@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from ._base import Violation, find_ignored_lines
+from ._scope import collect_scope_names, iter_within_scope
 
 logger = logging.getLogger("forbid_vars")
 
@@ -124,58 +125,6 @@ def load_autofix_config() -> dict[str, Any]:
     return {"patterns": _compile_patterns(patterns), "enabled": enabled}
 
 
-class ScopeVisitor(ast.NodeVisitor):
-    """A visitor that collects all names in a scope (not nested scopes)."""
-
-    def __init__(self, target_scope: ast.AST | None = None) -> None:
-        self.names: set[str] = set()
-        self.target_scope = target_scope
-        self.in_target_scope = target_scope is None  # Module level = True
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        """Don't descend into nested function definitions."""
-        if node is self.target_scope:
-            # This is the target scope - enter it
-            self.in_target_scope = True
-            self.generic_visit(node)
-            self.in_target_scope = False
-        elif self.in_target_scope:
-            # Nested function - don't descend (separate scope)
-            pass
-        else:
-            # Different scope - don't descend
-            pass
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        """Don't descend into nested async function definitions."""
-        if node is self.target_scope:
-            # This is the target scope - enter it
-            self.in_target_scope = True
-            self.generic_visit(node)
-            self.in_target_scope = False
-        elif self.in_target_scope:
-            # Nested function - don't descend (separate scope)
-            pass
-        else:
-            # Different scope - don't descend
-            pass
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """Don't descend into class definitions (separate scope)."""
-        if self.in_target_scope:
-            # Class inside function - don't descend
-            pass
-        else:
-            # Continue visiting if we're looking for module-level names
-            self.generic_visit(node)
-
-    def visit_Name(self, node: ast.Name) -> None:
-        """Collect name if we're in the target scope."""
-        if self.in_target_scope:
-            self.names.add(node.id)
-        self.generic_visit(node)
-
-
 class ForbiddenNameVisitor(ast.NodeVisitor):
     """AST visitor that detects forbidden variable names in Python code.
 
@@ -188,7 +137,6 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         forbidden_names: set[str],
         source: str,
         autofix_config: dict[str, Any],
-        scope_names: set[str],
     ) -> None:
         """Initialize the visitor.
 
@@ -196,13 +144,11 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
             forbidden_names: Set of variable names that are not allowed.
             source: The source code of the file being checked.
             autofix_config: Configuration for the autofix feature.
-            scope_names: All names defined in the current file's scope.
         """
         self.forbidden_names = forbidden_names
         self.source = source  # Store full source (optimization: avoid reconstruction)
         self.source_lines = source.splitlines()
         self.autofix_config = autofix_config
-        self.scope_names = scope_names
         self.violations: list[dict[str, Any]] = []
         # Scope tracking for scope-aware name generation and replacement
         self.current_scope: list[ast.AST] = []
@@ -233,15 +179,12 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
             return self.scope_names_cache[scope_id]
 
         # Cache miss - compute scope names
-        visitor = ScopeVisitor(target_scope=scope_node)
-        if scope_node:
-            visitor.visit(scope_node)
-        elif self.tree:  # pragma: no cover (tree always set by check method)
-            visitor.visit(self.tree)
+        assert self.tree is not None, "tree must be set by check() before scope lookups"
+        names = collect_scope_names(scope_node or self.tree)
 
         # Cache for future use
-        self.scope_names_cache[scope_id] = visitor.names
-        return visitor.names
+        self.scope_names_cache[scope_id] = names
+        return names
 
     def _generate_unique_name(self, suggestion: str, forbidden_var_name: str) -> str:
         """Generate a unique variable name considering only the current scope.
@@ -451,98 +394,21 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
             )
 
 
-class ScopedNameCollector(ast.NodeVisitor):
-    """Collect Name nodes within a specific scope only (not nested scopes)."""
+def _collect_scope_replacements(
+    scope: ast.AST, replace_names: dict[str, str]
+) -> list[tuple[int, int, str, str]]:
+    """Find (line, col, old_name, new_name) for every `Name` node within
+    `scope` (not nested scopes) whose id is being replaced.
 
-    def __init__(
-        self, scope_node: ast.AST | None, replace_names: dict[str, str]
-    ) -> None:
-        self.scope_node = scope_node
-        self.replace_names = replace_names  # {old_name: new_name}
-        self.nodes_to_replace: list[tuple[int, int, str, str]] = []
-        self.in_target_scope = scope_node is None  # Module-level = True
-        self.param_positions: set[tuple[int, int]] = set()
-
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        """Handle function definitions - enter target scope, skip nested."""
-        if node is self.scope_node:
-            # Enter target scope
-            self.in_target_scope = True
-            # Mark parameters as restricted (don't replace parameter names)
-            all_args = node.args.args + node.args.posonlyargs + node.args.kwonlyargs
-            for arg in all_args:
-                # pragma: lax no cover
-                if arg.arg in self.replace_names:
-                    self.param_positions.add((arg.lineno, arg.col_offset))
-            # pragma: lax no cover
-            if node.args.vararg and node.args.vararg.arg in self.replace_names:
-                pos = (node.args.vararg.lineno, node.args.vararg.col_offset)
-                self.param_positions.add(pos)
-            # pragma: lax no cover
-            if node.args.kwarg and node.args.kwarg.arg in self.replace_names:
-                pos = (node.args.kwarg.lineno, node.args.kwarg.col_offset)
-                self.param_positions.add(pos)
-            self.generic_visit(node)
-            self.in_target_scope = False
-        # pragma: no cover (nested functions have separate scopes)
-        elif self.in_target_scope:
-            # Nested function - don't descend (separate scope)
-            pass
-        # pragma: no cover (different scope not visited)
-        else:
-            # Different scope - don't descend
-            pass
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        """Handle async function definitions - same logic as visit_FunctionDef."""
-        if node is self.scope_node:
-            self.in_target_scope = True
-            all_args = node.args.args + node.args.posonlyargs + node.args.kwonlyargs
-            for arg in all_args:
-                # pragma: lax no cover
-                if arg.arg in self.replace_names:
-                    self.param_positions.add((arg.lineno, arg.col_offset))
-            # pragma: lax no cover
-            if node.args.vararg and node.args.vararg.arg in self.replace_names:
-                pos = (node.args.vararg.lineno, node.args.vararg.col_offset)
-                self.param_positions.add(pos)
-            # pragma: lax no cover
-            if node.args.kwarg and node.args.kwarg.arg in self.replace_names:
-                pos = (node.args.kwarg.lineno, node.args.kwarg.col_offset)
-                self.param_positions.add(pos)
-            self.generic_visit(node)
-            self.in_target_scope = False
-        # pragma: no cover (nested async functions have separate scopes)
-        elif self.in_target_scope:
-            pass
-        # pragma: no cover (different scope not visited)
-        else:
-            pass
-
-    def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """Don't descend into class definitions (separate scope)."""
-        # pragma: no cover (classes inside functions not typical)
-        if self.in_target_scope:
-            # Class inside function - don't descend
-            pass
-        else:
-            # Continue visiting if we're looking for module-level names
-            self.generic_visit(node)
-
-    def visit_Name(self, node: ast.Name) -> None:
-        """Collect Name node if we're in the target scope."""
-        if self.in_target_scope and node.id in self.replace_names:
-            pos = (node.lineno, node.col_offset)
-            # pragma: lax no cover
-            if pos not in self.param_positions:
-                replacement = (
-                    node.lineno,
-                    node.col_offset,
-                    node.id,
-                    self.replace_names[node.id],
-                )
-                self.nodes_to_replace.append(replacement)
-        self.generic_visit(node)
+    `ast.arg` parameter bindings are a distinct node type from `ast.Name`,
+    so a same-named parameter is never matched here — only actual variable
+    references within the scope are.
+    """
+    return [
+        (node.lineno, node.col_offset, node.id, replace_names[node.id])
+        for node in iter_within_scope(scope)
+        if isinstance(node, ast.Name) and node.id in replace_names
+    ]
 
 
 def _apply_fixes(
@@ -570,8 +436,7 @@ def _apply_fixes(
                 violations_by_scope[scope_id] = []
             violations_by_scope[scope_id].append(v)
 
-    # pragma: no cover (caller filters for fixable violations)
-    if not violations_by_scope:
+    if not violations_by_scope:  # pragma: no cover (caller filters for fixable ones)
         return
 
     # Step 2: Build scope-specific replacement mappings
@@ -589,19 +454,11 @@ def _apply_fixes(
     # Step 3: Collect replacements for each scope
     all_replacements: list[tuple[int, int, str, str]] = []
     for scope_id, replacements in scope_replacements.items():
-        # Find scope node from first violation
-        scope_node = None
-        for v in violations_by_scope[scope_id]:  # pragma: lax no cover
-            scope_node = v.get("scope_node")
-            break
-
-        # Collect Name nodes in this scope
-        collector = ScopedNameCollector(scope_node, replacements)
-        if scope_node:  # pragma: lax no cover
-            collector.visit(scope_node)
-        else:  # pragma: lax no cover
-            collector.visit(tree)
-        all_replacements.extend(collector.nodes_to_replace)
+        # Scope node is the same for every violation sharing this scope_id
+        scope_node = violations_by_scope[scope_id][0].get("scope_node")
+        all_replacements.extend(
+            _collect_scope_replacements(scope_node or tree, replacements)
+        )
 
     # Step 4: Sort reverse and apply replacements
     all_replacements.sort(key=lambda x: (x[0], x[1]), reverse=True)
@@ -615,13 +472,11 @@ def _apply_fixes(
         name_len = len(old_name)
 
         # Bounds check
-        # pragma: no cover (AST columns always valid)
-        if col >= len(line) or col + name_len > len(line):
+        if col >= len(line) or col + name_len > len(line):  # pragma: no cover
             continue
 
         # Verify the name matches at this position
-        # pragma: no cover (AST positions always match)
-        if line[col : col + name_len] != old_name:
+        if line[col : col + name_len] != old_name:  # pragma: no cover
             continue
 
         # Check word boundaries
@@ -660,8 +515,7 @@ class ForbidVarsCheck:
         """Returns all forbidden names as prefilter patterns."""
         if self.forbidden_names:
             return sorted(self.forbidden_names)
-        # pragma: no cover (constructor defaults to DEFAULT_FORBIDDEN_NAMES)
-        return None
+        return None  # pragma: no cover (constructor always sets forbidden_names)
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         """Run check and return violations.
@@ -674,12 +528,8 @@ class ForbidVarsCheck:
         Returns:
             List of violations
         """
-        scope_visitor = ScopeVisitor()
-        scope_visitor.visit(tree)
-        scope_names = scope_visitor.names
-
         visitor = ForbiddenNameVisitor(
-            self.forbidden_names, source, self.autofix_config, scope_names
+            self.forbidden_names, source, self.autofix_config
         )
         visitor.tree = tree  # Store tree for scope-aware name generation
         visitor.visit(tree)
