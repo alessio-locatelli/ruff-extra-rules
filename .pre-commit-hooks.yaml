@@ -5,11 +5,3 @@
   language: python
   types: [python]
   args: [--disable=redundant-assignment]
-
-- id: fix-misplaced-comments
-  name: Fix misplaced comments
-  description: Move trailing comments on closing brackets to expression lines
-  entry: python -m pre_commit_hooks.fix_misplaced_comments
-  language: python
-  types: [python]
-  args: [--fix]

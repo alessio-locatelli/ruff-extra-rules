@@ -11,6 +11,7 @@ Error Codes
   - TRI003: Redundant super init (redundant-super-init)
   - TRI004: Function naming violations (validate-function-name)
   - TRI005: Redundant variable assignments (redundant-assignment)
+  - STYLE-001: Comment misplaced on closing bracket line (misplaced-comment)
 
 Inline Ignore Comments
 ----------------------
@@ -534,6 +535,7 @@ if __name__ == "__main__":
 from . import (  # noqa: E402
     excessive_blank_lines,  # noqa: F401
     forbid_vars,  # noqa: F401
+    misplaced_comment,  # noqa: F401
     redundant_assignment,  # noqa: F401
     redundant_super_init,  # noqa: F401
     validate_function_name,  # noqa: F401

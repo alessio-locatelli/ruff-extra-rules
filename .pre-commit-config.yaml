@@ -6,6 +6,10 @@ repos:
   # like `result` far more than production code does.
   - repo: local
     hooks:
+      # Same hook id invoked twice with different args: the naming/structure
+      # checks (TRI00x) are report-only here so renames get a human review
+      # before landing, while misplaced-comment's fix is a purely mechanical
+      # text move (never changes semantics) safe to always auto-apply.
       - id: ast-checks
         name: Python AST checks (grouped, self-check)
         description: Run our own AST-based checks against src/
@@ -18,15 +22,15 @@ repos:
         language: system
         types: [python]
         files: ^src/
-        args: [--disable=redundant-assignment]
-      - id: fix-misplaced-comments
+        args: [--disable=redundant-assignment, misplaced-comment]
+      - id: ast-checks
         name: Fix misplaced comments (self-check)
         description: Move trailing comments on closing brackets to expression lines
-        entry: uv run python -m pre_commit_hooks.fix_misplaced_comments
+        entry: uv run python -m pre_commit_hooks.ast_checks
         language: system
         types: [python]
         files: ^src/
-        args: [--fix]
+        args: [--enable=misplaced-comment, --fix]
 
   # Standard pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
