@@ -100,30 +100,18 @@ def _python_fallback_filter(filepaths: Sequence[str], pattern: str) -> list[str]
     return matches
 
 
-def batch_filter_files(
-    filepaths: Sequence[str], patterns: list[str], match_any: bool = True
-) -> list[str]:
+def batch_filter_files(filepaths: Sequence[str], patterns: list[str]) -> list[str]:
     """
     Example:
         >>> # Find files with "data" OR "result"
-        >>> matches = batch_filter_files(files, ["data", "result"], match_any=True)
-        >>> # Find files with "def" AND "class"
-        >>> matches = batch_filter_files(files, ["def", "class"], match_any=False)
+        >>> matches = batch_filter_files(files, ["data", "result"])
     """
     if not patterns:
         return list(filepaths)
 
-    if match_any:
-        # OR: file matches if it contains ANY pattern
-        all_matches = set()
-        for pattern in patterns:
-            matches = git_grep_filter(filepaths, pattern, fixed_string=True)
-            all_matches.update(matches)
-        return sorted(all_matches)
-    else:
-        # AND: file matches if it contains ALL patterns
-        matching_files = set(filepaths)
-        for pattern in patterns:
-            matches = git_grep_filter(filepaths, pattern, fixed_string=True)
-            matching_files.intersection_update(matches)
-        return sorted(matching_files)
+    # OR: file matches if it contains ANY pattern
+    all_matches = set()
+    for pattern in patterns:
+        matches = git_grep_filter(filepaths, pattern, fixed_string=True)
+        all_matches.update(matches)
+    return sorted(all_matches)

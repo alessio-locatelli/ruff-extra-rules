@@ -163,7 +163,7 @@ def test_python_fallback_includes_unreadable_files(tmp_path: Path) -> None:
 def test_batch_filter_files_match_any(sample_files: list[str]) -> None:
     """Test batch filtering with OR logic."""
     # Match files with "data" OR "def get_"
-    matches = batch_filter_files(sample_files, ["data", "def get_"], match_any=True)
+    matches = batch_filter_files(sample_files, ["data", "def get_"])
 
     # Should match file1.py, file2.py, file3.py
     assert len(matches) == 3
@@ -172,19 +172,9 @@ def test_batch_filter_files_match_any(sample_files: list[str]) -> None:
     assert any(m.endswith("file3.py") for m in matches)
 
 
-def test_batch_filter_files_match_all(sample_files: list[str]) -> None:
-    """Test batch filtering with AND logic."""
-    # Match files with "data" AND "result"
-    matches = batch_filter_files(sample_files, ["data", "result"], match_any=False)
-
-    # Should only match file3.py
-    assert len(matches) == 1
-    assert matches[0].endswith("file3.py")
-
-
 def test_batch_filter_files_empty_patterns(sample_files: list[str]) -> None:
     """Test batch filtering with no patterns."""
-    matches = batch_filter_files(sample_files, [], match_any=True)
+    matches = batch_filter_files(sample_files, [])
 
     # Should return all files
     assert len(matches) == len(sample_files)
@@ -192,9 +182,7 @@ def test_batch_filter_files_empty_patterns(sample_files: list[str]) -> None:
 
 def test_batch_filter_files_no_matches(sample_files: list[str]) -> None:
     """Test batch filtering with patterns that match nothing."""
-    matches = batch_filter_files(
-        sample_files, ["nonexistent1", "nonexistent2"], match_any=True
-    )
+    matches = batch_filter_files(sample_files, ["nonexistent1", "nonexistent2"])
 
     assert len(matches) == 0
 
