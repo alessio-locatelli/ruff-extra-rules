@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-logger = logging.getLogger("cache")
+logger = logging.getLogger("validate_function_name")
 
 # Inline ignore comment format: # pytriage: ignore=TRI004
 IGNORE_COMMENT_MARKER = "pytriage: ignore=TRI004"
@@ -36,7 +36,9 @@ def line_at(source: str, lineno: int) -> str:
     return lines[lineno - 1] if lineno - 1 < len(lines) else ""
 
 
-def has_inline_ignore(source: str, func_node: ast.FunctionDef) -> bool:
+def has_inline_ignore(
+    source: str, func_node: ast.FunctionDef | ast.AsyncFunctionDef
+) -> bool:
     """Check if function has inline ignore comment."""
     line = line_at(source, func_node.lineno)
     return IGNORE_COMMENT_MARKER in line
@@ -69,7 +71,9 @@ def decorator_name(d: ast.AST) -> str | None:
     return None
 
 
-def is_decorator_override_or_abstract(func_node: ast.FunctionDef) -> bool:
+def is_decorator_override_or_abstract(
+    func_node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> bool:
     """Check if function is decorated with @override or @abstractmethod."""
     for d in func_node.decorator_list:
         name = decorator_name(d)
@@ -81,7 +85,9 @@ def is_decorator_override_or_abstract(func_node: ast.FunctionDef) -> bool:
     return False
 
 
-def analyze_function(func_node: ast.FunctionDef) -> dict[str, bool]:
+def analyze_function(
+    func_node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> dict[str, bool]:
     """Analyze function behavior and return detected patterns.
 
     Returns:
@@ -420,7 +426,7 @@ def _get_base_name(node: ast.expr) -> str | None:
     return None
 
 
-def is_simple_accessor(func_node: ast.FunctionDef) -> bool:
+def is_simple_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     """Check if function is a trivial accessor/getter pattern.
 
     Returns True for:
@@ -499,7 +505,9 @@ def process_file(filepath: Path) -> list[Suggestion]:
     suggestions: list[Suggestion] = []
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name.startswith(GET_PREFIX):
+        if isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef)
+        ) and node.name.startswith(GET_PREFIX):
             # skip if decorated with override/abstract
             if is_decorator_override_or_abstract(node):
                 continue

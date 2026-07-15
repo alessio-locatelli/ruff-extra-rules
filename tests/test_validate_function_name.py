@@ -409,3 +409,29 @@ def get_mock_response(**kwargs):
     assert len(suggestions) == 1
     assert suggestions[0].suggested_name == "create_mock_response"
     assert "mock" in suggestions[0].reason.lower()
+
+
+def test_async_get_function_is_flagged() -> None:
+    """Async get_* functions must be flagged, not just sync ones."""
+    source = """
+import requests
+
+class Fetcher:
+    async def get_api_data(self, url: str):
+        '''Fetch data from API.'''
+        return requests.get(url).json()
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
+        f.write(source)
+        f.flush()
+        filepath = Path(f.name)
+
+    try:
+        suggestions = process_file(filepath)
+    finally:
+        filepath.unlink()
+
+    assert len(suggestions) == 1
+    assert suggestions[0].func_name == "get_api_data"
+    assert suggestions[0].suggested_name == "fetch_api_data"

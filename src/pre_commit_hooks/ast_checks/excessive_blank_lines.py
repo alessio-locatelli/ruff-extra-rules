@@ -18,43 +18,34 @@ from ._base import Violation
 logger = logging.getLogger("excessive_blank_lines")
 
 
-def find_module_header_end(lines: list[str]) -> int:
+def find_module_header_end(lines: list[str], tree: ast.Module) -> int:
     """Module header includes: shebang, encoding, docstring, copyright/comments.
+
+    Comments aren't part of the AST, so they still need a text scan, but the
+    docstring's own extent is taken directly from the parsed module rather
+    than re-derived from raw text. This correctly handles raw-prefixed
+    docstrings (an r-string) that a naive quote-prefix text scan would miss
+    (byte strings can't be docstrings at all, per Python's own semantics).
 
     Returns index (0-based) where module header ends.
     """
-    in_docstring = False
-    docstring_char = None
+    start_idx = 0
 
-    for i, line in enumerate(lines):
-        stripped = line.strip()
+    if (
+        tree.body
+        and isinstance(tree.body[0], ast.Expr)
+        and isinstance(tree.body[0].value, ast.Constant)
+        and isinstance(tree.body[0].value.value, str)
+    ):
+        docstring_node = tree.body[0]
+        # end_lineno is 1-indexed, so it's already the 0-indexed line after it
+        start_idx = docstring_node.end_lineno or 0
 
-        # Empty lines in header are ok
-        if not stripped:
-            continue
+    for i in range(start_idx, len(lines)):
+        stripped = lines[i].strip()
 
-        # Shebang and encoding declarations
-        if stripped.startswith("#"):
-            continue
-
-        # Docstring detection
-        if stripped.startswith('"""') or stripped.startswith("'''"):
-            docstring_char = stripped[:3]
-            if stripped.count(docstring_char) >= 2 and len(stripped) > 3:
-                # Single-line docstring
-                continue
-            else:
-                # Multi-line docstring start
-                in_docstring = True
-                continue
-
-        # Check for docstring end
-        if in_docstring and docstring_char and docstring_char in stripped:
-            in_docstring = False
-            continue
-
-        # Skip lines inside docstring
-        if in_docstring:
+        # Empty lines and comments (shebang, encoding, copyright) are header
+        if not stripped or stripped.startswith("#"):
             continue
 
         # First code line (import, class, def, assignment, etc)
@@ -63,14 +54,14 @@ def find_module_header_end(lines: list[str]) -> int:
     return len(lines)
 
 
-def check_file_violations(source: str) -> list[tuple[int, str]]:
+def check_file_violations(source: str, tree: ast.Module) -> list[tuple[int, str]]:
     lines = source.splitlines(keepends=True)
 
     if not lines:
         return []
 
     violations = []
-    header_end = find_module_header_end(lines)
+    header_end = find_module_header_end(lines, tree)
 
     # Find the last non-blank line in the header region
     last_header_line = 0
@@ -130,13 +121,13 @@ def _is_class_or_function_def(line: str) -> bool:
     return stripped.startswith(("class ", "def ", "async def "))
 
 
-def fix_file_content(source: str) -> str:
+def fix_file_content(source: str, tree: ast.Module) -> str:
     lines = source.splitlines(keepends=True)
 
     if not lines:
         return source
 
-    header_end = find_module_header_end(lines)
+    header_end = find_module_header_end(lines, tree)
 
     # Find the last non-blank line in the header region
     last_header_line = 0
@@ -210,7 +201,7 @@ class ExcessiveBlankLinesCheck:
         return None
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
-        file_violations = check_file_violations(source)
+        file_violations = check_file_violations(source, tree)
 
         violations = []
         for line_num, message in file_violations:
@@ -238,7 +229,7 @@ class ExcessiveBlankLinesCheck:
             return False
 
         try:
-            fixed_content = fix_file_content(source)
+            fixed_content = fix_file_content(source, tree)
 
             # Write back to file
             filepath.write_text(fixed_content, encoding="utf-8")

@@ -13,7 +13,9 @@ def derive_entity_from_name(func_name: str) -> str:
     return func_name
 
 
-def first_docstring_line(func_node: ast.FunctionDef) -> str | None:
+def first_docstring_line(
+    func_node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> str | None:
     if (
         func_node.body
         and isinstance(func_node.body[0], ast.Expr)
@@ -53,7 +55,7 @@ def extract_first_verb(docstring_line: str) -> str | None:
 
 
 def suggest_name_for(
-    func_node: ast.FunctionDef, analysis: dict[str, bool]
+    func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis: dict[str, bool]
 ) -> tuple[str, str]:
     """Suggest a better name for a function based on behavioral analysis.
 

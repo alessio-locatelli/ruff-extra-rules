@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import ast
+import io
+import logging
+import re
+import tokenize
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
+
+logger = logging.getLogger("ast_checks")
 
 
 @dataclass
@@ -112,3 +118,36 @@ class ASTCheck(Protocol):
             True if fixes were successfully applied, False otherwise
         """
         ...
+
+
+def find_ignored_lines(source: str, pattern: re.Pattern[str]) -> set[int]:
+    """Extract line numbers that have an inline ignore comment matching `pattern`.
+
+    Uses the tokenize module to accurately detect comments, so a string or
+    byte literal that happens to contain matching text (e.g. a dict key)
+    is never mistaken for a suppression directive.
+
+    Args:
+        source: Python source code as string
+        pattern: Compiled regex identifying the ignore-comment marker
+
+    Returns:
+        Set of 1-indexed line numbers with a matching ignore comment
+    """
+    ignored: set[int] = set()
+
+    try:
+        tokens = tokenize.generate_tokens(io.StringIO(source).readline)
+
+        for tok_type, tok_string, (line, _), _, _ in tokens:
+            if tok_type != tokenize.COMMENT:
+                continue
+
+            if pattern.search(tok_string):
+                ignored.add(line)
+    except tokenize.TokenError as token_error:
+        # pragma: no cover (defensive: source already parsed by AST)
+        # If tokenization fails, return empty set (no lines ignored)
+        logger.debug(repr(token_error))
+
+    return ignored

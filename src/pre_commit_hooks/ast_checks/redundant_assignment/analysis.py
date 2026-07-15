@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 from enum import Enum, auto
-from pathlib import Path
 
 
 class PatternType(Enum):
@@ -452,7 +451,7 @@ class VariableTracker(ast.NodeVisitor):
         """
         self._visit_comprehension(node)
 
-    def visit_SetComp(self, node: ast.SetComp) -> None:  # noqa: N815
+    def visit_SetComp(self, node: ast.SetComp) -> None:
         """Visit set comprehension.
 
         Args:
@@ -460,7 +459,7 @@ class VariableTracker(ast.NodeVisitor):
         """
         self._visit_comprehension(node)
 
-    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:  # noqa: N815
+    def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
         """Visit generator expression.
 
         Args:
@@ -468,7 +467,7 @@ class VariableTracker(ast.NodeVisitor):
         """
         self._visit_comprehension(node)
 
-    def visit_DictComp(self, node: ast.DictComp) -> None:  # noqa: N815
+    def visit_DictComp(self, node: ast.DictComp) -> None:
         """Visit dict comprehension.
 
         Args:
@@ -905,23 +904,3 @@ def _is_literal_identity(lifecycle: VariableLifecycle) -> bool:
             return True
 
     return False
-
-
-def process_file(filepath: Path) -> list[VariableLifecycle]:
-    """Process a file and return all variable lifecycles.
-
-    Args:
-        filepath: Path to Python file
-
-    Returns:
-        List of variable lifecycles, or empty list if file cannot be parsed
-    """
-    try:
-        source = filepath.read_text()
-        tree = ast.parse(source)
-    except (OSError, SyntaxError, UnicodeDecodeError):
-        return []
-
-    tracker = VariableTracker(source)
-    tracker.visit(tree)
-    return tracker.build_lifecycles()

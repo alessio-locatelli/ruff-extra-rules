@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -65,6 +66,20 @@ def test_cache_hit_after_set(cache_manager: CacheManager, sample_file: Path) -> 
     assert cached is not None
     assert cached["violations"] == []
     assert "checked_at" in cached
+
+
+def test_get_cached_result_defaults_to_constructor_hook_name(
+    cache_manager: CacheManager, sample_file: Path
+) -> None:
+    """hook_name is optional on get_cached_result: it falls back to the
+    hook_name the CacheManager was constructed with (`cache_manager` fixture
+    uses "test-hook")."""
+    test_result: dict[str, list[str]] = {"violations": []}
+    cache_manager.set_cached_result(sample_file, "test-hook", test_result)
+
+    cached = cache_manager.get_cached_result(sample_file)
+    assert cached is not None
+    assert cached["violations"] == []
 
 
 def test_cache_invalidated_on_content_change(
@@ -258,3 +273,31 @@ def test_different_files_different_cache_paths(
     path2 = cache_manager._get_cache_path(file2)
 
     assert path1 != path2
+
+
+def test_concurrent_writers_do_not_lose_updates(
+    cache_manager: CacheManager, sample_file: Path
+) -> None:
+    """Concurrent set_cached_result calls for different hook names on the same
+    file must not clobber each other's entries.
+
+    Regression: the read-modify-write of the shared per-file cache blob was
+    unsynchronized, so under prek's parallel hook execution one writer's
+    update could silently overwrite another's (lost update).
+    """
+    hook_names = [f"hook-{i}" for i in range(20)]
+
+    with ThreadPoolExecutor(max_workers=len(hook_names)) as executor:
+        futures = [
+            executor.submit(
+                cache_manager.set_cached_result, sample_file, name, {"value": name}
+            )
+            for name in hook_names
+        ]
+        for future in futures:
+            future.result()
+
+    for name in hook_names:
+        cached = cache_manager.get_cached_result(sample_file, name)
+        assert cached is not None, f"Lost update for {name!r}"
+        assert cached["value"] == name

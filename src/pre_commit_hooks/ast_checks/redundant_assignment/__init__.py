@@ -35,7 +35,7 @@ import re
 from pathlib import Path
 
 from .. import register_check
-from .._base import Violation
+from .._base import Violation, find_ignored_lines
 from .analysis import VariableTracker, detect_redundancy
 from .autofix import apply_fixes
 from .semantic import should_autofix, should_report_violation
@@ -46,22 +46,6 @@ IGNORE_PATTERN = re.compile(r"#\s*pytriage:\s*ignore=TRI005", re.IGNORECASE)
 
 ERROR_CODE = "TRI005"
 CHECK_ID = "redundant-assignment"
-
-
-def get_ignored_lines(source: str) -> set[int]:
-    """Get line numbers with inline ignore comments.
-
-    Args:
-        source: Source code
-
-    Returns:
-        Set of line numbers (1-indexed) with ignore comments
-    """
-    ignored = set()
-    for i, line in enumerate(source.splitlines(), start=1):
-        if IGNORE_PATTERN.search(line):
-            ignored.add(i)
-    return ignored
 
 
 def format_message(var_name: str, pattern_type: str) -> str:
@@ -130,7 +114,7 @@ class RedundantAssignmentCheck:
             List of violations found
         """
         # Get ignored lines
-        ignored_lines = get_ignored_lines(source)
+        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
 
         # Track variables
         tracker = VariableTracker(source)

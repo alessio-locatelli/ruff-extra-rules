@@ -957,23 +957,21 @@ print(x)
     assert len(violations) == 0
 
 
-def test_process_file_invalid_syntax() -> None:
-    """Test that process_file handles invalid syntax gracefully."""
-    from tempfile import NamedTemporaryFile
+def test_orchestrator_skips_file_with_invalid_syntax(tmp_path: Path) -> None:
+    """Files with invalid syntax must not crash the check pipeline.
 
-    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
-        process_file,
-    )
+    Syntax errors are caught by CheckOrchestrator._check_file (it parses the
+    AST once for all checks), not by RedundantAssignmentCheck itself.
+    """
+    from pre_commit_hooks.ast_checks import CheckOrchestrator
 
-    with NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-        f.write("invalid python syntax (((")
-        f.flush()
-        filepath = Path(f.name)
+    filepath = tmp_path / "broken.py"
+    filepath.write_text("x = (((")
 
-    lifecycles = process_file(filepath)
-    assert lifecycles == []
+    orchestrator = CheckOrchestrator(checks=[RedundantAssignmentCheck()])
+    violations = orchestrator.process_files([str(filepath)])
 
-    filepath.unlink()
+    assert violations.get(str(filepath), []) == []
 
 
 def test_autofix_should_autofix_simple_call() -> None:
@@ -1352,30 +1350,6 @@ def test_should_autofix_complex_call_args() -> None:
     # Should NOT autofix due to complex arguments
     result = should_autofix(lifecycle, PatternType.IMMEDIATE_SINGLE_USE)
     assert result is False
-
-
-def test_process_file_success_path() -> None:
-    """Test process_file success path with valid Python file."""
-    from tempfile import NamedTemporaryFile
-
-    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
-        process_file,
-    )
-
-    with NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-        f.write("""
-def example():
-    x = "foo"
-    return x
-""")
-        f.flush()
-        filepath = Path(f.name)
-
-    lifecycles = process_file(filepath)
-    # Should return lifecycles, not empty list
-    assert len(lifecycles) >= 1
-
-    filepath.unlink()
 
 
 def test_conditional_assignment_with_augmented_use() -> None:
@@ -4094,6 +4068,27 @@ def func(depot_data, depots):
 
     # Both the new rule (Rule 10) and the ignore comment suppress this warning.
     assert len(violations) == 0
+
+
+def test_ignore_marker_inside_string_literal_does_not_suppress_violation() -> None:
+    """A string literal that merely contains the ignore-marker text is not a
+    real suppression comment and must not hide a violation on that line.
+
+    Regression: line-based ignore detection used a plain text search over
+    raw source lines, so a string literal containing '# pytriage: ignore=...'
+    text was indistinguishable from an actual comment. Ignore detection must
+    be tokenize-based so it only matches genuine COMMENT tokens.
+    """
+    source = """
+def call_it():
+    x = "foo"; note = "# pytriage: ignore=TRI005"
+    func(x=x)
+"""
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(Path("test.py"), tree, source)
+
+    assert any(v.line == 3 and "'x'" in v.message for v in violations)
 
 
 def test_variable_used_in_function_decorator_not_flagged() -> None:

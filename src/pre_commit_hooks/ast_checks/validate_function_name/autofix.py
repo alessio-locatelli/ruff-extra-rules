@@ -5,14 +5,17 @@ from __future__ import annotations
 import ast
 import logging
 import re
+from collections.abc import Iterator
 from pathlib import Path
 
-from .analysis import Suggestion, read_source
+from .analysis import Suggestion, attach_parents, read_source
 
 logger = logging.getLogger("validate-function-name")
 
+_FuncNode = ast.FunctionDef | ast.AsyncFunctionDef
 
-def _count_nesting_depth(func_node: ast.FunctionDef) -> int:
+
+def _count_nesting_depth(func_node: _FuncNode) -> int:
     """Calculate maximum nesting depth of control flow in function.
 
     Args:
@@ -42,7 +45,7 @@ def _count_nesting_depth(func_node: ast.FunctionDef) -> int:
     return max_depth
 
 
-def _count_returns(func_node: ast.FunctionDef) -> int:
+def _count_returns(func_node: _FuncNode) -> int:
     """Count number of return statements in function.
 
     Args:
@@ -54,7 +57,7 @@ def _count_returns(func_node: ast.FunctionDef) -> int:
     return sum(1 for node in ast.walk(func_node) if isinstance(node, ast.Return))
 
 
-def _count_function_lines(func_node: ast.FunctionDef) -> int:
+def _count_function_lines(func_node: _FuncNode) -> int:
     """Count lines of code in function, excluding docstring.
 
     Args:
@@ -82,14 +85,42 @@ def _count_function_lines(func_node: ast.FunctionDef) -> int:
     return total_lines - docstring_lines
 
 
+def _find_function_node(tree: ast.Module, name: str, lineno: int) -> _FuncNode | None:
+    """Find the function/async function definition matching name and line.
+
+    Args:
+        tree: Parsed AST tree
+        name: Function name to find
+        lineno: Line number the function is defined on
+
+    Returns:
+        The matching function node, or None if not found
+    """
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == name
+            and node.lineno == lineno
+        ):
+            return node
+    return None
+
+
 def should_autofix(filepath: Path, suggestion: Suggestion) -> bool:
     """Determine if a suggestion is safe to auto-fix.
 
     Safe autofix criteria (ALL must be met):
     1. High confidence (not "no confident suggestion")
-    2. Function is small (< 20 lines of code, excluding docstring)
-    3. Simple control flow (max nesting depth ≤ 1)
-    4. Single return point (at most one return statement)
+    2. Not a method (see below)
+    3. Function is small (< 20 lines of code, excluding docstring)
+    4. Simple control flow (max nesting depth ≤ 1)
+    5. Single return point (at most one return statement)
+
+    Methods are never auto-fixed: `apply_fix` can only find `self.x`/`cls.x`
+    call sites within the same class body, not external calls through a
+    differently-named receiver (e.g. `reader.get_report()` in a free
+    function elsewhere in the file). Renaming the definition without being
+    able to find every such call site would break real, unrenamed callers.
 
     Args:
         filepath: Path to the file containing the function
@@ -110,39 +141,286 @@ def should_autofix(filepath: Path, suggestion: Suggestion) -> bool:
         logger.warning("Filepath: %s. Error: %s", filepath, repr(error))
         return False
 
-    # Find the specific function
-    func_node: ast.FunctionDef | None = None
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.FunctionDef)
-            and node.name == suggestion.func_name
-            and node.lineno == suggestion.lineno
-        ):
-            func_node = node
-            break
-
+    func_node = _find_function_node(tree, suggestion.func_name, suggestion.lineno)
     if func_node is None:
         return False
 
-    # Check 2: Size (< 20 lines excluding docstring)
+    # Check 2: Not a method
+    attach_parents(tree)
+    if isinstance(getattr(func_node, "parent", None), ast.ClassDef):
+        return False
+
+    # Check 3: Size (< 20 lines excluding docstring)
     line_count = _count_function_lines(func_node)
     if line_count >= 20:
         return False
 
-    # Check 3: Complexity (nesting depth ≤ 1)
+    # Check 4: Complexity (nesting depth ≤ 1)
     nesting = _count_nesting_depth(func_node)
     if nesting > 1:
         return False
 
-    # Check 4: Single return (≤ 1 return statement)
+    # Check 5: Single return (≤ 1 return statement)
     returns = _count_returns(func_node)
     return returns <= 1
+
+
+def _def_name_position(
+    lines: list[str], func_node: _FuncNode
+) -> tuple[int, int] | None:
+    """Locate the exact (line, col) of the function name in its `def` statement.
+
+    Searches only the `def`/`async def` line, starting at the node's own
+    column offset, so it can never match text elsewhere in the file.
+
+    Args:
+        lines: Source lines (with line endings)
+        func_node: Function AST node
+
+    Returns:
+        (1-indexed line number, 0-indexed column) of the name, or None
+    """
+    line_idx = func_node.lineno - 1
+    if line_idx >= len(lines):  # pragma: no cover (AST line numbers always valid)
+        return None
+
+    pattern = re.compile(rf"\bdef\s+({re.escape(func_node.name)})\b")
+    match = pattern.search(lines[line_idx], func_node.col_offset)
+    if match is None:  # pragma: no cover (def name always present on its own line)
+        return None
+
+    return (func_node.lineno, match.start(1))
+
+
+def _attr_name_position(node: ast.Attribute) -> tuple[int, int] | None:
+    """Locate the (line, col) of the attribute name in `obj.attr`.
+
+    Args:
+        node: Attribute AST node
+
+    Returns:
+        (1-indexed line number, 0-indexed column) of the attribute name
+    """
+    if node.end_lineno is None or node.end_col_offset is None:  # pragma: no cover
+        return None
+    return (node.end_lineno, node.end_col_offset - len(node.attr))
+
+
+_SCOPE_BOUNDARY = (
+    ast.FunctionDef,
+    ast.AsyncFunctionDef,
+    ast.ClassDef,
+    ast.Lambda,
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
+
+
+def _iter_same_scope(node: ast.AST) -> Iterator[ast.AST]:
+    """Yield descendants of `node` without crossing into a nested scope.
+
+    A nested function/class/lambda/comprehension is itself yielded (so
+    callers can still inspect e.g. its name), but traversal does not
+    continue into its body, since it has independent Python scoping — a
+    binding inside it doesn't affect `node`'s own scope.
+    """
+    for child in ast.iter_child_nodes(node):
+        yield child
+        if not isinstance(child, _SCOPE_BOUNDARY):
+            yield from _iter_same_scope(child)
+
+
+def _binds_name(
+    node: ast.FunctionDef | ast.AsyncFunctionDef, name: str, target: ast.AST
+) -> bool:
+    """Whether a function's own scope introduces a new binding for `name`.
+
+    Conservative by design: covers a same-named parameter, a same-named
+    nested def/class anywhere in the body (not crossing further nested scope
+    boundaries), and any plain assignment to `name` anywhere in the body —
+    matching real Python scoping, where a single assignment anywhere in a
+    function makes that name local for the *entire* function. When this
+    returns True, every reference to `name` inside the function refers to
+    that local binding, not an outer scope's definition, so the whole
+    function must be skipped.
+
+    `target` (the function actually being renamed) is excluded from
+    consideration: it may legitimately appear as a nested def matching
+    `name` inside `node`'s body (when `node` is target's enclosing function),
+    and that must not itself count as a shadow, or its own call sites within
+    `node` would be wrongly skipped.
+    """
+    args = node.args
+    all_args = [
+        *args.args,
+        *args.posonlyargs,
+        *args.kwonlyargs,
+        *([args.vararg] if args.vararg else []),
+        *([args.kwarg] if args.kwarg else []),
+    ]
+    if any(arg.arg == name for arg in all_args):
+        return True
+
+    for child in _iter_same_scope(node):
+        if child is target:
+            continue
+        if (
+            isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+            and child.name == name
+        ):
+            return True
+        if (
+            isinstance(child, ast.Name)
+            and isinstance(child.ctx, ast.Store)
+            and child.id == name
+        ):
+            return True
+        if isinstance(child, (ast.Import, ast.ImportFrom)) and any(
+            (alias.asname or alias.name) == name for alias in child.names
+        ):
+            return True
+    return False
+
+
+def _is_rebound_in_scope(scope_node: ast.AST, name: str, target: ast.AST) -> bool:
+    """Whether `name` is rebound directly within `scope_node`'s own execution
+    context (module or enclosing function), outside any nested scope.
+
+    A reassignment like `get_data = fake` permanently rebinds the name for
+    the rest of that scope's runtime lifetime (Python has no block scoping),
+    so any `Load` reference could refer to the new value instead of the
+    function being renamed. Detecting this precisely requires control-flow
+    analysis this tool doesn't do, so when a rebinding is found anywhere in
+    the scope, the caller should refuse to rename at all rather than risk
+    renaming a reference that no longer points at the target function.
+    """
+    for child in _iter_same_scope(scope_node):
+        if child is target:
+            continue
+        if (
+            isinstance(child, ast.Name)
+            and isinstance(child.ctx, ast.Store)
+            and child.id == name
+        ):
+            return True
+        if isinstance(child, (ast.Import, ast.ImportFrom)) and any(
+            (alias.asname or alias.name) == name for alias in child.names
+        ):
+            return True
+    return False
+
+
+class _ReferenceCollector(ast.NodeVisitor):
+    """Collects exact source positions of true references to one function.
+
+    Only ever visits `Name`/`Attribute` nodes reached via normal AST
+    traversal, so it structurally cannot match text inside string/byte
+    literals or comments. For methods, only `self.name`/`cls.name` accesses
+    within the same class body are considered references, so identically
+    named methods on unrelated classes are never touched. `super().name()`
+    calls in subclasses are intentionally left alone: renaming them would be
+    unsafe if the subclass overrides the method, since `self.name()` then
+    resolves dynamically to the subclass's own (differently named) method.
+    For free functions, a nested function/lambda that shadows the name (its
+    own parameter, or any local binding to that name) is skipped entirely,
+    so a same-named local helper's own call sites are never touched.
+    """
+
+    def __init__(self, old_name: str, is_method: bool, target: ast.AST) -> None:
+        self.old_name = old_name
+        self.is_method = is_method
+        self.target = target
+        self.positions: list[tuple[int, int]] = []
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        if not self.is_method and _binds_name(node, self.old_name, self.target):
+            return
+        self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        if not self.is_method and _binds_name(node, self.old_name, self.target):
+            return
+        self.generic_visit(node)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        args = node.args
+        all_args = [
+            *args.args,
+            *args.posonlyargs,
+            *args.kwonlyargs,
+            *([args.vararg] if args.vararg else []),
+            *([args.kwarg] if args.kwarg else []),
+        ]
+        if not self.is_method and any(
+            arg.arg == self.old_name for arg in all_args
+        ):  # pragma: lax no cover
+            return
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if (
+            self.is_method
+            and node.attr == self.old_name
+            and isinstance(node.ctx, ast.Load)
+            and _is_self_like_receiver(node.value)
+        ):
+            pos = _attr_name_position(node)
+            if pos is not None:  # pragma: no branch
+                self.positions.append(pos)
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if (
+            not self.is_method
+            and node.id == self.old_name
+            and isinstance(node.ctx, ast.Load)
+        ):
+            self.positions.append((node.lineno, node.col_offset))
+        self.generic_visit(node)
+
+
+def _is_self_like_receiver(value: ast.expr) -> bool:
+    """Whether an attribute's receiver refers to the current instance/class.
+
+    Matches `self.x` and `cls.x` only. `super().x` is deliberately excluded:
+    see `_ReferenceCollector`.
+    """
+    return isinstance(value, ast.Name) and value.id in ("self", "cls")
+
+
+def _resolve_rename_scope(
+    tree: ast.Module, func_node: _FuncNode
+) -> tuple[ast.AST, bool]:
+    """Determine the AST subtree in which call-site references may be renamed.
+
+    Args:
+        tree: Parsed AST tree (with parent links attached)
+        func_node: The function being renamed
+
+    Returns:
+        (scope_node, is_method) — scope_node is the enclosing class (for
+        methods, so unrelated classes are never touched), the enclosing
+        function (for nested/closure functions), or the whole module (for
+        top-level functions).
+    """
+    parent = getattr(func_node, "parent", None)
+    if isinstance(parent, ast.ClassDef):
+        return parent, True
+    if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return parent, False
+    return tree, False
 
 
 def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
     """Apply a rename fix to a file.
 
-    Strategy: Word-boundary replacement of function name using regex.
+    Strategy: AST-scoped rename. Renames the function definition itself plus
+    true call-site references (`Name`/`Attribute` nodes reached via normal
+    AST traversal) within the scope the function is visible in. Never
+    touches string/byte literals, comments, or identically-named symbols in
+    unrelated scopes (e.g. a same-named method on a different class).
 
     Args:
         filepath: Path to the file to fix
@@ -157,18 +435,65 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
         logger.warning("Filepath: %s. Error: %s", filepath, repr(error))
         return False
 
-    # Word-boundary regex to avoid renaming parts of other identifiers
-    # E.g., "get_user" should not rename "get_username"
-    pattern = re.compile(rf"\b{re.escape(suggestion.func_name)}\b")
-
-    # Apply replacement
-    new_source = pattern.sub(suggestion.suggested_name, source)
-
-    # Check if anything was changed
-    if new_source == source:
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as syntax_error:
+        logger.warning("Filepath: %s. Error: %s", filepath, repr(syntax_error))
         return False
 
-    # Write back
+    attach_parents(tree)
+
+    func_node = _find_function_node(tree, suggestion.func_name, suggestion.lineno)
+    if func_node is None:
+        return False
+
+    lines = source.splitlines(keepends=True)
+
+    positions: list[tuple[int, int]] = []
+    def_pos = _def_name_position(lines, func_node)
+    if def_pos is not None:  # pragma: no branch (def line always resolvable)
+        positions.append(def_pos)
+
+    scope_node, is_method = _resolve_rename_scope(tree, func_node)
+
+    # A reassignment (`get_data = fake`) or shadowing import anywhere in the
+    # same scope means some Load references may no longer point at this
+    # function; refuse to rename call sites we can't safely tell apart.
+    if not is_method and _is_rebound_in_scope(scope_node, func_node.name, func_node):
+        return False
+
+    collector = _ReferenceCollector(func_node.name, is_method, func_node)
+    collector.visit(scope_node)
+    positions.extend(collector.positions)
+
+    if not positions:
+        return False
+
+    old_name = func_node.name
+    new_name = suggestion.suggested_name
+    old_len = len(old_name)
+
+    for line_num, col in sorted(set(positions), reverse=True):
+        line_idx = line_num - 1
+        if line_idx >= len(lines):  # pragma: no cover (AST line numbers always valid)
+            continue
+
+        line = lines[line_idx]
+
+        # Bounds check
+        if col >= len(line) or col + old_len > len(line):  # pragma: no cover
+            continue
+
+        # Verify the name matches at this position (defense in depth)
+        if line[col : col + old_len] != old_name:  # pragma: no cover
+            continue
+
+        lines[line_idx] = line[:col] + new_name + line[col + old_len :]
+
+    new_source = "".join(lines)
+    if new_source == source:  # pragma: no cover (defensive, positions imply a change)
+        return False
+
     try:
         filepath.write_text(new_source, encoding="utf8")
         return True

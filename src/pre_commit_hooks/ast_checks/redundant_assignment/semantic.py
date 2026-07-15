@@ -454,29 +454,33 @@ def calculate_semantic_value(
 
 def _would_exceed_line_length(
     lifecycle: VariableLifecycle,
-    max_length: int = 79,
+    *,
+    absolute_threshold: int = 25,
 ) -> bool:
-    """Check if inlining would cause usage lines to exceed max length.
+    """Check if inlining would likely cause usage lines to exceed line length.
+
+    This is a conservative estimate based on RHS length and variable name,
+    not the actual usage line (which we don't have here). Two call sites use
+    different thresholds: reporting a violation is lenient (25 chars), while
+    deciding whether to *auto-fix* is stricter (40 chars) since a wrong
+    autofix is more costly than a missed report.
 
     Args:
         lifecycle: Variable lifecycle
-        max_length: Maximum line length (default: 79)
+        absolute_threshold: RHS length (chars) above which inlining is
+            considered risky regardless of the variable name's length
 
     Returns:
-        True if any usage would exceed max length after inlining
+        True if inlining would likely exceed the line length
     """
     assignment = lifecycle.assignment
     var_name = assignment.var_name
     rhs_source = assignment.rhs_source.strip()
 
-    # For simple single-use cases, we can check if inlining would be too long
-    # This requires checking the usage line, but we don't have source lines here
-    # So we'll use a conservative estimate based on RHS length
-
-    # If the RHS is moderately long (>= 25 chars), inlining it is likely to
-    # cause line length issues, even if the variable name is also long
+    # If the RHS itself is long, inlining it is likely to cause line length
+    # issues, even if the variable name is also long
     # Example: tuple/list literals, moderately complex expressions
-    if len(rhs_source) >= 25:
+    if len(rhs_source) >= absolute_threshold:
         return True
 
     # If the RHS is significantly longer than the variable name,
@@ -678,7 +682,7 @@ def should_report_violation(
     if assignment.rhs_has_await:
         return False
 
-    # Rule 3: Don't report if inlining would likely exceed 79 characters
+    # Rule 3: Don't report if inlining would likely exceed the line length
     if _would_exceed_line_length(lifecycle):
         return False
 
@@ -751,39 +755,6 @@ def should_report_violation(
     return semantic_score < 50
 
 
-def _estimate_inlined_line_length(
-    lifecycle: VariableLifecycle,
-    max_length: int = 79,
-) -> bool:
-    """Check if inlining would likely exceed max line length.
-
-    This is a conservative estimate based on the RHS length and variable name.
-    The actual check in apply_fixes() is more precise, but this prevents us
-    from marking things as fixable when they're clearly too long.
-
-    Args:
-        lifecycle: Variable lifecycle
-        max_length: Maximum line length (default: 79)
-
-    Returns:
-        True if inlining would likely exceed max length
-    """
-    assignment = lifecycle.assignment
-    var_name = assignment.var_name
-    rhs_source = assignment.rhs_source.strip()
-
-    # Calculate the change in length: we remove var_name and add rhs_source
-    len_diff = len(rhs_source) - len(var_name)
-
-    # If the RHS is significantly longer than the variable name (20+ chars difference),
-    # it's likely to cause line length issues
-    if len_diff > 20:
-        return True
-
-    # If the RHS itself is long (40+ chars), it's risky to inline
-    return len(rhs_source) >= 40
-
-
 def should_autofix(
     lifecycle: VariableLifecycle,
     pattern: PatternType,
@@ -830,8 +801,9 @@ def should_autofix(
     if "\n" in rhs_source or "\r" in rhs_source:
         return False
 
-    # Check if inlining would likely exceed line length
-    if _estimate_inlined_line_length(lifecycle):
+    # Check if inlining would likely exceed line length (stricter threshold
+    # than reporting: a wrong autofix is more costly than a missed report)
+    if _would_exceed_line_length(lifecycle, absolute_threshold=40):
         return False
 
     # Calculate semantic value

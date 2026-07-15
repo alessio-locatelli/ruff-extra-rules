@@ -43,17 +43,17 @@ def git_grep_filter(
         cmd.extend(["-e", pattern, "--"])
         cmd.extend(filepaths)
 
-        result = subprocess.run(
+        git_grep_result = subprocess.run(
             cmd, capture_output=True, text=True, check=False, timeout=30
         )
 
         # Tests mock subprocess to force fallback path; this success path
         # is exercised in real-world usage and benchmarks
-        if result.returncode == 0:  # pragma: no cover
+        if git_grep_result.returncode == 0:  # pragma: no cover
             # Parse null-separated output
             # Git grep returns paths relative to repo root, but we need to preserve
             # the format of input paths (absolute vs relative)
-            git_matches = {f for f in result.stdout.split("\0") if f}
+            git_matches = {f for f in git_grep_result.stdout.split("\0") if f}
 
             # Build mapping: resolved path -> original input path
             input_map = {Path(fp).resolve(): fp for fp in filepaths}
@@ -68,7 +68,7 @@ def git_grep_filter(
             return matches
         # Tests mock subprocess to force fallback path; this "no matches"
         # path is exercised in real-world usage
-        elif result.returncode == 1:  # pragma: no cover
+        elif git_grep_result.returncode == 1:  # pragma: no cover
             # No matches found (not an error)
             return []
         else:
@@ -122,8 +122,8 @@ def batch_filter_files(
         return sorted(all_matches)
     else:
         # AND: file matches if it contains ALL patterns
-        result = set(filepaths)
+        matching_files = set(filepaths)
         for pattern in patterns:
             matches = git_grep_filter(filepaths, pattern, fixed_string=True)
-            result.intersection_update(matches)
-        return sorted(result)
+            matching_files.intersection_update(matches)
+        return sorted(matching_files)

@@ -9,16 +9,14 @@ Inline ignore: # pytriage: ignore=TRI001
 from __future__ import annotations
 
 import ast
-import io
 import logging
 import re
-import tokenize
 import tomllib
 from pathlib import Path
 from typing import Any
 
 from . import register_check
-from ._base import Violation
+from ._base import Violation, find_ignored_lines
 
 logger = logging.getLogger("forbid_vars")
 
@@ -454,34 +452,98 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
             )
 
 
-def get_ignored_lines(source: str) -> set[int]:
-    """Extract line numbers that have inline ignore comments.
+class ScopedNameCollector(ast.NodeVisitor):
+    """Collect Name nodes within a specific scope only (not nested scopes)."""
 
-    Uses the tokenize module to accurately detect comments (not strings).
+    def __init__(
+        self, scope_node: ast.AST | None, replace_names: dict[str, str]
+    ) -> None:
+        self.scope_node = scope_node
+        self.replace_names = replace_names  # {old_name: new_name}
+        self.nodes_to_replace: list[tuple[int, int, str, str]] = []
+        self.in_target_scope = scope_node is None  # Module-level = True
+        self.param_positions: set[tuple[int, int]] = set()
 
-    Args:
-        source: Python source code as string
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        """Handle function definitions - enter target scope, skip nested."""
+        if node is self.scope_node:
+            # Enter target scope
+            self.in_target_scope = True
+            # Mark parameters as restricted (don't replace parameter names)
+            all_args = node.args.args + node.args.posonlyargs + node.args.kwonlyargs
+            for arg in all_args:
+                # pragma: lax no cover
+                if arg.arg in self.replace_names:
+                    self.param_positions.add((arg.lineno, arg.col_offset))
+            # pragma: lax no cover
+            if node.args.vararg and node.args.vararg.arg in self.replace_names:
+                pos = (node.args.vararg.lineno, node.args.vararg.col_offset)
+                self.param_positions.add(pos)
+            # pragma: lax no cover
+            if node.args.kwarg and node.args.kwarg.arg in self.replace_names:
+                pos = (node.args.kwarg.lineno, node.args.kwarg.col_offset)
+                self.param_positions.add(pos)
+            self.generic_visit(node)
+            self.in_target_scope = False
+        # pragma: no cover (nested functions have separate scopes)
+        elif self.in_target_scope:
+            # Nested function - don't descend (separate scope)
+            pass
+        # pragma: no cover (different scope not visited)
+        else:
+            # Different scope - don't descend
+            pass
 
-    Returns:
-        Set of line numbers with ignore comments
-    """
-    ignored = set()
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        """Handle async function definitions - same logic as visit_FunctionDef."""
+        if node is self.scope_node:
+            self.in_target_scope = True
+            all_args = node.args.args + node.args.posonlyargs + node.args.kwonlyargs
+            for arg in all_args:
+                # pragma: lax no cover
+                if arg.arg in self.replace_names:
+                    self.param_positions.add((arg.lineno, arg.col_offset))
+            # pragma: lax no cover
+            if node.args.vararg and node.args.vararg.arg in self.replace_names:
+                pos = (node.args.vararg.lineno, node.args.vararg.col_offset)
+                self.param_positions.add(pos)
+            # pragma: lax no cover
+            if node.args.kwarg and node.args.kwarg.arg in self.replace_names:
+                pos = (node.args.kwarg.lineno, node.args.kwarg.col_offset)
+                self.param_positions.add(pos)
+            self.generic_visit(node)
+            self.in_target_scope = False
+        # pragma: no cover (nested async functions have separate scopes)
+        elif self.in_target_scope:
+            pass
+        # pragma: no cover (different scope not visited)
+        else:
+            pass
 
-    try:
-        tokens = tokenize.generate_tokens(io.StringIO(source).readline)
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        """Don't descend into class definitions (separate scope)."""
+        # pragma: no cover (classes inside functions not typical)
+        if self.in_target_scope:
+            # Class inside function - don't descend
+            pass
+        else:
+            # Continue visiting if we're looking for module-level names
+            self.generic_visit(node)
 
-        for tok_type, tok_string, (line, _), _, _ in tokens:
-            if tok_type != tokenize.COMMENT:
-                continue
-
-            if IGNORE_PATTERN.search(tok_string):
-                ignored.add(line)
-    except tokenize.TokenError as token_error:
-        # pragma: no cover (defensive: source already parsed by AST)
-        # If tokenization fails, return empty set (no lines ignored)
-        logger.debug(repr(token_error))
-
-    return ignored
+    def visit_Name(self, node: ast.Name) -> None:
+        """Collect Name node if we're in the target scope."""
+        if self.in_target_scope and node.id in self.replace_names:
+            pos = (node.lineno, node.col_offset)
+            # pragma: lax no cover
+            if pos not in self.param_positions:
+                replacement = (
+                    node.lineno,
+                    node.col_offset,
+                    node.id,
+                    self.replace_names[node.id],
+                )
+                self.nodes_to_replace.append(replacement)
+        self.generic_visit(node)
 
 
 def _apply_fixes(
@@ -525,101 +587,7 @@ def _apply_fixes(
                 replacements[old_name] = new_name
         scope_replacements[scope_id] = replacements
 
-    # Step 3: Create ScopedNameCollector class
-    class ScopedNameCollector(ast.NodeVisitor):
-        """Collect Name nodes within a specific scope only (not nested scopes)."""
-
-        def __init__(
-            self, scope_node: ast.AST | None, replace_names: dict[str, str]
-        ) -> None:
-            self.scope_node = scope_node
-            self.replace_names = replace_names  # {old_name: new_name}
-            self.nodes_to_replace: list[tuple[int, int, str, str]] = []
-            self.in_target_scope = scope_node is None  # Module-level = True
-            self.param_positions: set[tuple[int, int]] = set()
-
-        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-            """Handle function definitions - enter target scope, skip nested."""
-            if node is self.scope_node:
-                # Enter target scope
-                self.in_target_scope = True
-                # Mark parameters as restricted (don't replace parameter names)
-                all_args = node.args.args + node.args.posonlyargs + node.args.kwonlyargs
-                for arg in all_args:
-                    # pragma: lax no cover
-                    if arg.arg in self.replace_names:
-                        self.param_positions.add((arg.lineno, arg.col_offset))
-                # pragma: lax no cover
-                if node.args.vararg and node.args.vararg.arg in self.replace_names:
-                    pos = (node.args.vararg.lineno, node.args.vararg.col_offset)
-                    self.param_positions.add(pos)
-                # pragma: lax no cover
-                if node.args.kwarg and node.args.kwarg.arg in self.replace_names:
-                    pos = (node.args.kwarg.lineno, node.args.kwarg.col_offset)
-                    self.param_positions.add(pos)
-                self.generic_visit(node)
-                self.in_target_scope = False
-            # pragma: no cover (nested functions have separate scopes)
-            elif self.in_target_scope:
-                # Nested function - don't descend (separate scope)
-                pass
-            # pragma: no cover (different scope not visited)
-            else:
-                # Different scope - don't descend
-                pass
-
-        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-            """Handle async function definitions - same logic as visit_FunctionDef."""
-            if node is self.scope_node:
-                self.in_target_scope = True
-                all_args = node.args.args + node.args.posonlyargs + node.args.kwonlyargs
-                for arg in all_args:
-                    # pragma: lax no cover
-                    if arg.arg in self.replace_names:
-                        self.param_positions.add((arg.lineno, arg.col_offset))
-                # pragma: lax no cover
-                if node.args.vararg and node.args.vararg.arg in self.replace_names:
-                    pos = (node.args.vararg.lineno, node.args.vararg.col_offset)
-                    self.param_positions.add(pos)
-                # pragma: lax no cover
-                if node.args.kwarg and node.args.kwarg.arg in self.replace_names:
-                    pos = (node.args.kwarg.lineno, node.args.kwarg.col_offset)
-                    self.param_positions.add(pos)
-                self.generic_visit(node)
-                self.in_target_scope = False
-            # pragma: no cover (nested async functions have separate scopes)
-            elif self.in_target_scope:
-                pass
-            # pragma: no cover (different scope not visited)
-            else:
-                pass
-
-        def visit_ClassDef(self, node: ast.ClassDef) -> None:
-            """Don't descend into class definitions (separate scope)."""
-            # pragma: no cover (classes inside functions not typical)
-            if self.in_target_scope:
-                # Class inside function - don't descend
-                pass
-            else:
-                # Continue visiting if we're looking for module-level names
-                self.generic_visit(node)
-
-        def visit_Name(self, node: ast.Name) -> None:
-            """Collect Name node if we're in the target scope."""
-            if self.in_target_scope and node.id in self.replace_names:
-                pos = (node.lineno, node.col_offset)
-                # pragma: lax no cover
-                if pos not in self.param_positions:
-                    replacement = (
-                        node.lineno,
-                        node.col_offset,
-                        node.id,
-                        self.replace_names[node.id],
-                    )
-                    self.nodes_to_replace.append(replacement)
-            self.generic_visit(node)
-
-    # Step 4: Collect replacements for each scope
+    # Step 3: Collect replacements for each scope
     all_replacements: list[tuple[int, int, str, str]] = []
     for scope_id, replacements in scope_replacements.items():
         # Find scope node from first violation
@@ -636,7 +604,7 @@ def _apply_fixes(
             collector.visit(tree)
         all_replacements.extend(collector.nodes_to_replace)
 
-    # Step 5: Sort reverse and apply replacements
+    # Step 4: Sort reverse and apply replacements
     all_replacements.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
     for line_num, col, old_name, new_name in all_replacements:
@@ -720,7 +688,7 @@ class ForbidVarsCheck:
 
         # Lazy tokenization: only tokenize if violations found
         if visitor.violations:
-            ignored_lines = get_ignored_lines(source)
+            ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
             raw_violations = [
                 v for v in visitor.violations if v["line"] not in ignored_lines
             ]
