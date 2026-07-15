@@ -3,78 +3,140 @@
 Custom pre-commit hooks for code quality enforcement.
 
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
-[![Python 3.13+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+## Registered Hooks
+
+This repository registers exactly two hooks in `.pre-commit-hooks.yaml`:
+
+| Hook id                  | What it runs                                                                                                                                                                   |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ast-checks`             | A grouped orchestrator that runs several AST-based checks (TRI001–TRI005) against each file in a single parse pass. Individual checks are toggled with `--enable`/`--disable`. |
+| `fix-misplaced-comments` | STYLE-001: moves trailing comments on closing brackets to the expression line.                                                                                                 |
+
+There are no other installable hook ids and no console-script entry points (`[project.scripts]` in `pyproject.toml` is intentionally empty) — every check runs via `python -m pre_commit_hooks.<package>`.
 
 ## Performance
 
-All hooks are optimized for speed with:
+All checks are optimized for speed with:
 
 - **File content caching**: SHA-1 hash-based cache with mtime optimization (similar to mypy/ruff)
 - **Batch pre-filtering**: Fast git grep pre-filtering before Python processing
 - **Code-level optimizations**: Single AST parse, scope caching, pre-compiled regex patterns
 
-**Benchmark results (87 Python files):**
+**Benchmark results (92 Python files, this repo's own `src/`+`tests/`, 3 iterations):**
 
-| Metric                   | Time   | Improvement      |
-| ------------------------ | ------ | ---------------- |
-| Cold cache (first run)   | 371 ms | Baseline         |
-| Warm cache (incremental) | 176 ms | **52.5% faster** |
+| Metric                   | Time    | Change     |
+| ------------------------ | ------- | ---------- |
+| Cold cache (first run)   | ~4.80 s | Baseline   |
+| Warm cache (incremental) | ~4.69 s | ~2% faster |
 
-**Per-hook performance (warm cache):**
+**Per-check performance (cold cache averages):**
 
-| Hook                       | Cold Cache | Warm Cache | Speedup   |
-| -------------------------- | ---------- | ---------- | --------- |
-| forbid-vars                | 164 ms     | 40 ms      | **75.7%** |
-| validate-function-name     | 68 ms      | 40 ms      | **41.6%** |
-| fix-misplaced-comments     | 56 ms      | 33 ms      | **41.1%** |
-| fix-excessive-blank-lines  | 45 ms      | 30 ms      | **33.5%** |
-| redundant-assignment       | 42 ms      | 35 ms      | **16.7%** |
-| check-redundant-super-init | 38 ms      | 33 ms      | 11.9%     |
+| Check                               | Time    |
+| ----------------------------------- | ------- |
+| `ast-checks` (all checks, one pass) | ~1.55 s |
+| `forbid-vars`                       | ~1.34 s |
+| `redundant-assignment`              | ~1.43 s |
+| `validate-function-name`            | ~0.21 s |
+| `excessive-blank-lines`             | ~0.12 s |
+| `redundant-super-init`              | ~0.06 s |
+| `fix-misplaced-comments`            | ~0.10 s |
+
+Each measurement pays Python interpreter startup once per subprocess invocation, so the cache mainly saves the per-file re-analysis cost, not process startup — the warm-cache improvement is modest for that reason. These numbers come from actually running the current `ast_checks`/`fix_misplaced_comments` packages against this repo, not a stand-in.
 
 **Cache location**: `.cache/pre_commit_hooks/` (automatically managed, safe to delete)
 
 Run your own benchmarks:
 
 ```bash
-python scripts/benchmark.py --iterations=3
+uv run python scripts/benchmark.py --iterations=3
 ```
 
-## Available Hooks
+## Available Checks
 
 ---
 
-### fix-misplaced-comments
+### ast-checks (grouped)
 
-**STYLE-001**: Automatically fixes trailing comments on closing brackets by moving them to the expression line.
+The `ast-checks` hook runs the checks below in a single AST parse pass per file. Select which ones run with `--enable=<id>,<id>` or `--disable=<id>,<id>` (comma-separated check ids); by default all checks run except `redundant-assignment` (see `.pre-commit-hooks.yaml`).
 
-**Why?** When auto-formatters move closing brackets to new lines, comments on those lines become orphaned and lose context.
+```bash
+# List available check ids
+uv run python -m pre_commit_hooks.ast_checks --list-checks
 
-**Example:**
+# Run only forbid-vars and validate-function-name
+uv run python -m pre_commit_hooks.ast_checks --enable=forbid-vars,validate-function-name src/
 
-```python
-# Bad - comment is on bracket line:
-result = func(
-    arg
-)  # Comment about the function call
-
-# Fixed - comment moves to expression line:
-result = func(
-    arg  # Comment about the function call
-)
+# Run everything except redundant-assignment, with autofix
+uv run python -m pre_commit_hooks.ast_checks --disable=redundant-assignment --fix src/
 ```
+
+---
+
+#### forbid-vars
+
+**TRI001**: Prevents use of meaningless variable names like `data` and `result`.
+
+**Why?** Meaningless variable names reduce code clarity and maintainability. See [Peter Hilton's article on meaningless variable names](https://hilton.org.uk/blog/meaningless-variable-names) for more context.
+
+**Default forbidden names:**
+
+- `data`
+- `result`
 
 **Features:**
 
-- Automatically moves comments from closing bracket lines to expression lines
-- Places comments inline if they fit within 88 characters
-- Otherwise places them as preceding comments on their own line
-- Preserves file encoding and line endings
-- Gracefully handles syntax errors in source files
+- Detects forbidden names in assignments, function parameters, and async functions
+- **Autofixing**: suggests and optionally applies meaningful names based on context (`--fix`). The rename is scope-aware — it replaces only the AST `Name` nodes for that specific binding within its scope, not every textual occurrence in the file.
+- Supports a custom blacklist via `--forbid-vars-names`
+- Inline suppression with `# pytriage: ignore=TRI001`
+- Clear error messages with line numbers and helpful links
+
+**Suggest mode (default):**
+
+```
+src/process.py:2: TRI001: Forbidden variable name 'data' found. Use a more descriptive name. Or add '# pytriage: ignore=TRI001' to suppress.
+```
+
+**Fix mode:**
+
+```yaml
+- id: ast-checks
+  args: [--enable=forbid-vars, --fix]
+```
+
+#### Autofix Configuration (`pyproject.toml`)
+
+You can configure the `forbid-vars` autofix behavior in your `pyproject.toml` file.
+
+**Enabling/Disabling Categories:**
+
+The autofix patterns are grouped into categories (`http`, `file`, `database`, `data-science`, `semantic`). By default, only the `http` category is enabled. You can enable more categories like this:
+
+```toml
+[tool.forbid-vars.autofix]
+enabled = ["http", "file", "database"]
+```
+
+**Custom Patterns:**
+
+You can also add your own custom patterns. This is useful for project-specific conventions.
+
+```toml
+[tool.forbid-vars.autofix]
+enabled = ["custom"]
+
+[[tool.forbid-vars.autofix.patterns]]
+category = "custom"
+regex = "get_user_profile"
+name = "user_profile"
+```
 
 ---
 
-### fix-excessive-blank-lines
+#### excessive-blank-lines
 
 **TRI002**: Collapses multiple consecutive blank lines after module headers (copyright, docstrings, or comments) to a single blank line.
 
@@ -104,7 +166,7 @@ import os  # Good - 1 blank line
 
 ---
 
-### check-redundant-super-init
+#### redundant-super-init
 
 **TRI003**: Detects when a class forwards `**kwargs` to a parent `__init__` that accepts no arguments.
 
@@ -138,7 +200,7 @@ class Child(Base):
 
 ---
 
-### validate-function-name
+#### validate-function-name
 
 **TRI004**: Detects functions with `get_` prefix and suggests better names based on their behavior patterns.
 
@@ -183,12 +245,14 @@ def is_active(user: User) -> bool:
 | Mutation            | `update_*`       | `get_modified()` → `update_record()`    |
 | @property           | Remove `get_`    | `@property get_name` → `@property name` |
 
+Applies equally to `async def get_*` functions.
+
 **Features:**
 
 - Detects 15+ behavioral patterns using AST analysis
 - Suggests appropriate function names based on what the function actually does
-- **Safe autofix mode**: Automatically renames small, simple functions (< 20 lines, single return, simple control flow)
-- Inline suppression with `# naming: ignore`
+- **Safe autofix mode**: automatically renames small, simple functions (< 20 lines, single return, simple control flow). The rename is AST-scoped — it renames the definition plus true call-site references (`self.x`/`cls.x` within the same class for methods, or `Name` references across the module for free functions), and never touches string/byte literals, comments, or identically-named symbols in unrelated scopes (e.g. a same-named method on a different class).
+- Inline suppression with `# pytriage: ignore=TRI004`
 - Automatically skips:
   - `@property` decorators
   - `@override` / `@abstractmethod` decorators
@@ -196,37 +260,31 @@ def is_active(user: User) -> bool:
   - Functions that only call other `get_*` functions
   - Test functions: `test_get_*`
 
-**Autofix Mode:**
-
-The hook supports `--fix` to automatically rename functions, but ONLY when safe:
-
 **Safe autofix criteria (ALL must be met):**
 
 - Function is small (< 20 lines, excluding docstring)
-- Simple control flow (no nested conditions/loops)
+- Simple control flow (nesting depth ≤ 1)
 - Single return statement
 - High confidence suggestion
 
-**Example usage with autofix:**
-
 ```yaml
-- id: validate-function-name
-  args: [--fix] # Optional: auto-fix safe violations
+- id: ast-checks
+  args: [--enable=validate-function-name, --fix]
 ```
 
 **Suppression:**
 
 ```python
-def get_user(id: int) -> User:  # naming: ignore
+def get_user(id: int) -> User:  # pytriage: ignore=TRI004
     """Legacy API - name cannot be changed."""
     return User.objects.get(id=id)
 ```
 
 ---
 
-### redundant-assignment
+#### redundant-assignment
 
-> **⚠️ Opt-in (Experimental)**: This hook is disabled by default as it's in early development and may have false positives. To enable it, override the default configuration in your `.pre-commit-config.yaml`:
+> **⚠️ Opt-in (Experimental)**: This check is disabled by default in `.pre-commit-hooks.yaml` as it's in early development and may have false positives. To enable it, override the default args in your `.pre-commit-config.yaml`:
 >
 > ```yaml
 > - repo: https://github.com/YOUR_USERNAME/pre-commit-extra-hooks
@@ -285,7 +343,7 @@ print(msg)
   - Complex expressions (comprehensions, ternary operators, lambdas)
   - Multi-part descriptive names (`user_email_address`)
   - Type annotations
-- **Safe autofix mode**: Automatically inlines simple, low-value assignments when safe
+- **Safe autofix mode**: automatically inlines simple, low-value assignments when safe
 - Inline suppression with `# pytriage: ignore=TRI005`
 - Gracefully handles:
   - Augmented assignments (`x += 1`)
@@ -294,21 +352,17 @@ print(msg)
   - Tuple unpacking (skipped)
   - Class attributes (skipped)
 
-**Autofix Mode:**
-
-The hook supports `--fix` to automatically inline redundant assignments:
-
-```yaml
-- id: redundant-assignment
-  args: [--fix] # Optional: auto-fix safe violations
-```
-
 **Autofix criteria (ALL must be met):**
 
 - Semantic value score ≤ 20 (very low value)
 - Pattern is IMMEDIATE_SINGLE_USE or LITERAL_IDENTITY
 - RHS is simple: literal, name, attribute, or simple call
 - Inlining won't exceed 88 characters (Black's default)
+
+```yaml
+- id: ast-checks
+  args: [--enable=redundant-assignment, --fix]
+```
 
 **Example autofix:**
 
@@ -330,88 +384,37 @@ return result
 
 ---
 
-### forbid-vars
+### fix-misplaced-comments
 
-Prevents use of meaningless variable names like `data` and `result`. Now with autofix!
+**STYLE-001**: Automatically fixes trailing comments on closing brackets by moving them to the expression line.
 
-**Why?** Meaningless variable names reduce code clarity and maintainability. See [Peter Hilton's article on meaningless variable names](https://hilton.org.uk/blog/meaningless-variable-names) for more context.
+**Why?** When auto-formatters move closing brackets to new lines, comments on those lines become orphaned and lose context.
 
-**Default forbidden names:**
+**Example:**
 
-- `data`
-- `result`
+```python
+# Bad - comment is on bracket line:
+result = func(
+    arg
+)  # Comment about the function call
+
+# Fixed - comment moves to expression line:
+result = func(
+    arg  # Comment about the function call
+)
+```
 
 **Features:**
 
-- Detects forbidden names in assignments, function parameters, and async functions
-- **Autofixing**: Suggests and optionally applies meaningful names based on context (`--fix`).
-- Supports custom blacklist via `--names` argument
-- Inline suppression with `# maintainability: ignore[meaningless-variable-name]`
-- Clear error messages with line numbers and helpful links
-- Works independently (no git/pre-commit required for testing)
-
-#### Autofixing Violations
-
-The `forbid-vars` hook can now automatically suggest and apply fixes for common violation patterns.
-
-**Suggest Mode (default):**
-
-By default, the hook runs in "suggest mode". It will report forbidden names and suggest a better name if a known pattern is matched.
-
-```
-src/process.py:42: Forbidden variable name 'data' found. Consider renaming to 'user_records'. Or add ...
-```
-
-**Fix Mode (`--fix`):**
-
-To automatically apply the suggested fixes, you can use the `--fix` argument in your `.pre-commit-config.yaml`:
-
-```yaml
-- repo: https://github.com/YOUR_USERNAME/pre-commit-extra-hooks
-  rev: v1.0.0
-  hooks:
-    - id: forbid-vars
-      args: ["--fix"]
-```
-
-When a fix is applied, the hook will report the change:
-
-```
-Applied fix for 'data' -> 'user_records' in src/process.py:42
-```
-
-#### Autofix Configuration (`pyproject.toml`)
-
-You can configure the autofix behavior in your `pyproject.toml` file.
-
-**Enabling/Disabling Categories:**
-
-The autofix patterns are grouped into categories (`http`, `file`, `database`, `data-science`, `semantic`). By default, only the `http` category is enabled. You can enable more categories like this:
-
-```toml
-[tool.forbid-vars.autofix]
-enabled = ["http", "file", "database"]
-```
-
-**Custom Patterns:**
-
-You can also add your own custom patterns. This is useful for project-specific conventions.
-
-```toml
-[tool.forbid-vars.autofix]
-enabled = ["custom"]
-
-[[tool.forbid-vars.autofix.patterns]]
-category = "custom"
-regex = "get_user_profile"
-name = "user_profile"
-```
-
-**Limitation:** The autofix feature performs a file-wide search and replace for the variable name. This works well in most cases, but it can lead to incorrect changes if the same forbidden variable name (e.g., `data`) is used for different things in the same file. It is recommended to avoid reusing generic names for different purposes within the same file.
+- Automatically moves comments from closing bracket lines to expression lines
+- Places comments inline if they fit within 88 characters
+- Otherwise places them as preceding comments on their own line
+- Preserves file encoding and line endings
+- Gracefully handles syntax errors in source files
 
 ---
 
-### fix-misplaced-comments
+## Installation
 
 ### Using pre-commit
 
@@ -422,7 +425,8 @@ repos:
   - repo: https://github.com/YOUR_USERNAME/pre-commit-extra-hooks
     rev: v1.0.0 # Use the latest version tag
     hooks:
-      - id: forbid-vars
+      - id: ast-checks
+      - id: fix-misplaced-comments
 ```
 
 Then install the pre-commit hooks:
@@ -441,7 +445,7 @@ pip install git+https://github.com/YOUR_USERNAME/pre-commit-extra-hooks.git
 
 ### Automatic (via pre-commit)
 
-Once installed, the hook runs automatically on `git commit`:
+Once installed, the hooks run automatically on `git commit`:
 
 ```bash
 git add .
@@ -451,39 +455,39 @@ git commit -m "Add new feature"
 **Example output when violations are found:**
 
 ```
-forbid meaningless variable names...............................Failed
-- hook id: forbid-vars
+Python AST checks (grouped)......................................Failed
+- hook id: ast-checks
 - exit code: 1
 
-src/process.py:42: Forbidden variable name 'data' found. Use a more descriptive name or add '# maintainability: ignore[meaningless-variable-name]' to suppress. See https://hilton.org.uk/blog/meaningless-variable-names
+src/process.py:2: TRI001: Forbidden variable name 'data' found. Use a more descriptive name. Or add '# pytriage: ignore=TRI001' to suppress.
 ```
 
 ### Manual Execution
 
-Run the hook manually on specific files:
+Run a hook manually via pre-commit on all files:
 
 ```bash
-pre-commit run forbid-vars --all-files
+pre-commit run ast-checks --all-files
 ```
 
-Run the hook directly (independent of pre-commit):
+Run a check directly (independent of pre-commit, no console script is installed):
 
 ```bash
-forbid-vars src/main.py src/utils.py
+uv run python -m pre_commit_hooks.ast_checks --enable=forbid-vars src/main.py src/utils.py
 ```
 
 ## Configuration
 
 ### Custom Forbidden Names
 
-Override the default blacklist with your own:
+Override the `forbid-vars` default blacklist with your own:
 
 ```yaml
 - repo: https://github.com/YOUR_USERNAME/pre-commit-extra-hooks
   rev: v1.0.0
   hooks:
-    - id: forbid-vars
-      args: ["--names=data,result,info,temp,obj,value"]
+    - id: ast-checks
+      args: [--forbid-vars-names=data, result, info, temp, obj, value]
 ```
 
 ### Inline Suppression
@@ -495,7 +499,7 @@ Suppress violations on specific lines:
 data = load_from_database()
 
 # This will be ignored:
-data = load_from_database()  # maintainability: ignore[meaningless-variable-name]
+data = load_from_database()  # pytriage: ignore=TRI001
 ```
 
 **Note:** The ignore comment must be on the same line as the violation.
@@ -541,162 +545,38 @@ def legacy_code():
     user_records = fetch_users()
 
     # Legacy code - suppressed (refactoring is risky)
-    data = transform(user_records)  # maintainability: ignore[meaningless-variable-name]
-    result = validate(data)  # maintainability: ignore[meaningless-variable-name]
+    data = transform(user_records)  # pytriage: ignore=TRI001
+    result = validate(data)  # pytriage: ignore=TRI001
 
     return result
 ```
 
-## Adding New Hooks
+## Adding New Checks
 
-Want to contribute a new hook to this repository? Follow these steps:
+Want to contribute a new check to this repository? See [CONTRIBUTING.md](CONTRIBUTING.md) for the full walkthrough of the `register_check`/`ASTCheck` protocol used by the `ast_checks` package.
 
-### 1. Create the Hook Script
+## Testing
 
-Create a new Python module in `pre_commit_hooks/`:
-
-```bash
-touch pre_commit_hooks/your_hook.py
-```
-
-### 2. Implement the Hook
-
-Your hook should:
-
-- Accept file paths as command-line arguments
-- Return exit code 0 for success, non-zero for failure
-- Print error messages to stdout (format: `filepath:line: message`)
-- Use only Python standard library (no external dependencies)
-
-**Template:**
-
-```python
-"""Your hook description."""
-
-import argparse
-import sys
-from typing import Sequence
-
-
-def check_file(filepath: str) -> int:
-    """Check a single file. Returns 0 for pass, 1 for fail."""
-    # Your validation logic here
-    return 0
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    """Main entry point."""
-    parser = argparse.ArgumentParser(description="Your hook description")
-    parser.add_argument("filenames", nargs="*", help="Filenames to check")
-
-    args = parser.parse_args(argv)
-
-    failed = False
-    for filepath in args.filenames:
-        if check_file(filepath) != 0:
-            failed = True
-
-    return 1 if failed else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
-```
-
-### 3. Add Entry Point
-
-Add to `pyproject.toml` under `[project.scripts]`:
-
-```toml
-[project.scripts]
-your-hook = "pre_commit_hooks.your_hook:main"
-```
-
-### 4. Update Hook Metadata
-
-Add to `.pre-commit-hooks.yaml`:
-
-```yaml
-- id: your-hook
-  name: your hook name
-  description: Your hook description
-  entry: your-hook
-  language: python
-  types: [python] # or other file types
-```
-
-### 5. Write Tests
-
-Create `tests/test_your_hook.py`:
-
-```python
-"""Tests for your-hook."""
-
-import subprocess
-import sys
-
-
-def test_success_case():
-    """Test that hook passes on valid files."""
-    result = subprocess.run(
-        [sys.executable, "-m", "pre_commit_hooks.your_hook", "tests/fixtures/valid.py"],
-        capture_output=True,
-    )
-    assert result.returncode == 0
-```
-
-### 6. Test Independently
-
-Your hook should work without git or pre-commit:
+### Run the full test suite
 
 ```bash
-python -m pre_commit_hooks.your_hook path/to/file.py
+uv run coverage run -m pytest
+uv run coverage report
 ```
 
-## Testing Hooks
-
-### Run Tests
+### Test a specific check
 
 ```bash
-pytest tests/
+uv run pytest tests/test_forbid_vars.py -v
 ```
 
-### Test a Specific Hook
+### Run a check independently
+
+Every check works without git or pre-commit — just point it at files:
 
 ```bash
-pytest tests/test_forbid_vars.py -v
+uv run python -m pre_commit_hooks.ast_checks --enable=forbid-vars tests/fixtures/invalid_code.py
 ```
-
-### Test Hook Independently
-
-Run the hook directly to verify it works without pre-commit:
-
-```bash
-python -m pre_commit_hooks.forbid_vars tests/fixtures/invalid_code.py
-```
-
-## Configuration Options
-
-### forbid-vars
-
-**Arguments:**
-
-- `--names`: Comma-separated list of forbidden variable names (default: `data,result`)
-
-**Example:**
-
-```yaml
-- id: forbid-vars
-  args: ["--names=data,result,info,temp"]
-```
-
-**Inline ignore pattern:**
-
-```python
-# maintainability: ignore[meaningless-variable-name]
-```
-
-(Case-insensitive, must be on same line as violation)
 
 ## Development
 
@@ -707,47 +587,55 @@ python -m pre_commit_hooks.forbid_vars tests/fixtures/invalid_code.py
 git clone https://github.com/YOUR_USERNAME/pre-commit-extra-hooks.git
 cd pre-commit-extra-hooks
 
-# Install development dependencies
-pip install -e ".[dev]"
+# Install development dependencies (this project uses uv)
+uv sync
 
 # Install pre-commit hooks (dogfooding!)
-pre-commit install
+uv run pre-commit install
 ```
 
 ### Run Linter
 
 ```bash
-ruff check .
-ruff format .
+uv run ruff check --fix .
+uv run ruff format .
+uv run mypy src/ tests/
 ```
 
 ### Run Tests
 
 ```bash
-pytest tests/ -v
+uv run coverage run -m pytest
+uv run coverage report
 ```
 
 ## Project Structure
 
 ```text
-pre-commit-extra-hooks/
-├── .pre-commit-hooks.yaml   # Hook definitions
-├── .pre-commit-config.yaml  # Self-dogfooding configuration
-├── README.md                # This file
-├── LICENSE                  # MIT license
-├── pyproject.toml           # Python project metadata
+pre_commit_python_extra_hooks/
+├── .pre-commit-hooks.yaml     # Hook definitions (ast-checks, fix-misplaced-comments)
+├── .pre-commit-config.yaml    # Self-dogfooding configuration
+├── README.md                  # This file
+├── CONTRIBUTING.md            # Guide for adding new checks
+├── LICENSE                    # MIT license
+├── pyproject.toml             # Python project metadata
 │
-├── pre_commit_hooks/        # Hook implementations
-│   ├── __init__.py
-│   └── forbid_vars.py       # forbid-vars hook
+├── src/pre_commit_hooks/
+│   ├── _cache.py               # Shared disk cache (SHA-1 + mtime)
+│   ├── _prefilter.py           # git-grep based candidate-file filtering
+│   ├── ast_checks/             # Grouped orchestrator + individual checks
+│   │   ├── __init__.py          # CheckOrchestrator, register_check, CLI
+│   │   ├── _base.py             # ASTCheck protocol, Violation dataclass
+│   │   ├── forbid_vars.py       # TRI001
+│   │   ├── excessive_blank_lines.py  # TRI002
+│   │   ├── redundant_super_init.py   # TRI003
+│   │   ├── validate_function_name/   # TRI004
+│   │   └── redundant_assignment/     # TRI005 (opt-in)
+│   └── fix_misplaced_comments/  # STYLE-001
 │
-└── tests/                   # Test suite
-    ├── __init__.py
-    ├── test_forbid_vars.py
-    └── fixtures/            # Test data
-        ├── valid_code.py
-        ├── invalid_code.py
-        └── ignored_code.py
+└── tests/                     # Test suite
+    ├── fixtures/               # Test data per check
+    └── test_*.py
 ```
 
 ## Troubleshooting
@@ -768,7 +656,7 @@ pre-commit install
 
 **Solution:** Check if:
 
-1. File is a Python file (hook only runs on `*.py` files)
+1. File is a Python file (hooks only run on `*.py` files)
 2. Inline ignore comment is present
 3. The variable is actually being assigned (not an attribute like `obj.data`)
 
@@ -776,7 +664,7 @@ pre-commit install
 
 **Problem:** Hook fails on syntactically invalid Python.
 
-**Solution:** The hook requires valid Python syntax to parse the AST. Fix syntax errors first:
+**Solution:** The checks require valid Python syntax to parse the AST. Fix syntax errors first:
 
 ```bash
 python -m py_compile src/file.py
@@ -788,7 +676,7 @@ MIT License. See [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on adding hooks and maintaining this repository.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on adding checks and maintaining this repository.
 
 ## Resources
 
