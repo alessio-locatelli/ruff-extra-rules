@@ -1,12 +1,12 @@
 # Contributing to Pre-Commit Extra Hooks
 
-Thank you for contributing to this project! This guide will help you add new hooks, update existing ones, and maintain the repository.
+Thank you for contributing to this project! This guide will help you add new checks, update existing ones, and maintain the repository.
 
 ## Table of Contents
 
 - [Getting Started](#getting-started)
-- [Adding a New Hook](#adding-a-new-hook)
-- [Updating Existing Hooks](#updating-existing-hooks)
+- [Adding a New Check](#adding-a-new-check)
+- [Updating Existing Checks](#updating-existing-checks)
 - [Semantic Versioning](#semantic-versioning)
 - [Backward Compatibility](#backward-compatibility)
 - [Performance Testing](#performance-testing)
@@ -18,9 +18,10 @@ Thank you for contributing to this project! This guide will help you add new hoo
 
 ### Prerequisites
 
-- Python 3.8 or later
+- Python 3.13 or later
+- [uv](https://docs.astral.sh/uv/)
 - Git
-- pre-commit framework
+- pre-commit framework, or [prek](https://github.com/j178/prek) as a drop-in alternative
 
 ### Setup Development Environment
 
@@ -29,60 +30,49 @@ Thank you for contributing to this project! This guide will help you add new hoo
 git clone https://github.com/YOUR_USERNAME/pre-commit-extra-hooks.git
 cd pre-commit-extra-hooks
 
-# Install in development mode with dev dependencies
-pip install -e ".[dev]"
+# Install dependencies (creates .venv automatically)
+uv sync
 
 # Install pre-commit hooks (dogfooding!)
-pre-commit install
+uv run pre-commit install
 ```
 
 ### Run Tests
 
 ```bash
 # Run all tests
-pytest tests/ -v
+uv run pytest
 
-# Run tests for a specific hook
-pytest tests/test_forbid_vars.py -v
+# Run tests for a specific check
+uv run pytest tests/test_forbid_vars.py -v
 
 # Run with coverage
-pytest tests/ --cov=pre_commit_hooks --cov-report=html
+uv run coverage run -m pytest
+uv run coverage report
 ```
 
 ### Run Linters
 
 ```bash
-# Check code style
-ruff check .
-
-# Auto-fix issues
-ruff check --fix .
-
-# Format code
-ruff format .
-
-# Check all pre-commit hooks
-pre-commit run --all-files
+uv run ruff check --fix .
+uv run ruff format .
+uv run mypy src/ tests/
 ```
 
-## Adding a New Hook
+## Adding a New Check
 
-Follow these steps to add a new hook to the repository:
+Checks live under `src/pre_commit_hooks/ast_checks/` and plug into the grouped `ast-checks` hook — there is no per-check `.pre-commit-hooks.yaml` entry or console script to add. Follow these steps:
 
 ### 1. Design Phase
 
 Before writing code:
 
-- Define the hook's purpose (single responsibility)
-- Identify which file types it will check
-- Decide what exit codes to use (0 = success, 1 = failure)
-- Plan the error message format
-- Consider configuration options (CLI arguments)
+- Define the check's purpose (single responsibility)
+- Decide on a check id (kebab-case, e.g. `no-bare-except`) and an error code (`TRI00N`, next unused number)
+- Plan the violation message format and whether it needs an autofix mode
 - **Choose the right implementation approach** (see below)
 
-#### Choosing Between Bash and Python
-
-**Constitution I (KISS Principle)** states: _"Prefer Bash + Git commands; fall back to Python only when necessary."_
+#### Choosing Between Bash/Grep and Python/AST
 
 Use this decision tree to choose the right tool:
 
@@ -99,17 +89,6 @@ grep -n 'TODO\|FIXME' "$@"
 
 # ✓ Check for hardcoded IPs
 grep -E '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' "$@"
-
-# ✓ Check for print() debugging statements
-grep -n 'print(' "$@"
-
-# ✓ Check for console.log in JavaScript
-grep -n 'console\.log' "$@"
-
-# ✓ Ensure files end with newline
-for file in "$@"; do
-    [ -n "$(tail -c 1 "$file")" ] && echo "$file: Missing final newline"
-done
 ```
 
 **Characteristics of bash-appropriate checks:**
@@ -127,7 +106,7 @@ The check requires **syntax awareness** or **semantic understanding**:
 ```python
 # ✗ CANNOT use bash reliably:
 
-# Forbidden variable names (forbid-vars hook)
+# Forbidden variable names (forbid-vars check)
 # - Must distinguish: data = 1  vs  obj.data = 1  vs  "data = 1"
 # - Must detect function parameters: def foo(data):
 # - Needs inline suppression logic
@@ -135,14 +114,6 @@ The check requires **syntax awareness** or **semantic understanding**:
 # Unused imports
 # - Must parse import statements
 # - Must track variable usage in scope
-
-# Function complexity (too many parameters)
-# - Must parse function signatures
-# - Must handle *args, **kwargs
-
-# Enforce type hints
-# - Must understand Python syntax (def foo(x: int) -> str)
-# - Must distinguish annotated from non-annotated functions
 ```
 
 **Characteristics of Python-appropriate checks:**
@@ -153,7 +124,7 @@ The check requires **syntax awareness** or **semantic understanding**:
 - Needs suppression via inline comments
 - Requires accurate line number tracking
 
-##### Real-World Example: Why forbid-vars Uses AST
+##### Why forbid-vars Uses AST, Not Grep
 
 **Bash/grep approach (WRONG):**
 
@@ -173,256 +144,183 @@ def process(data):              # ❌ MISSED (function parameter not detected!)
     # data = 1                  # ❌ False positive (inside comment)
 ```
 
-**Bash accuracy: ~50%** (3 false positives, 1 critical miss - function parameters)
+**Python/AST approach (correct):** `forbid_vars.py` uses `ast.NodeVisitor` to check `ast.Assign`, `ast.AnnAssign`, and `ast.FunctionDef` parameters, filtering out attributes, strings, and comments automatically.
 
-**Python/AST approach (CORRECT):**
+**When in doubt:** start with a `git grep`/`ripgrep` pre-filter to cheaply skip files that can't contain a violation (see `get_prefilter_pattern()` below), then confirm with AST analysis. This hybrid pipeline is what every check in this repo already does.
 
-```python
-# Uses ast.NodeVisitor to check:
-# - ast.Assign (data = 1)
-# - ast.AnnAssign (data: int = 1)
-# - ast.FunctionDef parameters (def foo(data):)
-# - Filters out attributes, strings, comments automatically
-```
+### 2. Implement the Check
 
-**Python accuracy: 100%** (zero false positives, zero misses)
-
-##### Decision Criteria Summary
-
-| Question                                        | Bash | Python |
-| ----------------------------------------------- | ---- | ------ |
-| Simple string pattern?                          | ✓    |        |
-| Works in any context (strings, comments, code)? | ✓    |        |
-| Need to understand language syntax?             |      | ✓      |
-| Need to distinguish variables vs attributes?    |      | ✓      |
-| Need inline suppression logic?                  |      | ✓      |
-| Risk of false positives with grep?              |      | ✓      |
-| Checking Python/JS/Go code structure?           |      | ✓      |
-
-**When in doubt:** Start with bash. If you find false positives or missed violations in testing, switch to Python with proper parsing.
-
-### 2. Create Hook Module
-
-Create `pre_commit_hooks/your_hook.py`:
+Every check implements the `ASTCheck` protocol defined in `src/pre_commit_hooks/ast_checks/_base.py`:
 
 ```python
-"""Brief description of what this hook does."""
+class ASTCheck(Protocol):
+    @property
+    def check_id(self) -> str: ...          # e.g. "forbid-vars"
 
-import argparse
-import sys
-from typing import Sequence
+    @property
+    def error_code(self) -> str: ...        # e.g. "TRI001"
 
+    def get_prefilter_pattern(self) -> list[str] | None: ...  # git-grep fast path
 
-def check_file(filepath: str) -> list[str]:
-    """
-    Check a single file for violations.
+    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]: ...
 
-    Args:
-        filepath: Path to the file to check
-
-    Returns:
-        List of error messages (empty if no violations)
-    """
-    errors = []
-
-    try:
-        with open(filepath, encoding="utf-8") as f:
-            content = f.read()
-
-        # Your validation logic here
-        # ...
-
-    except (OSError, UnicodeDecodeError) as error:
-        logger.warning("File: %s, error: %s", filepath, repr(error))
-        # Skip files we can't read
-        return []
-
-    return errors
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    """
-    Main entry point for the hook.
-
-    Args:
-        argv: Command-line arguments
-
-    Returns:
-        Exit code: 0 for success, 1 for failure
-    """
-    parser = argparse.ArgumentParser(description="Description of your hook")
-    parser.add_argument("filenames", nargs="*", help="Filenames to check")
-    # Add custom arguments as needed
-    # parser.add_argument("--option", help="Description")
-
-    args = parser.parse_args(argv)
-
-    failed = False
-    for filepath in args.filenames:
-        errors = check_file(filepath)
-        if errors:
-            failed = True
-            for error in errors:
-                # Standard format: filepath:line: message
-                print(error)
-
-    return 1 if failed else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+    def fix(self, filepath: Path, violations: list[Violation], source: str, tree: ast.Module) -> bool: ...
 ```
 
-**Key Requirements:**
+`CheckOrchestrator` parses each file's AST **once** and hands the same `tree`/`source` to every enabled check, so `check()` must not re-parse the file.
 
-- Use only Python standard library (no external dependencies)
-- Accept file paths as positional arguments
-- Return exit code 0 for success, non-zero for failure
-- Print errors to stdout in format `filepath:line: message`
-- Handle file read errors gracefully
-- Support running without git/pre-commit (independence requirement)
-
-### 3. Add Entry Point
-
-Update `pyproject.toml` under `[project.scripts]`:
-
-```toml
-[project.scripts]
-forbid-vars = "pre_commit_hooks.forbid_vars:main"
-your-hook = "pre_commit_hooks.your_hook:main"  # Add this line
-```
-
-### 4. Update Hook Metadata
-
-Add to `.pre-commit-hooks.yaml`:
-
-```yaml
-- id: your-hook
-  name: brief description
-  description: Longer description of what the hook does
-  entry: your-hook
-  language: python
-  types: [python] # or other file types: [yaml], [markdown], etc.
-  # Optional fields:
-  # args: ['--default-arg=value']
-  # require_serial: true  # if hook needs to run serially
-```
-
-### 5. Write Tests
-
-Create `tests/test_your_hook.py`:
+Create `src/pre_commit_hooks/ast_checks/your_check.py` (or a package with `__init__.py` if the check needs multiple modules — see `validate_function_name/` for an example):
 
 ```python
-"""Tests for your-hook."""
+"""your-check - one-line description.
 
-import subprocess
-import sys
+TRI00N: what this detects.
+
+Inline ignore: # pytriage: ignore=TRI00N
+"""
+
+from __future__ import annotations
+
+import ast
 from pathlib import Path
 
-FIXTURES_DIR = Path(__file__).parent / "fixtures"
+from . import register_check
+from ._base import Violation
+
+ERROR_CODE = "TRI00N"
 
 
-def run_hook(filenames, args=None):
-    """Helper to run the hook."""
-    cmd = [sys.executable, "-m", "pre_commit_hooks.your_hook"]
-    if args:
-        cmd.extend(args)
-    cmd.extend(str(f) for f in filenames)
+@register_check
+class YourCheck:
+    """One-line description."""
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    return result.returncode, result.stdout, result.stderr
+    @property
+    def check_id(self) -> str:
+        return "your-check"
 
+    @property
+    def error_code(self) -> str:
+        return ERROR_CODE
 
-def test_success_case():
-    """Test that valid files pass."""
-    valid_file = FIXTURES_DIR / "valid.py"
-    returncode, stdout, stderr = run_hook([valid_file])
-    assert returncode == 0
-    assert stdout == ""
+    def get_prefilter_pattern(self) -> list[str] | None:
+        # Fixed strings passed to `git grep` to skip files that can't match.
+        # Return None to check every file (e.g. a check with no cheap prefilter).
+        return ["some_fixed_string"]
 
+    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+        violations = []
+        for node in ast.walk(tree):
+            if ...:  # your detection logic
+                violations.append(
+                    Violation(
+                        check_id=self.check_id,
+                        error_code=self.error_code,
+                        line=node.lineno,
+                        col=node.col_offset,
+                        message="...",
+                        fixable=False,
+                    )
+                )
+        return violations
 
-def test_failure_case():
-    """Test that invalid files fail with error messages."""
-    invalid_file = FIXTURES_DIR / "invalid.py"
-    returncode, stdout, stderr = run_hook([invalid_file])
-    assert returncode == 1
-    assert "expected error" in stdout
+    def fix(
+        self, filepath: Path, violations: list[Violation], source: str, tree: ast.Module
+    ) -> bool:
+        return False  # implement if the check supports --fix
 ```
 
-**Required Test Coverage:**
+Register the module so the `@register_check` decorator runs at import time by adding it to the import list at the bottom of `src/pre_commit_hooks/ast_checks/__init__.py`:
 
-- Success cases (exit 0)
-- Failure cases (exit 1 with error messages)
-- Edge cases (empty files, binary files, syntax errors)
-- CLI argument handling
-- Independence (hook runs without git/pre-commit)
-
-### 6. Create Test Fixtures
-
-Create sample files in `tests/fixtures/`:
-
-- `valid_<hookname>.py` - Files that should pass
-- `invalid_<hookname>.py` - Files that should fail
-
-### 7. Update Documentation
-
-Add to `README.md`:
-
-#### In "Available Hooks" section:
-
-```markdown
-### your-hook
-
-Brief description of what the hook does.
-
-**Features:**
-
-- Feature 1
-- Feature 2
+```python
+from . import (
+    excessive_blank_lines,
+    forbid_vars,
+    redundant_assignment,
+    redundant_super_init,
+    validate_function_name,
+    your_check,  # add this
+)
 ```
 
-#### In "Configuration Options" section:
+That's it — no `.pre-commit-hooks.yaml` entry and no `[project.scripts]` entry needed. The check is now selectable via `--enable=your-check`/`--disable=your-check` on the existing `ast-checks` hook, and shows up in `python -m pre_commit_hooks.ast_checks --list-checks`.
 
-````markdown
-### your-hook
+**Key requirements:**
 
-**Arguments:**
+- Use only the Python standard library (no external runtime dependencies)
+- Never touch text inside string/byte literals or comments when writing an autofix — locate targets via AST node positions (`node.lineno`/`node.col_offset`/`node.end_lineno`/`node.end_col_offset`), not blind regex substitution over the whole file. See `validate_function_name/autofix.py` for a worked example of AST-scoped renaming.
+- Support inline suppression: `# pytriage: ignore=TRI00N`
+- If the check is experimental or prone to false positives, keep it out of the default enabled set (see how `redundant-assignment` is excluded via `args: [--disable=redundant-assignment]` in `.pre-commit-hooks.yaml`)
 
-- `--option`: Description of option
+### 3. Write Tests
 
-**Example:**
+Create `tests/test_your_check.py` using `tmp_path` and `pytest.mark.parametrize` (see `tests/test_fix_misplaced_comments.py` for the idiomatic pattern used in this repo):
 
-```yaml
-- id: your-hook
-  args: ["--option=value"]
+```python
+"""Tests for your-check (TRI00N)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from pre_commit_hooks.ast_checks.your_check import YourCheck
+
+
+def test_detects_violation(tmp_path: Path) -> None:
+    test_file = tmp_path / "module.py"
+    test_file.write_text("...")
+
+    import ast
+
+    source = test_file.read_text()
+    tree = ast.parse(source)
+    violations = YourCheck().check(test_file, tree, source)
+
+    assert len(violations) == 1
+    assert violations[0].error_code == "TRI00N"
 ```
-````
 
-````
+**Required test coverage:**
 
-### 8. Test and Validate
+- Detection: true positives across the patterns the check targets
+- No false positives on the idiomatic code the check should leave alone
+- Inline suppression (`# pytriage: ignore=TRI00N`)
+- Autofix, if implemented — including that it never mutates unrelated text (string literals, comments, or identically-named symbols in unrelated scopes)
+
+### 4. Add Fixtures (optional)
+
+For larger example files, add them under `tests/fixtures/your_check/` (see `tests/fixtures/validate_function_name/` for the `good/`/`bad/`/`ignore/` convention used elsewhere).
+
+### 5. Update Documentation
+
+Add a subsection under "Available Checks" → "ast-checks (grouped)" in `README.md`, following the format used by the existing checks (why it exists, an example, features, suppression syntax).
+
+### 6. Test and Validate
 
 ```bash
 # Run tests
-pytest tests/test_your_hook.py -v
+uv run pytest tests/test_your_check.py -v
 
-# Test hook independently
-python -m pre_commit_hooks.your_hook tests/fixtures/invalid.py
+# Confirm it's registered
+uv run python -m pre_commit_hooks.ast_checks --list-checks
 
-# Run linter
-ruff check pre_commit_hooks/your_hook.py
+# Test the check independently (no git/pre-commit required)
+uv run python -m pre_commit_hooks.ast_checks --enable=your-check tests/fixtures/invalid.py
 
-# Run all pre-commit hooks
-pre-commit run --all-files
-````
+# Run the full suite
+uv run ruff check --fix .
+uv run ruff format .
+uv run mypy src/ tests/
+uv run coverage run -m pytest
+uv run coverage report
+```
 
-## Updating Existing Hooks
+## Updating Existing Checks
 
-When updating an existing hook:
+When updating an existing check:
 
 ### 1. Maintain Backward Compatibility
 
-- Don't remove CLI arguments (deprecate with warnings instead)
+- Don't remove check ids or CLI arguments (deprecate with warnings instead)
 - Don't change default behavior in breaking ways
 - Add new features as opt-in (via flags)
 - Document migration path for breaking changes
@@ -435,21 +333,15 @@ When updating an existing hook:
 
 ### 3. Update Documentation
 
-- Update README.md with new features
+- Update `README.md` with new features
 - Add migration notes if applicable
-- Update CHANGELOG.md
 
 ### 4. Validate Changes
 
 ```bash
-# Run full test suite
-pytest tests/ -v
-
-# Test manually on real files
-python -m pre_commit_hooks.hook_name path/to/file.py
-
-# Run linter
-ruff check .
+uv run pytest
+uv run python -m pre_commit_hooks.ast_checks --enable=check-id path/to/file.py
+uv run ruff check .
 ```
 
 ## Semantic Versioning
@@ -472,119 +364,71 @@ This repository follows [Semantic Versioning 2.0.0](https://semver.org/).
 
 **MINOR (1.0.0 → 1.1.0):**
 
-- Add new hook to repository
-- Add new CLI argument to existing hook (opt-in)
-- Add new file type support to hook
+- Add new check to the `ast-checks` registry
+- Add new CLI argument to an existing check (opt-in)
 
 **MAJOR (1.0.0 → 2.0.0):**
 
-- Remove deprecated CLI argument
-- Change default forbidden names in forbid-vars
-- Change error message format in breaking way
-- Remove a hook entirely
+- Remove a check id or CLI argument
+- Change default forbidden names in `forbid-vars`
+- Change error message format in a breaking way
+- Remove a hook (`ast-checks`/`fix-misplaced-comments`) entirely
 
 ### Deprecation Process
 
 Before removing features (MAJOR version bump):
 
-1. Mark feature as deprecated in MINOR version
-2. Add deprecation warning to output
-3. Document migration path in README and CHANGELOG
+1. Mark feature as deprecated in a MINOR version
+2. Add a deprecation warning to output
+3. Document migration path in `README.md`
 4. Wait at least one MINOR version before removal
 5. Remove in next MAJOR version
-
-**Example:**
-
-```python
-# v1.1.0: Add deprecation warning
-if args.old_option:
-    print("WARNING: --old-option is deprecated, use --new-option instead", file=sys.stderr)
-
-# v2.0.0: Remove old option
-# (old_option no longer accepted)
-```
 
 ## Backward Compatibility
 
 ### Guidelines
 
 1. **CLI Interface Stability:**
-   - Hook IDs never change (e.g., `forbid-vars` is permanent)
+   - Hook IDs never change (`ast-checks`, `fix-misplaced-comments` are permanent)
+   - Check ids passed via `--enable`/`--disable` never change once shipped
    - New arguments are optional with sensible defaults
    - Deprecated arguments show warnings before removal
 
 2. **Error Format Stability:**
-   - Maintain `filepath:line: message` format
+   - Maintain `filepath:line: TRI00N: message` format
    - Tools may parse this format, don't break it
 
 3. **Behavior Stability:**
-   - Default configurations remain constant
-   - New checks are opt-in via arguments
+   - Default enabled/disabled checks remain constant
+   - New checks are opt-in via `--enable` until proven stable
    - Exit codes remain: 0 (success), 1 (failure)
 
 4. **Configuration Compatibility:**
    - `.pre-commit-hooks.yaml` schema remains stable
+   - `pyproject.toml` config tables (e.g. `[tool.forbid-vars.autofix]`) remain stable
    - New fields are optional
-   - Old configurations continue working
-
-### Testing Backward Compatibility
-
-```bash
-# Test with minimal configuration (defaults only)
-forbid-vars file.py
-
-# Test with old argument syntax
-forbid-vars --names=data,result file.py
-
-# Verify exit codes
-forbid-vars file.py && echo "EXIT 0" || echo "EXIT 1"
-```
 
 ## Performance Testing
 
-All hooks must meet performance requirements.
+All checks must meet performance requirements.
 
 ### Performance Target
 
-**Requirement:** Process <1000 files in <5 seconds
+**Requirement:** Process <1000 files in <5 seconds (warm cache).
 
 ### Benchmarking
 
-Create a performance test:
-
-```python
-# tests/test_performance.py
-import tempfile
-import time
-from pathlib import Path
-
-
-def test_forbid_vars_performance():
-    """Test that hook processes 1000 files in under 5 seconds."""
-    # Create 1000 temporary files
-    with tempfile.TemporaryDirectory() as tmpdir:
-        files = []
-        for i in range(1000):
-            filepath = Path(tmpdir) / f"file_{i}.py"
-            filepath.write_text(f"x = {i}\n")
-            files.append(str(filepath))
-
-        # Measure execution time
-        start = time.time()
-        returncode = main(files)
-        elapsed = time.time() - start
-
-        assert elapsed < 5.0, f"Hook took {elapsed:.2f}s (should be <5s)"
-        assert returncode == 0
+```bash
+uv run python scripts/benchmark.py --iterations=3
 ```
+
+`scripts/benchmark.py` invokes the real, currently-registered `ast_checks`/`fix_misplaced_comments` packages against this repo's own `src/`+`tests/` and reports per-check cold/warm timings — see the "Performance" section in `README.md` for the latest numbers.
 
 ### Profiling
 
-Use Python profiling tools to identify bottlenecks:
-
 ```bash
-# Profile hook execution
-python -m cProfile -o profile.stats -m pre_commit_hooks.forbid_vars file.py
+# Profile a single check
+python -m cProfile -o profile.stats -m pre_commit_hooks.ast_checks --enable=forbid-vars src/
 
 # View results
 python -c "import pstats; p = pstats.Stats('profile.stats'); p.sort_stats('cumulative'); p.print_stats(20)"
@@ -593,22 +437,15 @@ python -c "import pstats; p = pstats.Stats('profile.stats'); p.sort_stats('cumul
 ### Optimization Guidelines
 
 1. **Minimize I/O:**
-   - Read files once
-   - Use buffered I/O
-   - Skip binary files early
+   - Let `CheckOrchestrator` read/parse each file once; don't re-read in `check()`/`fix()`
+   - Use the shared `_cache.py` disk cache and `_prefilter.py` git-grep filtering rather than reinventing them
 
 2. **Efficient Algorithms:**
    - Prefer O(n) over O(n²)
    - Use set lookups instead of list searches
-   - Avoid regex when simple string operations suffice
 
-3. **Lazy Evaluation:**
-   - Parse only when necessary
-   - Use generators for large datasets
-
-4. **Parallel Processing:**
-   - pre-commit runs hooks in parallel by default
-   - Avoid `require_serial: true` unless necessary
+3. **Parallel Processing:**
+   - `prek`/`pre-commit` may run hooks in parallel across files; avoid shared mutable state without locking (see `_cache.py`)
 
 ## Release Process
 
@@ -621,76 +458,27 @@ Update version in `pyproject.toml`:
 version = "1.1.0"  # Increment according to semver
 ```
 
-Update version in `pre_commit_hooks/__init__.py`:
-
-```python
-__version__ = "1.1.0"
-```
-
-### 2. Update CHANGELOG
-
-Create or update `CHANGELOG.md`:
-
-```markdown
-# Changelog
-
-## [1.1.0] - 2025-11-28
-
-### Added
-
-- New hook: check-docstrings
-- forbid-vars: Added --custom-message argument
-
-### Fixed
-
-- forbid-vars: Fixed crash on empty function parameters
-
-### Deprecated
-
-- forbid-vars: --old-arg is deprecated, use --new-arg
-```
-
-### 3. Run Full Test Suite
+### 2. Run Full Test Suite
 
 ```bash
-# Run all tests
-pytest tests/ -v
-
-# Run linters
-pre-commit run --all-files
-
-# Manual smoke test
-python -m pre_commit_hooks.forbid_vars tests/fixtures/invalid_code.py
+uv run ruff check --fix .
+uv run ruff format .
+uv run mypy src/ tests/
+uv run coverage run -m pytest
+uv run coverage report
 ```
 
-### 4. Create Git Tag
+### 3. Create Git Tag
 
 ```bash
-# Commit version changes
-git add pyproject.toml pre_commit_hooks/__init__.py CHANGELOG.md
-git commit -m "Bump version to v1.1.0"
-
-# Create annotated tag
+git add pyproject.toml
+git commit -m "chore: bump version to v1.1.0"
 git tag -a v1.1.0 -m "Release v1.1.0"
-
-# Push changes and tag
 git push origin main
 git push origin v1.1.0
 ```
 
-### 5. Verify Release
-
-Users can now use the new version:
-
-```yaml
-repos:
-  - repo: https://github.com/YOUR_USERNAME/pre-commit-extra-hooks
-    rev: v1.1.0 # New version
-    hooks:
-      - id: forbid-vars
-```
-
-Test autoupdate works:
+### 4. Verify Release
 
 ```bash
 pre-commit autoupdate
@@ -698,91 +486,24 @@ pre-commit autoupdate
 
 ## CI/CD Configuration
 
-### Recommended GitHub Actions
+This repository does not currently ship a CI workflow. If you add one (GitHub Actions is the natural choice given the repo is hosted there), run the full command sequence from this project's own `CLAUDE.md`/README on every PR:
 
-Create `.github/workflows/ci.yml`:
-
-```yaml
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
-
-    steps:
-      - uses: actions/checkout@v3
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run ruff
-        run: ruff check .
-
-      - name: Run tests
-        run: pytest tests/ -v --cov=pre_commit_hooks
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-
-  pre-commit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
-      - uses: pre-commit/action@v3.0.0
+```bash
+uv run ruff check --fix .
+uv run ruff format .
+uv run mypy src/ tests/
+uv run coverage run -m pytest
+uv run coverage report
 ```
 
-### GitLab CI
-
-Create `.gitlab-ci.yml`:
-
-```yaml
-image: python:3.11
-
-stages:
-  - test
-  - lint
-
-test:
-  stage: test
-  script:
-    - pip install -e ".[dev]"
-    - pytest tests/ -v --cov=pre_commit_hooks
-  coverage: '/TOTAL.*\s+(\d+%)$/'
-
-lint:
-  stage: lint
-  script:
-    - pip install ruff pre-commit
-    - ruff check .
-    - pre-commit run --all-files
-```
+Target Python 3.13+ only (`requires-python = ">=3.13"` in `pyproject.toml`) — do not add older interpreters to a version matrix.
 
 ## Code Quality Standards
 
 ### Python Style
 
 - Follow PEP 8 (enforced by ruff)
-- Use type hints for function signatures
-- Maximum line length: 100 characters
+- Use type hints for all function signatures (enforced by mypy)
 - Use f-strings for string formatting
 
 ### Docstrings
@@ -791,8 +512,7 @@ Use Google-style docstrings:
 
 ```python
 def check_file(filepath: str, forbidden_names: set[str]) -> list[str]:
-    """
-    Check a Python file for forbidden variable names.
+    """Check a Python file for forbidden variable names.
 
     Args:
         filepath: Path to the Python file to check
@@ -800,27 +520,24 @@ def check_file(filepath: str, forbidden_names: set[str]) -> list[str]:
 
     Returns:
         List of error messages (empty if no violations)
-
-    Raises:
-        OSError: If file cannot be read
     """
 ```
 
 ### Testing
 
-- Aim for >90% code coverage
+- `pyproject.toml` sets `fail_under` for `coverage report` — keep it passing
 - Test success cases, failure cases, and edge cases
 - Use descriptive test names: `test_what_when_expected`
-- Include docstrings in tests explaining what they verify
+- Prefer `pytest.mark.parametrize` over near-duplicate test functions
 
 ### Error Messages
 
-Format: `filepath:line: clear message`
+Format: `filepath:line: TRI00N: clear message`
 
 **Good:**
 
 ```
-src/app.py:42: Forbidden variable name 'data' found. Use a more descriptive name.
+src/app.py:42: TRI001: Forbidden variable name 'data' found. Use a more descriptive name.
 ```
 
 **Bad:**
@@ -835,6 +552,6 @@ If you have questions about contributing:
 
 - Open an issue with the `question` label
 - Check existing issues for similar questions
-- Review the README.md for usage examples
+- Review `README.md` for usage examples
 
-Thank you for contributing! 🎉
+Thank you for contributing!

@@ -7,7 +7,7 @@ Usage:
 This script measures:
 - First run performance (cold cache)
 - Incremental run performance (warm cache)
-- Per-hook breakdown
+- Per-check breakdown
 """
 
 from __future__ import annotations
@@ -15,17 +15,57 @@ from __future__ import annotations
 import argparse
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
-HOOKS = [
-    "forbid-vars",
-    "validate-function-name",
-    "check-redundant-super-init",
-    "fix-misplaced-comments",
-    "fix-excessive-blank-lines",
-]
+# Each entry runs one invocation of the real, currently-registered hooks.
+# The `ast-checks` sub-checks are benchmarked individually via --enable=<id>,
+# plus one combined run mirroring .pre-commit-hooks.yaml's default args.
+CHECKS: dict[str, list[str]] = {
+    "ast-checks (all enabled)": [
+        "python",
+        "-m",
+        "pre_commit_hooks.ast_checks",
+        "--disable=redundant-assignment",
+    ],
+    "forbid-vars": [
+        "python",
+        "-m",
+        "pre_commit_hooks.ast_checks",
+        "--enable=forbid-vars",
+    ],
+    "excessive-blank-lines": [
+        "python",
+        "-m",
+        "pre_commit_hooks.ast_checks",
+        "--enable=excessive-blank-lines",
+    ],
+    "redundant-super-init": [
+        "python",
+        "-m",
+        "pre_commit_hooks.ast_checks",
+        "--enable=redundant-super-init",
+    ],
+    "validate-function-name": [
+        "python",
+        "-m",
+        "pre_commit_hooks.ast_checks",
+        "--enable=validate-function-name",
+    ],
+    "redundant-assignment": [
+        "python",
+        "-m",
+        "pre_commit_hooks.ast_checks",
+        "--enable=redundant-assignment",
+    ],
+    "fix-misplaced-comments": [
+        "python",
+        "-m",
+        "pre_commit_hooks.fix_misplaced_comments",
+    ],
+}
 
 CACHE_DIR = Path(".cache/pre_commit_hooks")
 
@@ -44,23 +84,29 @@ def get_test_files() -> list[str]:
     return [str(f) for f in test_files + src_files]
 
 
-def run_hook(hook_name: str, files: list[str]) -> dict[str, Any]:
-    """Run a single hook and measure time.
+def run_check(name: str, command: list[str], files: list[str]) -> dict[str, Any]:
+    """Run a single check invocation and measure time.
 
     Returns:
         Dict with timing and result info
     """
     start = time.perf_counter()
     result = subprocess.run(
-        ["python", "-m", f"pre_commit_hooks.{hook_name.replace('-', '_')}", *files],
+        [*command, *files],
         capture_output=True,
         text=True,
         check=False,
     )
     elapsed = time.perf_counter() - start
 
+    if result.returncode not in (0, 1):
+        print(
+            f"  ⚠ {name} exited {result.returncode}: {result.stderr.strip()[:200]}",
+            file=sys.stderr,
+        )
+
     return {
-        "hook": hook_name,
+        "name": name,
         "elapsed_ms": elapsed * 1000,
         "return_code": result.returncode,
         "files_checked": len(files),
@@ -68,7 +114,7 @@ def run_hook(hook_name: str, files: list[str]) -> dict[str, Any]:
 
 
 def benchmark_iteration(files: list[str], label: str) -> dict[str, Any]:
-    """Run all hooks once and collect timing data."""
+    """Run all checks once and collect timing data."""
     print(f"\n{'=' * 60}")
     print(f"{label}")
     print(f"{'=' * 60}")
@@ -76,11 +122,11 @@ def benchmark_iteration(files: list[str], label: str) -> dict[str, Any]:
     results = []
     total_start = time.perf_counter()
 
-    for hook in HOOKS:
-        result = run_hook(hook, files)
+    for name, command in CHECKS.items():
+        result = run_check(name, command, files)
         results.append(result)
         print(
-            f"  {hook:30s} {result['elapsed_ms']:8.2f} ms "
+            f"  {name:30s} {result['elapsed_ms']:8.2f} ms "
             f"({result['files_checked']} files)"
         )
 
@@ -92,7 +138,7 @@ def benchmark_iteration(files: list[str], label: str) -> dict[str, Any]:
     return {
         "label": label,
         "total_ms": total_elapsed * 1000,
-        "hooks": results,
+        "checks": results,
     }
 
 
@@ -156,35 +202,35 @@ def main() -> None:
     print(f"Warm cache (incremental):    {warm_avg:8.2f} ms")
     print(f"Cache speedup:               {(1 - warm_avg / cold_avg) * 100:7.1f}%")
 
-    # Per-hook averages
+    # Per-check averages
     print("\n" + "-" * 60)
-    print("Per-hook averages (cold cache):")
+    print("Per-check averages (cold cache):")
     print("-" * 60)
 
-    for hook in HOOKS:
-        hook_times = [
-            next(h["elapsed_ms"] for h in r["hooks"] if h["hook"] == hook)
+    for name in CHECKS:
+        check_times = [
+            next(c["elapsed_ms"] for c in r["checks"] if c["name"] == name)
             for r in cold_results
         ]
-        avg_time = sum(hook_times) / len(hook_times)
-        print(f"  {hook:30s} {avg_time:8.2f} ms")
+        avg_time = sum(check_times) / len(check_times)
+        print(f"  {name:30s} {avg_time:8.2f} ms")
 
     print("\n" + "-" * 60)
-    print("Per-hook averages (warm cache):")
+    print("Per-check averages (warm cache):")
     print("-" * 60)
 
-    for hook in HOOKS:
-        hook_times = [
-            next(h["elapsed_ms"] for h in r["hooks"] if h["hook"] == hook)
+    for name in CHECKS:
+        check_times = [
+            next(c["elapsed_ms"] for c in r["checks"] if c["name"] == name)
             for r in warm_results
         ]
-        avg_time = sum(hook_times) / len(hook_times)
+        avg_time = sum(check_times) / len(check_times)
         cold_time = sum(
-            next(h["elapsed_ms"] for h in r["hooks"] if h["hook"] == hook)
+            next(c["elapsed_ms"] for c in r["checks"] if c["name"] == name)
             for r in cold_results
         ) / len(cold_results)
         speedup = (1 - avg_time / cold_time) * 100 if cold_time > 0 else 0
-        print(f"  {hook:30s} {avg_time:8.2f} ms ({speedup:+6.1f}%)")
+        print(f"  {name:30s} {avg_time:8.2f} ms ({speedup:+6.1f}%)")
 
 
 if __name__ == "__main__":
