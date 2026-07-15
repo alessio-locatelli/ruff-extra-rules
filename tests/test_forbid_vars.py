@@ -438,6 +438,34 @@ def test_autofix_replaces_all_uses_in_scope() -> None:
         assert "print(" in fixed_content
 
 
+def test_autofix_avoids_walrus_target_collision_in_comprehension() -> None:
+    """A suggested name must not collide with a `:=` target bound inside a
+    comprehension in the same scope (PEP 572: the walrus target belongs to
+    the enclosing scope, not the comprehension's own scope), even though
+    the comprehension's own loop variable is correctly invisible to it.
+    """
+    source = (
+        "def foo():\n"
+        "    data = requests.get(url)\n"
+        "    items = [y for x in xs if (response := check(x)) and response.ok]\n"
+        "    return data, items\n"
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.py"
+        filepath.write_text(source)
+
+        tree = ast.parse(source)
+        check = ForbidVarsCheck()
+        violations = check.check(filepath, tree, source)
+        check.fix(filepath, violations, source, tree)
+
+        fixed_content = filepath.read_text()
+
+    assert "response = requests.get(url)" not in fixed_content
+    assert "response := check(x)" in fixed_content
+
+
 def test_multiple_violations_same_scope() -> None:
     """Test handling of multiple forbidden variables in the same scope."""
     source = """def process():

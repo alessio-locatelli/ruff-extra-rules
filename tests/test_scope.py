@@ -118,3 +118,53 @@ def test_collect_scope_names_excludes_comprehension_loop_variable() -> None:
 
     assert "values" in names
     assert "item" not in names
+
+
+def test_collect_scope_names_includes_walrus_target_in_comprehension() -> None:
+    """PEP 572: a `:=` target inside a comprehension binds to the scope
+    enclosing the comprehension, not the comprehension's own scope — unlike
+    the comprehension's `for`-loop variable, which stays hidden.
+    """
+    tree = ast.parse(
+        "def outer():\n"
+        "    return [y for x in range(3) if (found := x) and found.bit_length()]\n"
+    )
+    outer = tree.body[0]
+    assert isinstance(outer, ast.FunctionDef)
+
+    names = collect_scope_names(outer)
+
+    assert "found" in names
+    assert "x" not in names
+    assert "y" not in names
+
+
+def test_collect_scope_names_includes_walrus_target_in_nested_comprehension() -> None:
+    tree = ast.parse(
+        "def outer():\n"
+        "    return [[z for z in range(3) if (deep := z)] for y in range(3)]\n"
+    )
+    outer = tree.body[0]
+    assert isinstance(outer, ast.FunctionDef)
+
+    names = collect_scope_names(outer)
+
+    assert "deep" in names
+    assert "z" not in names
+    assert "y" not in names
+
+
+def test_collect_scope_names_excludes_walrus_target_scoped_to_nested_lambda() -> None:
+    """A walrus inside a lambda binds to the lambda's own scope, even if the
+    lambda itself sits inside a comprehension — it must not bubble up
+    further, unlike a walrus directly inside the comprehension.
+    """
+    tree = ast.parse(
+        "def outer():\n    return [(lambda: (local := 1))() for item in range(3)]\n"
+    )
+    outer = tree.body[0]
+    assert isinstance(outer, ast.FunctionDef)
+
+    names = collect_scope_names(outer)
+
+    assert "local" not in names
