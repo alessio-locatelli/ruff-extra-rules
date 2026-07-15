@@ -5,9 +5,9 @@ from __future__ import annotations
 import ast
 import logging
 import re
-from collections.abc import Iterator
 from pathlib import Path
 
+from .._scope import iter_within_scope
 from .analysis import Suggestion, attach_parents, read_source
 
 logger = logging.getLogger("validate-function-name")
@@ -206,32 +206,6 @@ def _attr_name_position(node: ast.Attribute) -> tuple[int, int] | None:
     return (node.end_lineno, node.end_col_offset - len(node.attr))
 
 
-_SCOPE_BOUNDARY = (
-    ast.FunctionDef,
-    ast.AsyncFunctionDef,
-    ast.ClassDef,
-    ast.Lambda,
-    ast.ListComp,
-    ast.SetComp,
-    ast.DictComp,
-    ast.GeneratorExp,
-)
-
-
-def _iter_same_scope(node: ast.AST) -> Iterator[ast.AST]:
-    """Yield descendants of `node` without crossing into a nested scope.
-
-    A nested function/class/lambda/comprehension is itself yielded (so
-    callers can still inspect e.g. its name), but traversal does not
-    continue into its body, since it has independent Python scoping — a
-    binding inside it doesn't affect `node`'s own scope.
-    """
-    for child in ast.iter_child_nodes(node):
-        yield child
-        if not isinstance(child, _SCOPE_BOUNDARY):
-            yield from _iter_same_scope(child)
-
-
 def _binds_name(
     node: ast.FunctionDef | ast.AsyncFunctionDef, name: str, target: ast.AST
 ) -> bool:
@@ -263,7 +237,7 @@ def _binds_name(
     if any(arg.arg == name for arg in all_args):
         return True
 
-    for child in _iter_same_scope(node):
+    for child in iter_within_scope(node):
         if child is target:
             continue
         if (
@@ -296,7 +270,7 @@ def _is_rebound_in_scope(scope_node: ast.AST, name: str, target: ast.AST) -> boo
     the scope, the caller should refuse to rename at all rather than risk
     renaming a reference that no longer points at the target function.
     """
-    for child in _iter_same_scope(scope_node):
+    for child in iter_within_scope(scope_node):
         if child is target:
             continue
         if (
