@@ -12,7 +12,6 @@ import ast
 import logging
 from pathlib import Path
 
-from . import register_check
 from ._base import Violation
 
 logger = logging.getLogger("excessive_blank_lines")
@@ -184,7 +183,6 @@ def fix_file_content(source: str, tree: ast.Module) -> str:
     return "".join(new_lines)
 
 
-@register_check
 class ExcessiveBlankLinesCheck:
     """Check for excessive blank lines after module headers."""
 

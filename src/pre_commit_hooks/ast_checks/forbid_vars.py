@@ -15,7 +15,6 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from . import register_check
 from ._base import Violation, find_ignored_lines
 
 logger = logging.getLogger("forbid_vars")
@@ -637,7 +636,6 @@ def _apply_fixes(
     filepath.write_text("".join(lines), encoding="utf-8")
 
 
-@register_check
 class ForbidVarsCheck:
     """Check for forbidden meaningless variable names."""
 

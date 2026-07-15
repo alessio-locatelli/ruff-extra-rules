@@ -34,7 +34,6 @@ import ast
 import re
 from pathlib import Path
 
-from .. import register_check
 from .._base import Violation, find_ignored_lines
 from .analysis import VariableTracker, detect_redundancy
 from .autofix import apply_fixes
@@ -82,7 +81,6 @@ def format_message(var_name: str, pattern_type: str) -> str:
     )
 
 
-@register_check
 class RedundantAssignmentCheck:
     """Check for redundant variable assignments (TRI005)."""
 

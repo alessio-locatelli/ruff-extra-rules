@@ -35,129 +35,112 @@ from __future__ import annotations
 import ast
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+from .._base import Violation
 from .analysis import process_file
 from .autofix import apply_fix, should_autofix
-
-if TYPE_CHECKING:
-    from pre_commit_hooks.ast_checks._base import Violation
 
 ERROR_CODE = "TRI004"
 
 logger_check = logging.getLogger("validate_function_name_check")
 
 
-def _make_check_class() -> type:
-    """Create the check class (delayed import to avoid circular dependencies)."""
-    from .. import register_check
-    from .._base import Violation
+class ValidateFunctionNameCheck:
+    """Check for get_* functions and suggest better names."""
 
-    @register_check
-    class ValidateFunctionNameCheck:
-        """Check for get_* functions and suggest better names."""
+    @property
+    def check_id(self) -> str:
+        return "validate-function-name"
 
-        @property
-        def check_id(self) -> str:
-            return "validate-function-name"
+    @property
+    def error_code(self) -> str:
+        return ERROR_CODE
 
-        @property
-        def error_code(self) -> str:
-            return ERROR_CODE
+    def get_prefilter_pattern(self) -> list[str] | None:
+        return ["def get_"]
 
-        def get_prefilter_pattern(self) -> list[str] | None:
-            return ["def get_"]
+    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+        """Run check and return violations.
 
-        def check(
-            self, filepath: Path, tree: ast.Module, source: str
-        ) -> list[Violation]:
-            """Run check and return violations.
+        Args:
+            filepath: Path to file
+            tree: Parsed AST tree
+            source: Source code
 
-            Args:
-                filepath: Path to file
-                tree: Parsed AST tree
-                source: Source code
+        Returns:
+            List of violations
+        """
+        # Use existing analysis module
+        suggestions = process_file(filepath)
 
-            Returns:
-                List of violations
-            """
-            # Use existing analysis module
-            suggestions = process_file(filepath)
+        # Convert Suggestion objects to Violation objects
+        violations = []
+        for suggestion in suggestions:
+            message = (
+                f"Function '{suggestion.func_name}' should be renamed to "
+                f"'{suggestion.suggested_name}' ({suggestion.reason})"
+            )
 
-            # Convert Suggestion objects to Violation objects
-            violations = []
-            for suggestion in suggestions:
-                message = (
-                    f"Function '{suggestion.func_name}' should be renamed to "
-                    f"'{suggestion.suggested_name}' ({suggestion.reason})"
+            violations.append(
+                Violation(
+                    check_id=self.check_id,
+                    error_code=self.error_code,
+                    line=suggestion.lineno,
+                    col=0,
+                    message=message,
+                    fixable=True,  # May be fixable based on complexity
+                    fix_data={
+                        "suggestion": suggestion,  # Store original for autofix
+                    },
                 )
+            )
 
-                violations.append(
-                    Violation(
-                        check_id=self.check_id,
-                        error_code=self.error_code,
-                        line=suggestion.lineno,
-                        col=0,
-                        message=message,
-                        fixable=True,  # May be fixable based on complexity
-                        fix_data={
-                            "suggestion": suggestion,  # Store original for autofix
-                        },
+        return violations
+
+    def fix(
+        self,
+        filepath: Path,
+        violations: list[Violation],
+        source: str,
+        tree: ast.Module,
+    ) -> bool:
+        """Apply fixes for function naming violations.
+
+        Args:
+            filepath: Path to file
+            violations: Violations to fix
+            source: Source code
+            tree: Parsed AST tree
+
+        Returns:
+            True if fixes were applied successfully
+        """
+        if not violations:
+            return False
+
+        applied_any = False
+
+        for violation in violations:
+            if not violation.fix_data:
+                continue
+
+            suggestion = violation.fix_data.get("suggestion")
+            if not suggestion:
+                continue
+
+            # Check if safe to autofix
+            if should_autofix(filepath, suggestion):
+                try:
+                    if apply_fix(filepath, suggestion):
+                        applied_any = True
+                        # Mark as fixed
+                        violation.fix_data["fixed"] = True
+                except Exception as fix_error:  # noqa: BLE001
+                    logger_check.error(
+                        "Failed to apply fix for %s in %s: %s",
+                        suggestion.func_name,
+                        filepath,
+                        repr(fix_error),
                     )
-                )
 
-            return violations
-
-        def fix(
-            self,
-            filepath: Path,
-            violations: list[Violation],
-            source: str,
-            tree: ast.Module,
-        ) -> bool:
-            """Apply fixes for function naming violations.
-
-            Args:
-                filepath: Path to file
-                violations: Violations to fix
-                source: Source code
-                tree: Parsed AST tree
-
-            Returns:
-                True if fixes were applied successfully
-            """
-            if not violations:
-                return False
-
-            applied_any = False
-
-            for violation in violations:
-                if not violation.fix_data:
-                    continue
-
-                suggestion = violation.fix_data.get("suggestion")
-                if not suggestion:
-                    continue
-
-                # Check if safe to autofix
-                if should_autofix(filepath, suggestion):
-                    try:
-                        if apply_fix(filepath, suggestion):
-                            applied_any = True
-                            # Mark as fixed
-                            violation.fix_data["fixed"] = True
-                    except Exception as fix_error:  # noqa: BLE001
-                        logger_check.error(
-                            "Failed to apply fix for %s in %s: %s",
-                            suggestion.func_name,
-                            filepath,
-                            repr(fix_error),
-                        )
-
-            return applied_any
-
-    return ValidateFunctionNameCheck
-
-
-# Register the check when this module is imported
-_make_check_class()
+        return applied_any

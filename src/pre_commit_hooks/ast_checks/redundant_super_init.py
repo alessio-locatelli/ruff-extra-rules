@@ -13,7 +13,6 @@ import ast
 import logging
 from pathlib import Path
 
-from . import register_check
 from ._base import Violation
 
 logger = logging.getLogger("redundant_super_init")
@@ -139,7 +138,6 @@ def _parent_accepts_args(
     return False
 
 
-@register_check
 class RedundantSuperInitCheck:
     """Check for redundant **kwargs forwarding to parent __init__."""
 

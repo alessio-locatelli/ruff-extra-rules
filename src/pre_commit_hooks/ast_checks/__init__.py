@@ -36,6 +36,12 @@ from pre_commit_hooks._cache import CacheManager
 from pre_commit_hooks._prefilter import batch_filter_files
 
 from ._base import ASTCheck, Violation
+from .excessive_blank_lines import ExcessiveBlankLinesCheck
+from .forbid_vars import ForbidVarsCheck
+from .misplaced_comment import MisplacedCommentCheck
+from .redundant_assignment import RedundantAssignmentCheck
+from .redundant_super_init import RedundantSuperInitCheck
+from .validate_function_name import ValidateFunctionNameCheck
 
 
 def filter_excluded_files(
@@ -77,23 +83,17 @@ def filter_excluded_files(
 
 logger = logging.getLogger("ast_checks")
 
-# Check registry will be populated as checks are implemented
-_CHECK_REGISTRY: dict[str, type[ASTCheck]] = {}
-
-
-def register_check(check_class: type[ASTCheck]) -> type[ASTCheck]:
-    """Register a check class in the global registry.
-
-    Args:
-        check_class: Check class to register
-
-    Returns:
-        The same check class (for use as decorator)
-    """
-    # Instantiate to get check_id
-    instance = check_class()
-    _CHECK_REGISTRY[instance.check_id] = check_class
-    return check_class
+# The complete, fixed set of checks the ast-checks hook can run. This package
+# has no plugin mechanism for third-party checks, so a static list is all
+# that's needed — add new checks here rather than via a registration side effect.
+ALL_CHECKS: list[type[ASTCheck]] = [
+    ForbidVarsCheck,
+    ExcessiveBlankLinesCheck,
+    RedundantSuperInitCheck,
+    ValidateFunctionNameCheck,
+    RedundantAssignmentCheck,
+    MisplacedCommentCheck,
+]
 
 
 class CheckOrchestrator:
@@ -375,9 +375,19 @@ def load_checks(
     if check_args is None:
         check_args = {}
 
-    checks = []
+    checks: list[ASTCheck] = []
 
-    for check_id, check_class in _CHECK_REGISTRY.items():
+    for check_class in ALL_CHECKS:
+        try:
+            check = check_class()
+        except Exception as init_error:  # noqa: BLE001
+            logger.error(
+                "Failed to load check %s: %s", check_class.__name__, repr(init_error)
+            )
+            continue
+
+        check_id = check.check_id
+
         # Determine if check should be loaded
         if enabled is not None:
             # Explicit enable list - only load if in list
@@ -387,13 +397,16 @@ def load_checks(
             # Explicit disable list - skip if in list
             continue
 
-        # Instantiate with check-specific arguments
-        try:
-            args = check_args.get(check_id, {})
-            check = check_class(**args) if args else check_class()
-            checks.append(check)
-        except Exception as init_error:  # noqa: BLE001
-            logger.error("Failed to load check %s: %s", check_id, repr(init_error))
+        # Re-instantiate with check-specific arguments, if any were given
+        args = check_args.get(check_id, {})
+        if args:
+            try:
+                check = check_class(**args)
+            except Exception as init_error:  # noqa: BLE001
+                logger.error("Failed to load check %s: %s", check_id, repr(init_error))
+                continue
+
+        checks.append(check)
 
     return checks
 
@@ -446,9 +459,9 @@ def main(argv: list[str] | None = None) -> int:
     # List checks if requested
     if args.list_checks:
         print("Available checks:")
-        for check_id in sorted(_CHECK_REGISTRY.keys()):
-            check = _CHECK_REGISTRY[check_id]()
-            print(f"  - {check_id}: {check.error_code}")
+        instances = sorted((cls() for cls in ALL_CHECKS), key=lambda c: c.check_id)
+        for check in instances:
+            print(f"  - {check.check_id}: {check.error_code}")
         return 0
 
     # No files to check
@@ -470,7 +483,7 @@ def main(argv: list[str] | None = None) -> int:
     disabled = {c.strip() for c in args.disable.split(",")} if args.disable else None
 
     # Validate check IDs
-    all_check_ids = set(_CHECK_REGISTRY.keys())
+    all_check_ids = {cls().check_id for cls in ALL_CHECKS}
     if enabled:
         invalid = enabled - all_check_ids
         if invalid:
@@ -529,14 +542,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-
-# Import checks to register them (must be at end of file)
-from . import (  # noqa: E402
-    excessive_blank_lines,  # noqa: F401
-    forbid_vars,  # noqa: F401
-    misplaced_comment,  # noqa: F401
-    redundant_assignment,  # noqa: F401
-    redundant_super_init,  # noqa: F401
-    validate_function_name,  # noqa: F401
-)
