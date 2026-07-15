@@ -20,15 +20,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-# Each entry runs one invocation of the real, currently-registered hooks.
-# The `ast-checks` sub-checks are benchmarked individually via --enable=<id>,
-# plus one combined run mirroring .pre-commit-hooks.yaml's default args.
+# Each entry runs one invocation of the real, currently-registered checks —
+# all six now live behind the single ast-checks hook. The sub-checks are
+# benchmarked individually via --enable=<id>, plus one combined run
+# mirroring .pre-commit-hooks.yaml's default args (every check enabled).
 CHECKS: dict[str, list[str]] = {
     "ast-checks (all enabled)": [
         "python",
         "-m",
         "pre_commit_hooks.ast_checks",
-        "--disable=redundant-assignment",
     ],
     "forbid-vars": [
         "python",
@@ -60,10 +60,11 @@ CHECKS: dict[str, list[str]] = {
         "pre_commit_hooks.ast_checks",
         "--enable=redundant-assignment",
     ],
-    "fix-misplaced-comments": [
+    "misplaced-comment": [
         "python",
         "-m",
-        "pre_commit_hooks.fix_misplaced_comments",
+        "pre_commit_hooks.ast_checks",
+        "--enable=misplaced-comment",
     ],
 }
 
