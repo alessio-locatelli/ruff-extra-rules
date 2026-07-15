@@ -142,7 +142,7 @@ class CheckOrchestrator:
 
         # Step 2: Pre-filter files (OR logic: file matches if it contains ANY pattern)
         if patterns:
-            candidate_files = batch_filter_files(filepaths, patterns, match_any=True)
+            candidate_files = batch_filter_files(filepaths, patterns)
         else:
             # No patterns means all files need to be checked
             candidate_files = filepaths
