@@ -164,6 +164,31 @@ def test_cache_version_mismatch(temp_cache_dir: Path, sample_file: Path) -> None
     assert cached is None
 
 
+def test_cache_version_mismatch_recovers_on_rewrite(
+    temp_cache_dir: Path, sample_file: Path
+) -> None:
+    """A version bump must not pin a file to permanent cache misses.
+
+    set_cached_result() used to load the on-disk blob (still tagged with
+    the old version) and only patch individual keys, leaving the stale
+    version tag in place forever — so every later run would keep missing
+    and rewriting under the same never-updated old tag. Writing a fresh
+    result under the new version must actually persist that version, so
+    the immediately following read is a hit.
+    """
+    cache_v1 = CacheManager(cache_dir=temp_cache_dir, cache_version="1.0.0")
+    cache_v1.set_cached_result(sample_file, "test-hook", {"violations": ["old"]})
+
+    cache_v2 = CacheManager(cache_dir=temp_cache_dir, cache_version="2.0.0")
+    assert cache_v2.get_cached_result(sample_file, "test-hook") is None
+
+    cache_v2.set_cached_result(sample_file, "test-hook", {"violations": ["new"]})
+    cached = cache_v2.get_cached_result(sample_file, "test-hook")
+
+    assert cached is not None
+    assert cached["violations"] == ["new"]
+
+
 def test_compute_file_hash(sample_file: Path) -> None:
     """Test file hash computation."""
     hash1 = CacheManager.compute_file_hash(sample_file)

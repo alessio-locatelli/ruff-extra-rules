@@ -184,10 +184,20 @@ class CacheManager:
 
             with self._locked(cache_file):
                 # Load existing cache or create new
+                cache_data = None
                 if cache_file.exists():
                     with open(cache_file, encoding="utf-8") as f:
                         cache_data = json.load(f)
-                else:
+                    if cache_data.get("version") != self.cache_version:
+                        # Stale format/logic version: results under it may
+                        # no longer be valid, so start fresh rather than
+                        # silently keeping the old version tag on disk —
+                        # that would pin this file to a permanent cache
+                        # miss on every future run until .cache is
+                        # manually cleared.
+                        cache_data = None
+
+                if cache_data is None:
                     cache_data = {"version": self.cache_version, "hook_results": {}}
 
                 # Update cache
