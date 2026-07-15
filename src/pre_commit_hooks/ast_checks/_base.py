@@ -145,9 +145,9 @@ def find_ignored_lines(source: str, pattern: re.Pattern[str]) -> set[int]:
 
             if pattern.search(tok_string):
                 ignored.add(line)
-    except tokenize.TokenError as token_error:
-        # pragma: no cover (defensive: source already parsed by AST)
-        # If tokenization fails, return empty set (no lines ignored)
+    except tokenize.TokenError as token_error:  # pragma: no cover
+        # Defensive: source is already parsed by AST, so tokenizing it can't
+        # realistically fail. If it ever does, treat it as no lines ignored.
         logger.debug(repr(token_error))
 
     return ignored

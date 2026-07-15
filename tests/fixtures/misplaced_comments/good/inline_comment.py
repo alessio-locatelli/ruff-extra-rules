@@ -13,7 +13,7 @@ def another_example():
         some_long_function_name(
             argument_one,
             argument_two,
-            argument_three,
-        )  # This closes the function call
+            argument_three,  # This closes the function call
+        )
     )
     return value
