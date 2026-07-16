@@ -1,10 +1,15 @@
 # Pre-Commit Extra Hooks
 
-Custom pre-commit hooks for code quality enforcement.
+Custom pre-commit/prek hooks for code quality enforcement.
 
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
-[![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+## Disclaimer
+
+- This project is a stopgap until plugin support is implemented in `ruff` ([astral-sh/ruff#283](https://github.com/astral-sh/ruff/issues/283)), and will be archived thereafter.
+- This is a best-effort proof-of-concept implemented using coding agents.
 
 ## Registered Hooks
 
@@ -17,61 +22,13 @@ This repository registers two hooks in `.pre-commit-hooks.yaml`, both backed by 
 
 There are no other installable hook ids and no console-script entry points (`[project.scripts]` in `pyproject.toml` is intentionally empty) — every check runs via `python -m pre_commit_hooks.ast_checks`.
 
-## Performance
-
-All checks are optimized for speed with:
-
-- **File content caching**: SHA-1 hash-based cache with mtime optimization (similar to mypy/ruff)
-- **Batch pre-filtering**: Fast git grep pre-filtering before Python processing
-- **Code-level optimizations**: Single AST parse, scope caching, pre-compiled regex patterns
-
-**Benchmark results (97 Python files, this repo's own `src/`+`tests/`, 3 iterations):**
-
-| Metric                   | Time    | Change       |
-| ------------------------ | ------- | ------------ |
-| Cold cache (first run)   | ~6.11 s | Baseline     |
-| Warm cache (incremental) | ~6.09 s | ~0.3% faster |
-
-**Per-check performance (cold cache averages):**
-
-| Check                               | Time    |
-| ----------------------------------- | ------- |
-| `ast-checks` (all checks, one pass) | ~2.81 s |
-| `redundant-assignment`              | ~1.43 s |
-| `forbid-vars`                       | ~1.30 s |
-| `misplaced-comment`                 | ~0.18 s |
-| `validate-function-name`            | ~0.19 s |
-| `excessive-blank-lines`             | ~0.13 s |
-| `redundant-super-init`              | ~0.06 s |
-
-Each measurement pays Python interpreter startup once per subprocess invocation, so the cache mainly saves the per-file re-analysis cost, not process startup — the warm-cache improvement is modest for that reason. `ast-checks (all checks, one pass)` now runs every check by default (`redundant-assignment` and `misplaced-comment` included), so it isn't directly comparable to pre-merge numbers. These numbers come from actually running the current `ast_checks` package against this repo, not a stand-in.
-
-**Cache location**: `.cache/pre_commit_hooks/` (automatically managed, safe to delete)
-
-Run your own benchmarks:
-
-```bash
-uv run python scripts/benchmark.py --iterations=3
-```
-
 ## Available Checks
 
 ---
 
 ### ast-checks (grouped)
 
-The `ast-checks` hook runs the checks below in a single AST parse pass per file, with every check enabled by default. Select which ones run with `--enable=<id>,<id>` or `--disable=<id>,<id>` (comma-separated check ids).
-
-```bash
-# List available check ids
-uv run python -m pre_commit_hooks.ast_checks --list-checks
-
-# Run only forbid-vars and validate-function-name
-uv run python -m pre_commit_hooks.ast_checks --enable=forbid-vars,validate-function-name src/
-
-# Run everything except redundant-assignment, with autofix
-uv run python -m pre_commit_hooks.ast_checks --disable=redundant-assignment --fix src/
-```
+The `ast-checks` hook runs the checks below in a single AST parse pass per file, with every check enabled by default. Select which ones run with `--enable=<id>,<id>` or `--disable=<id>,<id>` (comma-separated check ids) passed via `args:` in your `.pre-commit-config.yaml`.
 
 ---
 
@@ -297,23 +254,23 @@ def get_user(id: int) -> User:  # pytriage: ignore=TRI004
 **Example:**
 
 ```python
-# ❌ Redundant - adds no value:
+# Redundant - adds no value:
 x = "foo"
 func(x=x)
 
-# ❌ Redundant - simple pass-through:
+# Redundant - simple pass-through:
 result = get_value()
 return result
 
-# ✅ Adds clarity - transformative verb indicates processing:
+# Adds clarity - transformative verb indicates processing:
 formatted_timestamp = format_iso8601(raw_ts)
 return formatted_timestamp
 
-# ✅ Adds clarity - breaks down complex chained expression:
+# Adds clarity - breaks down complex chained expression:
 collection_places = singleton_factory(mongo_client)[DATABASE_NAME]["places"]
 return collection_places.find_one({"_id": place_id})
 
-# ✅ Not flagged - conditional assignment with subsequent use:
+# Not flagged - conditional assignment with subsequent use:
 if condition:
     msg = "foo"
 else:
@@ -399,7 +356,7 @@ result = func(
 - Otherwise places them as preceding comments on their own line
 - Never moves linter pragma comments (`noqa`, `type: ignore`, `pragma:`, etc.)
 - Inline suppression with `# pytriage: ignore=STYLE-001`
-- Gracefully handles syntax errors in source files (reads and writes UTF-8, matching every other check)
+- Preserves the source file's PEP 263 declared encoding; lines untouched by a fix also keep their original newline style (CRLF/LF) — a line a fix rewrites gets a plain `\n`
 
 Registered as its own hook id with `--fix` on by default (see [Registered Hooks](#registered-hooks)):
 
@@ -411,34 +368,35 @@ Registered as its own hook id with `--fix` on by default (see [Registered Hooks]
 
 ## Installation
 
-### Using pre-commit
+### Using prek or pre-commit
 
-Add to your `.pre-commit-config.yaml`:
+Add to your `.pre-commit-config.yaml` — the same file [prek](https://github.com/j178/prek) and pre-commit both read:
 
 ```yaml
 repos:
-  - repo: https://github.com/YOUR_USERNAME/pre-commit-extra-hooks
-    rev: v1.0.0 # Use the latest version tag
+  - repo: https://github.com/alessio-locatelli/pre_commit_python_extra_hooks
+    rev: <tag-or-commit-sha> # pin a specific tag or commit; see the repo's tags for available versions
     hooks:
       - id: ast-checks
       - id: misplaced-comment
 ```
 
-Then install the pre-commit hooks:
+Then install the hooks:
 
 ```bash
-pre-commit install
+prek install
+# or: pre-commit install
 ```
 
 ### Manual Installation
 
 ```bash
-pip install git+https://github.com/YOUR_USERNAME/pre-commit-extra-hooks.git
+pip install git+https://github.com/alessio-locatelli/pre_commit_python_extra_hooks.git
 ```
 
 ## Usage
 
-### Automatic (via pre-commit)
+### Automatic (on commit)
 
 Once installed, the hooks run automatically on `git commit`:
 
@@ -459,16 +417,10 @@ src/process.py:2: TRI001: Forbidden variable name 'data' found. Use a more descr
 
 ### Manual Execution
 
-Run a hook manually via pre-commit on all files:
+Run a hook manually via prek (or pre-commit) on all files:
 
 ```bash
-pre-commit run ast-checks --all-files
-```
-
-Run a check directly (independent of pre-commit, no console script is installed):
-
-```bash
-uv run python -m pre_commit_hooks.ast_checks --enable=forbid-vars src/main.py src/utils.py
+prek run ast-checks --all-files
 ```
 
 ## Configuration
@@ -478,8 +430,8 @@ uv run python -m pre_commit_hooks.ast_checks --enable=forbid-vars src/main.py sr
 Override the `forbid-vars` default blacklist with your own:
 
 ```yaml
-- repo: https://github.com/YOUR_USERNAME/pre-commit-extra-hooks
-  rev: v1.0.0
+- repo: https://github.com/alessio-locatelli/pre_commit_python_extra_hooks
+  rev: <tag-or-commit-sha>
   hooks:
     - id: ast-checks
       args: [--forbid-vars-names=data, result, info, temp, obj, value]
@@ -499,185 +451,17 @@ data = load_from_database()  # pytriage: ignore=TRI001
 
 **Note:** The ignore comment must be on the same line as the violation.
 
-## Examples
-
-### ❌ Code that Fails
-
-```python
-def process():
-    """Process data."""
-    data = fetch()  # Violation: 'data' is forbidden
-    result = transform(data)  # Violation: 'result' is forbidden
-    return result
-
-
-def calculate(data):  # Violation: parameter 'data'
-    """Calculate something."""
-    return data * 2
-```
-
-### ✅ Code that Passes
-
-```python
-def process_user_records():
-    """Process user records."""
-    user_records = fetch_users()
-    transformed_output = transform(user_records)
-    return transformed_output
-
-
-def calculate_total(invoice_items):
-    """Calculate total from invoice items."""
-    return sum(item.price * item.quantity for item in invoice_items)
-```
-
-### ✅ Code with Suppression
-
-```python
-def legacy_code():
-    """Legacy code with necessary suppressions."""
-    # New code - descriptive names
-    user_records = fetch_users()
-
-    # Legacy code - suppressed (refactoring is risky)
-    data = transform(user_records)  # pytriage: ignore=TRI001
-    result = validate(data)  # pytriage: ignore=TRI001
-
-    return result
-```
-
-## Adding New Checks
-
-Want to contribute a new check to this repository? See [CONTRIBUTING.md](CONTRIBUTING.md) for the full walkthrough of the `ASTCheck` protocol used by the `ast_checks` package.
-
-## Testing
-
-### Run the full test suite
-
-```bash
-uv run coverage run -m pytest
-uv run coverage report
-```
-
-### Test a specific check
-
-```bash
-uv run pytest tests/test_forbid_vars.py -v
-```
-
-### Run a check independently
-
-Every check works without git or pre-commit — just point it at files:
-
-```bash
-uv run python -m pre_commit_hooks.ast_checks --enable=forbid-vars tests/fixtures/invalid_code.py
-```
-
-## Development
-
-### Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/pre-commit-extra-hooks.git
-cd pre-commit-extra-hooks
-
-# Install development dependencies (this project uses uv)
-uv sync
-
-# Install pre-commit hooks (dogfooding!)
-uv run pre-commit install
-```
-
-### Run Linter
-
-```bash
-uv run ruff check --fix .
-uv run ruff format .
-uv run mypy src/ tests/
-```
-
-### Run Tests
-
-```bash
-uv run coverage run -m pytest
-uv run coverage report
-```
-
-## Project Structure
-
-```text
-pre_commit_python_extra_hooks/
-├── .pre-commit-hooks.yaml     # Hook definitions (ast-checks, misplaced-comment)
-├── .pre-commit-config.yaml    # Self-dogfooding configuration
-├── README.md                  # This file
-├── CONTRIBUTING.md            # Guide for adding new checks
-├── CONTEXT.md                 # Domain glossary
-├── docs/adr/                  # Architecture decision records
-├── LICENSE                    # MIT license
-├── pyproject.toml             # Python project metadata
-│
-├── src/pre_commit_hooks/
-│   ├── _cache.py               # Shared disk cache (SHA-1 + mtime)
-│   ├── _prefilter.py           # git-grep based candidate-file filtering
-│   └── ast_checks/             # Grouped orchestrator + individual checks
-│       ├── __init__.py          # CheckOrchestrator, ALL_CHECKS, CLI
-│       ├── _base.py             # ASTCheck protocol, Violation dataclass
-│       ├── _scope.py            # Shared lexical-scope traversal
-│       ├── forbid_vars.py       # TRI001
-│       ├── excessive_blank_lines.py  # TRI002
-│       ├── redundant_super_init.py   # TRI003
-│       ├── validate_function_name/   # TRI004
-│       ├── redundant_assignment/     # TRI005
-│       └── misplaced_comment.py      # STYLE-001
-│
-└── tests/                     # Test suite
-    ├── fixtures/               # Test data per check
-    └── test_*.py
-```
-
-## Troubleshooting
-
-### Hook not running
-
-**Problem:** Hook doesn't run on commit.
-
-**Solution:** Make sure you've installed the git hooks:
-
-```bash
-pre-commit install
-```
-
-### No violations reported despite bad code
-
-**Problem:** Code with `data` variable passes the hook.
-
-**Solution:** Check if:
-
-1. File is a Python file (hooks only run on `*.py` files)
-2. Inline ignore comment is present
-3. The variable is actually being assigned (not an attribute like `obj.data`)
-
-### Syntax errors in code
-
-**Problem:** Hook fails on syntactically invalid Python.
-
-**Solution:** The checks require valid Python syntax to parse the AST. Fix syntax errors first:
-
-```bash
-python -m py_compile src/file.py
-```
-
 ## License
 
 MIT License. See [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on adding checks and maintaining this repository.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Resources
 
 - [Pre-commit Framework](https://pre-commit.com/)
+- [prek](https://github.com/j178/prek)
 - [Meaningless Variable Names](https://hilton.org.uk/blog/meaningless-variable-names)
 - [Python AST Documentation](https://docs.python.org/3/library/ast.html)
