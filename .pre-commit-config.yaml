@@ -67,7 +67,7 @@ repos:
         args: ["--baseline", ".secrets.baseline"]
 
   - repo: https://github.com/jendrikseipp/vulture
-    rev: 'v2.16'
+    rev: "v2.16"
     hooks:
       - id: vulture
         language_version: python3.14

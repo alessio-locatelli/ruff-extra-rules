@@ -1,0 +1,18 @@
+# Violation.fix_data stays untyped at the boundary; each check gets its own private TypedDict
+
+`Violation.fix_data: dict[str, Any] | None` (`ast_checks/_base.py`) is a per-check-invented payload: `forbid_vars` stores a raw violation dict, `redundant_assignment` stores `{pattern, assign_line, var_name, rhs_source, use_line, use_col}`, `validate_function_name` stores a `Suggestion` dataclass under a `"suggestion"` key. This is the "leaky `fix_data`" debt named in `docs/adr/0001-iterative-refactor-not-rewrite.md`, still open.
+
+A second problem sits on top of the typing gap: an implicit `fix_data["fixed"] = True` convention, read by `CheckOrchestrator._apply_fixes` (`ast_checks/__init__.py:384-390`) and `main()`'s reporter (`ast_checks/__init__.py:562`), with no shared type or helper enforcing it. This surfaced a concrete instance of the resulting confusion: `CheckOrchestrator._apply_fixes` already marks a check's original violations as fixed itself, unconditionally, for every check, whenever `check.fix()` returns `True` — but `validate_function_name/__init__.py`'s own `fix()` (line ~148) _also_ sets `violation.fix_data["fixed"] = True` internally, on a throwaway list of `Violation` objects (`fresh_violations`) that is discarded when `fix()` returns and never read again. Dead code, left over from before the orchestrator took over that responsibility.
+
+## Considered Options
+
+- **Leave `fix_data` as `dict[str, Any]` permanently, add nothing but a shared `mark_fixed`/`is_fixed` helper**: rejected as insufficient on its own — it fixes the `"fixed"`-convention leak but leaves the rest of `fix_data` exactly as untyped as before. mypy's existing strictness (`disallow_any_generics` etc., in `mypy.ini`) doesn't catch a mismatch between the keys a check's `check()` writes and the keys its own `fix()` reads back, since both sides see `dict[str, Any]`; a typo surfaces only as a runtime `KeyError`.
+- **Make `Violation` generic over its `fix_data` payload type, propagated through the `ASTCheck` Protocol**: rejected — `CheckOrchestrator` holds one heterogeneous `list[Violation]` covering every enabled check's violations together (`all_violations` in `_check_file`), and never reads a check-specific field, only the shared `"fixed"` flag. Making `Violation` generic would force that list to either erase back to `Violation[Any]` (losing the benefit at the only place doing the erasing) or fragment into per-check lists the orchestrator doesn't otherwise need.
+- **Shared `mark_fixed`/`is_fixed` helpers, plus a private `TypedDict` per check for its own `fix_data` shape, used only inside that check's own module**: adopted. `check()` constructs and `fix()` reads back a value typed against e.g. `ForbidVarsFixData`, so a key-name typo or wrong-type value is caught by mypy at the only place it actually needs to be — within one check's own file — without touching `Violation`'s field type or the `ASTCheck` Protocol at all.
+
+## Consequences
+
+- `_base.py` gains `mark_fixed(violation)` / `is_fixed(violation)`; every read/write of the `"fixed"` convention (currently three independent hand-written sites) routes through them, including deleting the dead marking identified above in `validate_function_name/__init__.py`.
+- Each of `forbid_vars.py`, `redundant_assignment/__init__.py`, and `validate_function_name/__init__.py` gains its own private `TypedDict` (e.g. `ForbidVarsFixData`) co-located in that module, not exported or referenced from `_base.py` or the orchestrator.
+- `misplaced_comment.py` and `excessive_blank_lines.py`, which never store anything beyond the shared `"fixed"` flag, need no `TypedDict` of their own.
+- Tracked as `docs/work-items/04-typed-fix-data-and-fixed-marker.md`.
