@@ -1,6 +1,6 @@
-# Pre-Commit Extra Hooks
+# Ruff Extra Rules
 
-Custom Python checks and hooks for pre-commit/prek.
+Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside ruff rather than replace it.
 
 ## Project Context
 

@@ -164,37 +164,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pre-commit-extra-hooks"
-version = "1.0.0"
-source = { editable = "." }
-
-[package.dev-dependencies]
-dev = [
-    { name = "covdefaults" },
-    { name = "coverage" },
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "ruff" },
-    { name = "strict-no-cover" },
-    { name = "types-requests" },
-    { name = "types-toml" },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "covdefaults", specifier = ">=2.3.0" },
-    { name = "coverage", specifier = ">=7.12.0" },
-    { name = "mypy", specifier = ">=1.19.0" },
-    { name = "pytest", specifier = ">=9.0.1" },
-    { name = "ruff", specifier = ">=0.14.7" },
-    { name = "strict-no-cover", specifier = ">=0.1.1" },
-    { name = "types-requests", specifier = ">=2.32.4.20250913" },
-    { name = "types-toml", specifier = ">=0.10.8.20240310" },
-]
-
-[[package]]
 name = "pydantic"
 version = "2.12.5"
 source = { registry = "https://pypi.org/simple" }
@@ -297,6 +266,37 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/69/82/251d5f1aa4dcad30aed491b4657cecd9fb4274214da6960ffec144c260f7/ruff-0.14.7-py3-none-win32.whl", hash = "sha256:e33052c9199b347c8937937163b9b149ef6ab2e4bb37b042e593da2e6f6cccfa", size = 13126751, upload-time = "2025-11-28T20:55:03.47Z" },
     { url = "https://files.pythonhosted.org/packages/a8/b5/d0b7d145963136b564806f6584647af45ab98946660d399ec4da79cae036/ruff-0.14.7-py3-none-win_amd64.whl", hash = "sha256:e17a20ad0d3fad47a326d773a042b924d3ac31c6ca6deb6c72e9e6b5f661a7c6", size = 14531726, upload-time = "2025-11-28T20:54:59.121Z" },
     { url = "https://files.pythonhosted.org/packages/1d/d2/1637f4360ada6a368d3265bf39f2cf737a0aaab15ab520fc005903e883f8/ruff-0.14.7-py3-none-win_arm64.whl", hash = "sha256:be4d653d3bea1b19742fcc6502354e32f65cd61ff2fbdb365803ef2c2aec6228", size = 13609215, upload-time = "2025-11-28T20:55:15.375Z" },
+]
+
+[[package]]
+name = "ruff-extra-rules"
+version = "1.0.0"
+source = { editable = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "covdefaults" },
+    { name = "coverage" },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "strict-no-cover" },
+    { name = "types-requests" },
+    { name = "types-toml" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "covdefaults", specifier = ">=2.3.0" },
+    { name = "coverage", specifier = ">=7.12.0" },
+    { name = "mypy", specifier = ">=1.19.0" },
+    { name = "pytest", specifier = ">=9.0.1" },
+    { name = "ruff", specifier = ">=0.14.7" },
+    { name = "strict-no-cover", specifier = ">=0.1.1" },
+    { name = "types-requests", specifier = ">=2.32.4.20250913" },
+    { name = "types-toml", specifier = ">=0.10.8.20240310" },
 ]
 
 [[package]]

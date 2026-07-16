@@ -1,6 +1,6 @@
-# Pre-Commit Extra Hooks
+# Ruff Extra Rules
 
-Custom pre-commit/prek hooks for code quality enforcement.
+Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside ruff rather than replace it.
 
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
@@ -8,6 +8,7 @@ Custom pre-commit/prek hooks for code quality enforcement.
 
 ## Disclaimer
 
+- This is not a standalone linter and not a `ruff` competitor. It's a small set of rules/fixups `ruff` doesn't (yet) have, run as an extra pre-commit/prek hook alongside `ruff` — not instead of it.
 - This project is a stopgap until plugin support is implemented in `ruff` ([astral-sh/ruff#283](https://github.com/astral-sh/ruff/issues/283)), and will be archived thereafter.
 - This is a best-effort proof-of-concept implemented using coding agents.
 
@@ -374,7 +375,7 @@ Add to your `.pre-commit-config.yaml` — the same file [prek](https://github.co
 
 ```yaml
 repos:
-  - repo: https://github.com/alessio-locatelli/pre_commit_python_extra_hooks
+  - repo: https://github.com/alessio-locatelli/ruff-extra-rules
     rev: <tag-or-commit-sha> # pin a specific tag or commit; see the repo's tags for available versions
     hooks:
       - id: ast-checks
@@ -391,7 +392,7 @@ prek install
 ### Manual Installation
 
 ```bash
-pip install git+https://github.com/alessio-locatelli/pre_commit_python_extra_hooks.git
+pip install git+https://github.com/alessio-locatelli/ruff-extra-rules.git
 ```
 
 ## Usage
@@ -430,7 +431,7 @@ prek run ast-checks --all-files
 Override the `forbid-vars` default blacklist with your own:
 
 ```yaml
-- repo: https://github.com/alessio-locatelli/pre_commit_python_extra_hooks
+- repo: https://github.com/alessio-locatelli/ruff-extra-rules
   rev: <tag-or-commit-sha>
   hooks:
     - id: ast-checks

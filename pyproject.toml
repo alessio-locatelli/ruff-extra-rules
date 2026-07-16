@@ -3,9 +3,9 @@ requires = ["setuptools>=80.9.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pre-commit-extra-hooks"
+name = "ruff-extra-rules"
 version = "1.0.0"
-description = "Custom pre-commit/prek hooks for code quality enforcement"
+description = "Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside ruff"
 readme = "README.md"
 requires-python = ">=3.14"
 license = { text = "MIT" }

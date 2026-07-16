@@ -1,6 +1,6 @@
-# Pre-Commit Extra Hooks
+# Ruff Extra Rules
 
-Custom pre-commit/prek hooks providing fast, AST-based Python code-quality checks, plus the shared runtime (caching, prefiltering, orchestration) they run on.
+Custom pre-commit/prek hooks providing fast, AST-based Python rule checks that ruff doesn't (yet) cover, plus the shared runtime (caching, prefiltering, orchestration) they run on. Runs alongside ruff, not instead of it.
 
 ## Language
 
