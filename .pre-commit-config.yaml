@@ -70,3 +70,4 @@ repos:
     rev: 'v2.16'
     hooks:
       - id: vulture
+        language_version: python3.14
