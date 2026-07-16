@@ -5,7 +5,7 @@ Custom pre-commit/prek hooks providing fast, AST-based Python code-quality check
 ## Language
 
 **Hook**:
-An installable unit registered in `.pre-commit-hooks.yaml` that pre-commit/prek invokes as a subprocess against a set of files. Post-merge (ADR 0001, Q2), this repo exposes exactly one: `ast-checks`.
+An installable unit registered in `.pre-commit-hooks.yaml` that pre-commit/prek invokes as a subprocess against a set of files. This repo exposes two, both backed by the same `ast_checks` orchestrator: `ast-checks` (every check, report-only by default) and `misplaced-comment` (STYLE-001 only, `--fix` on by default).
 _Avoid_: linter, tool
 
 **Check**:
