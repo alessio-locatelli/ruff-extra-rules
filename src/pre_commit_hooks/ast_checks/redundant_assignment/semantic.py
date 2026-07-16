@@ -30,20 +30,6 @@ def _is_test_file(filepath: Path | None) -> bool:
     return filename.startswith("test_") or filename.endswith("_test.py")
 
 
-def _is_test_function(scope_node: ast.AST | None) -> bool:
-    """Check if code is inside a test function.
-
-    Args:
-        scope_node: AST node representing the current scope
-
-    Returns:
-        True if inside a test function
-    """
-    if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef):
-        return scope_node.name.startswith("test_")
-    return False
-
-
 # Transformative verbs that indicate semantic value
 TRANSFORMATIVE_VERBS = {
     "formatted",

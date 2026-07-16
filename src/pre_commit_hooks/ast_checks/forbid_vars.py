@@ -15,7 +15,7 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from ._base import Violation, find_ignored_lines
+from ._base import Violation, byte_col_to_char_col, find_ignored_lines
 from ._scope import collect_scope_names, iter_within_scope
 
 logger = logging.getLogger("forbid_vars")
@@ -298,9 +298,11 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
             target = node.targets[0]
             # Use pre-stored source instead of rebuilding (performance optimization)
             rhs_source = ast.get_source_segment(self.source, node.value)
-            if rhs_source:
-                match = self._find_best_match(rhs_source)
-                self._check_name(target.id, target.lineno, target.col_offset, match)
+            # get_source_segment always resolves given a consistent
+            # tree/source pair, which check() guarantees.
+            assert rhs_source
+            match = self._find_best_match(rhs_source)
+            self._check_name(target.id, target.lineno, target.col_offset, match)
 
         self.generic_visit(node)
 
@@ -452,19 +454,16 @@ def _apply_fixes(
     """
     lines = source.splitlines(keepends=True)
 
-    # Step 1: Group violations by their enclosing scope
+    # Step 1: Group violations by their enclosing scope. The caller
+    # (ForbidVarsCheck.fix()) already filters to violations with a
+    # suggestion and only calls here with a non-empty list.
     violations_by_scope: dict[int | None, list[dict[str, Any]]] = {}
     scope_nodes: dict[int | None, ast.AST] = {}
     for v in violations:
-        if not v.get("suggestion"):  # pragma: no cover (fix() already filters these)
-            continue
         scope_node = _find_enclosing_function(tree, v["line"])
         scope_id = id(scope_node) if scope_node else None
         violations_by_scope.setdefault(scope_id, []).append(v)
         scope_nodes[scope_id] = scope_node or tree
-
-    if not violations_by_scope:  # pragma: no cover (caller filters for fixable ones)
-        return
 
     # Step 2: Build scope-specific replacement mappings
     scope_replacements: dict[int | None, dict[str, str]] = {}
@@ -488,30 +487,20 @@ def _apply_fixes(
     # Step 4: Sort reverse and apply replacements
     all_replacements.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
-    for line_num, col, old_name, new_name in all_replacements:
+    # Positions come from real ast.Name nodes resolved against this same
+    # tree/source, and are applied in descending (line, col) order so an
+    # earlier (later-in-line) edit never shifts a not-yet-applied position
+    # before it — so line/col are always in range, the text at each
+    # position always equals old_name, and (since a Name node's span is
+    # always a maximal tokenizer match) it's always on a word boundary.
+    for line_num, byte_col, old_name, new_name in all_replacements:
         line_idx = line_num - 1
-        if line_idx >= len(lines):  # pragma: no cover (AST line numbers always valid)
-            continue
-
         line = lines[line_idx]
         name_len = len(old_name)
-
-        # Bounds check
-        if col >= len(line) or col + name_len > len(line):  # pragma: no cover
-            continue
-
-        # Verify the name matches at this position
-        if line[col : col + name_len] != old_name:  # pragma: no cover
-            continue
-
-        # Check word boundaries
-        before_ok = col == 0 or not (line[col - 1].isalnum() or line[col - 1] == "_")
-        after_ok = col + name_len >= len(line) or not (
-            line[col + name_len].isalnum() or line[col + name_len] == "_"
-        )
-
-        if before_ok and after_ok:  # pragma: lax no cover
-            lines[line_idx] = line[:col] + new_name + line[col + name_len :]
+        # byte_col is a UTF-8 byte offset (from ast.col_offset); convert to a
+        # character offset before indexing into `line` (a str).
+        col = byte_col_to_char_col(line, byte_col)
+        lines[line_idx] = line[:col] + new_name + line[col + name_len :]
 
     filepath.write_text("".join(lines), encoding=encoding, newline="")
 
@@ -537,10 +526,12 @@ class ForbidVarsCheck:
         return "TRI001"
 
     def get_prefilter_pattern(self) -> list[str] | None:
-        """Returns all forbidden names as prefilter patterns."""
-        if self.forbidden_names:
-            return sorted(self.forbidden_names)
-        return None  # pragma: no cover (constructor always sets forbidden_names)
+        """Returns all forbidden names as prefilter patterns.
+
+        __init__ always sets a non-empty forbidden_names (falling back to
+        DEFAULT_FORBIDDEN_NAMES), so this never returns None.
+        """
+        return sorted(self.forbidden_names)
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         """Run check and return violations.
@@ -621,6 +612,6 @@ class ForbidVarsCheck:
         try:
             _apply_fixes(filepath, fixable, source, tree, encoding)
             return True
-        except Exception as fix_error:  # noqa: BLE001  # pragma: no cover (defensive error handling)
+        except OSError as fix_error:
             logger.error("Failed to apply fixes to %s: %s", filepath, repr(fix_error))
             return False

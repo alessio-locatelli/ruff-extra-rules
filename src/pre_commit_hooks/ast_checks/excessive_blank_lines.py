@@ -169,10 +169,12 @@ def fix_file_content(source: str, tree: ast.Module) -> str:
                     # Collapse to 1 blank line
                     target_blank_count = 1
 
-                # Append the appropriate number of blank lines
+                # Append the appropriate number of blank lines. target_blank_count
+                # is always <= blank_count (min(2, blank_count) or 1 when
+                # blank_count > 0), and i == blank_line_start_idx + blank_count,
+                # so blank_line_start_idx + j < i holds for every j in range.
                 for j in range(target_blank_count):
-                    if blank_line_start_idx + j < i:
-                        new_lines.append(lines[blank_line_start_idx + j])
+                    new_lines.append(lines[blank_line_start_idx + j])
 
             blank_count = 0
             found_first_code_line = True

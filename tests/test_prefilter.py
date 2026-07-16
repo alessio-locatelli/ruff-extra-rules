@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from unittest import mock
@@ -72,6 +73,53 @@ def test_git_grep_filter_regex_pattern(sample_files: list[str]) -> None:
 
     assert len(matches) >= 1
     assert any(m.endswith("file1.py") for m in matches)
+
+
+def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None:
+    """Exercises the actual git-grep-succeeded (returncode == 0) and
+    git-grep-found-nothing (returncode == 1) branches without mocking
+    subprocess. The other tests here use files outside any git repo, so
+    `git grep` always errors out and they only ever exercise the Python
+    fallback path.
+    """
+    original_dir = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run(["git", "init", "-q"], check=True)
+
+        file1 = tmp_path / "file1.py"
+        file1.write_text("def get_name():\n    return 'foo'\n")
+        subprocess.run(["git", "add", "file1.py"], check=True, cwd=tmp_path)
+
+        matches = git_grep_filter([str(file1)], "def get_", fixed_string=True)
+        assert matches == [str(file1)]
+
+        no_matches = git_grep_filter(
+            [str(file1)], "totally_absent_pattern", fixed_string=True
+        )
+        assert no_matches == []
+    finally:
+        os.chdir(original_dir)
+
+
+def test_git_grep_filter_skips_unresolvable_git_paths(tmp_path: Path) -> None:
+    """Defensive: if git's null-separated output includes a path that
+    doesn't resolve back to one of the requested filepaths, it's skipped
+    rather than included as a bogus match.
+    """
+    file1 = tmp_path / "file1.py"
+    file1.write_text("data = 1\n")
+
+    with mock.patch("subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=f"{file1}\0/does/not/exist/in/input.py\0",
+            stderr="",
+        )
+        matches = git_grep_filter([str(file1)], "data", fixed_string=True)
+
+    assert matches == [str(file1)]
 
 
 def test_git_grep_fallback_when_not_in_git_repo(tmp_path: Path) -> None:

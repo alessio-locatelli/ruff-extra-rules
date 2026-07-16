@@ -2,10 +2,45 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
-from pre_commit_hooks.ast_checks import CheckOrchestrator, load_checks
+import pytest
+
+from pre_commit_hooks import ast_checks
+from pre_commit_hooks.ast_checks import (
+    ALL_CHECKS,
+    CheckOrchestrator,
+    filter_excluded_files,
+    load_checks,
+    main,
+)
+from pre_commit_hooks.ast_checks._base import Violation
+from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
+from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
+
+
+def test_filter_excluded_files_no_patterns_returns_all() -> None:
+    files = ["a.py", "b.py"]
+    assert filter_excluded_files(files, []) == files
+
+
+def test_filter_excluded_files_excludes_matching_file() -> None:
+    files = ["a.py", "b.py", "migrations/0001_init.py"]
+    result = filter_excluded_files(files, ["migrations/*.py"])
+    assert result == ["a.py", "b.py"]
+
+
+def test_filter_excluded_files_excludes_matching_parent_dir() -> None:
+    files = ["src/main.py", "vendor/lib/thing.py"]
+    result = filter_excluded_files(files, ["vendor"])
+    assert result == ["src/main.py"]
+
+
+def test_filter_excluded_files_no_match_keeps_file() -> None:
+    files = ["src/main.py"]
+    assert filter_excluded_files(files, ["nonexistent/*.py"]) == files
 
 
 def test_process_files_handles_utf8_bom(tmp_path: Path) -> None:
@@ -115,3 +150,469 @@ def test_fix_preserves_crlf_line_endings(tmp_path: Path) -> None:
     result = filepath.read_bytes()
     assert b"\r\nother = 1\r\n" in result
     assert b"x  # comment" in result
+
+
+def test_process_files_empty_filepaths_returns_empty() -> None:
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    assert orchestrator.process_files([]) == {}
+
+
+def test_process_files_no_prefilter_pattern_checks_all_files(tmp_path: Path) -> None:
+    """ExcessiveBlankLinesCheck has no prefilter pattern (checks everything),
+    so with only it enabled, no git-grep pre-filtering happens at all.
+    """
+    filepath = tmp_path / "module.py"
+    filepath.write_text("\n\n\nimport os\n")
+
+    orchestrator = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()])
+    violations = orchestrator.process_files([str(filepath)])
+
+    assert violations[str(filepath)][0].error_code == "TRI002"
+
+
+def test_process_files_no_candidates_after_prefilter_returns_empty(
+    tmp_path: Path,
+) -> None:
+    """A file that doesn't contain any check's prefilter pattern is dropped
+    before parsing, and produces no entry in the result.
+    """
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    orchestrator = CheckOrchestrator(checks=[RedundantSuperInitCheck()])
+    violations = orchestrator.process_files([str(filepath)])
+
+    assert violations == {}
+
+
+def test_process_files_second_call_uses_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    first = orchestrator.process_files([str(filepath)])
+    assert first[str(filepath)][0].error_code == "TRI001"
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("_check_file should not run on a cache hit")
+
+    monkeypatch.setattr(orchestrator, "_check_file", boom)
+    second = orchestrator.process_files([str(filepath)])
+    assert second[str(filepath)][0].error_code == "TRI001"
+
+
+def test_process_files_cache_key_mismatch_forces_recheck(tmp_path: Path) -> None:
+    """Changing which checks are enabled between runs must invalidate the
+    cache entry from a previous run with a different check set.
+    """
+    filepath = tmp_path / "module.py"
+    filepath.write_text("\n\n\ndata = 1\n")
+
+    forbid_vars_only = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    forbid_vars_only.process_files([str(filepath)])
+
+    both_checks = CheckOrchestrator(
+        checks=[ForbidVarsCheck(), ExcessiveBlankLinesCheck()]
+    )
+    violations = both_checks.process_files([str(filepath)])
+
+    error_codes = {v.error_code for v in violations[str(filepath)]}
+    assert error_codes == {"TRI001", "TRI002"}
+
+
+def test_get_cached_violations_ignores_corrupted_cache_entry(
+    tmp_path: Path,
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    cache_key = orchestrator._generate_cache_key()
+    orchestrator.cache.set_cached_result(
+        filepath, "ast-checks", {"cache_key": cache_key, "violations": [{}]}
+    )
+
+    result = orchestrator._get_cached_violations(filepath, cache_key)
+    assert result is None
+
+
+def test_cache_violations_serialization_error_is_caught(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise TypeError("simulated cache backend failure")
+
+    monkeypatch.setattr(orchestrator.cache, "set_cached_result", boom)
+
+    # Must not raise, just skip caching for this file.
+    violations = orchestrator.process_files([str(filepath)])
+    assert violations[str(filepath)][0].error_code == "TRI001"
+
+
+def test_process_files_missing_file_is_skipped(tmp_path: Path) -> None:
+    missing = tmp_path / "does_not_exist.py"
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    violations = orchestrator.process_files([str(missing)])
+
+    assert violations == {}
+
+
+def test_process_files_bad_encoding_cookie_is_skipped(tmp_path: Path) -> None:
+    filepath = tmp_path / "bad_enc.py"
+    filepath.write_bytes(b"# -*- coding: totally-bogus-enc -*-\ndata = 1\n")
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    violations = orchestrator.process_files([str(filepath)])
+
+    assert violations == {}
+
+
+def test_process_files_undecodable_content_is_skipped(tmp_path: Path) -> None:
+    filepath = tmp_path / "bad_decode.py"
+    filepath.write_bytes(b"# -*- coding: ascii -*-\nx = 1  # caf\xe9\n")
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    violations = orchestrator.process_files([str(filepath)])
+
+    assert violations == {}
+
+
+def test_process_files_invalid_syntax_is_skipped(tmp_path: Path) -> None:
+    filepath = tmp_path / "bad_syntax.py"
+    filepath.write_text("def foo(:\n")
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    violations = orchestrator.process_files([str(filepath)])
+
+    assert violations == {}
+
+
+def test_process_files_check_exception_is_logged_and_skipped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A check that raises must not prevent other checks from running or
+    crash the whole file's processing.
+    """
+    filepath = tmp_path / "module.py"
+    filepath.write_text("\n\n\ndata = 1\n")
+
+    forbid_vars = ForbidVarsCheck()
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise ValueError("simulated check failure")
+
+    monkeypatch.setattr(forbid_vars, "check", boom)
+
+    orchestrator = CheckOrchestrator(checks=[forbid_vars, ExcessiveBlankLinesCheck()])
+    violations = orchestrator.process_files([str(filepath)])
+
+    error_codes = {v.error_code for v in violations[str(filepath)]}
+    assert error_codes == {"TRI002"}
+
+
+def test_apply_fixes_skips_check_with_no_fixable_violations(tmp_path: Path) -> None:
+    """redundant-super-init never marks violations fixable; when mixed with
+    a fixable forbid-vars violation in the same file, its check must be
+    skipped in the fix loop rather than attempting (and no-op'ing) a fix.
+    """
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "data = requests.get(url)\n"
+        "\n\n"
+        "class Base:\n"
+        "    def __init__(self):\n"
+        "        pass\n"
+        "\n\n"
+        "class Child(Base):\n"
+        "    def __init__(self, **kwargs):\n"
+        "        super().__init__(**kwargs)\n"
+    )
+
+    checks = load_checks(enabled={"forbid-vars", "redundant-super-init"})
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    by_check = {v.check_id: v for v in violations[str(filepath)]}
+    forbid_vars_fix_data = by_check["forbid-vars"].fix_data
+    assert forbid_vars_fix_data is not None
+    assert forbid_vars_fix_data.get("fixed") is True
+    assert by_check["redundant-super-init"].fixable is False
+
+
+def test_apply_fixes_file_disappears_before_refetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """If the file can't be re-read inside _apply_fixes (e.g. deleted by a
+    concurrent process), that check's fix is skipped rather than crashing.
+    """
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = requests.get(url)\n")
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()], fix_mode=True)
+
+    original_read = orchestrator._read_source
+    calls = {"n": 0}
+
+    def flaky_read(fp: Path) -> tuple[str, str] | None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return original_read(fp)
+        return None
+
+    monkeypatch.setattr(orchestrator, "_read_source", flaky_read)
+
+    violations = orchestrator.process_files([str(filepath)])
+    v = violations[str(filepath)][0]
+    assert not (v.fix_data and v.fix_data.get("fixed"))
+
+
+def test_apply_fixes_skips_when_recompute_finds_no_fixable_violations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = requests.get(url)\n")
+
+    forbid_vars = ForbidVarsCheck()
+    original_check = forbid_vars.check
+    calls = {"n": 0}
+
+    def flaky_check(fp: Path, tree: ast.Module, source: str) -> list[Violation]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return original_check(fp, tree, source)
+        return []
+
+    monkeypatch.setattr(forbid_vars, "check", flaky_check)
+
+    orchestrator = CheckOrchestrator(checks=[forbid_vars], fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+    v = violations[str(filepath)][0]
+    assert not (v.fix_data and v.fix_data.get("fixed"))
+
+
+def test_apply_fixes_marks_nothing_fixed_when_fix_returns_false(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = requests.get(url)\n")
+
+    forbid_vars = ForbidVarsCheck()
+    monkeypatch.setattr(forbid_vars, "fix", lambda *a, **k: False)
+
+    orchestrator = CheckOrchestrator(checks=[forbid_vars], fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+    v = violations[str(filepath)][0]
+    assert not (v.fix_data and v.fix_data.get("fixed"))
+
+
+def test_apply_fixes_exception_in_fix_is_logged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = requests.get(url)\n")
+
+    forbid_vars = ForbidVarsCheck()
+
+    def boom(*args: object, **kwargs: object) -> bool:
+        raise RuntimeError("simulated fix failure")
+
+    monkeypatch.setattr(forbid_vars, "fix", boom)
+
+    orchestrator = CheckOrchestrator(checks=[forbid_vars], fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+    v = violations[str(filepath)][0]
+    assert not (v.fix_data and v.fix_data.get("fixed"))
+
+
+def test_load_checks_explicit_check_args_none_default() -> None:
+    """Passing check_args explicitly (not relying on the None default)
+    takes the same path as leaving it unset.
+    """
+    checks = load_checks(enabled={"forbid-vars"}, check_args={})
+    assert len(checks) == 1
+    assert checks[0].check_id == "forbid-vars"
+
+
+def test_load_checks_disabled_set_skips_matching_check() -> None:
+    checks = load_checks(disabled={"forbid-vars"})
+    check_ids = {c.check_id for c in checks}
+    assert "forbid-vars" not in check_ids
+    assert len(check_ids) == len(ALL_CHECKS) - 1
+
+
+def test_load_checks_check_specific_args_are_applied() -> None:
+    checks = load_checks(
+        enabled={"forbid-vars"},
+        check_args={"forbid-vars": {"forbidden_names": {"custom_name"}}},
+    )
+    assert len(checks) == 1
+    check = checks[0]
+    assert isinstance(check, ForbidVarsCheck)
+    assert check.forbidden_names == {"custom_name"}
+
+
+def test_load_checks_skips_check_whose_init_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BrokenCheck:
+        def __init__(self) -> None:
+            raise RuntimeError("simulated broken check")
+
+    monkeypatch.setattr(ast_checks, "ALL_CHECKS", [*ALL_CHECKS, BrokenCheck])
+
+    checks = load_checks()
+    assert len(checks) == len(ALL_CHECKS)
+
+
+def test_load_checks_skips_check_when_custom_args_raise() -> None:
+    checks = load_checks(
+        enabled={"forbid-vars"},
+        check_args={"forbid-vars": {"not_a_real_kwarg": 1}},
+    )
+    assert checks == []
+
+
+def test_main_list_checks(capsys: pytest.CaptureFixture[str]) -> None:
+    exit_code = main(["--list-checks"])
+    assert exit_code == 0
+
+    out = capsys.readouterr().out
+    assert "Available checks:" in out
+    assert "forbid-vars: TRI001" in out
+
+
+def test_main_no_filenames_returns_zero() -> None:
+    assert main([]) == 0
+
+
+def test_main_no_violations_returns_zero(tmp_path: Path) -> None:
+    filepath = tmp_path / "clean.py"
+    filepath.write_text("x = 1\n")
+
+    assert main([str(filepath)]) == 0
+
+
+def test_main_reports_non_fixable_violation(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "class Base:\n"
+        "    def __init__(self):\n"
+        "        pass\n"
+        "\n\n"
+        "class Child(Base):\n"
+        "    def __init__(self, **kwargs):\n"
+        "        super().__init__(**kwargs)\n"
+    )
+
+    exit_code = main([str(filepath), "--enable", "redundant-super-init"])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "TRI003" in err
+    assert "[FIXABLE]" not in err
+    assert "[FIXED]" not in err
+    assert "Run with --fix" not in err
+
+
+def test_main_reports_fixable_violation_without_fix_flag(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = requests.get(url)\nprint(data)\n")
+
+    exit_code = main([str(filepath), "--enable", "forbid-vars"])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "[FIXABLE]" in err
+    assert "Run with --fix to inline automatically." in err
+
+
+def test_main_fix_flag_marks_violation_fixed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = requests.get(url)\nprint(data)\n")
+
+    exit_code = main([str(filepath), "--enable", "forbid-vars", "--fix"])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "[FIXED]" in err
+    assert "Run with --fix" not in err
+
+
+def test_main_exclude_pattern_excludes_all_files_returns_zero(
+    tmp_path: Path,
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    exit_code = main([str(filepath), "--exclude", "*.py"])
+    assert exit_code == 0
+
+
+def test_main_unknown_enable_check_returns_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    exit_code = main([str(filepath), "--enable", "not-a-real-check"])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "Unknown checks: not-a-real-check" in err
+
+
+def test_main_unknown_disable_check_returns_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    exit_code = main([str(filepath), "--disable", "not-a-real-check"])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "Unknown checks: not-a-real-check" in err
+
+
+def test_main_forbid_vars_names_overrides_default(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("custom_forbidden = 1\n")
+
+    exit_code = main(
+        [
+            str(filepath),
+            "--enable",
+            "forbid-vars",
+            "--forbid-vars-names",
+            "custom_forbidden",
+        ]
+    )
+    assert exit_code == 1
+
+
+def test_main_disabling_all_checks_returns_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    all_ids = ",".join(sorted(cls().check_id for cls in ALL_CHECKS))
+    exit_code = main([str(filepath), "--disable", all_ids])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "Error: No checks enabled" in err

@@ -2,19 +2,7 @@
 plugins = covdefaults
 
 [report]
-# True coverage is ~71.99% as of 2026-07-15, correctly scoped to
-# src/pre_commit_hooks (a pre-existing pyproject.toml [tool.coverage.*]
-# config that would have scoped/enforced this was dead: coverage.py only
-# reads one config file, and this .coveragerc took precedence, so that
-# config silently never applied). The orchestrator (ast_checks/__init__.py)
-# and redundant-super-init have little to no dedicated test coverage;
-# restoring this to 100 is tracked as follow-up work, not a one-shot fix.
-# Set fail_under with real margin below the measured baseline (not right
-# at the rounding boundary) so the gate reliably catches further
-# regressions.
-fail_under = 70
+# fail_under defaults to 100 via covdefaults; no override needed now that
+# the whole codebase is at 100%.
 exclude_also =
     no cover: start(?s:.)*?no cover: stop
-    # Use if you want to ignore cases where (some of) the code is covered. See
-    # https://github.com/pydantic/strict-no-cover
-    pragma: lax no cover

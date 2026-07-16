@@ -12,10 +12,7 @@ from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
     VariableTracker,
     detect_redundancy,
 )
-from pre_commit_hooks.ast_checks.redundant_assignment.semantic import (
-    _is_test_file,
-    _is_test_function,
-)
+from pre_commit_hooks.ast_checks.redundant_assignment.semantic import _is_test_file
 
 
 def test_immediate_single_use_detected() -> None:
@@ -290,6 +287,58 @@ def test_fix_method_with_fixable_violations(tmp_path: Path) -> None:
     # The assignment should be removed and the usage inlined.
     assert "x = " not in fixed_content
     assert 'func(x="foo")' in fixed_content
+
+
+def test_fix_two_assignments_used_on_the_same_line(tmp_path: Path) -> None:
+    """Regression: two independently-fixable assignments whose single uses
+    land on the same line must both be inlined, even when the replacement
+    text is a different length than the variable it replaces (which shifts
+    the column of whichever use is processed second).
+    """
+    source = """def f():
+    x = 1
+    y = 22
+    return y + x
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert check.fix(filepath, violations, source, tree) is True
+
+    fixed_content = filepath.read_text()
+    assert "x = " not in fixed_content
+    assert "y = " not in fixed_content
+    assert "return 22 + 1" in fixed_content
+
+
+def test_fix_chained_assignment_where_use_line_is_another_assign_line(
+    tmp_path: Path,
+) -> None:
+    """Regression: x's only use is on the same line as y's assignment
+    (`y = x`). Applying y's fix first blanks that whole line, so x's own
+    fix must skip cleanly instead of crashing when its use is gone.
+    """
+    source = """def f():
+    x = 1
+    y = x
+    return y
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert check.fix(filepath, violations, source, tree) is True
+
+    fixed_content = filepath.read_text()
+    assert "y = " not in fixed_content
+    assert "return x" in fixed_content
 
 
 def test_autofix_skips_violation_without_fix_data(tmp_path: Path) -> None:
@@ -1163,6 +1212,28 @@ def example():
     # But augmented assignments typically indicate the variable will be used again
     # So it's reasonable either way
     assert isinstance(violations, list)
+
+
+def test_repeated_augmented_assignment_reuses_existing_uses_key() -> None:
+    """Branch coverage: a second augmented assignment to the same variable
+    in the same scope appends to the existing self.uses[key] list rather
+    than recreating it.
+    """
+    source = """
+def example():
+    x = 0
+    x += 1
+    x += 2
+"""
+    tree = ast.parse(source)
+    tracker = VariableTracker(source)
+    tracker.visit(tree)
+
+    lifecycles = tracker.build_lifecycles()
+    lc = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    # Each `x += n` counts as one use (the implicit read), so two augmented
+    # assignments produce two entries under the same (scope_id, "x") key.
+    assert len(lc.uses) == 2
 
 
 def test_long_chained_expression_not_flagged() -> None:
@@ -3029,38 +3100,6 @@ def test_is_test_file_handles_none() -> None:
     assert _is_test_file(None) is False
 
 
-def test_is_test_function_detects_test_functions() -> None:
-    source = "def test_something(): pass"
-    tree = ast.parse(source)
-    func_node = tree.body[0]
-    assert _is_test_function(func_node) is True
-
-
-def test_is_test_function_detects_async_test_functions() -> None:
-    source = "async def test_async_something(): pass"
-    tree = ast.parse(source)
-    func_node = tree.body[0]
-    assert _is_test_function(func_node) is True
-
-
-def test_is_test_function_rejects_non_test_functions() -> None:
-    source = "def helper_function(): pass"
-    tree = ast.parse(source)
-    func_node = tree.body[0]
-    assert _is_test_function(func_node) is False
-
-
-def test_is_test_function_handles_non_function_nodes() -> None:
-    source = "x = 5"
-    tree = ast.parse(source)
-    assign_node = tree.body[0]
-    assert _is_test_function(assign_node) is False
-
-
-def test_is_test_function_handles_none() -> None:
-    assert _is_test_function(None) is False
-
-
 def test_context_manager_assignment_inside_usage_outside_not_flagged() -> None:
     """This pattern is used to reduce nesting: load data inside the context
     manager, use it outside to avoid deep indentation.
@@ -3520,6 +3559,16 @@ def test_has_inline_comment_mismatched_quote_in_string() -> None:
     assert _has_inline_comment(1, lines) is True
 
 
+def test_has_comment_above_first_line_returns_false() -> None:
+    """Branch coverage: an assignment on line 1 has no line above to check."""
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        _has_comment_above,
+    )
+
+    lines = ['x = "foo"', "process(x)"]
+    assert _has_comment_above(1, lines) is False
+
+
 def test_track_attribute_assignment_with_non_name_base() -> None:
     """Branch coverage: base of attribute/subscript assignment is not a Name.
 
@@ -3872,3 +3921,28 @@ def test_contains_nondeterministic_call_with_subscript_func() -> None:
     rhs_node = ast.parse("funcs[0]()", mode="eval").body
     # Not nondeterministic
     assert _contains_nondeterministic_call(rhs_node) is False
+
+
+def test_fix_inlines_use_on_line_with_non_ascii_text(tmp_path: Path) -> None:
+    """Regression: ast.col_offset is a UTF-8 byte offset, not a character
+    offset. A non-ASCII character earlier on the use's line (here, in a
+    string literal) must not throw off the position used to locate the
+    variable for inlining.
+    """
+    source = """def process():
+    data = calc()
+    x = "café"; return data
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert any(v.fixable for v in violations)
+    assert check.fix(filepath, violations, source, tree) is True
+
+    fixed_content = filepath.read_text()
+    assert "data" not in fixed_content
+    assert "return calc()" in fixed_content
