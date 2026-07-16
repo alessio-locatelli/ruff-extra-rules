@@ -208,26 +208,19 @@ def test_cache_write_errors_do_not_crash(
         temp_cache_dir.chmod(0o755)
 
 
-def test_clear_cache_deletes_old_entries_but_keeps_recent_ones(
-    cache_manager: CacheManager, sample_file: Path
+def test_write_cache_cleans_up_temp_file_on_write_error(
+    cache_manager: CacheManager,
 ) -> None:
-    cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
-    cache_files = list(cache_manager.cache_dir.rglob("*.json"))
-    assert len(cache_files) > 0
+    """The .tmp file is removed even when writing to it fails partway
+    (e.g. non-JSON-serializable data), instead of being left behind.
+    """
+    cache_file = cache_manager.cache_dir / "some_hash.json"
 
-    cache_manager.clear_cache(older_than_days=0)  # 0 days = all
+    with pytest.raises(TypeError):
+        cache_manager._write_cache(cache_file, {"bad": {1, 2, 3}})
 
-    cache_files = list(cache_manager.cache_dir.rglob("*.json"))
-    assert len(cache_files) == 0
-
-    cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
-    cache_files_before = list(cache_manager.cache_dir.rglob("*.json"))
-    assert len(cache_files_before) > 0
-
-    cache_manager.clear_cache(older_than_days=999)  # nothing old enough to delete
-
-    cache_files_after = list(cache_manager.cache_dir.rglob("*.json"))
-    assert len(cache_files_after) == len(cache_files_before)
+    assert not cache_file.with_suffix(".tmp").exists()
+    assert not cache_file.exists()
 
 
 def test_cache_path_uses_two_level_structure(

@@ -7,7 +7,7 @@ import logging
 import re
 from pathlib import Path
 
-from .._base import read_source_with_encoding
+from .._base import byte_col_to_char_col, read_source_with_encoding
 from .._scope import iter_within_scope
 from .analysis import Suggestion, attach_parents, read_source
 
@@ -165,9 +165,7 @@ def should_autofix(filepath: Path, suggestion: Suggestion) -> bool:
     return returns <= 1
 
 
-def _def_name_position(
-    lines: list[str], func_node: _FuncNode
-) -> tuple[int, int] | None:
+def _def_name_position(lines: list[str], func_node: _FuncNode) -> tuple[int, int]:
     """Locate the exact (line, col) of the function name in its `def` statement.
 
     Searches only the `def`/`async def` line, starting at the node's own
@@ -178,32 +176,38 @@ def _def_name_position(
         func_node: Function AST node
 
     Returns:
-        (1-indexed line number, 0-indexed column) of the name, or None
+        (1-indexed line number, 0-indexed column) of the name
     """
     line_idx = func_node.lineno - 1
-    if line_idx >= len(lines):  # pragma: no cover (AST line numbers always valid)
-        return None
+    # AST line numbers are always valid for the source that produced them.
+    assert line_idx < len(lines)
 
     pattern = re.compile(rf"\bdef\s+({re.escape(func_node.name)})\b")
     match = pattern.search(lines[line_idx], func_node.col_offset)
-    if match is None:  # pragma: no cover (def name always present on its own line)
-        return None
+    # The def keyword and name are always present on their own line.
+    assert match is not None
 
     return (func_node.lineno, match.start(1))
 
 
-def _attr_name_position(node: ast.Attribute) -> tuple[int, int] | None:
+def _attr_name_position(node: ast.Attribute, lines: list[str]) -> tuple[int, int]:
     """Locate the (line, col) of the attribute name in `obj.attr`.
 
     Args:
         node: Attribute AST node
+        lines: Source lines (with line endings), for byte-to-char conversion
 
     Returns:
         (1-indexed line number, 0-indexed column) of the attribute name
     """
-    if node.end_lineno is None or node.end_col_offset is None:  # pragma: no cover
-        return None
-    return (node.end_lineno, node.end_col_offset - len(node.attr))
+    # Always populated for a real node from a parsed tree.
+    assert node.end_lineno is not None
+    assert node.end_col_offset is not None
+    # end_col_offset is a UTF-8 byte offset; convert to a character offset
+    # before subtracting the (character) length of the attribute name.
+    line = lines[node.end_lineno - 1]
+    char_end = byte_col_to_char_col(line, node.end_col_offset)
+    return (node.end_lineno, char_end - len(node.attr))
 
 
 def _binds_name(
@@ -302,10 +306,13 @@ class _ReferenceCollector(ast.NodeVisitor):
     so a same-named local helper's own call sites are never touched.
     """
 
-    def __init__(self, old_name: str, is_method: bool, target: ast.AST) -> None:
+    def __init__(
+        self, old_name: str, is_method: bool, target: ast.AST, lines: list[str]
+    ) -> None:
         self.old_name = old_name
         self.is_method = is_method
         self.target = target
+        self.lines = lines
         self.positions: list[tuple[int, int]] = []
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -327,9 +334,7 @@ class _ReferenceCollector(ast.NodeVisitor):
             *([args.vararg] if args.vararg else []),
             *([args.kwarg] if args.kwarg else []),
         ]
-        if not self.is_method and any(
-            arg.arg == self.old_name for arg in all_args
-        ):  # pragma: lax no cover
+        if not self.is_method and any(arg.arg == self.old_name for arg in all_args):
             return
         self.generic_visit(node)
 
@@ -340,9 +345,7 @@ class _ReferenceCollector(ast.NodeVisitor):
             and isinstance(node.ctx, ast.Load)
             and _is_self_like_receiver(node.value)
         ):
-            pos = _attr_name_position(node)
-            if pos is not None:  # pragma: no branch
-                self.positions.append(pos)
+            self.positions.append(_attr_name_position(node, self.lines))
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
@@ -351,7 +354,12 @@ class _ReferenceCollector(ast.NodeVisitor):
             and node.id == self.old_name
             and isinstance(node.ctx, ast.Load)
         ):
-            self.positions.append((node.lineno, node.col_offset))
+            # col_offset is a UTF-8 byte offset; convert to a character
+            # offset before it's used to index into the line as a str.
+            char_col = byte_col_to_char_col(
+                self.lines[node.lineno - 1], node.col_offset
+            )
+            self.positions.append((node.lineno, char_col))
         self.generic_visit(node)
 
 
@@ -423,10 +431,7 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
 
     lines = source.splitlines(keepends=True)
 
-    positions: list[tuple[int, int]] = []
-    def_pos = _def_name_position(lines, func_node)
-    if def_pos is not None:  # pragma: no branch (def line always resolvable)
-        positions.append(def_pos)
+    positions: list[tuple[int, int]] = [_def_name_position(lines, func_node)]
 
     scope_node, is_method = _resolve_rename_scope(tree, func_node)
 
@@ -436,37 +441,26 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
     if not is_method and _is_rebound_in_scope(scope_node, func_node.name, func_node):
         return False
 
-    collector = _ReferenceCollector(func_node.name, is_method, func_node)
+    collector = _ReferenceCollector(func_node.name, is_method, func_node, lines)
     collector.visit(scope_node)
     positions.extend(collector.positions)
-
-    if not positions:
-        return False
 
     old_name = func_node.name
     new_name = suggestion.suggested_name
     old_len = len(old_name)
 
+    # Positions come from real ast.Name/Attribute nodes resolved against
+    # this same tree/source, so line/col are always in range and the text
+    # at each position always equals old_name.
     for line_num, col in sorted(set(positions), reverse=True):
         line_idx = line_num - 1
-        if line_idx >= len(lines):  # pragma: no cover (AST line numbers always valid)
-            continue
-
         line = lines[line_idx]
-
-        # Bounds check
-        if col >= len(line) or col + old_len > len(line):  # pragma: no cover
-            continue
-
-        # Verify the name matches at this position (defense in depth)
-        if line[col : col + old_len] != old_name:  # pragma: no cover
-            continue
-
         lines[line_idx] = line[:col] + new_name + line[col + old_len :]
 
+    # suggested_name is always != func_node.name (collect_suggestions only
+    # emits a Suggestion when they differ), so replacing at least one
+    # position always changes the source.
     new_source = "".join(lines)
-    if new_source == source:  # pragma: no cover (defensive, positions imply a change)
-        return False
 
     try:
         filepath.write_text(new_source, encoding=encoding, newline="")

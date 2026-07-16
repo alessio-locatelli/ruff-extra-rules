@@ -744,6 +744,61 @@ name = "fetched_data"
         os.chdir(original_dir)
 
 
+def test_autofix_custom_pattern_without_category_is_skipped() -> None:
+    import os
+
+    original_dir = os.getcwd()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.chdir(tmpdir)
+
+            pyproject = Path("pyproject.toml")
+            pyproject.write_text(r"""
+[[tool.forbid-vars.autofix.patterns]]
+regex = "\\.fetch\\(.*\\)"
+name = "fetched_data"
+""")
+
+            from pre_commit_hooks.ast_checks.forbid_vars import load_autofix_config
+
+            config = load_autofix_config()
+
+            assert not any(
+                p["name"] == "fetched_data"
+                for patterns in config["patterns"].values()
+                for p in patterns
+            )
+    finally:
+        os.chdir(original_dir)
+
+
+def test_autofix_custom_pattern_merges_into_existing_category() -> None:
+    import os
+
+    original_dir = os.getcwd()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.chdir(tmpdir)
+
+            pyproject = Path("pyproject.toml")
+            pyproject.write_text(r"""
+[[tool.forbid-vars.autofix.patterns]]
+category = "http"
+regex = "\\.patch\\(.*\\)"
+name = "patched_data"
+""")
+
+            from pre_commit_hooks.ast_checks.forbid_vars import load_autofix_config
+
+            config = load_autofix_config()
+
+            assert any(p["name"] == "patched_data" for p in config["patterns"]["http"])
+            # Default "http" patterns are still present alongside the custom one
+            assert any(p["name"] == "response" for p in config["patterns"]["http"])
+    finally:
+        os.chdir(original_dir)
+
+
 def test_suggestion_fallback_when_in_forbidden_names() -> None:
     check = ForbidVarsCheck(forbidden_names={"data", "response"})
 
@@ -830,3 +885,218 @@ def test_cached_scope_names_reuse() -> None:
     assert len(violations) == 2
     names = {v.fix_data["name"] for v in violations if v.fix_data}
     assert names == {"data", "result"}
+
+
+def test_generate_unique_name_cache_hit_for_repeated_reassignment() -> None:
+    """Branch coverage: the second reassignment of the same forbidden name in
+    the same scope returns the cached suggestion instead of recomputing it.
+    """
+    source = """def process():
+    data = requests.get()
+    print(data)
+    data = requests.get()
+    return data
+"""
+
+    tree = ast.parse(source)
+    check = ForbidVarsCheck()
+    violations = check.check(Path("test.py"), tree, source)
+
+    assert len(violations) == 2
+    suggestions = {v.fix_data["suggestion"] for v in violations if v.fix_data}
+    assert suggestions == {"response"}
+
+
+def test_find_best_match_prefers_higher_specificity() -> None:
+    """Branch coverage: when an RHS matches multiple patterns in a category,
+    the longer (more specific) regex wins even when checked after a shorter
+    one that also matches.
+    """
+    source = """def process():
+    data = requests.get(url).json()
+    return data
+"""
+
+    tree = ast.parse(source)
+    check = ForbidVarsCheck()
+    violations = check.check(Path("test.py"), tree, source)
+
+    assert len(violations) == 1
+    assert violations[0].fix_data is not None
+    assert violations[0].fix_data["suggestion"] == "response"
+
+
+def test_semantic_naming_false_when_match_not_on_target_line() -> None:
+    """Branch coverage: the regex-group name substitution looks up the match
+    on the *target's own* source line. When the matched call lives on a
+    different line than the target (e.g. a parenthesized multi-line RHS),
+    that lookup finds nothing and the raw group-reference name is kept as-is.
+    """
+    import os
+
+    original_dir = os.getcwd()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.chdir(tmpdir)
+
+            pyproject = Path("pyproject.toml")
+            pyproject.write_text("""
+[tool.forbid-vars.autofix]
+enabled = ["semantic"]
+""")
+
+            from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
+
+            check = ForbidVarsCheck()
+
+            source = """def process():
+    data = (
+        get_user()
+    )
+    return data
+"""
+
+            tree = ast.parse(source)
+            violations = check.check(Path("test.py"), tree, source)
+
+            assert len(violations) == 1
+            assert violations[0].fix_data is not None
+            # The regex-group reference couldn't be resolved against the
+            # target's own line, so the raw pattern name is used unexpanded.
+            assert violations[0].fix_data["suggestion"] == r"\1"
+    finally:
+        os.chdir(original_dir)
+
+
+def test_annotated_attribute_assignment_is_not_checked() -> None:
+    """Branch coverage: an annotated assignment whose target is an attribute
+    (e.g. ``self.data: int = 5``), not a plain name, is skipped entirely —
+    only simple-name annotated assignments are analyzed.
+    """
+    source = """class Foo:
+    def __init__(self):
+        self.data: int = 5
+"""
+
+    tree = ast.parse(source)
+    check = ForbidVarsCheck()
+    violations = check.check(Path("test.py"), tree, source)
+
+    assert violations == []
+
+
+def test_model_validator_decorator_skips_arg_check() -> None:
+    """A function decorated with an irrelevant decorator is still checked for
+    forbidden arg names, while one decorated with ``@model_validator`` (in
+    either bare or called form) is exempt.
+    """
+    source = """class Model:
+    @staticmethod
+    def plain(data):
+        return data
+
+    @model_validator
+    def bare(data):
+        return data
+
+    @model_validator(mode="before")
+    def called(data):
+        return data
+"""
+
+    tree = ast.parse(source)
+    check = ForbidVarsCheck()
+    violations = check.check(Path("test.py"), tree, source)
+
+    flagged_functions = {v.fix_data["name"] for v in violations if v.fix_data}
+    assert flagged_functions == {"data"}
+    assert len(violations) == 1
+
+
+def test_async_model_validator_decorator_skips_arg_check() -> None:
+    """Same exemption as ``test_model_validator_decorator_skips_arg_check``,
+    but for an async function definition.
+    """
+    source = """class Model:
+    @model_validator
+    async def bare(data):
+        return data
+"""
+
+    tree = ast.parse(source)
+    check = ForbidVarsCheck()
+    violations = check.check(Path("test.py"), tree, source)
+
+    assert violations == []
+
+
+def test_apply_fixes_second_violation_same_name_reuses_replacement() -> None:
+    """Branch coverage: when two violations in the same scope share the same
+    forbidden name, only the first one's suggestion is kept as the
+    replacement for that name.
+    """
+    source = """def process():
+    data = response.get()
+    print(data)
+    data = other.get()
+    print(data)
+"""
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.py"
+        filepath.write_text(source)
+
+        tree = ast.parse(source)
+        check = ForbidVarsCheck()
+        violations = check.check(filepath, tree, source)
+        assert len(violations) == 2
+
+        check.fix(filepath, violations, source, tree)
+
+        fixed_content = filepath.read_text()
+
+    assert "data" not in fixed_content
+
+
+def test_autofix_replaces_name_on_line_with_non_ascii_text() -> None:
+    """Regression: ast.col_offset is a UTF-8 byte offset, not a character
+    offset. Non-ASCII text earlier on the same line as the forbidden name
+    must not throw off the position used to locate and replace it.
+    """
+    source = """def process():
+    label = "café"; data = requests.get(url)
+    return data
+"""
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.py"
+        filepath.write_text(source)
+
+        tree = ast.parse(source)
+        check = ForbidVarsCheck()
+        violations = check.check(filepath, tree, source)
+        assert len(violations) == 1
+
+        assert check.fix(filepath, violations, source, tree) is True
+
+        fixed_content = filepath.read_text()
+
+    assert "data" not in fixed_content
+    assert "response = requests.get(url)" in fixed_content
+    assert "return response" in fixed_content
+
+
+def test_fix_write_failure_returns_false(tmp_path: Path) -> None:
+    source = """def process():
+    data = requests.get(url)
+    return data
+"""
+    # Point at a path inside a directory that doesn't exist so write_text()
+    # raises OSError.
+    filepath = tmp_path / "missing_dir" / "test.py"
+
+    tree = ast.parse(source)
+    check = ForbidVarsCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert check.fix(filepath, violations, source, tree) is False

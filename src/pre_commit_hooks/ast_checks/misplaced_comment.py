@@ -101,29 +101,30 @@ def _scan_misplaced_comments(
         if bracket_line in seen_bracket_lines:
             continue
 
-        for next_token in tokens[i + 1 :]:
-            if next_token.start[0] > bracket_line:
-                break
-            if next_token.type != tokenize.COMMENT:
-                continue
-            if not is_linter_pragma(next_token.string) and is_bracket_only_line(
-                tokens, i
-            ):
-                found.append(
-                    _MisplacedComment(
-                        bracket_line=bracket_line,
-                        comment_line=next_token.start[0],
-                        comment_col=next_token.start[1],
-                        comment_text=next_token.string,
-                    )
+        # Find the first token that's either a comment (a candidate, since
+        # anything else on this same line doesn't matter) or on a later
+        # line (nothing to find on this bracket's line). Every token stream
+        # ends with an ENDMARKER on a line past the last real line, so this
+        # always finds something.
+        next_token = next(
+            t
+            for t in tokens[i + 1 :]
+            if t.start[0] > bracket_line or t.type == tokenize.COMMENT
+        )
+        if (
+            next_token.start[0] == bracket_line
+            and not is_linter_pragma(next_token.string)
+            and is_bracket_only_line(tokens, i)
+        ):
+            found.append(
+                _MisplacedComment(
+                    bracket_line=bracket_line,
+                    comment_line=next_token.start[0],
+                    comment_col=next_token.start[1],
+                    comment_text=next_token.string,
                 )
-                seen_bracket_lines.add(bracket_line)
-            break
-        else:
-            # Every token stream ends with an ENDMARKER on a line past the
-            # last real line, so `next_token.start[0] > bracket_line` always
-            # eventually fires and this loop never merely exhausts itself.
-            continue  # pragma: no cover
+            )
+            seen_bracket_lines.add(bracket_line)
 
     return found
 
@@ -145,6 +146,8 @@ class MisplacedCommentCheck:
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         try:
             tokens = tuple(tokenize.generate_tokens(StringIO(source).readline))
+        # Defensive: source is already parsed by AST, so tokenizing it can't
+        # realistically fail. If it ever does, treat it as no violations.
         except tokenize.TokenError as token_error:  # pragma: no cover
             logger.debug(repr(token_error))
             return []
@@ -181,6 +184,8 @@ class MisplacedCommentCheck:
     ) -> bool:
         try:
             tokens = tuple(tokenize.generate_tokens(StringIO(source).readline))
+        # Defensive: source is already parsed by AST, so tokenizing it can't
+        # realistically fail. If it ever does, skip fixing rather than crash.
         except tokenize.TokenError as token_error:  # pragma: no cover
             logger.debug(repr(token_error))
             return False
@@ -201,8 +206,7 @@ class MisplacedCommentCheck:
             prev_line_idx = bracket_line_idx - 1
             # A bracket-only line can only exist if its opening bracket
             # precedes it on an earlier line, so prev_line_idx is never < 0.
-            if prev_line_idx < 0:  # pragma: no cover
-                continue
+            assert prev_line_idx >= 0
 
             prev_line = lines[prev_line_idx].rstrip()
             indent = len(lines[prev_line_idx]) - len(lines[prev_line_idx].lstrip())

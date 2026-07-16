@@ -315,7 +315,10 @@ def analyze_function(
                 base_name = _get_base_name(target)
                 if base_name and (base_name in param_names or base_name == "self"):
                     flags["mutates_args"] = True
-            elif isinstance(target, ast.Name):
+            else:
+                # An augmented assignment target is always a Name,
+                # Attribute, or Subscript.
+                assert isinstance(target, ast.Name)
                 # x += 1 where x is a parameter (modifying mutable default argument)
                 if target.id in param_names:
                     flags["mutates_args"] = True
@@ -439,10 +442,9 @@ def is_simple_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
 
     These are idiomatic getters and should not be flagged.
     """
+    # A function's body is never empty (Python requires at least one
+    # statement), so only the post-docstring-strip check below can be.
     body = func_node.body
-    # ignore docstring-only wrappers
-    if not body:
-        return False
     # skip leading docstring expression
     if (
         isinstance(body[0], ast.Expr)

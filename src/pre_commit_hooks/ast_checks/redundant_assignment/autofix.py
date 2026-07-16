@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .._base import Violation
+from .._base import Violation, byte_col_to_char_col
 
 
 def apply_fixes(
@@ -41,9 +41,18 @@ def apply_fixes(
 
     source_lines = source.splitlines(keepends=True)
 
-    # Sort violations by line number (descending)
-    # to avoid line number shifts when removing assignments
-    fixable_violations.sort(key=lambda v: v.line, reverse=True)
+    # Sort by (use_line, use_col) descending: when two fixable assignments
+    # are inlined on the same use line, the rightmost one must be replaced
+    # first, since a replacement's length can differ from the variable name
+    # it replaces and shift every column after it on that line. Violations
+    # missing use_line (filtered out in the loop below) sort last.
+    def _use_position(v: Violation) -> tuple[int, int]:
+        fix_data = v.fix_data
+        if not fix_data or fix_data.get("use_line") is None:
+            return (-1, -1)
+        return (fix_data["use_line"], fix_data["use_col"])
+
+    fixable_violations.sort(key=_use_position, reverse=True)
 
     fixed_any = False
     removed_lines: set[int] = set()  # Track which lines we removed
@@ -83,15 +92,18 @@ def apply_fixes(
         # Find all matches to verify we're replacing the right one
         matches = tuple(re.finditer(pattern, use_line))
 
-        # Find the match closest to the column offset
-        target_match = None
-        for match in matches:
-            if match.start() == use_col:
-                target_match = match
-                break
+        # use_col is a UTF-8 byte offset (from ast.col_offset); match.start()
+        # is a character offset, so convert before comparing.
+        use_char_col = byte_col_to_char_col(use_line, use_col)
 
-        if not target_match:  # pragma: no cover
-            # Fallback: if exact column doesn't match, skip for safety
+        # Usually resolves to one of the regex matches directly. But a
+        # chained assignment's use line can coincide with another
+        # violation's assign line (e.g. `x = 1; y = x; return y`): y's fix
+        # is applied first and blanks the `y = x` line, so x's own use on
+        # that same line is gone by the time x's fix runs. Skip rather than
+        # inline into now-unrelated text.
+        target_match = next((m for m in matches if m.start() == use_char_col), None)
+        if target_match is None:
             continue
 
         # Replace the specific occurrence

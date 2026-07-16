@@ -8,19 +8,14 @@ and invalidated when file content changes.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import hashlib
 import json
 import logging
-import sys
 import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
-
-if sys.platform == "win32":
-    import msvcrt  # pragma: no cover
-else:
-    import fcntl
 
 __all__ = ["CacheManager"]
 
@@ -76,31 +71,15 @@ class CacheManager:
         Multiple hook processes (e.g. under prek's parallel execution) can
         target the same per-file cache blob for different hook names at the
         same time. Without this lock, a read-modify-write race would let one
-        process's write silently clobber another's (lost update). Uses
-        `msvcrt` on Windows and `fcntl` elsewhere, since neither is available
-        on both platforms and the package targets both.
+        process's write silently clobber another's (lost update).
         """
         lock_file = cache_file.with_suffix(".lock")
-        if sys.platform == "win32":  # pragma: no cover
-            with open(lock_file, "a+b") as lock_fp:
-                lock_fp.seek(0)
-                if not lock_fp.read(1):
-                    lock_fp.write(b"\0")
-                    lock_fp.flush()
-                lock_fp.seek(0)
-                msvcrt.locking(lock_fp.fileno(), msvcrt.LK_LOCK, 1)
-                try:
-                    yield
-                finally:
-                    lock_fp.seek(0)
-                    msvcrt.locking(lock_fp.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            with open(lock_file, "a", encoding="utf-8") as lock_fp:
-                fcntl.flock(lock_fp, fcntl.LOCK_EX)
-                try:
-                    yield
-                finally:
-                    fcntl.flock(lock_fp, fcntl.LOCK_UN)
+        with open(lock_file, "a", encoding="utf-8") as lock_fp:
+            fcntl.flock(lock_fp, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_fp, fcntl.LOCK_UN)
 
     def _ensure_cache_dir(self) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -246,18 +225,5 @@ class CacheManager:
         finally:
             # Safety cleanup for error cases; temp file is atomically
             # renamed in success path, so this only runs on errors
-            if temp_file.exists():  # pragma: no cover
+            if temp_file.exists():
                 temp_file.unlink()
-
-    def clear_cache(self, older_than_days: int = 30) -> None:
-        cutoff = time.time() - (older_than_days * 86400)
-        for cache_file in (
-            *self.cache_dir.rglob("*.json"),
-            *self.cache_dir.rglob("*.lock"),
-        ):
-            try:
-                if cache_file.stat().st_mtime < cutoff:
-                    cache_file.unlink()
-            # Graceful error handling for permission issues or concurrent deletion
-            except OSError as os_error:  # pragma: no cover
-                logger.warning("Clear cache failed: %s", repr(os_error))

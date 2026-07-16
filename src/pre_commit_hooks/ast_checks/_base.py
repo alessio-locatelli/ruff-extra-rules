@@ -123,6 +123,26 @@ class ASTCheck(Protocol):
         ...
 
 
+def byte_col_to_char_col(line: str, byte_col: int) -> int:
+    """Convert a UTF-8 byte offset within `line` to a character offset.
+
+    CPython's AST column offsets (`col_offset`/`end_col_offset`) are UTF-8
+    byte offsets, not character offsets. On a line containing any non-ASCII
+    text before the target position, indexing or regex-matching `line`
+    (a `str`, indexed by character) directly with the raw `col_offset`
+    lands on the wrong character. Converting first keeps position-based
+    fixes correct on such lines.
+
+    Args:
+        line: The source line the offset was recorded against
+        byte_col: A UTF-8 byte offset into `line`
+
+    Returns:
+        The equivalent character offset into `line`
+    """
+    return len(line.encode("utf-8")[:byte_col].decode("utf-8"))
+
+
 def read_source_with_encoding(filepath: Path) -> tuple[str, str]:
     """Read a file's content, honoring a PEP 263 encoding declaration.
 

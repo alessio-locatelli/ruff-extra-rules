@@ -262,11 +262,12 @@ class VariableTracker(ast.NodeVisitor):
         self.stmt_index_stack.pop()
 
     def _increment_stmt_index(self) -> None:
-        """Increment the statement index in the current scope."""
-        # Defensive guard: stack initialized with [0] in __init__ and maintained
-        # via balanced _enter_scope/_exit_scope calls; should never be empty
-        if self.stmt_index_stack:  # pragma: lax no cover
-            self.stmt_index_stack[-1] += 1
+        """Increment the statement index in the current scope.
+
+        stmt_index_stack is initialized with [0] and only ever grows/shrinks
+        in balanced pairs via _enter_scope/_exit_scope, so it's never empty.
+        """
+        self.stmt_index_stack[-1] += 1
 
     def _get_current_scope_id(self) -> int:
         """Get the current scope ID."""
@@ -308,6 +309,10 @@ class VariableTracker(ast.NodeVisitor):
         """
         try:
             return ast.get_source_segment(self.source, node) or ""
+        # Defensive: get_source_segment slices source by byte offset and
+        # decodes it, which could raise (ValueError/UnicodeDecodeError, or
+        # TypeError) if a node's position were ever inconsistent with this
+        # source — not expected for a node resolved against its own tree.
         except ValueError, TypeError:  # pragma: no cover
             return ""
 
@@ -710,7 +715,7 @@ class VariableTracker(ast.NodeVisitor):
                 in_control_flow=self.control_flow_depth > 0,
             )
             key = (scope_id, var_name)
-            if key not in self.uses:  # pragma: lax no cover
+            if key not in self.uses:
                 self.uses[key] = []
             self.uses[key].append(usage)
 
