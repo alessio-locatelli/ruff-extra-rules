@@ -160,14 +160,11 @@ class ASTCheck(Protocol):
     @property
     def error_code(self) -> str: ...        # e.g. "TRI001"
 
-    @property
-    def requires_ast(self) -> bool: ...     # False lets check() run when ast.parse() fails
-
     def get_prefilter_pattern(self) -> list[str] | None: ...  # git-grep fast path
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]: ...
 
-    def fix(self, filepath: Path, violations: list[Violation], source: str, tree: ast.Module) -> bool: ...
+    def fix(self, filepath: Path, violations: list[Violation], source: str, tree: ast.Module, encoding: str = "utf-8") -> bool: ...
 ```
 
 `CheckOrchestrator` parses each file's AST **once** and hands the same `tree`/`source` to every enabled check, so `check()` must not re-parse the file.
@@ -203,13 +200,6 @@ class YourCheck:
     def error_code(self) -> str:
         return ERROR_CODE
 
-    @property
-    def requires_ast(self) -> bool:
-        # True unless this check only tokenizes and never reads the `tree`
-        # argument (see misplaced-comment) — those can keep running on files
-        # CheckOrchestrator couldn't ast.parse().
-        return True
-
     def get_prefilter_pattern(self) -> list[str] | None:
         # Fixed strings passed to `git grep` to skip files that can't match.
         # Return None to check every file (e.g. a check with no cheap prefilter).
@@ -232,7 +222,12 @@ class YourCheck:
         return violations
 
     def fix(
-        self, filepath: Path, violations: list[Violation], source: str, tree: ast.Module
+        self,
+        filepath: Path,
+        violations: list[Violation],
+        source: str,
+        tree: ast.Module,
+        encoding: str = "utf-8",
     ) -> bool:
         return False  # implement if the check supports --fix
 ```

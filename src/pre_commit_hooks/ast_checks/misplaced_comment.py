@@ -139,12 +139,6 @@ class MisplacedCommentCheck:
     def error_code(self) -> str:
         return ERROR_CODE
 
-    @property
-    def requires_ast(self) -> bool:
-        # Only tokenizes; never touches the `tree` argument in check()/fix(),
-        # so it can still run on files CheckOrchestrator can't ast.parse().
-        return False
-
     def get_prefilter_pattern(self) -> list[str] | None:
         return ["#"]
 

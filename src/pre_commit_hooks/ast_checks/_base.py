@@ -67,22 +67,6 @@ class ASTCheck(Protocol):
         """
         ...
 
-    @property
-    def requires_ast(self) -> bool:
-        """Whether this check needs a real parsed AST to run.
-
-        Most checks are AST-based and must return True. A check that only
-        tokenizes (e.g. misplaced-comment) can return False, letting it
-        still run against files CheckOrchestrator couldn't ast.parse() —
-        such a check must never read the `tree` argument passed to check()
-        or fix() in that case, since it will be a harmless placeholder
-        Module, not a real parse of the file.
-
-        Returns:
-            True if check()/fix() need a genuine ast.Module for this file
-        """
-        ...
-
     def get_prefilter_pattern(self) -> list[str] | None:
         """Patterns for git grep pre-filtering.
 

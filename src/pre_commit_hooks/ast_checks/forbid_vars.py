@@ -536,10 +536,6 @@ class ForbidVarsCheck:
     def error_code(self) -> str:
         return "TRI001"
 
-    @property
-    def requires_ast(self) -> bool:
-        return True
-
     def get_prefilter_pattern(self) -> list[str] | None:
         """Returns all forbidden names as prefilter patterns."""
         if self.forbidden_names:

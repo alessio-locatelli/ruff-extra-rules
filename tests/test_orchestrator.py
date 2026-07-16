@@ -82,57 +82,6 @@ def test_apply_fixes_recomputes_stale_positions(tmp_path: Path) -> None:
     assert '"foo"' in result
 
 
-AST_INVALID_SOURCE = 'result = func(\n    x\n)  # comment\n\n\nprint "invalid"\n'
-
-
-def test_ast_requiring_check_still_skips_unparseable_file(tmp_path: Path) -> None:
-    """Regression guard: an AST-invalid file must behave as it did before
-    requires_ast existed when only AST-dependent checks are enabled.
-    """
-    filepath = tmp_path / "ast_invalid.py"
-    filepath.write_text(AST_INVALID_SOURCE)
-
-    checks = load_checks(enabled={"forbid-vars"})
-    orchestrator = CheckOrchestrator(checks=checks)
-    violations = orchestrator.process_files([str(filepath)])
-
-    assert violations == {}
-
-
-def test_tokenize_only_check_reports_on_ast_invalid_file(tmp_path: Path) -> None:
-    """misplaced-comment (requires_ast=False) must still report its
-    violation even though this file fails ast.parse() (Python 2 `print`
-    statement).
-    """
-    filepath = tmp_path / "ast_invalid.py"
-    filepath.write_text(AST_INVALID_SOURCE)
-
-    checks = load_checks(enabled={"misplaced-comment"})
-    orchestrator = CheckOrchestrator(checks=checks)
-    violations = orchestrator.process_files([str(filepath)])
-
-    assert len(violations[str(filepath)]) == 1
-    assert violations[str(filepath)][0].error_code == "STYLE-001"
-
-
-def test_tokenize_only_check_fixes_ast_invalid_file(tmp_path: Path) -> None:
-    """--fix must move the misplaced comment even though the file remains
-    ast.parse()-invalid throughout (the fix itself never depends on a tree).
-    """
-    filepath = tmp_path / "ast_invalid.py"
-    filepath.write_text(AST_INVALID_SOURCE)
-
-    checks = load_checks(enabled={"misplaced-comment"})
-    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
-    violations = orchestrator.process_files([str(filepath)])
-
-    assert violations[str(filepath)][0].fix_data == {"fixed": True}
-    result = filepath.read_text(encoding="utf-8")
-    assert "x  # comment" in result
-    assert ")\n" in result
-    assert 'print "invalid"' in result  # still Python-2-invalid, untouched
-
-
 def test_fix_honors_pep263_encoding_declaration(tmp_path: Path) -> None:
     """A file with a non-UTF-8 PEP 263 encoding cookie must be read, fixed,
     and written back in its declared encoding, not assumed to be UTF-8.

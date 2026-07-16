@@ -149,10 +149,6 @@ class RedundantSuperInitCheck:
     def error_code(self) -> str:
         return "TRI003"
 
-    @property
-    def requires_ast(self) -> bool:
-        return True
-
     def get_prefilter_pattern(self) -> list[str] | None:
         return ["super().__init__"]
 

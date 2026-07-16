@@ -192,10 +192,6 @@ class ExcessiveBlankLinesCheck:
     def error_code(self) -> str:
         return "TRI002"
 
-    @property
-    def requires_ast(self) -> bool:
-        return True
-
     def get_prefilter_pattern(self) -> list[str] | None:
         """Returns None because all files should be checked."""
         return None
