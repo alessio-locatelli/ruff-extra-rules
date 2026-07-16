@@ -1,6 +1,5 @@
 [run]
 plugins = covdefaults
-source = src/pre_commit_hooks
 
 [report]
 # True coverage is ~71.99% as of 2026-07-15, correctly scoped to
