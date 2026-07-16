@@ -29,14 +29,14 @@ def sample_file(tmp_path: Path) -> Path:
     return file_path
 
 
-def test_cache_dir_created(cache_manager: CacheManager, temp_cache_dir: Path) -> None:
+@pytest.mark.usefixtures("cache_manager")
+def test_cache_dir_created(temp_cache_dir: Path) -> None:
     assert temp_cache_dir.exists()
     assert (temp_cache_dir / "CACHEDIR.TAG").exists()
 
 
-def test_cachedir_tag_has_correct_signature(
-    cache_manager: CacheManager, temp_cache_dir: Path
-) -> None:
+@pytest.mark.usefixtures("cache_manager")
+def test_cachedir_tag_has_correct_signature(temp_cache_dir: Path) -> None:
     tag_content = (temp_cache_dir / "CACHEDIR.TAG").read_text()
     assert "Signature: 8a477f597d28d172789f06886806bc55" in tag_content
 
@@ -186,7 +186,7 @@ def test_atomic_write(cache_manager: CacheManager, sample_file: Path) -> None:
 
 
 def test_corrupted_cache_returns_miss_instead_of_crashing(
-    cache_manager: CacheManager, temp_cache_dir: Path, sample_file: Path
+    cache_manager: CacheManager, sample_file: Path
 ) -> None:
     cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
 

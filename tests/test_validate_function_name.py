@@ -311,7 +311,6 @@ def get_placeholder_backend(original_exception):
     return PlaceholderBackend
 """
 
-    suggestions = []
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(source)
         f.flush()
@@ -335,7 +334,6 @@ def get_combined_revision(*functions):
     return params
 """
 
-    suggestions = []
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(source)
         f.flush()
@@ -362,7 +360,6 @@ def get_mock_response(**kwargs):
     return MagicMock(spec=object, **response_kwargs)
 """
 
-    suggestions = []
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(source)
         f.flush()

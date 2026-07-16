@@ -74,9 +74,7 @@ def test_git_grep_filter_regex_pattern(sample_files: list[str]) -> None:
     assert any(m.endswith("file1.py") for m in matches)
 
 
-def test_git_grep_fallback_when_not_in_git_repo(
-    sample_files: list[str], tmp_path: Path
-) -> None:
+def test_git_grep_fallback_when_not_in_git_repo(tmp_path: Path) -> None:
     non_git_dir = tmp_path / "non_git"
     non_git_dir.mkdir()
 
