@@ -6,6 +6,7 @@ import ast
 import tempfile
 from pathlib import Path
 
+from pre_commit_hooks.ast_checks.validate_function_name import ValidateFunctionNameCheck
 from pre_commit_hooks.ast_checks.validate_function_name.analysis import (
     analyze_function,
     process_file,
@@ -435,3 +436,26 @@ class Fetcher:
     assert len(suggestions) == 1
     assert suggestions[0].func_name == "get_api_data"
     assert suggestions[0].suggested_name == "fetch_api_data"
+
+
+def test_check_uses_given_tree_and_source_not_disk(tmp_path: Path) -> None:
+    """check() must derive violations from the tree/source CheckOrchestrator
+    hands it, not by independently re-reading the file from disk.
+
+    The file on disk has no get_ functions at all; the tree/source passed to
+    check() does. If check() ever regresses to re-reading the file itself
+    (as it used to, via analysis.process_file), this would find zero
+    violations instead of one.
+    """
+    filepath = tmp_path / "mod.py"
+    filepath.write_text("x = 1\n")
+
+    source = "def get_data() -> bool:\n    return True\n"
+    tree = ast.parse(source)
+
+    check = ValidateFunctionNameCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert len(violations) == 1
+    assert "get_data" in violations[0].message
+    assert "is_data" in violations[0].message

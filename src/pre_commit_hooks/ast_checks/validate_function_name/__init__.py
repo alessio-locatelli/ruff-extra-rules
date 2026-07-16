@@ -37,7 +37,7 @@ import logging
 from pathlib import Path
 
 from .._base import Violation
-from .analysis import process_file
+from .analysis import collect_suggestions
 from .autofix import apply_fix, should_autofix
 
 ERROR_CODE = "TRI004"
@@ -70,8 +70,10 @@ class ValidateFunctionNameCheck:
         Returns:
             List of violations
         """
-        # Use existing analysis module
-        suggestions = process_file(filepath)
+        # Reuse the orchestrator's already-parsed tree/source instead of
+        # re-reading and re-parsing the file (see analysis.process_file for
+        # the standalone equivalent used by tests).
+        suggestions = collect_suggestions(filepath, tree, source)
 
         # Convert Suggestion objects to Violation objects
         violations = []
@@ -109,8 +111,11 @@ class ValidateFunctionNameCheck:
 
         Note: apply_fix() re-reads the file itself (and detects its own
         encoding via read_source_with_encoding) rather than using `source`/
-        `encoding` here — see analysis.process_file, which check() also
-        routes through independently of CheckOrchestrator's own read.
+        `encoding` here. Unlike check(), this isn't a pure inefficiency to
+        remove: when a file has multiple get_ functions to rename, applying
+        one rename can shift the text a later rename's positions were
+        computed against, so each apply_fix() call re-reads the
+        just-written file to stay correct against the current file state.
 
         Args:
             filepath: Path to file

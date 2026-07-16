@@ -479,17 +479,20 @@ def is_simple_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
 
 
 def process_file(filepath: Path) -> list[Suggestion]:
-    """Process a single file and return naming suggestions.
+    """Read and parse a file standalone, then return naming suggestions.
+
+    Thin convenience wrapper around `collect_suggestions` for callers (e.g.
+    tests) that only have a path, not an already-parsed tree/source. The
+    orchestrator-driven check() path must call `collect_suggestions` directly
+    with its own shared tree/source instead of this, to avoid re-reading and
+    re-parsing a file the orchestrator already parsed once.
 
     Args:
-        path: Path to the Python file to analyze
+        filepath: Path to the Python file to analyze
 
     Returns:
         List of Suggestion objects for functions that should be renamed
     """
-    # Import here to avoid circular dependency
-    from .suggestion import suggest_name_for
-
     try:
         source = read_source(filepath)
     except (OSError, SyntaxError, UnicodeDecodeError, LookupError) as error:
@@ -501,6 +504,25 @@ def process_file(filepath: Path) -> list[Suggestion]:
     except SyntaxError as syntax_error:
         logger.warning("File: %s, error: %s", filepath, repr(syntax_error))
         return []
+
+    return collect_suggestions(filepath, tree, source)
+
+
+def collect_suggestions(
+    filepath: Path, tree: ast.Module, source: str
+) -> list[Suggestion]:
+    """Walk an already-parsed tree and return naming suggestions.
+
+    Args:
+        filepath: Path to the file (used only to tag returned Suggestions)
+        tree: Parsed AST tree
+        source: Source code matching `tree`
+
+    Returns:
+        List of Suggestion objects for functions that should be renamed
+    """
+    # Import here to avoid circular dependency
+    from .suggestion import suggest_name_for
 
     # attach parent links for better analysis
     attach_parents(tree)
