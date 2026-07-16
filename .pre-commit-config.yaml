@@ -1,5 +1,32 @@
 # Self-dogfooding: use our own hooks + standard quality tools
 repos:
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: check-yaml
+        exclude: ^specs/
+      - id: check-ast
+      - id: check-added-large-files
+      - id: check-json
+      - id: check-symlinks
+      - id: check-toml
+      - id: destroyed-symlinks
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: no-commit-to-branch
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.21
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
   # Our own hooks, run against src/ only. tests/ is excluded: its fixtures
   # under tests/fixtures/ are deliberately "bad" example code for our own
   # test suite, and the test suite itself idiomatically uses forbidden names
@@ -33,35 +60,13 @@ repos:
         files: ^src/
         args: [--enable=misplaced-comment, --fix]
 
-  # Standard pre-commit hooks
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v6.0.0
-    hooks:
-      - id: trailing-whitespace
-      - id: check-yaml
-        exclude: ^specs/
-      - id: check-ast
-      - id: check-added-large-files
-      - id: check-json
-      - id: check-symlinks
-      - id: check-toml
-      - id: destroyed-symlinks
-      - id: end-of-file-fixer
-      - id: mixed-line-ending
-        args: ["--fix=lf"]
-      - id: check-case-conflict
-      - id: check-merge-conflict
-      - id: no-commit-to-branch
-
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.21
-    hooks:
-      - id: ruff-check
-        args: [--fix]
-      - id: ruff-format
-
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:
       - id: detect-secrets
         args: ["--baseline", ".secrets.baseline"]
+
+  - repo: https://github.com/jendrikseipp/vulture
+    rev: 'v2.16'
+    hooks:
+      - id: vulture
