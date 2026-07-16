@@ -5,16 +5,18 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pre-commit-extra-hooks"
 version = "1.0.0"
-description = "Custom pre-commit hooks for code quality enforcement"
+description = "Custom pre-commit/prek hooks for code quality enforcement"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.14"
 license = { text = "MIT" }
-authors = [{ name = "Sam", email = "sam@example.com" }]
+authors = [
+  { name = "Alessio", email = "software.development@secure.mailbox.org" },
+]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "License :: OSI Approved :: MIT License",
-  "Operating System :: OS Independent",
+  "Operating System :: POSIX :: Linux",
 ]
 
 # Entry points define the CLI commands
@@ -26,7 +28,6 @@ classifiers = [
 dev = [
   "pytest>=9.0.1",
   "ruff>=0.14.7",
-  "pre-commit>=4.5.0",
   "mypy>=1.19.0",
   "types-toml>=0.10.8.20240310",
   "types-requests>=2.32.4.20250913",
@@ -41,7 +42,7 @@ include = ["pre_commit_hooks*"]
 
 # Ruff configuration (linting and formatting)
 [tool.ruff]
-target-version = "py313"
+target-version = "py314"
 exclude = ["tests/fixtures/**"]
 
 [tool.ruff.lint]
