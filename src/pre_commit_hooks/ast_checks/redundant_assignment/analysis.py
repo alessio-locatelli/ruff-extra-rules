@@ -308,7 +308,7 @@ class VariableTracker(ast.NodeVisitor):
         """
         try:
             return ast.get_source_segment(self.source, node) or ""
-        except (ValueError, TypeError):  # pragma: no cover
+        except ValueError, TypeError:  # pragma: no cover
             return ""
 
     def _is_simple_name_target(self, target: ast.expr) -> bool:
