@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import ast
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -220,27 +222,6 @@ def test_process_files_different_check_set_forces_recheck(tmp_path: Path) -> Non
 
     error_codes = {v.error_code for v in violations[str(filepath)]}
     assert error_codes == {"TRI001", "TRI002"}
-
-
-def test_process_files_different_check_config_forces_recheck(tmp_path: Path) -> None:
-    """Regression: ForbidVarsCheck(forbidden_names={"custom"}) and
-    ForbidVarsCheck() must not share a cache entry, or a config change
-    (e.g. --forbid-vars-names) on an unchanged file serves the previous
-    config's stale violations instead of re-checking.
-    """
-    filepath = tmp_path / "module.py"
-    filepath.write_text("widget = 1\nreturn_widget = widget\n")
-
-    default_config = CheckOrchestrator(checks=[ForbidVarsCheck()])
-    first = default_config.process_files([str(filepath)])
-    assert str(filepath) not in first
-
-    custom_config = CheckOrchestrator(
-        checks=[ForbidVarsCheck(forbidden_names={"widget"})]
-    )
-    second = custom_config.process_files([str(filepath)])
-
-    assert {v.error_code for v in second[str(filepath)]} == {"TRI001"}
 
 
 def test_generate_cache_key_changes_when_source_tree_changes(
@@ -488,15 +469,30 @@ def test_load_checks_disabled_set_skips_matching_check() -> None:
     assert len(check_ids) == len(ALL_CHECKS) - 1
 
 
-def test_load_checks_check_specific_args_are_applied() -> None:
+def test_load_checks_check_specific_args_are_applied(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No shipped check currently has a configurable `__init__`, so this
+    exercises the generic re-instantiate-with-kwargs branch in `load_checks`
+    against a synthetic check rather than a real one.
+    """
+
+    class ConfigurableCheck:
+        check_id = "configurable"
+
+        def __init__(self, custom: str = "default") -> None:
+            self.custom = custom
+
+    monkeypatch.setattr(ast_checks, "ALL_CHECKS", [*ALL_CHECKS, ConfigurableCheck])
+
     checks = load_checks(
-        enabled={"forbid-vars"},
-        check_args={"forbid-vars": {"forbidden_names": {"custom_name"}}},
+        enabled={"configurable"},
+        check_args={"configurable": {"custom": "custom_value"}},
     )
     assert len(checks) == 1
     check = checks[0]
-    assert isinstance(check, ForbidVarsCheck)
-    assert check.forbidden_names == {"custom_name"}
+    assert isinstance(check, ConfigurableCheck)
+    assert check.custom == "custom_value"
 
 
 def test_load_checks_skips_check_whose_init_raises(
@@ -602,6 +598,66 @@ def test_main_exclude_pattern_excludes_all_files_returns_zero(
     assert exit_code == 0
 
 
+def test_main_check_specific_cli_arg_round_trip(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No shipped check currently registers its own CLI argument, so this
+    exercises main()'s add_cli_arguments -> parse_args -> cli_kwargs_from_args
+    -> check_args wiring end-to-end against a synthetic check.
+    """
+
+    class ConfigurableCheck:
+        check_id = "configurable"
+        error_code = "CFG001"
+
+        def __init__(self, marker: str = "default") -> None:
+            self.marker = marker
+
+        def get_prefilter_pattern(self) -> list[str] | None:
+            return None
+
+        def check(
+            self, filepath: Path, tree: ast.Module, source: str
+        ) -> list[Violation]:
+            return [
+                Violation(
+                    check_id=self.check_id,
+                    error_code=self.error_code,
+                    line=1,
+                    col=0,
+                    message=self.marker,
+                    fixable=False,
+                )
+            ]
+
+        @classmethod
+        def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
+            parser.add_argument("--configurable-marker")
+
+        @classmethod
+        def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
+            return {"marker": args.configurable_marker}
+
+    monkeypatch.setattr(ast_checks, "ALL_CHECKS", [*ALL_CHECKS, ConfigurableCheck])
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    exit_code = main(
+        [
+            str(filepath),
+            "--enable",
+            "configurable",
+            "--configurable-marker",
+            "custom-message",
+        ]
+    )
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "custom-message" in err
+
+
 def test_main_unknown_enable_check_returns_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -626,22 +682,6 @@ def test_main_unknown_disable_check_returns_one(
 
     err = capsys.readouterr().err
     assert "Unknown checks: not-a-real-check" in err
-
-
-def test_main_forbid_vars_names_overrides_default(tmp_path: Path) -> None:
-    filepath = tmp_path / "module.py"
-    filepath.write_text("custom_forbidden = 1\n")
-
-    exit_code = main(
-        [
-            str(filepath),
-            "--enable",
-            "forbid-vars",
-            "--forbid-vars-names",
-            "custom_forbidden",
-        ]
-    )
-    assert exit_code == 1
 
 
 def test_main_disabling_all_checks_returns_one(
