@@ -215,6 +215,23 @@ def atomic_write_text(path: Path, content: str, encoding: str) -> None:
             temp_path.unlink()
 
 
+def ignore_pattern_for(error_code: str) -> re.Pattern[str]:
+    """Compile the inline-ignore regex for a check's error code.
+
+    Every check that supports `# pytriage: ignore=<code>` suppression
+    compiled a near-identical pattern by hand; this is the single place that
+    pattern is defined, so all checks agree on its syntax (case-insensitive,
+    optional whitespace around `:`).
+
+    Args:
+        error_code: The check's error code, e.g. "TRI001" or "STYLE-001"
+
+    Returns:
+        Compiled, case-insensitive regex matching that code's ignore comment
+    """
+    return re.compile(rf"#\s*pytriage:\s*ignore={re.escape(error_code)}", re.IGNORECASE)
+
+
 def find_ignored_lines(source: str, pattern: re.Pattern[str]) -> set[int]:
     """Extract line numbers that have an inline ignore comment matching `pattern`.
 

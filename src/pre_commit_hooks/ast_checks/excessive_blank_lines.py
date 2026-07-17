@@ -12,15 +12,14 @@ from __future__ import annotations
 
 import ast
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from ._base import Violation, atomic_write_text, find_ignored_lines
+from ._base import Violation, atomic_write_text, find_ignored_lines, ignore_pattern_for
 
 logger = logging.getLogger("excessive_blank_lines")
 
-IGNORE_PATTERN = re.compile(r"#\s*pytriage:\s*ignore=TRI002", re.IGNORECASE)
+IGNORE_PATTERN = ignore_pattern_for("TRI002")
 
 
 @dataclass(frozen=True)

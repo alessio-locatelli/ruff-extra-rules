@@ -11,14 +11,13 @@ from __future__ import annotations
 
 import ast
 import logging
-import re
 from pathlib import Path
 
-from ._base import Violation, find_ignored_lines
+from ._base import Violation, find_ignored_lines, ignore_pattern_for
 
 logger = logging.getLogger("redundant_super_init")
 
-IGNORE_PATTERN = re.compile(r"#\s*pytriage:\s*ignore=TRI003", re.IGNORECASE)
+IGNORE_PATTERN = ignore_pattern_for("TRI003")
 
 
 class SuperInitChecker(ast.NodeVisitor):
