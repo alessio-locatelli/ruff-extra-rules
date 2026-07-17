@@ -12,11 +12,11 @@ repo's own self-dogfooding. The existing comment there explains why:
 suite, and the test suite itself idiomatically uses forbidden names like
 `result` far more than production code does.
 
-Raised during the 2026-07-16 ADR interview for
-[08-document-is-test-file-heuristic.md](08-document-is-test-file-heuristic.md):
-extending self-checking to `tests/` is a plausible next feature, distinct
-from that item's decision (which only concerns TRI005's existing
-test-directory relaxation, not whether checks run there at all).
+This is a related but distinct idea from
+[08-document-is-test-file-heuristic.md](08-document-is-test-file-heuristic.md)'s
+decision, which only concerns TRI005's existing test-directory relaxation,
+not whether checks run against `tests/` at all: extending self-checking to
+`tests/` is a plausible next feature.
 
 ## Proposed Fix
 

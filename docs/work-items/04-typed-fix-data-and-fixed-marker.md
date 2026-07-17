@@ -1,6 +1,6 @@
 # Typed fix_data and a shared "fixed" marker
 
-Status: Open — resolved by ADR (2026-07-16 interview), not yet implemented
+Status: Open — resolved by docs/adr/0006-typed-fix-data-per-check.md, not yet implemented
 Kind: Refactor / type safety
 
 ## Problem
@@ -17,23 +17,23 @@ convention read by `CheckOrchestrator._apply_fixes`
 `fix_data`" debt named in `docs/adr/0001-iterative-refactor-not-rewrite.md`
 and it's still open.
 
-While confirming exactly how `"fixed"` gets set today, found a concrete
-instance of the problem: `CheckOrchestrator._apply_fixes` already marks a
-check's _original_ violations as fixed itself, unconditionally, for every
-check, whenever `check.fix()` returns `True`. `validate_function_name/__init__.py`'s
-own `fix()` (line ~148) _also_ sets `violation.fix_data["fixed"] = True`
-internally — but on `fresh_violations`, a throwaway list of new `Violation`
-objects discarded when `fix()` returns and never read again. It's dead code,
-and exactly the kind of asymmetry a single shared helper used consistently
-would make impossible.
+A concrete instance of the resulting confusion already exists in the code:
+`CheckOrchestrator._apply_fixes` marks a check's original violations as fixed
+itself, unconditionally, for every check, whenever `check.fix()` returns
+`True`. `validate_function_name/__init__.py`'s own `fix()` (line 148) also
+sets `violation.fix_data["fixed"] = True` internally — but on
+`fresh_violations`, a throwaway list of new `Violation` objects discarded
+when `fix()` returns and never read again. It's dead code, and exactly the
+kind of asymmetry a single shared helper used consistently would make
+impossible.
 
-## Decision (2026-07-16 ADR interview)
+## Decision (see docs/adr/0006-typed-fix-data-per-check.md)
 
 Both parts confirmed:
 
 1. Add `mark_fixed(violation)` / `is_fixed(violation)` helpers to `_base.py`;
    route every read/write of the `"fixed"` convention through them,
-   including removing the now-identified dead marking in
+   including removing the dead marking identified above in
    `validate_function_name/__init__.py`'s `fix()`.
 2. Give each check a private `TypedDict` for its own `fix_data` shape (e.g.
    `ForbidVarsFixData`), defined and used only inside that check's own

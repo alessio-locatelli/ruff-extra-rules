@@ -1,6 +1,6 @@
 # Document the _is_test_file() path heuristic in the README
 
-Status: Open — resolved by ADR 0007, not yet implemented
+Status: Open — resolved by docs/adr/0007-redundant-assignment-test-file-heuristic-deliberate.md, not yet implemented
 Kind: Documentation / hidden dependency
 
 ## Problem
@@ -12,7 +12,7 @@ into or out of a test directory silently changes which violations get
 reported, with nothing in the diagnostic output — or, until now, the
 README — revealing why.
 
-## Decision (2026-07-16 ADR interview, see docs/adr/0007)
+## Decision (see docs/adr/0007-redundant-assignment-test-file-heuristic-deliberate.md)
 
 Keep the heuristic exactly as-is; no code change. This project has no
 consumers besides this repo itself, and its layout (`tests/`, `test_*.py`)
