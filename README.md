@@ -294,6 +294,7 @@ print(msg)
   - Type annotations
 - **Safe autofix mode**: automatically inlines simple, low-value assignments when safe
 - Inline suppression with `# pytriage: ignore=TRI005`
+- **Test-file relaxation**: a file under a `tests`/`test` directory, or named `test_*.py`/`*_test.py`, gets a higher semantic-value score for descriptive variable names — test code idiomatically uses named intermediates (`mock_response`, `expected_total`) for readability far more than production code does, so fewer of them get flagged
 - Gracefully handles:
   - Augmented assignments (`x += 1`)
   - Conditional assignments in if/else blocks
