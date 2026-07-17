@@ -50,7 +50,13 @@ class CacheManager:
     # lambdas/comprehensions as separate scopes (the old walker leaked their
     # names into the enclosing scope) — a cached suggestion/fixability from
     # before this change could differ from what the check would compute now.
-    CACHE_VERSION = "1.2.0"
+    #
+    # 1.3.0: excessive-blank-lines (TRI002) and redundant-super-init (TRI003)
+    # gained inline-ignore support — a file cached with a violation before
+    # this change would otherwise keep reporting it even after a
+    # `# pytriage: ignore=...` comment is added, since the file's own
+    # content hash still matches the stale cache entry.
+    CACHE_VERSION = "1.3.0"
     DEFAULT_CACHE_DIR = Path(".cache/pre_commit_hooks")
 
     def __init__(

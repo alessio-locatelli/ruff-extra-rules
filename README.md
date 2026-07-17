@@ -121,6 +121,7 @@ import os  # Good - 1 blank line
 - Preserves copyright comment spacing (1 blank line after copyright)
 - Only affects module-level blank lines, preserves function/class spacing
 - Maintains file encoding and handles different line ending styles
+- Inline suppression with `# pytriage: ignore=TRI002`, placed on the first code line after the blank run (the violation's own line is blank and can't carry a trailing comment)
 
 ---
 
@@ -155,6 +156,8 @@ class Child(Base):
 - Limited to same-file parent classes (safe, zero false positives)
 - Handles multiple inheritance correctly
 - Gracefully skips unresolvable parent classes (imports, stdlib)
+- Inline suppression with `# pytriage: ignore=TRI003`, placed on the `__init__` definition line
+- No autofix — this check flags a design decision the caller has to make
 
 ---
 

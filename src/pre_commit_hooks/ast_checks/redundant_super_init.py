@@ -4,18 +4,21 @@ TRI003: Detects when a class forwards **kwargs to a parent __init__ that
 accepts no arguments. This is a logic error that creates misleading inheritance
 patterns.
 
-Inline ignore: # pytriage: ignore=TRI003 (not currently supported)
+Inline ignore: # pytriage: ignore=TRI003, placed on the __init__ definition line.
 """
 
 from __future__ import annotations
 
 import ast
 import logging
+import re
 from pathlib import Path
 
-from ._base import Violation
+from ._base import Violation, find_ignored_lines
 
 logger = logging.getLogger("redundant_super_init")
+
+IGNORE_PATTERN = re.compile(r"#\s*pytriage:\s*ignore=TRI003", re.IGNORECASE)
 
 
 class SuperInitChecker(ast.NodeVisitor):
@@ -73,7 +76,8 @@ class SuperInitChecker(ast.NodeVisitor):
                             (
                                 init_node.lineno,
                                 f"Redundant **kwargs forwarded to {base.id}.__init__() "
-                                f"which accepts no arguments",
+                                "which accepts no arguments. Or add "
+                                "'# pytriage: ignore=TRI003' to suppress.",
                             )
                         )
 
@@ -156,8 +160,14 @@ class RedundantSuperInitCheck:
         checker = SuperInitChecker(str(filepath))
         checker.visit(tree)
 
+        if not checker.violations:
+            return []
+
+        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
         violations = []
         for line_num, message in checker.violations:
+            if line_num in ignored_lines:
+                continue
             violations.append(
                 Violation(
                     check_id=self.check_id,

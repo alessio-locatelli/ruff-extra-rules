@@ -3,18 +3,39 @@
 TRI002: Collapse 2+ consecutive blank lines after module headers (copyright,
 docstring, or comments) to a single blank line.
 
-Inline ignore: # pytriage: ignore=TRI002 (not currently supported)
+Inline ignore: # pytriage: ignore=TRI002, placed on the first code line after
+the blank run (the violation's own line is blank, so it can't carry a
+trailing comment itself).
 """
 
 from __future__ import annotations
 
 import ast
 import logging
+import re
+from dataclasses import dataclass
 from pathlib import Path
 
-from ._base import Violation, atomic_write_text
+from ._base import Violation, atomic_write_text, find_ignored_lines
 
 logger = logging.getLogger("excessive_blank_lines")
+
+IGNORE_PATTERN = re.compile(r"#\s*pytriage:\s*ignore=TRI002", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class _BlankRunViolation:
+    line: int
+    anchor_line: int
+    message: str
+
+
+def _format_message(blank_count: int, target: int) -> str:
+    return (
+        f"Excessive blank lines ({blank_count}) should be collapsed to {target}. "
+        "Add '# pytriage: ignore=TRI002' to the line following the blank run "
+        "to suppress."
+    )
 
 
 def find_module_header_end(lines: list[str], tree: ast.Module) -> int:
@@ -52,7 +73,7 @@ def find_module_header_end(lines: list[str], tree: ast.Module) -> int:
     return len(lines)
 
 
-def check_file_violations(source: str, tree: ast.Module) -> list[tuple[int, str]]:
+def check_file_violations(source: str, tree: ast.Module) -> list[_BlankRunViolation]:
     lines = source.splitlines(keepends=True)
 
     if not lines:
@@ -86,25 +107,28 @@ def check_file_violations(source: str, tree: ast.Module) -> list[tuple[int, str]
                 and blank_count >= 2
                 and start_blank is not None
             ):
+                # anchor_line is this line — the violation's own start_blank
+                # line is blank and can't carry a trailing ignore comment.
+                anchor_line = i + 1
                 # Check if this line is a class or function definition
                 # PEP 8 allows 2 blank lines before top-level class/function definitions
                 if _is_class_or_function_def(line):
                     # Only report if more than 2 blank lines
                     if blank_count > 2:
                         violations.append(
-                            (
-                                start_blank + 1,
-                                f"Excessive blank lines ({blank_count}) "
-                                + "should be collapsed to 2",
+                            _BlankRunViolation(
+                                line=start_blank + 1,
+                                anchor_line=anchor_line,
+                                message=_format_message(blank_count, target=2),
                             )
                         )
                 else:
                     # For non-class/function definitions, report if >= 2 blank lines
                     violations.append(
-                        (
-                            start_blank + 1,
-                            f"Excessive blank lines ({blank_count}) "
-                            + "should be collapsed to 1",
+                        _BlankRunViolation(
+                            line=start_blank + 1,
+                            anchor_line=anchor_line,
+                            message=_format_message(blank_count, target=1),
                         )
                     )
             blank_count = 0
@@ -200,16 +224,21 @@ class ExcessiveBlankLinesCheck:
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         file_violations = check_file_violations(source, tree)
+        if not file_violations:
+            return []
 
+        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
         violations = []
-        for line_num, message in file_violations:
+        for fv in file_violations:
+            if fv.anchor_line in ignored_lines:
+                continue
             violations.append(
                 Violation(
                     check_id=self.check_id,
                     error_code=self.error_code,
-                    line=line_num,
+                    line=fv.line,
                     col=0,
-                    message=message,
+                    message=fv.message,
                     fixable=True,
                 )
             )
@@ -225,6 +254,18 @@ class ExcessiveBlankLinesCheck:
         encoding: str = "utf-8",
     ) -> bool:
         if not violations:
+            return False
+
+        # Recompute independently rather than trusting the passed
+        # violations, same as misplaced_comment.fix(): a stale or
+        # caller-supplied violations list must never cause an ignored blank
+        # run to be collapsed anyway.
+        file_violations = check_file_violations(source, tree)
+        if not file_violations:
+            return False
+
+        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
+        if any(fv.anchor_line in ignored_lines for fv in file_violations):
             return False
 
         try:

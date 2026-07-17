@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from pre_commit_hooks.ast_checks._base import Violation
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "excessive_blank_lines"
@@ -33,6 +34,15 @@ def test_bad_fixtures_are_flagged(fixture_path: Path) -> None:
     ids=lambda p: p.name,
 )
 def test_good_fixtures_are_not_flagged(fixture_path: Path) -> None:
+    assert _check(fixture_path.read_text()) == []
+
+
+@pytest.mark.parametrize(
+    "fixture_path",
+    sorted((FIXTURES_DIR / "ignore").glob("*.py")),
+    ids=lambda p: p.name,
+)
+def test_ignore_fixtures_are_not_flagged(fixture_path: Path) -> None:
     assert _check(fixture_path.read_text()) == []
 
 
@@ -64,7 +74,65 @@ def test_leading_blank_lines_before_first_code_with_no_header() -> None:
     whole leading run is treated as the gap before the first code line.
     """
     source = "\n\n\nimport os\n"
-    assert _check(source) == ["Excessive blank lines (3) should be collapsed to 1"]
+    assert _check(source) == [
+        "Excessive blank lines (3) should be collapsed to 1. Add "
+        "'# pytriage: ignore=TRI002' to the line following the blank run "
+        "to suppress."
+    ]
+
+
+def test_inline_ignore_suppresses_violation() -> None:
+    """The blank run's own line is blank, so the ignore comment goes on the
+    first code line after it instead."""
+    source = '"""Docstring."""\n\n\n\ndef foo():  # pytriage: ignore=TRI002\n    pass\n'
+    assert _check(source) == []
+
+
+def test_inline_ignore_is_respected_by_fix(tmp_path: Path) -> None:
+    source = '"""Docstring."""\n\n\n\ndef foo():  # pytriage: ignore=TRI002\n    pass\n'
+    test_file = tmp_path / "module.py"
+    test_file.write_text(source)
+    tree = ast.parse(source)
+    check = ExcessiveBlankLinesCheck()
+
+    # A stale violation (as if collected before the ignore comment was
+    # added) must not cause fix() to collapse the blank run anyway — fix()
+    # independently re-checks ignored_lines rather than trusting its input.
+    stale_violation = Violation(
+        check_id=check.check_id,
+        error_code=check.error_code,
+        line=2,
+        col=0,
+        message="stale",
+        fixable=True,
+    )
+    assert check.fix(test_file, [stale_violation], source, tree) is False
+    assert test_file.read_text() == source
+
+
+def test_fix_with_stale_violation_and_no_current_violation_returns_false(
+    tmp_path: Path,
+) -> None:
+    """A caller-supplied violations list can be stale (e.g. a previous fix in
+    the same run already collapsed the blank run) — fix() must recheck the
+    current source rather than trusting it.
+    """
+    source = '"""Docstring."""\n\ndef foo():\n    pass\n'
+    test_file = tmp_path / "module.py"
+    test_file.write_text(source)
+    tree = ast.parse(source)
+    check = ExcessiveBlankLinesCheck()
+
+    stale_violation = Violation(
+        check_id=check.check_id,
+        error_code=check.error_code,
+        line=2,
+        col=0,
+        message="stale",
+        fixable=True,
+    )
+    assert check.fix(test_file, [stale_violation], source, tree) is False
+    assert test_file.read_text() == source
 
 
 def test_fix_file_content_empty_source_returns_unchanged() -> None:

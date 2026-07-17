@@ -36,6 +36,15 @@ def test_good_fixtures_are_not_flagged(fixture_path: Path) -> None:
     assert _check(fixture_path.read_text()) == []
 
 
+@pytest.mark.parametrize(
+    "fixture_path",
+    sorted((FIXTURES_DIR / "ignore").glob("*.py")),
+    ids=lambda p: p.name,
+)
+def test_ignore_fixtures_are_not_flagged(fixture_path: Path) -> None:
+    assert _check(fixture_path.read_text()) == []
+
+
 def test_check_id_and_error_code() -> None:
     check = RedundantSuperInitCheck()
     assert check.check_id == "redundant-super-init"
@@ -73,6 +82,19 @@ class Child(Base):
     assert violation.col == 0
     assert violation.fixable is False
     assert "Base.__init__()" in violation.message
+
+
+def test_inline_ignore_suppresses_violation() -> None:
+    source = """class Base:
+    def __init__(self):
+        pass
+
+
+class Child(Base):
+    def __init__(self, **kwargs):  # pytriage: ignore=TRI003
+        super().__init__(**kwargs)
+"""
+    assert _check(source) == []
 
 
 def test_init_without_kwargs_param_not_flagged() -> None:
