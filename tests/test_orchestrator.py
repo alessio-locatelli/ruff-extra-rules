@@ -203,7 +203,7 @@ def test_process_files_second_call_uses_cache(
     assert second[str(filepath)][0].error_code == "TRI001"
 
 
-def test_process_files_cache_key_mismatch_forces_recheck(tmp_path: Path) -> None:
+def test_process_files_different_check_set_forces_recheck(tmp_path: Path) -> None:
     """Changing which checks are enabled between runs must invalidate the
     cache entry from a previous run with a different check set.
     """
@@ -222,6 +222,49 @@ def test_process_files_cache_key_mismatch_forces_recheck(tmp_path: Path) -> None
     assert error_codes == {"TRI001", "TRI002"}
 
 
+def test_process_files_different_check_config_forces_recheck(tmp_path: Path) -> None:
+    """Regression: ForbidVarsCheck(forbidden_names={"custom"}) and
+    ForbidVarsCheck() must not share a cache entry, or a config change
+    (e.g. --forbid-vars-names) on an unchanged file serves the previous
+    config's stale violations instead of re-checking.
+    """
+    filepath = tmp_path / "module.py"
+    filepath.write_text("widget = 1\nreturn_widget = widget\n")
+
+    default_config = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    first = default_config.process_files([str(filepath)])
+    assert str(filepath) not in first
+
+    custom_config = CheckOrchestrator(
+        checks=[ForbidVarsCheck(forbidden_names={"widget"})]
+    )
+    second = custom_config.process_files([str(filepath)])
+
+    assert {v.error_code for v in second[str(filepath)]} == {"TRI001"}
+
+
+def test_generate_cache_key_changes_when_source_tree_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: replaces the hand-bumped CACHE_VERSION that a developer
+    had to remember to update whenever a check's own code changed (commit
+    0e3efba). The cache key must change on its own when the hashed source
+    tree changes, without anyone bumping anything.
+    """
+    fake_root = tmp_path / "pre_commit_hooks"
+    fake_root.mkdir()
+    (fake_root / "module.py").write_text("x = 1\n")
+    monkeypatch.setattr(ast_checks, "_PACKAGE_ROOT", fake_root)
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    key_before = orchestrator._generate_cache_key()
+
+    (fake_root / "module.py").write_text("x = 2\n")
+    key_after = orchestrator._generate_cache_key()
+
+    assert key_before != key_after
+
+
 def test_get_cached_violations_ignores_corrupted_cache_entry(
     tmp_path: Path,
 ) -> None:
@@ -229,12 +272,9 @@ def test_get_cached_violations_ignores_corrupted_cache_entry(
     filepath.write_text("data = 1\n")
 
     orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
-    cache_key = orchestrator._generate_cache_key()
-    orchestrator.cache.set_cached_result(
-        filepath, "ast-checks", {"cache_key": cache_key, "violations": [{}]}
-    )
+    orchestrator.cache.set_cached_result(filepath, "ast-checks", {"violations": [{}]})
 
-    result = orchestrator._get_cached_violations(filepath, cache_key)
+    result = orchestrator._get_cached_violations(filepath)
     assert result is None
 
 

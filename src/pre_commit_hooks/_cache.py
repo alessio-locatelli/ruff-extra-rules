@@ -28,8 +28,17 @@ class CacheManager:
     Uses SHA-1 content hashing for cache keys with mtime fast-path optimization.
     Cache is stored in .cache/pre_commit_hooks/ directory in JSON format.
 
+    `cache_version` has no default: a stale value here silently serves
+    outdated results, so every caller must supply one that changes whenever
+    something that could affect a cached result changes. See
+    `ast_checks.CheckOrchestrator._generate_cache_key()` for the one real
+    caller — it derives its version from a hash of its own source tree
+    rather than a hand-maintained constant, which previously caused a real
+    bug (commit 0e3efba) when a change was made without remembering to bump
+    it.
+
     Example:
-        >>> cache = CacheManager(hook_name="forbid-vars")
+        >>> cache = CacheManager(hook_name="forbid-vars", cache_version="1")
         >>> result = cache.get_cached_result(Path("foo.py"))  # uses hook_name
         >>> if result is None:
         ...     # Run expensive check
@@ -39,42 +48,18 @@ class CacheManager:
         ...     )
     """
 
-    # Bump whenever a check's detection/fix logic changes in a way that could
-    # make a previously-cached result stale, even though the file content and
-    # enabled-checks cache key are unchanged (e.g. TRI004 gained async def
-    # support: a file cached "no violations" before that fix would otherwise
-    # stay stale until its content changes or the cache is cleared).
-    #
-    # 1.2.0: forbid-vars' scope-collision detection moved from a hand-rolled
-    # walker to _scope.collect_scope_names, which now correctly treats
-    # lambdas/comprehensions as separate scopes (the old walker leaked their
-    # names into the enclosing scope) — a cached suggestion/fixability from
-    # before this change could differ from what the check would compute now.
-    #
-    # 1.3.0: excessive-blank-lines (TRI002) and redundant-super-init (TRI003)
-    # gained inline-ignore support — a file cached with a violation before
-    # this change would otherwise keep reporting it even after a
-    # `# pytriage: ignore=...` comment is added, since the file's own
-    # content hash still matches the stale cache entry.
-    #
-    # 1.4.0: validate-function-name (TRI004) moved its own hand-rolled
-    # substring-based inline-ignore check onto the shared, tokenize-based
-    # find_ignored_lines() — this is stricter about only matching real
-    # comments (not string/byte literals containing the marker text) and
-    # more lenient about whitespace/case around it, so a cached result from
-    # before this change could differ from what the check computes now.
-    CACHE_VERSION = "1.4.0"
     DEFAULT_CACHE_DIR = Path(".cache/pre_commit_hooks")
 
     def __init__(
         self,
         cache_dir: Path | None = None,
         hook_name: str = "",
-        cache_version: str | None = None,
+        *,
+        cache_version: str,
     ) -> None:
         self.cache_dir = cache_dir or self.DEFAULT_CACHE_DIR
         self.hook_name = hook_name
-        self.cache_version = cache_version or self.CACHE_VERSION
+        self.cache_version = cache_version
         self._ensure_cache_dir()
 
     @contextlib.contextmanager
@@ -226,6 +211,18 @@ class CacheManager:
             # Read in 64KB chunks for large files
             for chunk in iter(lambda: f.read(65536), b""):
                 sha1.update(chunk)
+        return sha1.hexdigest()
+
+    @staticmethod
+    def compute_tree_hash(root: Path) -> str:
+        """SHA-1 over every `.py` file's content under `root`, sorted for
+        determinism. Recomputed fresh on every call rather than cached to
+        disk itself — measured ~0.2ms for this repo's own src/ tree,
+        negligible next to per-invocation interpreter startup.
+        """
+        sha1 = hashlib.sha1()
+        for py_file in sorted(root.rglob("*.py")):
+            sha1.update(py_file.read_bytes())
         return sha1.hexdigest()
 
     def _write_cache(self, cache_file: Path, cache_data: dict[str, Any]) -> None:
