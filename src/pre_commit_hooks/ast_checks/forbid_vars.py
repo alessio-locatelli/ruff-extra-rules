@@ -15,7 +15,12 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from ._base import Violation, byte_col_to_char_col, find_ignored_lines
+from ._base import (
+    Violation,
+    atomic_write_text,
+    byte_col_to_char_col,
+    find_ignored_lines,
+)
 from ._scope import collect_scope_names, iter_within_scope
 
 logger = logging.getLogger("forbid_vars")
@@ -502,7 +507,7 @@ def _apply_fixes(
         col = byte_col_to_char_col(line, byte_col)
         lines[line_idx] = line[:col] + new_name + line[col + name_len :]
 
-    filepath.write_text("".join(lines), encoding=encoding, newline="")
+    atomic_write_text(filepath, "".join(lines), encoding)
 
 
 class ForbidVarsCheck:

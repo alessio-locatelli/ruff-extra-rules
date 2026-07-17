@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 
-from ._base import Violation, find_ignored_lines
+from ._base import Violation, atomic_write_text, find_ignored_lines
 
 logger = logging.getLogger("misplaced_comment")
 
@@ -225,6 +225,6 @@ class MisplacedCommentCheck:
             fixed_any = True
 
         if fixed_any:
-            filepath.write_text("".join(lines), encoding=encoding, newline="")
+            atomic_write_text(filepath, "".join(lines), encoding)
 
         return fixed_any

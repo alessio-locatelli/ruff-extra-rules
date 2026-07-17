@@ -5,7 +5,10 @@ from __future__ import annotations
 import ast
 import io
 import logging
+import os
 import re
+import stat
+import tempfile
 import tokenize
 from dataclasses import dataclass
 from pathlib import Path
@@ -168,6 +171,48 @@ def read_source_with_encoding(filepath: Path) -> tuple[str, str]:
     raw = filepath.read_bytes()
     encoding, _ = tokenize.detect_encoding(io.BytesIO(raw).readline)
     return raw.decode(encoding), encoding
+
+
+def atomic_write_text(path: Path, content: str, encoding: str) -> None:
+    """Write `content` to `path` via temp-file-then-rename, atomic on POSIX.
+
+    Mirrors `_cache.py`'s `_write_cache`, with three refinements needed for
+    a source file rather than a cache blob: the write targets `path.resolve()`
+    rather than `path` itself, so a symlinked file gets its target's content
+    replaced in place rather than having the symlink itself overwritten with
+    a plain file (`replace()`, unlike the `open()` a plain `write_text()`
+    uses, acts on the symlink's own directory entry, not what it points to);
+    the temp file gets a unique name from `tempfile.mkstemp` (a fixed
+    `<name>.tmp` sibling could collide if two hook processes fix the same
+    file at once); and its permission bits are copied from the resolved
+    target before the rename (`mkstemp` creates files mode 0600, which would
+    otherwise silently strip an executable script's +x bit). A plain
+    `Path.write_text()` can also leave a truncated, invalid file on disk if
+    the process is killed mid-write; writing to a temp file first and
+    renaming it into place means the target always ends up either fully old
+    or fully new.
+
+    Args:
+        path: File to write
+        content: Text content to write
+        encoding: Encoding to write with
+
+    Raises:
+        OSError: if the temp file can't be created, written, or renamed
+    """
+    real_path = path.resolve()
+    fd, temp_name = tempfile.mkstemp(
+        dir=real_path.parent, prefix=f".{real_path.name}.", suffix=".tmp"
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding, newline="") as temp_file:
+            temp_file.write(content)
+        temp_path.chmod(stat.S_IMODE(real_path.stat().st_mode))
+        temp_path.replace(real_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 def find_ignored_lines(source: str, pattern: re.Pattern[str]) -> set[int]:

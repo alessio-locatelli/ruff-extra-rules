@@ -491,6 +491,12 @@ def test_fix_returns_false_when_apply_fix_fails_without_raising(
 ) -> None:
     """apply_fix() can fail internally (e.g. a write error) and simply
     return False rather than raising; that must not be reported as fixed.
+
+    The write goes through atomic_write_text's temp-file-then-rename, which
+    only needs the parent directory to be writable (not the target file
+    itself, since rename() doesn't check the destination's permission bits)
+    — so the directory, not the file, has to be read-only to force a write
+    failure here.
     """
     filepath = tmp_path / "mod.py"
     source = "def get_data() -> bool:\n    return True\n"
@@ -501,11 +507,11 @@ def test_fix_returns_false_when_apply_fix_fails_without_raising(
     violations = check.check(filepath, tree, source)
     assert len(violations) == 1
 
-    filepath.chmod(0o444)
+    tmp_path.chmod(0o555)
     try:
         assert check.fix(filepath, violations, source, tree) is False
     finally:
-        filepath.chmod(0o644)
+        tmp_path.chmod(0o755)
 
     assert not (violations[0].fix_data and violations[0].fix_data.get("fixed"))
 

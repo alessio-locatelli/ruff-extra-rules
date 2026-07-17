@@ -7,7 +7,7 @@ import logging
 import re
 from pathlib import Path
 
-from .._base import byte_col_to_char_col, read_source_with_encoding
+from .._base import atomic_write_text, byte_col_to_char_col, read_source_with_encoding
 from .._scope import iter_within_scope
 from .analysis import Suggestion, attach_parents, read_source
 
@@ -463,7 +463,7 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
     new_source = "".join(lines)
 
     try:
-        filepath.write_text(new_source, encoding=encoding, newline="")
+        atomic_write_text(filepath, new_source, encoding)
         return True
     except OSError as os_error:
         logger.warning("Filepath: %s. Error: %s", filepath, repr(os_error))
