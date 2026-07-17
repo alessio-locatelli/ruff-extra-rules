@@ -27,7 +27,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -95,6 +97,42 @@ ALL_CHECKS: list[type[ASTCheck]] = [
     MisplacedCommentCheck,
 ]
 
+# src/pre_commit_hooks/ — the tree CacheManager.compute_tree_hash() hashes to
+# invalidate every cached result whenever any check's own code, or shared
+# code it depends on, changes.
+_PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _fingerprint_default(value: object) -> Any:
+    """`json.dumps(..., default=...)` handler for the value shapes a check's
+    own `vars()` can contain but that `json` can't natively serialize: a
+    `set`'s iteration order depends on PYTHONHASHSEED (randomized per
+    process by default), so it's sorted first rather than dumped as-is —
+    otherwise the same config would fingerprint differently across process
+    runs, making the cache key (and so the cache itself) useless. Anything
+    else falls back to repr() rather than raising, since vars() can pick up
+    values this generic and unopinionated (e.g. a test's monkeypatched
+    instance attribute) that were never meant to be "config" in the first
+    place — the fingerprint just needs to not crash construction, not be
+    meaningful for every possible value a check instance could ever hold.
+    """
+    if isinstance(value, (set, frozenset)):
+        return sorted(value)
+    if isinstance(value, re.Pattern):
+        return value.pattern
+    return repr(value)
+
+
+def _fingerprint_check(check: ASTCheck) -> str:
+    """Stable fingerprint of a check instance's own state — effectively its
+    constructor arguments, e.g. so `ForbidVarsCheck(forbidden_names={"x"})`
+    and `ForbidVarsCheck()` fingerprint differently and don't share a cache
+    entry. Checks with no `__init__` override (most of them) have no
+    instance attributes at all, so this is deliberately a generic `vars()`
+    dump rather than something every check must opt into.
+    """
+    return json.dumps(vars(check), default=_fingerprint_default, sort_keys=True)
+
 
 class CheckOrchestrator:
     """Orchestrates running multiple AST checks on Python files.
@@ -120,7 +158,9 @@ class CheckOrchestrator:
         """
         self.checks = checks
         self.fix_mode = fix_mode
-        self.cache = CacheManager(hook_name="ast-checks")
+        self.cache = CacheManager(
+            hook_name="ast-checks", cache_version=self._generate_cache_key()
+        )
 
     def process_files(self, filepaths: list[str]) -> dict[str, list[Violation]]:
         """Process files and return violations for each file.
@@ -151,10 +191,9 @@ class CheckOrchestrator:
         if not candidate_files:
             return {}
 
-        # Step 3: Generate cache key from enabled checks
-        cache_key = self._generate_cache_key()
-
-        # Step 4: Process each file
+        # Step 3: Process each file. self.cache's own cache_version (set at
+        # construction from _generate_cache_key()) already gates staleness —
+        # no separate per-file cache_key needed here.
         all_violations: dict[str, list[Violation]] = {}
 
         for filepath_str in candidate_files:
@@ -163,7 +202,7 @@ class CheckOrchestrator:
             # Try cache first (skip in fix mode since file will be modified)
             cached_violations: list[Violation] | None = None
             if not self.fix_mode:
-                cached_violations = self._get_cached_violations(filepath, cache_key)
+                cached_violations = self._get_cached_violations(filepath)
 
             violations: list[Violation] | None
             if cached_violations is not None:
@@ -175,7 +214,7 @@ class CheckOrchestrator:
 
                 # Cache results (only if not in fix mode)
                 if not self.fix_mode and violations is not None:
-                    self._cache_violations(filepath, cache_key, violations)
+                    self._cache_violations(filepath, violations)
 
             if violations is not None and violations:
                 all_violations[filepath_str] = violations
@@ -183,33 +222,36 @@ class CheckOrchestrator:
         return all_violations
 
     def _generate_cache_key(self) -> str:
-        """Generate cache key from enabled checks.
-
-        Returns:
-            Cache key string (sorted, comma-separated check IDs)
+        """Cache key from the enabled checks, their own config, and this
+        package's own source — replaces a hand-maintained CACHE_VERSION
+        constant that a developer had to remember to bump whenever any
+        check's behavior changed (a real bug, commit 0e3efba, already came
+        from forgetting to). Any of the three changing invalidates every
+        cached result for every check — deliberately coarse-grained in
+        exchange for never missing a real change again.
         """
         check_ids = sorted(check.check_id for check in self.checks)
-        return ",".join(check_ids)
+        fingerprints = sorted(
+            f"{check.check_id}={_fingerprint_check(check)}" for check in self.checks
+        )
+        tree_hash = CacheManager.compute_tree_hash(_PACKAGE_ROOT)
+        return "|".join([",".join(check_ids), ",".join(fingerprints), tree_hash])
 
-    def _get_cached_violations(
-        self, filepath: Path, cache_key: str
-    ) -> list[Violation] | None:
+    def _get_cached_violations(self, filepath: Path) -> list[Violation] | None:
         """Retrieve cached violations for a file.
 
         Args:
             filepath: Path to file
-            cache_key: Cache key for enabled checks
 
         Returns:
             List of violations if cache hit, None if cache miss
         """
         try:
+            # self.cache's own cache_version already rejects a stale entry
+            # (enabled checks, their config, or this package's own source
+            # changed since it was written) before this ever sees it.
             cached = self.cache.get_cached_result(filepath, "ast-checks")
             if cached is None:
-                return None
-
-            # Verify cache key matches (enabled checks haven't changed)
-            if cached.get("cache_key") != cache_key:
                 return None
 
             # Deserialize violations
@@ -231,14 +273,11 @@ class CheckOrchestrator:
             logger.debug("Cache deserialization failed: %s", repr(error))
             return None
 
-    def _cache_violations(
-        self, filepath: Path, cache_key: str, violations: list[Violation]
-    ) -> None:
+    def _cache_violations(self, filepath: Path, violations: list[Violation]) -> None:
         """Cache violations for a file.
 
         Args:
             filepath: Path to file
-            cache_key: Cache key for enabled checks
             violations: List of violations to cache
         """
         try:
@@ -259,9 +298,7 @@ class CheckOrchestrator:
                 )
 
             self.cache.set_cached_result(
-                filepath,
-                "ast-checks",
-                {"cache_key": cache_key, "violations": serialized},
+                filepath, "ast-checks", {"violations": serialized}
             )
         except (TypeError, ValueError) as error:
             logger.warning("Cache serialization failed: %s", repr(error))

@@ -19,7 +19,9 @@ def temp_cache_dir(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def cache_manager(temp_cache_dir: Path) -> CacheManager:
-    return CacheManager(cache_dir=temp_cache_dir, hook_name="test-hook")
+    return CacheManager(
+        cache_dir=temp_cache_dir, hook_name="test-hook", cache_version="1"
+    )
 
 
 @pytest.fixture
@@ -175,6 +177,36 @@ def test_compute_file_hash(sample_file: Path) -> None:
     sample_file.write_text("different content")
     hash3 = CacheManager.compute_file_hash(sample_file)
     assert hash1 != hash3
+
+
+def test_compute_tree_hash_stable_for_unchanged_tree(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "b.py").write_text("y = 2\n")
+
+    assert CacheManager.compute_tree_hash(tmp_path) == CacheManager.compute_tree_hash(
+        tmp_path
+    )
+
+
+def test_compute_tree_hash_changes_when_any_file_changes(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n")
+    (tmp_path / "b.py").write_text("y = 2\n")
+    hash1 = CacheManager.compute_tree_hash(tmp_path)
+
+    (tmp_path / "b.py").write_text("y = 3\n")
+    hash2 = CacheManager.compute_tree_hash(tmp_path)
+
+    assert hash1 != hash2
+
+
+def test_compute_tree_hash_ignores_non_python_files(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("x = 1\n")
+    hash1 = CacheManager.compute_tree_hash(tmp_path)
+
+    (tmp_path / "notes.txt").write_text("unrelated content")
+    hash2 = CacheManager.compute_tree_hash(tmp_path)
+
+    assert hash1 == hash2
 
 
 def test_atomic_write(cache_manager: CacheManager, sample_file: Path) -> None:
