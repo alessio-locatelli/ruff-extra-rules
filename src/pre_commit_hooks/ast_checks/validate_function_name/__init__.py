@@ -18,7 +18,7 @@ names based on behavioral analysis:
 - Object creation → create_*
 - Mutation → update_*
 
-This check runs as part of the grouped `ast-checks` hook:
+This check runs as part of the grouped `ruff-extra-rules` hook:
 
     python -m pre_commit_hooks.ast_checks [--fix] <files>
 

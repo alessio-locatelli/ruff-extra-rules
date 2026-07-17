@@ -103,7 +103,7 @@ def test_apply_fixes_recomputes_stale_positions(tmp_path: Path) -> None:
         "    print(x)\n"
     )
 
-    checks = load_checks(enabled={"excessive-blank-lines", "redundant-assignment"})
+    checks = load_checks(select={"excessive-blank-lines", "redundant-assignment"})
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
@@ -127,7 +127,7 @@ def test_fix_honors_pep263_encoding_declaration(tmp_path: Path) -> None:
     filepath = tmp_path / "latin1.py"
     filepath.write_bytes(source.encode("latin-1"))
 
-    checks = load_checks(enabled={"misplaced-comment"})
+    checks = load_checks(select={"misplaced-comment"})
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
@@ -144,7 +144,7 @@ def test_fix_preserves_crlf_line_endings(tmp_path: Path) -> None:
         b"result = func(\r\n    x\r\n)  # comment\r\n\r\nother = 1\r\n"
     )
 
-    checks = load_checks(enabled={"misplaced-comment"})
+    checks = load_checks(select={"misplaced-comment"})
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
@@ -253,7 +253,9 @@ def test_get_cached_violations_ignores_corrupted_cache_entry(
     filepath.write_text("data = 1\n")
 
     orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
-    orchestrator.cache.set_cached_result(filepath, "ast-checks", {"violations": [{}]})
+    orchestrator.cache.set_cached_result(
+        filepath, "ruff-extra-rules", {"violations": [{}]}
+    )
 
     result = orchestrator._get_cached_violations(filepath)
     assert result is None
@@ -357,7 +359,7 @@ def test_apply_fixes_skips_check_with_no_fixable_violations(tmp_path: Path) -> N
         "        super().__init__(**kwargs)\n"
     )
 
-    checks = load_checks(enabled={"forbid-vars", "redundant-super-init"})
+    checks = load_checks(select={"forbid-vars", "redundant-super-init"})
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
@@ -457,16 +459,27 @@ def test_load_checks_explicit_check_args_none_default() -> None:
     """Passing check_args explicitly (not relying on the None default)
     takes the same path as leaving it unset.
     """
-    checks = load_checks(enabled={"forbid-vars"}, check_args={})
+    checks = load_checks(select={"forbid-vars"}, check_args={})
     assert len(checks) == 1
     assert checks[0].check_id == "forbid-vars"
 
 
-def test_load_checks_disabled_set_skips_matching_check() -> None:
-    checks = load_checks(disabled={"forbid-vars"})
+def test_load_checks_ignore_set_skips_matching_check() -> None:
+    checks = load_checks(ignore={"forbid-vars"})
     check_ids = {c.check_id for c in checks}
     assert "forbid-vars" not in check_ids
     assert len(check_ids) == len(ALL_CHECKS) - 1
+
+
+def test_load_checks_ignore_composes_with_select() -> None:
+    """Regression: `select` used to make `ignore` a no-op entirely (an
+    `elif` instead of two independent checks), so `--select`+`--ignore`
+    couldn't be combined the way `ruff check --select`/`--ignore` can.
+    """
+    checks = load_checks(
+        select={"forbid-vars", "redundant-super-init"}, ignore={"forbid-vars"}
+    )
+    assert {c.check_id for c in checks} == {"redundant-super-init"}
 
 
 def test_load_checks_check_specific_args_are_applied(
@@ -486,7 +499,7 @@ def test_load_checks_check_specific_args_are_applied(
     monkeypatch.setattr(ast_checks, "ALL_CHECKS", [*ALL_CHECKS, ConfigurableCheck])
 
     checks = load_checks(
-        enabled={"configurable"},
+        select={"configurable"},
         check_args={"configurable": {"custom": "custom_value"}},
     )
     assert len(checks) == 1
@@ -510,7 +523,7 @@ def test_load_checks_skips_check_whose_init_raises(
 
 def test_load_checks_skips_check_when_custom_args_raise() -> None:
     checks = load_checks(
-        enabled={"forbid-vars"},
+        select={"forbid-vars"},
         check_args={"forbid-vars": {"not_a_real_kwarg": 1}},
     )
     assert checks == []
@@ -550,7 +563,7 @@ def test_main_reports_non_fixable_violation(
         "        super().__init__(**kwargs)\n"
     )
 
-    exit_code = main([str(filepath), "--enable", "redundant-super-init"])
+    exit_code = main([str(filepath), "--select", "redundant-super-init"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
@@ -566,7 +579,7 @@ def test_main_reports_fixable_violation_without_fix_flag(
     filepath = tmp_path / "module.py"
     filepath.write_text("data = requests.get(url)\nprint(data)\n")
 
-    exit_code = main([str(filepath), "--enable", "forbid-vars"])
+    exit_code = main([str(filepath), "--select", "forbid-vars"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
@@ -580,7 +593,7 @@ def test_main_fix_flag_marks_violation_fixed(
     filepath = tmp_path / "module.py"
     filepath.write_text("data = requests.get(url)\nprint(data)\n")
 
-    exit_code = main([str(filepath), "--enable", "forbid-vars", "--fix"])
+    exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
@@ -646,7 +659,7 @@ def test_main_check_specific_cli_arg_round_trip(
     exit_code = main(
         [
             str(filepath),
-            "--enable",
+            "--select",
             "configurable",
             "--configurable-marker",
             "custom-message",
@@ -658,41 +671,66 @@ def test_main_check_specific_cli_arg_round_trip(
     assert "custom-message" in err
 
 
-def test_main_unknown_enable_check_returns_one(
+def test_main_unknown_select_check_returns_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1\n")
 
-    exit_code = main([str(filepath), "--enable", "not-a-real-check"])
+    exit_code = main([str(filepath), "--select", "not-a-real-check"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
     assert "Unknown checks: not-a-real-check" in err
 
 
-def test_main_unknown_disable_check_returns_one(
+def test_main_unknown_ignore_check_returns_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1\n")
 
-    exit_code = main([str(filepath), "--disable", "not-a-real-check"])
+    exit_code = main([str(filepath), "--ignore", "not-a-real-check"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
     assert "Unknown checks: not-a-real-check" in err
 
 
-def test_main_disabling_all_checks_returns_one(
+def test_main_ignoring_all_checks_returns_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1\n")
 
     all_ids = ",".join(sorted(cls().check_id for cls in ALL_CHECKS))
-    exit_code = main([str(filepath), "--disable", all_ids])
+    exit_code = main([str(filepath), "--ignore", all_ids])
     assert exit_code == 1
 
     err = capsys.readouterr().err
     assert "Error: No checks enabled" in err
+
+
+def test_main_select_and_ignore_compose(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Regression: `--select`+`--ignore` together used to behave like
+    `--select` alone, silently dropping `--ignore` (see
+    `test_load_checks_ignore_composes_with_select`).
+    """
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    exit_code = main(
+        [
+            str(filepath),
+            "--select",
+            "forbid-vars,redundant-super-init",
+            "--ignore",
+            "forbid-vars",
+        ]
+    )
+    assert exit_code == 0
+
+    err = capsys.readouterr().err
+    assert "TRI001" not in err

@@ -30,17 +30,12 @@ repos:
   # Our own hooks, run against src/ only. tests/ is excluded: its fixtures
   # under tests/fixtures/ are deliberately "bad" example code for our own
   # test suite, and the test suite itself idiomatically uses forbidden names
-  # like `result` far more than production code does.
-  #
-  # Two separate hook ids sharing one implementation: the naming/structure
-  # checks (TRI00x) are report-only here so renames get a human review
-  # before landing, while misplaced-comment's fix is a purely mechanical
-  # text move (never changes semantics) safe to always auto-apply — see its
-  # own default args in .pre-commit-hooks.yaml.
+  # like `result` far more than production code does (see
+  # docs/work-items/10-lint-tests-directory.md).
   - repo: local
     hooks:
-      - id: ast-checks
-        name: Python AST checks (grouped, self-check)
+      - id: ruff-extra-rules
+        name: Extra Python rule checks (self-check)
         description: Run our own AST-based checks against src/
         # `uv run` resolves this project's own managed venv regardless of
         # the ambient shell's PATH, since `language: system` hooks run
@@ -51,14 +46,7 @@ repos:
         language: system
         types: [python]
         files: ^src/
-        args: [--disable=misplaced-comment]
-      - id: misplaced-comment
-        name: Fix misplaced comments (self-check)
-        entry: uv run python -m pre_commit_hooks.ast_checks
-        language: system
-        types: [python]
-        files: ^src/
-        args: [--enable=misplaced-comment, --fix]
+        args: [--fix]
 
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0

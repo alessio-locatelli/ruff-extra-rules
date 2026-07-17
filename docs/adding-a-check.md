@@ -1,6 +1,6 @@
 # Adding a new AST check
 
-Checks live under `src/pre_commit_hooks/ast_checks/` and plug into the grouped `ast-checks` hook — there is no per-check `.pre-commit-hooks.yaml` entry or console script to add.
+Checks live under `src/pre_commit_hooks/ast_checks/` and plug into the grouped `ruff-extra-rules` hook — there is no per-check `.pre-commit-hooks.yaml` entry or console script to add.
 
 ## 1. Design
 
@@ -45,14 +45,14 @@ class ASTCheck(Protocol):
 
 `add_cli_arguments`/`cli_kwargs_from_args` are part of the protocol, so `type[ASTCheck]` (as used by `ALL_CHECKS`) requires both. `BaseCheck` provides a no-op default for each — inherit it (`class YourCheck(BaseCheck):`) unless your check actually needs its own CLI option, in which case override both.
 
-Create `src/pre_commit_hooks/ast_checks/your_check.py` (or a package with `__init__.py` if the check needs multiple modules — see `validate_function_name/` for an example). Register the class in `ALL_CHECKS` in `src/pre_commit_hooks/ast_checks/__init__.py`. That's the whole registration step — no `.pre-commit-hooks.yaml` entry and no `[project.scripts]` entry. The check becomes selectable via `--enable=your-check`/`--disable=your-check` on the `ast-checks` hook and shows up in `python -m pre_commit_hooks.ast_checks --list-checks`.
+Create `src/pre_commit_hooks/ast_checks/your_check.py` (or a package with `__init__.py` if the check needs multiple modules — see `validate_function_name/` for an example). Register the class in `ALL_CHECKS` in `src/pre_commit_hooks/ast_checks/__init__.py`. That's the whole registration step — no `.pre-commit-hooks.yaml` entry and no `[project.scripts]` entry. The check becomes selectable via `--select=your-check`/`--ignore=your-check` on the `ruff-extra-rules` hook and shows up in `python -m pre_commit_hooks.ast_checks --list-checks`.
 
 **Requirements:**
 
 - Standard library only, no external runtime dependencies.
 - Never touch text inside string/byte literals or comments when writing an autofix — locate targets via AST node positions (`node.lineno`/`node.col_offset`/`node.end_lineno`/`node.end_col_offset`), not blind regex substitution over the whole file. See `validate_function_name/autofix.py` for a worked example of AST-scoped renaming.
 - Support inline suppression: `# pytriage: ignore=TRI00N`.
-- If the check is experimental or prone to false positives, keep it out of the default-enabled set via `args: [--disable=your-check-id]` in `.pre-commit-hooks.yaml`.
+- If the check is experimental or prone to false positives, keep it out of the default-enabled set via `args: [--ignore=your-check-id]` in `.pre-commit-hooks.yaml`.
 
 ## 3. Write tests
 
@@ -67,14 +67,14 @@ For larger example files, add fixtures under `tests/fixtures/your_check/`, follo
 
 ## 4. Update README.md
 
-Add a subsection under "Available Checks" → "ast-checks (grouped)", following the format used by the existing checks (why it exists, a short example, suppression syntax).
+Add a subsection under "Available Checks" → "ruff-extra-rules (grouped)", following the format used by the existing checks (why it exists, a short example, suppression syntax).
 
 ## 5. Validate
 
 ```bash
 uv run pytest tests/test_your_check.py -v
 uv run python -m pre_commit_hooks.ast_checks --list-checks
-uv run python -m pre_commit_hooks.ast_checks --enable=your-check path/to/file.py
+uv run python -m pre_commit_hooks.ast_checks --select=your-check path/to/file.py
 uv run ruff check --fix .
 uv run ruff format .
 uv run mypy src/ tests/
@@ -117,7 +117,7 @@ Guidelines:
 
 ```bash
 uv run python scripts/benchmark.py --iterations=3 --clear-cache  # measures this repo's own src/+tests/
-python -m cProfile -o profile.stats -m pre_commit_hooks.ast_checks --enable=your-check src/
+python -m cProfile -o profile.stats -m pre_commit_hooks.ast_checks --select=your-check src/
 python -c "import pstats; p = pstats.Stats('profile.stats'); p.sort_stats('cumulative'); p.print_stats(20)"
 ```
 

@@ -84,9 +84,10 @@ def filter_excluded_files(
 
 logger = logging.getLogger("ast_checks")
 
-# The complete, fixed set of checks the ast-checks hook can run. This package
-# has no plugin mechanism for third-party checks, so a static list is all
-# that's needed — add new checks here rather than via a registration side effect.
+# The complete, fixed set of checks the ruff-extra-rules hook can run. This
+# package has no plugin mechanism for third-party checks, so a static list is
+# all that's needed — add new checks here rather than via a registration
+# side effect.
 ALL_CHECKS: list[type[ASTCheck]] = [
     ForbidVarsCheck,
     ExcessiveBlankLinesCheck,
@@ -156,7 +157,7 @@ class CheckOrchestrator:
         self.checks = checks
         self.fix_mode = fix_mode
         self.cache = CacheManager(
-            hook_name="ast-checks", cache_version=self._generate_cache_key()
+            hook_name="ruff-extra-rules", cache_version=self._generate_cache_key()
         )
 
     def process_files(self, filepaths: list[str]) -> dict[str, list[Violation]]:
@@ -247,7 +248,7 @@ class CheckOrchestrator:
             # self.cache's own cache_version already rejects a stale entry
             # (enabled checks, their config, or this package's own source
             # changed since it was written) before this ever sees it.
-            cached = self.cache.get_cached_result(filepath, "ast-checks")
+            cached = self.cache.get_cached_result(filepath, "ruff-extra-rules")
             if cached is None:
                 return None
 
@@ -295,7 +296,7 @@ class CheckOrchestrator:
                 )
 
             self.cache.set_cached_result(
-                filepath, "ast-checks", {"violations": serialized}
+                filepath, "ruff-extra-rules", {"violations": serialized}
             )
         except (TypeError, ValueError) as error:
             logger.warning("Cache serialization failed: %s", repr(error))
@@ -430,15 +431,19 @@ class CheckOrchestrator:
 
 
 def load_checks(
-    enabled: set[str] | None = None,
-    disabled: set[str] | None = None,
+    select: set[str] | None = None,
+    ignore: set[str] | None = None,
     check_args: dict[str, Any] | None = None,
 ) -> list[ASTCheck]:
-    """Load and instantiate checks based on enabled/disabled sets.
+    """Load and instantiate checks based on select/ignore sets.
+
+    Mirrors `ruff check --select`/`--ignore`: `select` narrows the
+    candidate set (None = all checks), and `ignore` always subtracts from
+    whatever that candidate set is, whether or not `select` was given.
 
     Args:
-        enabled: Set of check IDs to enable (None = all checks)
-        disabled: Set of check IDs to disable
+        select: Set of check IDs to restrict to (None = all checks)
+        ignore: Set of check IDs to exclude, applied on top of `select`
         check_args: Dict of check-specific arguments
 
     Returns:
@@ -461,12 +466,9 @@ def load_checks(
         check_id = check.check_id
 
         # Determine if check should be loaded
-        if enabled is not None:
-            # Explicit enable list - only load if in list
-            if check_id not in enabled:
-                continue
-        elif disabled is not None and check_id in disabled:
-            # Explicit disable list - skip if in list
+        if select is not None and check_id not in select:
+            continue
+        if ignore is not None and check_id in ignore:
             continue
 
         # Re-instantiate with check-specific arguments, if any were given
@@ -493,17 +495,17 @@ def main(argv: list[str] | None = None) -> int:
         Exit code (0 if no violations, 1 if violations found)
     """
     parser = argparse.ArgumentParser(
-        prog="ast-checks",
+        prog="ruff-extra-rules",
         description="Run multiple AST-based checks in a single pass",
     )
     parser.add_argument("filenames", nargs="*", help="Python files to check")
     parser.add_argument(
-        "--enable",
-        help="Comma-separated list of checks to enable (default: all)",
+        "--select",
+        help="Comma-separated list of checks to restrict to (default: all)",
     )
     parser.add_argument(
-        "--disable",
-        help="Comma-separated list of checks to disable",
+        "--ignore",
+        help="Comma-separated list of checks to exclude",
     )
     parser.add_argument(
         "--fix",
@@ -548,20 +550,20 @@ def main(argv: list[str] | None = None) -> int:
         # All files were excluded
         return 0
 
-    # Parse enabled/disabled sets
-    enabled = {c.strip() for c in args.enable.split(",")} if args.enable else None
-    disabled = {c.strip() for c in args.disable.split(",")} if args.disable else None
+    # Parse select/ignore sets
+    select = {c.strip() for c in args.select.split(",")} if args.select else None
+    ignore = {c.strip() for c in args.ignore.split(",")} if args.ignore else None
 
     # Validate check IDs
     all_check_ids = {cls().check_id for cls in ALL_CHECKS}
-    if enabled:
-        invalid = enabled - all_check_ids
+    if select:
+        invalid = select - all_check_ids
         if invalid:
             checks_str = ", ".join(sorted(invalid))
             print(f"Error: Unknown checks: {checks_str}", file=sys.stderr)
             return 1
-    if disabled:
-        invalid = disabled - all_check_ids
+    if ignore:
+        invalid = ignore - all_check_ids
         if invalid:
             checks_str = ", ".join(sorted(invalid))
             print(f"Error: Unknown checks: {checks_str}", file=sys.stderr)
@@ -576,7 +578,7 @@ def main(argv: list[str] | None = None) -> int:
             check_args[check_class().check_id] = kwargs
 
     # Load checks
-    checks = load_checks(enabled=enabled, disabled=disabled, check_args=check_args)
+    checks = load_checks(select=select, ignore=ignore, check_args=check_args)
 
     if not checks:
         print("Error: No checks enabled", file=sys.stderr)

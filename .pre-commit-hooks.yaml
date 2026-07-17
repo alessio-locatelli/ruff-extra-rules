@@ -1,14 +1,6 @@
-- id: ast-checks
-  name: Python AST checks (grouped)
+- id: ruff-extra-rules
+  name: Extra Python rule checks (ruff-extra-rules)
   description: Run multiple AST-based checks in a single pass for improved performance
   entry: python -m pre_commit_hooks.ast_checks
   language: python
   types: [python]
-
-- id: misplaced-comment
-  name: Fix misplaced comments (STYLE-001)
-  description: Move trailing comments off closing-bracket-only lines to the expression line
-  entry: python -m pre_commit_hooks.ast_checks
-  language: python
-  types: [python]
-  args: [--enable=misplaced-comment, --fix]

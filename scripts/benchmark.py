@@ -21,11 +21,11 @@ from pathlib import Path
 from typing import Any
 
 # Each entry runs one invocation of the real, currently-registered checks —
-# all six now live behind the single ast-checks hook. The sub-checks are
-# benchmarked individually via --enable=<id>, plus one combined run
+# all six now live behind the single ruff-extra-rules hook. The sub-checks
+# are benchmarked individually via --select=<id>, plus one combined run
 # mirroring .pre-commit-hooks.yaml's default args (every check enabled).
 CHECKS: dict[str, list[str]] = {
-    "ast-checks (all enabled)": [
+    "ruff-extra-rules (all enabled)": [
         "python",
         "-m",
         "pre_commit_hooks.ast_checks",
@@ -34,37 +34,37 @@ CHECKS: dict[str, list[str]] = {
         "python",
         "-m",
         "pre_commit_hooks.ast_checks",
-        "--enable=forbid-vars",
+        "--select=forbid-vars",
     ],
     "excessive-blank-lines": [
         "python",
         "-m",
         "pre_commit_hooks.ast_checks",
-        "--enable=excessive-blank-lines",
+        "--select=excessive-blank-lines",
     ],
     "redundant-super-init": [
         "python",
         "-m",
         "pre_commit_hooks.ast_checks",
-        "--enable=redundant-super-init",
+        "--select=redundant-super-init",
     ],
     "validate-function-name": [
         "python",
         "-m",
         "pre_commit_hooks.ast_checks",
-        "--enable=validate-function-name",
+        "--select=validate-function-name",
     ],
     "redundant-assignment": [
         "python",
         "-m",
         "pre_commit_hooks.ast_checks",
-        "--enable=redundant-assignment",
+        "--select=redundant-assignment",
     ],
     "misplaced-comment": [
         "python",
         "-m",
         "pre_commit_hooks.ast_checks",
-        "--enable=misplaced-comment",
+        "--select=misplaced-comment",
     ],
 }
 

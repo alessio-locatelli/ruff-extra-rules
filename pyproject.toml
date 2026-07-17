@@ -21,7 +21,7 @@ classifiers = [
 
 # Entry points define the CLI commands
 # These map to the 'entry' field in .pre-commit-hooks.yaml
-# Note: ast-checks uses python -m entry point instead of a script entry
+# Note: ruff-extra-rules uses python -m entry point instead of a script entry
 [project.scripts]
 
 [dependency-groups]

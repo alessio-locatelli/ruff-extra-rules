@@ -14,12 +14,7 @@ Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside 
 
 ## Registered Hooks
 
-This repository registers two hooks in `.pre-commit-hooks.yaml`, both backed by the same `ast_checks` implementation (there's one orchestrator, one cache, one prefilter — not a duplicated pipeline):
-
-| Hook id             | What it runs                                                                                                                                                                                                   |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ast-checks`        | A grouped orchestrator that runs every AST-based check (TRI001–TRI005, STYLE-001) against each file in a single parse pass, report-only by default. Individual checks are toggled with `--enable`/`--disable`. |
-| `misplaced-comment` | The same orchestrator restricted to STYLE-001 with `--fix` on by default — moving a comment off a closing-bracket-only line never changes semantics, so it's safe to auto-apply without a human review step.   |
+This repository registers a single hook, `ruff-extra-rules`, in `.pre-commit-hooks.yaml` (there's one orchestrator, one cache, one prefilter — not a duplicated pipeline). It runs every AST-based check (TRI001–TRI005, STYLE-001) against each file in a single parse pass, report-only by default. Individual checks are toggled with `--select`/`--ignore`, and `--fix` applies whatever each check's own fix logic considers safe — mirroring `ruff check`'s own `--select`/`--ignore`/`--fix` flags.
 
 There are no other installable hook ids and no console-script entry points (`[project.scripts]` in `pyproject.toml` is intentionally empty) — every check runs via `python -m pre_commit_hooks.ast_checks`.
 
@@ -27,14 +22,14 @@ There are no other installable hook ids and no console-script entry points (`[pr
 
 ---
 
-### ast-checks (grouped)
+### ruff-extra-rules (grouped)
 
-The `ast-checks` hook runs every check below in a single AST parse pass per file. Two `args:` flags in `.pre-commit-config.yaml` narrow that down, and they're mutually exclusive ways of doing the same thing:
+The `ruff-extra-rules` hook runs every check below in a single AST parse pass per file. `--select`/`--ignore` narrow which checks run:
 
-- `--enable=<id>,<id>` restricts the hook to **only** the listed check(s) — every other check is skipped entirely for that hook block, not merely left in report-only mode.
-- `--disable=<id>,<id>` is the inverse: it runs every check _except_ the listed ones.
+- `--select=<id>,<id>` restricts the hook to **only** the listed check(s).
+- `--ignore=<id>,<id>` excludes the listed check(s) — it composes with `--select` rather than replacing it, just like `ruff check --select`/`--ignore`.
 
-This matters for the per-check `--fix` examples below: `args: [--enable=redundant-assignment, --fix]` fixes `redundant-assignment` and runs nothing else — it does not also report on the other checks. To auto-fix one check while still getting reports for the rest, add two `ast-checks` hook blocks: one scoped to that check with `--fix`, and a second, unscoped one (or `--disable`-ing that same check) for report-only coverage of everything else.
+This matters for the per-check `--fix` examples below: `args: [--select=redundant-assignment, --fix]` fixes (and only reports on) `redundant-assignment` alone. To auto-fix everything at once while still reporting on whatever isn't fixable, drop `--select` entirely — `args: [--fix]` applies to every check.
 
 ---
 
@@ -64,8 +59,8 @@ src/process.py:2: TRI001: Forbidden variable name 'data' found. Use a more descr
 **Fix mode:**
 
 ```yaml
-- id: ast-checks
-  args: [--enable=forbid-vars, --fix]
+- id: ruff-extra-rules
+  args: [--select=forbid-vars, --fix]
 ```
 
 ---
@@ -204,8 +199,8 @@ Applies equally to `async def get_*` functions.
 - High confidence suggestion
 
 ```yaml
-- id: ast-checks
-  args: [--enable=validate-function-name, --fix]
+- id: ruff-extra-rules
+  args: [--select=validate-function-name, --fix]
 ```
 
 **Suppression:**
@@ -285,8 +280,8 @@ print(msg)
 - Inlining won't exceed 88 characters (Black's default)
 
 ```yaml
-- id: ast-checks
-  args: [--enable=redundant-assignment, --fix]
+- id: ruff-extra-rules
+  args: [--select=redundant-assignment, --fix]
 ```
 
 **Example autofix:**
@@ -338,10 +333,11 @@ result = func(
 - Inline suppression with `# pytriage: ignore=STYLE-001`
 - Preserves the source file's PEP 263 declared encoding; lines untouched by a fix also keep their original newline style (CRLF/LF) — a line a fix rewrites gets a plain `\n`
 
-Registered as its own hook id with `--fix` on by default (see [Registered Hooks](#registered-hooks)):
+Runs as part of the single `ruff-extra-rules` hook like every other check above (see [Registered Hooks](#registered-hooks)). Its fix is a purely mechanical text move that never changes semantics, so it's always safe to include in a `--fix` run alongside the rest:
 
 ```yaml
-- id: misplaced-comment
+- id: ruff-extra-rules
+  args: [--fix]
 ```
 
 ---
@@ -357,8 +353,7 @@ repos:
   - repo: https://github.com/alessio-locatelli/ruff-extra-rules
     rev: <tag-or-commit-sha> # pin a specific tag or commit; see the repo's tags for available versions
     hooks:
-      - id: ast-checks
-      - id: misplaced-comment
+      - id: ruff-extra-rules
 ```
 
 Then install the hooks:
@@ -388,8 +383,8 @@ git commit -m "Add new feature"
 **Example output when violations are found:**
 
 ```
-Python AST checks (grouped)......................................Failed
-- hook id: ast-checks
+Extra Python rule checks (ruff-extra-rules)......................Failed
+- hook id: ruff-extra-rules
 - exit code: 1
 
 src/process.py:2: TRI001: Forbidden variable name 'data' found. Use a more descriptive name. Or add '# pytriage: ignore=TRI001' to suppress.
@@ -400,7 +395,7 @@ src/process.py:2: TRI001: Forbidden variable name 'data' found. Use a more descr
 Run a hook manually via prek (or pre-commit) on all files:
 
 ```bash
-prek run ast-checks --all-files
+prek run ruff-extra-rules --all-files
 ```
 
 ## Configuration

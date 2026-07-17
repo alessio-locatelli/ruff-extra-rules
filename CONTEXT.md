@@ -5,7 +5,7 @@ Custom pre-commit/prek hooks providing fast, AST-based Python rule checks that r
 ## Language
 
 **Hook**:
-An installable unit registered in `.pre-commit-hooks.yaml` that pre-commit/prek invokes as a subprocess against a set of files. This repo exposes two, both backed by the same `ast_checks` orchestrator: `ast-checks` (every check, report-only by default) and `misplaced-comment` (STYLE-001 only, `--fix` on by default).
+An installable unit registered in `.pre-commit-hooks.yaml` that pre-commit/prek invokes as a subprocess against a set of files. This repo exposes a single one, `ruff-extra-rules`, backed by the `ast_checks` orchestrator: every check runs in one pass, report-only by default, with `--select`/`--ignore`/`--fix` narrowing and fixing like `ruff check`'s own flags (see `docs/adr/0008-ruff-check-cli-parity.md`).
 _Avoid_: linter, tool
 
 **Check**:

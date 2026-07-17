@@ -5,7 +5,7 @@ Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside 
 ## Project Context
 
 - Personal hobby project, maintained solo by Alessio through coding agents — not used by anyone else.
-- Originally built in "vibe-coding" mode: none of the existing architecture or design decisions (duplicated hook pipelines, decorator-based check registry, etc.) were deliberate choices. The messiness is inherited, not intentional — don't assume unwritten rationale behind odd patterns.
+- Originally built in "vibe-coding" mode: none of the existing architecture or design decisions were deliberate choices. The messiness is inherited, not intentional — don't assume unwritten rationale behind odd patterns.
 - Before assuming a pattern here is deliberate, check whether it's covered by an ADR in `docs/adr/`. If it isn't, treat it as accretion, not intent.
 - Breaking changes are allowed and expected. Don't design backward-compatibility shims, deprecation warnings, or migration paths for this project's own hook ids/CLI surface.
 - No hosted CI exists — this is a single-maintainer local repo, and the full command sequence under [Development](#development) is run locally before every commit instead. Don't add a CI badge or workflow implying automated checks run unless a real CI workflow is actually added.
@@ -46,8 +46,8 @@ Use [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
 uv run python -m pre_commit_hooks.ast_checks --list-checks
-uv run python -m pre_commit_hooks.ast_checks --enable=forbid-vars,validate-function-name src/
-uv run python -m pre_commit_hooks.ast_checks --disable=redundant-assignment --fix src/
+uv run python -m pre_commit_hooks.ast_checks --select=forbid-vars,validate-function-name src/
+uv run python -m pre_commit_hooks.ast_checks --ignore=redundant-assignment --fix src/
 ```
 
 ## Development
