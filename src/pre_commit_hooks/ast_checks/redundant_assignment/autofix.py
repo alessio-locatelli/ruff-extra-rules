@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from .._base import Violation, byte_col_to_char_col
+from .._base import Violation, atomic_write_text, byte_col_to_char_col
 
 
 def apply_fixes(
@@ -125,7 +125,7 @@ def apply_fixes(
 
         # Write the fixed source back to file
         new_source = "".join(source_lines)
-        filepath.write_text(new_source, encoding=encoding, newline="")
+        atomic_write_text(filepath, new_source, encoding)
         return True
 
     return False

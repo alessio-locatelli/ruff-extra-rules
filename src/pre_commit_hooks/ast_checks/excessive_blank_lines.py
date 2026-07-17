@@ -12,7 +12,7 @@ import ast
 import logging
 from pathlib import Path
 
-from ._base import Violation
+from ._base import Violation, atomic_write_text
 
 logger = logging.getLogger("excessive_blank_lines")
 
@@ -231,7 +231,7 @@ class ExcessiveBlankLinesCheck:
             fixed_content = fix_file_content(source, tree)
 
             # Write back to file
-            filepath.write_text(fixed_content, encoding=encoding, newline="")
+            atomic_write_text(filepath, fixed_content, encoding)
             return True
         except OSError as os_error:
             logger.error("Failed to write %s: %s", filepath, repr(os_error))
