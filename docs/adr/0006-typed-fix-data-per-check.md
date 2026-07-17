@@ -15,4 +15,4 @@ A second problem sits on top of the typing gap: an implicit `fix_data["fixed"] =
 - `_base.py` gains `mark_fixed(violation)` / `is_fixed(violation)`; every read/write of the `"fixed"` convention (currently three independent hand-written sites) routes through them, including deleting the dead marking identified above in `validate_function_name/__init__.py`.
 - Each of `forbid_vars.py`, `redundant_assignment/__init__.py`, and `validate_function_name/__init__.py` gains its own private `TypedDict` (e.g. `ForbidVarsFixData`) co-located in that module, not exported or referenced from `_base.py` or the orchestrator.
 - `misplaced_comment.py` and `excessive_blank_lines.py`, which never store anything beyond the shared `"fixed"` flag, need no `TypedDict` of their own.
-- Tracked as `docs/work-items/04-typed-fix-data-and-fixed-marker.md`.
+- Tracked as `docs/work-items/archived/04-typed-fix-data-and-fixed-marker.md`.

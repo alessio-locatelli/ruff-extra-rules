@@ -15,4 +15,4 @@ While designing the replacement, a second, related gap surfaced: `CheckOrchestra
 - `CACHE_VERSION` as a hand-maintained string is removed entirely; the cache key becomes: sorted `check_id` list + a fingerprint of each enabled check's constructor arguments + a SHA-1 hash of the concatenated source of every `.py` file under `src/pre_commit_hooks/`.
 - The tree hash is recomputed fresh on every process invocation rather than cached to disk itself — the simplest correct option; revisit only if `scripts/benchmark.py` shows it matters.
 - A change to any file in `src/pre_commit_hooks/` — including a check's own file, a shared module, or `_cache.py`'s own serialization logic — invalidates every cached result for every check, not just the ones a finer-grained scheme would isolate. Traded deliberately for eliminating the class of bug that already occurred once.
-- Tracked as `docs/work-items/07-structural-cache-invalidation.md` and `docs/work-items/09-cache-key-missing-check-config.md`.
+- Tracked as `docs/work-items/archived/07-structural-cache-invalidation.md` and `docs/work-items/archived/09-cache-key-missing-check-config.md`.
