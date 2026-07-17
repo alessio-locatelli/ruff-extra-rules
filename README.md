@@ -29,7 +29,12 @@ There are no other installable hook ids and no console-script entry points (`[pr
 
 ### ast-checks (grouped)
 
-The `ast-checks` hook runs the checks below in a single AST parse pass per file, with every check enabled by default. Select which ones run with `--enable=<id>,<id>` or `--disable=<id>,<id>` (comma-separated check ids) passed via `args:` in your `.pre-commit-config.yaml`.
+The `ast-checks` hook runs every check below in a single AST parse pass per file. Two `args:` flags in `.pre-commit-config.yaml` narrow that down, and they're mutually exclusive ways of doing the same thing:
+
+- `--enable=<id>,<id>` restricts the hook to **only** the listed check(s) — every other check is skipped entirely for that hook block, not merely left in report-only mode.
+- `--disable=<id>,<id>` is the inverse: it runs every check _except_ the listed ones.
+
+This matters for the per-check `--fix` examples below: `args: [--enable=redundant-assignment, --fix]` fixes `redundant-assignment` and runs nothing else — it does not also report on the other checks. To auto-fix one check while still getting reports for the rest, add two `ast-checks` hook blocks: one scoped to that check with `--fix`, and a second, unscoped one (or `--disable`-ing that same check) for report-only coverage of everything else.
 
 ---
 
@@ -47,10 +52,8 @@ The `ast-checks` hook runs the checks below in a single AST parse pass per file,
 **Features:**
 
 - Detects forbidden names in assignments, function parameters, and async functions
-- **Autofixing**: suggests and optionally applies meaningful names based on context (`--fix`). The rename is scope-aware — it replaces only the AST `Name` nodes for that specific binding within its scope, not every textual occurrence in the file.
-- Supports a custom blacklist via `--forbid-vars-names`
+- **Autofixing**: suggests and optionally applies meaningful names based on context (`--fix`). The rename is scope-aware — it replaces only the AST `Name` nodes for that specific binding within its scope, not every textual occurrence in the file. Suggestions come from a fixed, built-in set of patterns (HTTP calls, file I/O, database queries, data-science idioms, and generic `get_`/`find_`/`create_` prefixes) — not configurable per-project.
 - Inline suppression with `# pytriage: ignore=TRI001`
-- Clear error messages with line numbers and helpful links
 
 **Suggest mode (default):**
 
@@ -63,33 +66,6 @@ src/process.py:2: TRI001: Forbidden variable name 'data' found. Use a more descr
 ```yaml
 - id: ast-checks
   args: [--enable=forbid-vars, --fix]
-```
-
-#### Autofix Configuration (`pyproject.toml`)
-
-You can configure the `forbid-vars` autofix behavior in your `pyproject.toml` file.
-
-**Enabling/Disabling Categories:**
-
-The autofix patterns are grouped into categories (`http`, `file`, `database`, `data-science`, `semantic`). By default, only the `http` category is enabled. You can enable more categories like this:
-
-```toml
-[tool.forbid-vars.autofix]
-enabled = ["http", "file", "database"]
-```
-
-**Custom Patterns:**
-
-You can also add your own custom patterns. This is useful for project-specific conventions.
-
-```toml
-[tool.forbid-vars.autofix]
-enabled = ["custom"]
-
-[[tool.forbid-vars.autofix.patterns]]
-category = "custom"
-regex = "get_user_profile"
-name = "user_profile"
 ```
 
 ---
@@ -153,9 +129,8 @@ class Child(Base):
 
 - Detects redundant `**kwargs` forwarding using AST analysis
 - Analyzes class hierarchies and method signatures
-- Limited to same-file parent classes (safe, zero false positives)
 - Handles multiple inheritance correctly
-- Gracefully skips unresolvable parent classes (imports, stdlib)
+- Limited to same-file parent classes — an imported or stdlib parent is skipped rather than guessed at
 - Inline suppression with `# pytriage: ignore=TRI003`, placed on the `__init__` definition line
 - No autofix — this check flags a design decision the caller has to make
 
@@ -429,18 +404,6 @@ prek run ast-checks --all-files
 ```
 
 ## Configuration
-
-### Custom Forbidden Names
-
-Override the `forbid-vars` default blacklist with your own:
-
-```yaml
-- repo: https://github.com/alessio-locatelli/ruff-extra-rules
-  rev: <tag-or-commit-sha>
-  hooks:
-    - id: ast-checks
-      args: [--forbid-vars-names=data, result, info, temp, obj, value]
-```
 
 ### Inline Suppression
 
