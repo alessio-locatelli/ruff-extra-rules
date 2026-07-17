@@ -19,14 +19,14 @@ from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 
-from ._base import Violation, atomic_write_text, find_ignored_lines
+from ._base import Violation, atomic_write_text, find_ignored_lines, ignore_pattern_for
 
 logger = logging.getLogger("misplaced_comment")
 
 CHECK_ID = "misplaced-comment"
 ERROR_CODE = "STYLE-001"
 
-IGNORE_PATTERN = re.compile(r"#\s*pytriage:\s*ignore=STYLE-001", re.IGNORECASE)
+IGNORE_PATTERN = ignore_pattern_for("STYLE-001")
 
 # Linter pragma patterns that should NEVER be moved
 LINTER_PRAGMA_PATTERNS = [

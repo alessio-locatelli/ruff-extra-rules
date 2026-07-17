@@ -7,12 +7,12 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
-from .._base import read_source_with_encoding
+from .._base import find_ignored_lines, ignore_pattern_for, read_source_with_encoding
 
 logger = logging.getLogger("validate_function_name")
 
-# Inline ignore comment format: # pytriage: ignore=TRI004
-IGNORE_COMMENT_MARKER = "pytriage: ignore=TRI004"
+# Format: # pytriage: ignore=TRI004
+IGNORE_PATTERN = ignore_pattern_for("TRI004")
 GET_PREFIX = "get_"
 
 
@@ -31,20 +31,6 @@ def read_source(path: Path) -> str:
     """Read source code from a file, honoring a PEP 263 encoding declaration."""
     source, _encoding = read_source_with_encoding(path)
     return source
-
-
-def line_at(source: str, lineno: int) -> str:
-    """Get the line at the given line number (1-indexed)."""
-    lines = source.splitlines()
-    return lines[lineno - 1] if lineno - 1 < len(lines) else ""
-
-
-def has_inline_ignore(
-    source: str, func_node: ast.FunctionDef | ast.AsyncFunctionDef
-) -> bool:
-    """Check if function has inline ignore comment."""
-    line = line_at(source, func_node.lineno)
-    return IGNORE_COMMENT_MARKER in line
 
 
 def _call_name(node: ast.AST) -> str | None:
@@ -529,6 +515,7 @@ def collect_suggestions(
     # attach parent links for better analysis
     attach_parents(tree)
 
+    ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
     suggestions: list[Suggestion] = []
 
     for node in ast.walk(tree):
@@ -538,7 +525,7 @@ def collect_suggestions(
             # skip if decorated with override/abstract
             if is_decorator_override_or_abstract(node):
                 continue
-            if has_inline_ignore(source, node):
+            if node.lineno in ignored_lines:
                 continue
             # skip simple accessors/dict-like getters (idiomatic)
             if is_simple_accessor(node):

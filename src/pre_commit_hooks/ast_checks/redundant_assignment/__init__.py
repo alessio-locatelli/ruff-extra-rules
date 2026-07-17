@@ -31,17 +31,15 @@ Examples:
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 
-from .._base import Violation, find_ignored_lines
+from .._base import Violation, find_ignored_lines, ignore_pattern_for
 from .analysis import VariableTracker, detect_redundancy
 from .autofix import apply_fixes
 from .semantic import should_autofix, should_report_violation
 
-# Regex pattern for inline ignore comments
 # Format: # pytriage: ignore=TRI005
-IGNORE_PATTERN = re.compile(r"#\s*pytriage:\s*ignore=TRI005", re.IGNORECASE)
+IGNORE_PATTERN = ignore_pattern_for("TRI005")
 
 ERROR_CODE = "TRI005"
 CHECK_ID = "redundant-assignment"

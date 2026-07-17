@@ -56,7 +56,14 @@ class CacheManager:
     # this change would otherwise keep reporting it even after a
     # `# pytriage: ignore=...` comment is added, since the file's own
     # content hash still matches the stale cache entry.
-    CACHE_VERSION = "1.3.0"
+    #
+    # 1.4.0: validate-function-name (TRI004) moved its own hand-rolled
+    # substring-based inline-ignore check onto the shared, tokenize-based
+    # find_ignored_lines() — this is stricter about only matching real
+    # comments (not string/byte literals containing the marker text) and
+    # more lenient about whitespace/case around it, so a cached result from
+    # before this change could differ from what the check computes now.
+    CACHE_VERSION = "1.4.0"
     DEFAULT_CACHE_DIR = Path(".cache/pre_commit_hooks")
 
     def __init__(

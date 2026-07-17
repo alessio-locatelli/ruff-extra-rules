@@ -20,6 +20,7 @@ from ._base import (
     atomic_write_text,
     byte_col_to_char_col,
     find_ignored_lines,
+    ignore_pattern_for,
 )
 from ._scope import collect_scope_names, iter_within_scope
 
@@ -27,7 +28,7 @@ logger = logging.getLogger("forbid_vars")
 
 # Regex pattern for inline ignore comments
 # Format: # pytriage: ignore=TRI001
-IGNORE_PATTERN = re.compile(r"#\s*pytriage:\s*ignore=TRI001", re.IGNORECASE)
+IGNORE_PATTERN = ignore_pattern_for("TRI001")
 
 # Default forbidden variable names
 DEFAULT_FORBIDDEN_NAMES = {"data", "result"}
