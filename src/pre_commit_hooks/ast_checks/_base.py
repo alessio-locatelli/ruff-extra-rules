@@ -148,7 +148,7 @@ class ASTCheck(Protocol):
 class BaseCheck:
     """No-op defaults for ASTCheck's optional CLI-argument extension
     points, so a check with nothing check-specific doesn't have to repeat
-    the override itself (see ForbidVarsCheck for the one real usage).
+    the override itself.
     """
 
     @classmethod

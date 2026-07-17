@@ -6,8 +6,6 @@ import ast
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
 
 
@@ -545,24 +543,6 @@ class TestSomething:
     assert "result" in violations[0].message
 
 
-def test_custom_forbidden_names() -> None:
-    check = ForbidVarsCheck(forbidden_names={"foo", "bar"})
-
-    source = """def process():
-    foo = 1
-    bar = 2
-    data = 3  # Should NOT be flagged with custom config
-    return foo, bar, data
-"""
-
-    tree = ast.parse(source)
-    violations = check.check(Path("test.py"), tree, source)
-
-    assert len(violations) == 2
-    names = {v.fix_data["name"] for v in violations if v.fix_data}
-    assert names == {"foo", "bar"}
-
-
 def test_positional_only_parameters() -> None:
     source = """def process(data, /, other):  # 'data' is positional-only
     return data, other
@@ -627,26 +607,6 @@ def test_check_ids() -> None:
     assert check.error_code == "TRI001"
 
 
-def test_different_forbidden_names() -> None:
-    check = ForbidVarsCheck(forbidden_names={"temp", "tmp"})
-
-    source = """def process():
-    data = 1  # Should NOT be flagged
-    temp = 2  # Should be flagged
-    return data, temp
-"""
-
-    tree = ast.parse(source)
-    violations = check.check(Path("test.py"), tree, source)
-
-    assert len(violations) == 1, "Should only flag the configured names"
-    assert "temp" in violations[0].message
-
-    patterns = check.get_prefilter_pattern()
-    assert patterns is not None
-    assert set(patterns) == {"temp", "tmp"}
-
-
 def test_keyword_only_parameters() -> None:
     source = """def process(*, data, other):  # 'data' is keyword-only
     return data, other
@@ -698,164 +658,16 @@ def test_function_annotated_assignment_with_value() -> None:
     assert "data" in violations[0].message
 
 
-def test_load_autofix_config_without_pyproject() -> None:
-    import os
-
-    from pre_commit_hooks.ast_checks.forbid_vars import load_autofix_config
-
-    original_dir = os.getcwd()
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
-            config = load_autofix_config()
-
-            assert "patterns" in config
-            assert "enabled" in config
-            assert config["enabled"] == ["http"]
-    finally:
-        os.chdir(original_dir)
-
-
-def test_autofix_with_custom_patterns() -> None:
-    import os
-
-    original_dir = os.getcwd()
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
-
-            pyproject = Path("pyproject.toml")
-            pyproject.write_text(r"""
-[tool.forbid-vars.autofix]
-enabled = ["custom", "http"]
-
-[[tool.forbid-vars.autofix.patterns]]
-category = "custom"
-regex = "\\.fetch\\(.*\\)"
-name = "fetched_data"
-""")
-
-            from pre_commit_hooks.ast_checks.forbid_vars import load_autofix_config
-
-            config = load_autofix_config()
-
-            assert "custom" in config["patterns"]
-            assert "http" in config["enabled"]
-            assert "custom" in config["enabled"]
-    finally:
-        os.chdir(original_dir)
-
-
-def test_autofix_custom_pattern_without_category_is_skipped() -> None:
-    import os
-
-    original_dir = os.getcwd()
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
-
-            pyproject = Path("pyproject.toml")
-            pyproject.write_text(r"""
-[[tool.forbid-vars.autofix.patterns]]
-regex = "\\.fetch\\(.*\\)"
-name = "fetched_data"
-""")
-
-            from pre_commit_hooks.ast_checks.forbid_vars import load_autofix_config
-
-            config = load_autofix_config()
-
-            assert not any(
-                p["name"] == "fetched_data"
-                for patterns in config["patterns"].values()
-                for p in patterns
-            )
-    finally:
-        os.chdir(original_dir)
-
-
-def test_load_autofix_config_found_from_subdirectory_of_repo(tmp_path: Path) -> None:
-    """Regression: the CLI accepts files from any CWD, so config lookup must
-    resolve the repo root via git rather than assuming CWD == repo root.
-    """
-    import os
-    import subprocess
-
-    from pre_commit_hooks.ast_checks.forbid_vars import load_autofix_config
-
-    subprocess.run(["git", "init", "-q"], check=True, cwd=tmp_path)
-    pyproject = tmp_path / "pyproject.toml"
-    pyproject.write_text(r"""
-[tool.forbid-vars.autofix]
-enabled = ["custom"]
-
-[[tool.forbid-vars.autofix.patterns]]
-category = "custom"
-regex = "\\.fetch\\(.*\\)"
-name = "fetched_data"
-""")
-    subdir = tmp_path / "src" / "nested"
-    subdir.mkdir(parents=True)
-
-    original_dir = os.getcwd()
-    try:
-        os.chdir(subdir)
-        config = load_autofix_config()
-    finally:
-        os.chdir(original_dir)
-
-    assert "custom" in config["enabled"]
-    assert any(p["name"] == "fetched_data" for p in config["patterns"]["custom"])
-
-
-def test_repo_root_falls_back_to_cwd_when_git_unavailable(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    import subprocess
-
-    from pre_commit_hooks.ast_checks.forbid_vars import _repo_root
-
-    def _raise(*args: object, **kwargs: object) -> None:
-        raise FileNotFoundError("git not found")
-
-    monkeypatch.setattr(subprocess, "run", _raise)
-
-    assert _repo_root() == Path.cwd()
-
-
-def test_autofix_custom_pattern_merges_into_existing_category() -> None:
-    import os
-
-    original_dir = os.getcwd()
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
-
-            pyproject = Path("pyproject.toml")
-            pyproject.write_text(r"""
-[[tool.forbid-vars.autofix.patterns]]
-category = "http"
-regex = "\\.patch\\(.*\\)"
-name = "patched_data"
-""")
-
-            from pre_commit_hooks.ast_checks.forbid_vars import load_autofix_config
-
-            config = load_autofix_config()
-
-            assert any(p["name"] == "patched_data" for p in config["patterns"]["http"])
-            # Default "http" patterns are still present alongside the custom one
-            assert any(p["name"] == "response" for p in config["patterns"]["http"])
-    finally:
-        os.chdir(original_dir)
-
-
 def test_suggestion_fallback_when_in_forbidden_names() -> None:
-    check = ForbidVarsCheck(forbidden_names={"data", "response"})
+    """The semantic category's get_<x> -> <x> substitution can itself
+    produce a forbidden name; the fix then falls back to a generic 'var'
+    name instead of introducing a new violation.
+    """
+    check = ForbidVarsCheck()
 
     source = """def fetch():
-    data = response.get()
-    return data
+    result = get_result()
+    return result
 """
 
     tree = ast.parse(source)
@@ -889,37 +701,20 @@ def test_name_conflict_counter_increment() -> None:
 
 
 def test_semantic_naming_with_regex_groups() -> None:
-    import os
+    check = ForbidVarsCheck()
 
-    original_dir = os.getcwd()
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
-
-            pyproject = Path("pyproject.toml")
-            pyproject.write_text("""
-[tool.forbid-vars.autofix]
-enabled = ["semantic"]
-""")
-
-            from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
-
-            check = ForbidVarsCheck()
-
-            source = """def process():
+    source = """def process():
     data = get_user()
     return data
 """
 
-            tree = ast.parse(source)
-            violations = check.check(Path("test.py"), tree, source)
+    tree = ast.parse(source)
+    violations = check.check(Path("test.py"), tree, source)
 
-            assert len(violations) == 1
-            assert violations[0].fixable
-            assert violations[0].fix_data is not None
-            assert violations[0].fix_data["suggestion"] == "user"
-    finally:
-        os.chdir(original_dir)
+    assert len(violations) == 1
+    assert violations[0].fixable
+    assert violations[0].fix_data is not None
+    assert violations[0].fix_data["suggestion"] == "user"
 
 
 def test_cached_scope_names_reuse() -> None:
@@ -983,40 +778,23 @@ def test_semantic_naming_false_when_match_not_on_target_line() -> None:
     different line than the target (e.g. a parenthesized multi-line RHS),
     that lookup finds nothing and the raw group-reference name is kept as-is.
     """
-    import os
+    check = ForbidVarsCheck()
 
-    original_dir = os.getcwd()
-    try:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            os.chdir(tmpdir)
-
-            pyproject = Path("pyproject.toml")
-            pyproject.write_text("""
-[tool.forbid-vars.autofix]
-enabled = ["semantic"]
-""")
-
-            from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
-
-            check = ForbidVarsCheck()
-
-            source = """def process():
+    source = """def process():
     data = (
         get_user()
     )
     return data
 """
 
-            tree = ast.parse(source)
-            violations = check.check(Path("test.py"), tree, source)
+    tree = ast.parse(source)
+    violations = check.check(Path("test.py"), tree, source)
 
-            assert len(violations) == 1
-            assert violations[0].fix_data is not None
-            # The regex-group reference couldn't be resolved against the
-            # target's own line, so the raw pattern name is used unexpanded.
-            assert violations[0].fix_data["suggestion"] == r"\1"
-    finally:
-        os.chdir(original_dir)
+    assert len(violations) == 1
+    assert violations[0].fix_data is not None
+    # The regex-group reference couldn't be resolved against the
+    # target's own line, so the raw pattern name is used unexpanded.
+    assert violations[0].fix_data["suggestion"] == r"\1"
 
 
 def test_annotated_attribute_assignment_is_not_checked() -> None:

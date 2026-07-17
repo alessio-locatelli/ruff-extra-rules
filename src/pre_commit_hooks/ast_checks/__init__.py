@@ -29,7 +29,6 @@ import argparse
 import ast
 import json
 import logging
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -118,18 +117,16 @@ def _fingerprint_default(value: object) -> Any:
     """
     if isinstance(value, (set, frozenset)):
         return sorted(value)
-    if isinstance(value, re.Pattern):
-        return value.pattern
     return repr(value)
 
 
 def _fingerprint_check(check: ASTCheck) -> str:
     """Stable fingerprint of a check instance's own state — effectively its
-    constructor arguments, e.g. so `ForbidVarsCheck(forbidden_names={"x"})`
-    and `ForbidVarsCheck()` fingerprint differently and don't share a cache
-    entry. Checks with no `__init__` override (most of them) have no
-    instance attributes at all, so this is deliberately a generic `vars()`
-    dump rather than something every check must opt into.
+    constructor arguments, so two instances of the same check with different
+    configuration wouldn't share a cache entry. Checks with no `__init__`
+    override (most of them) have no instance attributes at all, so this is
+    deliberately a generic `vars()` dump rather than something every check
+    must opt into.
     """
     return json.dumps(vars(check), default=_fingerprint_default, sort_keys=True)
 

@@ -8,12 +8,9 @@ Inline ignore: # pytriage: ignore=TRI001
 
 from __future__ import annotations
 
-import argparse
 import ast
 import logging
 import re
-import subprocess
-import tomllib
 from pathlib import Path
 from typing import Any, TypedDict, cast
 
@@ -108,72 +105,8 @@ def _compile_patterns(
     return compiled
 
 
-def _repo_root() -> Path:
-    """Resolve the repo root via `git rev-parse --show-toplevel`.
-
-    The documented CLI usage (`... path/to/file.py`) allows invocation from
-    any CWD, so a plain `Path("pyproject.toml")` lookup would silently miss
-    a repo's `[tool.forbid-vars.autofix]` customization unless invoked from
-    the repo root exactly. Falls back to the process CWD — the previous
-    behavior — if git isn't available or the CWD isn't inside a repo.
-    """
-    try:
-        rev_parse = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-        if rev_parse.returncode == 0:
-            return Path(rev_parse.stdout.strip())
-    except (
-        subprocess.SubprocessError,
-        FileNotFoundError,
-        subprocess.TimeoutExpired,
-    ) as error:
-        logger.debug(repr(error))
-    return Path.cwd()
-
-
-def load_autofix_config() -> dict[str, Any]:
-    """Load autofix configuration from pyproject.toml and pre-compile regex patterns.
-
-    Returns:
-        A dictionary containing the autofix configuration with pre-compiled regexes.
-    """
-    pyproject_path = _repo_root() / "pyproject.toml"
-    if not pyproject_path.exists():
-        return {
-            "patterns": _compile_patterns(DEFAULT_AUTOFIX_PATTERNS),
-            "enabled": ["http"],
-        }
-
-    with open(pyproject_path, "rb") as f:
-        pyproject_data = tomllib.load(f)
-
-    config = pyproject_data.get("tool", {}).get("forbid-vars", {}).get("autofix", {})
-
-    # Combine default and custom patterns
-    patterns = DEFAULT_AUTOFIX_PATTERNS.copy()
-    custom_patterns = config.get("patterns", [])
-    for custom_pattern in custom_patterns:
-        category = custom_pattern.get("category")
-        if category:
-            if category not in patterns:
-                patterns[category] = []
-            patterns[category].append(
-                {
-                    "regex": custom_pattern["regex"],
-                    "name": custom_pattern["name"],
-                }
-            )
-
-    # Get enabled categories, default to http
-    enabled = config.get("enabled", ["http"])
-
-    # Pre-compile all regex patterns (performance optimization)
-    return {"patterns": _compile_patterns(patterns), "enabled": enabled}
+# Autofix patterns are always active and not user-configurable — see README.
+AUTOFIX_PATTERNS = _compile_patterns(DEFAULT_AUTOFIX_PATTERNS)
 
 
 class ForbiddenNameVisitor(ast.NodeVisitor):
@@ -187,19 +120,16 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         self,
         forbidden_names: set[str],
         source: str,
-        autofix_config: dict[str, Any],
     ) -> None:
         """Initialize the visitor.
 
         Args:
             forbidden_names: Set of variable names that are not allowed.
             source: The source code of the file being checked.
-            autofix_config: Configuration for the autofix feature.
         """
         self.forbidden_names = forbidden_names
         self.source = source  # Store full source (optimization: avoid reconstruction)
         self.source_lines = source.splitlines()
-        self.autofix_config = autofix_config
         self.violations: list[ForbidVarsFixData] = []
         # Scope tracking for scope-aware name generation and replacement
         self.current_scope: list[ast.AST] = []
@@ -296,11 +226,7 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         best_match = None
         max_specificity = -1
 
-        enabled_categories = self.autofix_config.get("enabled", [])
-        all_patterns = self.autofix_config.get("patterns", {})
-
-        for category in enabled_categories:
-            patterns = all_patterns.get(category, [])
+        for patterns in AUTOFIX_PATTERNS.values():
             for pattern in patterns:
                 # Use pre-compiled regex (performance optimization)
                 if pattern["compiled"].search(rhs_source):
@@ -563,14 +489,9 @@ def _apply_fixes(
 class ForbidVarsCheck(BaseCheck):
     """Check for forbidden meaningless variable names."""
 
-    def __init__(self, forbidden_names: set[str] | None = None) -> None:
-        """Initialize check.
-
-        Args:
-            forbidden_names: Set of forbidden variable names (default: data, result)
-        """
-        self.forbidden_names = forbidden_names or DEFAULT_FORBIDDEN_NAMES
-        self.autofix_config = load_autofix_config()
+    def __init__(self) -> None:
+        """Initialize check."""
+        self.forbidden_names = DEFAULT_FORBIDDEN_NAMES
 
     @property
     def check_id(self) -> str:
@@ -580,29 +501,8 @@ class ForbidVarsCheck(BaseCheck):
     def error_code(self) -> str:
         return "TRI001"
 
-    @classmethod
-    def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--forbid-vars-names",
-            help=(
-                "Forbidden variable names for forbid-vars check (default: data,result)"
-            ),
-        )
-
-    @classmethod
-    def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
-        if not args.forbid_vars_names:
-            return {}
-        names_list = args.forbid_vars_names.split(",")
-        forbidden_names = {n.strip() for n in names_list if n.strip()}
-        return {"forbidden_names": forbidden_names}
-
     def get_prefilter_pattern(self) -> list[str] | None:
-        """Returns all forbidden names as prefilter patterns.
-
-        __init__ always sets a non-empty forbidden_names (falling back to
-        DEFAULT_FORBIDDEN_NAMES), so this never returns None.
-        """
+        """Returns all forbidden names as prefilter patterns."""
         return sorted(self.forbidden_names)
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
@@ -616,9 +516,7 @@ class ForbidVarsCheck(BaseCheck):
         Returns:
             List of violations
         """
-        visitor = ForbiddenNameVisitor(
-            self.forbidden_names, source, self.autofix_config
-        )
+        visitor = ForbiddenNameVisitor(self.forbidden_names, source)
         visitor.tree = tree  # Store tree for scope-aware name generation
         visitor.visit(tree)
 
