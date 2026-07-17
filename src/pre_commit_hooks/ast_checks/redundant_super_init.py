@@ -13,7 +13,7 @@ import ast
 import logging
 from pathlib import Path
 
-from ._base import Violation, find_ignored_lines, ignore_pattern_for
+from ._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
 
 logger = logging.getLogger("redundant_super_init")
 
@@ -141,7 +141,7 @@ def _parent_accepts_args(
     return False
 
 
-class RedundantSuperInitCheck:
+class RedundantSuperInitCheck(BaseCheck):
     """Check for redundant **kwargs forwarding to parent __init__."""
 
     @property

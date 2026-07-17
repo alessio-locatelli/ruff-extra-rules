@@ -8,6 +8,7 @@ Inline ignore: # pytriage: ignore=TRI001
 
 from __future__ import annotations
 
+import argparse
 import ast
 import logging
 import re
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any, TypedDict, cast
 
 from ._base import (
+    BaseCheck,
     Violation,
     atomic_write_text,
     byte_col_to_char_col,
@@ -529,7 +531,7 @@ def _apply_fixes(
     atomic_write_text(filepath, "".join(lines), encoding)
 
 
-class ForbidVarsCheck:
+class ForbidVarsCheck(BaseCheck):
     """Check for forbidden meaningless variable names."""
 
     def __init__(self, forbidden_names: set[str] | None = None) -> None:
@@ -548,6 +550,23 @@ class ForbidVarsCheck:
     @property
     def error_code(self) -> str:
         return "TRI001"
+
+    @classmethod
+    def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "--forbid-vars-names",
+            help=(
+                "Forbidden variable names for forbid-vars check (default: data,result)"
+            ),
+        )
+
+    @classmethod
+    def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
+        if not args.forbid_vars_names:
+            return {}
+        names_list = args.forbid_vars_names.split(",")
+        forbidden_names = {n.strip() for n in names_list if n.strip()}
+        return {"forbidden_names": forbidden_names}
 
     def get_prefilter_pattern(self) -> list[str] | None:
         """Returns all forbidden names as prefilter patterns.

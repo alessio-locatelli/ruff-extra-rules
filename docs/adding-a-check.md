@@ -13,7 +13,7 @@ For the general prefilter-then-parse pipeline shape, see CLAUDE.md's "Suggested 
 
 ## 2. Implement
 
-Every check implements the `ASTCheck` protocol (`src/pre_commit_hooks/ast_checks/_base.py`):
+Every check implements the `ASTCheck` protocol (`src/pre_commit_hooks/ast_checks/_base.py`) and should inherit `BaseCheck` from the same module:
 
 ```python
 class ASTCheck(Protocol):
@@ -35,9 +35,15 @@ class ASTCheck(Protocol):
         tree: ast.Module,
         encoding: str = "utf-8",
     ) -> bool: ...
+
+    # Optional: register/parse check-specific CLI arguments, e.g. --your-check-option
+    def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None: ...
+    def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]: ...
 ```
 
 `CheckOrchestrator` parses each file's AST **once** and hands the same `tree`/`source` to every enabled check — `check()` must not re-parse the file.
+
+`add_cli_arguments`/`cli_kwargs_from_args` are part of the protocol, so `type[ASTCheck]` (as used by `ALL_CHECKS`) requires both. `BaseCheck` provides a no-op default for each — inherit it (`class YourCheck(BaseCheck):`) unless your check actually needs its own CLI option, in which case override both (see `ForbidVarsCheck` for the one real usage: `--forbid-vars-names`).
 
 Create `src/pre_commit_hooks/ast_checks/your_check.py` (or a package with `__init__.py` if the check needs multiple modules — see `validate_function_name/` for an example). Register the class in `ALL_CHECKS` in `src/pre_commit_hooks/ast_checks/__init__.py`. That's the whole registration step — no `.pre-commit-hooks.yaml` entry and no `[project.scripts]` entry. The check becomes selectable via `--enable=your-check`/`--disable=your-check` on the `ast-checks` hook and shows up in `python -m pre_commit_hooks.ast_checks --list-checks`.
 

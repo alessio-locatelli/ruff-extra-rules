@@ -37,7 +37,7 @@ import logging
 from pathlib import Path
 from typing import Any, TypedDict, cast
 
-from .._base import Violation
+from .._base import BaseCheck, Violation
 from .analysis import Suggestion, collect_suggestions
 from .autofix import apply_fix, should_autofix
 
@@ -54,7 +54,7 @@ class ValidateFunctionNameFixData(TypedDict):
     suggestion: Suggestion
 
 
-class ValidateFunctionNameCheck:
+class ValidateFunctionNameCheck(BaseCheck):
     """Check for get_* functions and suggest better names."""
 
     @property

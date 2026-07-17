@@ -19,7 +19,13 @@ from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 
-from ._base import Violation, atomic_write_text, find_ignored_lines, ignore_pattern_for
+from ._base import (
+    BaseCheck,
+    Violation,
+    atomic_write_text,
+    find_ignored_lines,
+    ignore_pattern_for,
+)
 
 logger = logging.getLogger("misplaced_comment")
 
@@ -129,7 +135,7 @@ def _scan_misplaced_comments(
     return found
 
 
-class MisplacedCommentCheck:
+class MisplacedCommentCheck(BaseCheck):
     """Move trailing comments off closing-bracket-only lines."""
 
     @property
