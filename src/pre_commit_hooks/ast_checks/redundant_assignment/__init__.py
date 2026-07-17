@@ -32,10 +32,11 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import Any, cast
 
 from .._base import Violation, find_ignored_lines, ignore_pattern_for
 from .analysis import VariableTracker, detect_redundancy
-from .autofix import apply_fixes
+from .autofix import RedundantAssignmentFixData, apply_fixes
 from .semantic import should_autofix, should_report_violation
 
 # Format: # pytriage: ignore=TRI005
@@ -158,6 +159,15 @@ class RedundantAssignmentCheck:
             assert len(lifecycle.uses) == 1
             single_use = lifecycle.uses[0]
 
+            fix_data: RedundantAssignmentFixData = {
+                "pattern": pattern.name,
+                "assign_line": lifecycle.assignment.line,
+                "var_name": lifecycle.assignment.var_name,
+                "rhs_source": lifecycle.assignment.rhs_source,
+                "use_line": single_use.line,
+                "use_col": single_use.col,
+            }
+
             violation = Violation(
                 check_id=self.check_id,
                 error_code=self.error_code,
@@ -165,14 +175,10 @@ class RedundantAssignmentCheck:
                 col=lifecycle.assignment.col,
                 message=message,
                 fixable=fixable,
-                fix_data={
-                    "pattern": pattern.name,
-                    "assign_line": lifecycle.assignment.line,
-                    "var_name": lifecycle.assignment.var_name,
-                    "rhs_source": lifecycle.assignment.rhs_source,
-                    "use_line": single_use.line,
-                    "use_col": single_use.col,
-                },
+                # Violation.fix_data is intentionally untyped (dict[str,
+                # Any]) at this boundary; see RedundantAssignmentFixData in
+                # autofix.py for the shape check()/apply_fixes() agree on.
+                fix_data=cast(dict[str, Any], fix_data),
             )
             violations.append(violation)
 

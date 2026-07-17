@@ -4,8 +4,24 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TypedDict, cast
 
 from .._base import Violation, atomic_write_text, byte_col_to_char_col
+
+
+class RedundantAssignmentFixData(TypedDict):
+    """Constructed by RedundantAssignmentCheck.check(), read back here by
+    apply_fixes(). Must stay JSON-serializable (no AST nodes/lifecycle
+    objects) — detect_redundancy() only returns a pattern for single-use
+    lifecycles, so use_line/use_col are always concrete ints, never absent.
+    """
+
+    pattern: str
+    assign_line: int
+    var_name: str
+    rhs_source: str
+    use_line: int
+    use_col: int
 
 
 def apply_fixes(
@@ -47,9 +63,10 @@ def apply_fixes(
     # it replaces and shift every column after it on that line. Violations
     # missing use_line (filtered out in the loop below) sort last.
     def _use_position(v: Violation) -> tuple[int, int]:
-        fix_data = v.fix_data
-        if not fix_data or fix_data.get("use_line") is None:
+        raw_fix_data = v.fix_data
+        if not raw_fix_data or raw_fix_data.get("use_line") is None:
             return (-1, -1)
+        fix_data = cast(RedundantAssignmentFixData, raw_fix_data)
         return (fix_data["use_line"], fix_data["use_col"])
 
     fixable_violations.sort(key=_use_position, reverse=True)
@@ -61,9 +78,10 @@ def apply_fixes(
         # Extract fix data. use_line/use_col are None when the violation
         # didn't have exactly one use (see RedundantAssignmentCheck.check) —
         # that's the only shape this can safely auto-fix.
-        fix_data = violation.fix_data
-        if not fix_data or fix_data.get("use_line") is None:
+        raw_fix_data = violation.fix_data
+        if not raw_fix_data or raw_fix_data.get("use_line") is None:
             continue
+        fix_data = cast(RedundantAssignmentFixData, raw_fix_data)
 
         assign_line_idx = fix_data["assign_line"] - 1
         use_line_idx = fix_data["use_line"] - 1

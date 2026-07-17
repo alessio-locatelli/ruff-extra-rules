@@ -35,14 +35,23 @@ from __future__ import annotations
 import ast
 import logging
 from pathlib import Path
+from typing import Any, TypedDict, cast
 
 from .._base import Violation
-from .analysis import collect_suggestions
+from .analysis import Suggestion, collect_suggestions
 from .autofix import apply_fix, should_autofix
 
 ERROR_CODE = "TRI004"
 
 logger_check = logging.getLogger("validate_function_name_check")
+
+
+class ValidateFunctionNameFixData(TypedDict):
+    """Constructed by check(), read back by fix() to re-apply the same
+    suggestion computed during check() rather than recomputing it.
+    """
+
+    suggestion: Suggestion
 
 
 class ValidateFunctionNameCheck:
@@ -83,6 +92,7 @@ class ValidateFunctionNameCheck:
                 f"'{suggestion.suggested_name}' ({suggestion.reason})"
             )
 
+            fix_data: ValidateFunctionNameFixData = {"suggestion": suggestion}
             violations.append(
                 Violation(
                     check_id=self.check_id,
@@ -91,9 +101,10 @@ class ValidateFunctionNameCheck:
                     col=0,
                     message=message,
                     fixable=True,  # May be fixable based on complexity
-                    fix_data={
-                        "suggestion": suggestion,  # Store original for autofix
-                    },
+                    # Violation.fix_data is intentionally untyped (dict[str,
+                    # Any]) at this boundary; see ValidateFunctionNameFixData
+                    # above for the shape check()/fix() actually agree on.
+                    fix_data=cast(dict[str, Any], fix_data),
                 )
             )
 
@@ -135,7 +146,8 @@ class ValidateFunctionNameCheck:
             if not violation.fix_data:
                 continue
 
-            suggestion = violation.fix_data.get("suggestion")
+            fix_data = cast(ValidateFunctionNameFixData, violation.fix_data)
+            suggestion = fix_data.get("suggestion")
             if not suggestion:
                 continue
 
@@ -144,8 +156,6 @@ class ValidateFunctionNameCheck:
                 try:
                     if apply_fix(filepath, suggestion):
                         applied_any = True
-                        # Mark as fixed
-                        violation.fix_data["fixed"] = True
                 except Exception as fix_error:  # noqa: BLE001
                     logger_check.error(
                         "Failed to apply fix for %s in %s: %s",

@@ -191,14 +191,6 @@ def atomic_write_text(path: Path, content: str, encoding: str) -> None:
     the process is killed mid-write; writing to a temp file first and
     renaming it into place means the target always ends up either fully old
     or fully new.
-
-    Args:
-        path: File to write
-        content: Text content to write
-        encoding: Encoding to write with
-
-    Raises:
-        OSError: if the temp file can't be created, written, or renamed
     """
     real_path = path.resolve()
     fd, temp_name = tempfile.mkstemp(
@@ -222,12 +214,6 @@ def ignore_pattern_for(error_code: str) -> re.Pattern[str]:
     compiled a near-identical pattern by hand; this is the single place that
     pattern is defined, so all checks agree on its syntax (case-insensitive,
     optional whitespace around `:`).
-
-    Args:
-        error_code: The check's error code, e.g. "TRI001" or "STYLE-001"
-
-    Returns:
-        Compiled, case-insensitive regex matching that code's ignore comment
     """
     return re.compile(rf"#\s*pytriage:\s*ignore={re.escape(error_code)}", re.IGNORECASE)
 
@@ -263,3 +249,17 @@ def find_ignored_lines(source: str, pattern: re.Pattern[str]) -> set[int]:
         logger.debug(repr(token_error))
 
     return ignored
+
+
+def mark_fixed(violation: Violation) -> None:
+    """The single place that writes the `fix_data["fixed"]` convention —
+    previously three independent hand-written sites.
+    """
+    if violation.fix_data is None:
+        violation.fix_data = {}
+    violation.fix_data["fixed"] = True
+
+
+def is_fixed(violation: Violation) -> bool:
+    """Whether `mark_fixed()` has already been called on `violation`."""
+    return bool(violation.fix_data and violation.fix_data.get("fixed", False))

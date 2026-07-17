@@ -13,7 +13,7 @@ import logging
 import re
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, cast
 
 from ._base import (
     Violation,
@@ -29,6 +29,20 @@ logger = logging.getLogger("forbid_vars")
 # Regex pattern for inline ignore comments
 # Format: # pytriage: ignore=TRI001
 IGNORE_PATTERN = ignore_pattern_for("TRI001")
+
+
+class ForbidVarsFixData(TypedDict):
+    """Constructed by ForbiddenNameVisitor._check_name(), read back by fix()
+    via _apply_fixes(). Must stay JSON-serializable — no AST node — since
+    fix() re-resolves the enclosing scope from the fresh tree it's given
+    instead (see _find_enclosing_function).
+    """
+
+    name: str
+    line: int
+    col: int
+    suggestion: str | None
+
 
 # Default forbidden variable names
 DEFAULT_FORBIDDEN_NAMES = {"data", "result"}
@@ -155,7 +169,7 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         self.source = source  # Store full source (optimization: avoid reconstruction)
         self.source_lines = source.splitlines()
         self.autofix_config = autofix_config
-        self.violations: list[dict[str, Any]] = []
+        self.violations: list[ForbidVarsFixData] = []
         # Scope tracking for scope-aware name generation and replacement
         self.current_scope: list[ast.AST] = []
         self.tree: ast.Module | None = None
@@ -278,7 +292,7 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
             # can't carry an AST node — fix() re-resolves the enclosing
             # scope from the fresh tree it's given instead (see
             # _find_enclosing_function).
-            violation: dict[str, Any] = {
+            violation: ForbidVarsFixData = {
                 "name": name,
                 "line": lineno,
                 "col": col_offset,
@@ -441,7 +455,7 @@ def _find_enclosing_function(
 
 def _apply_fixes(
     filepath: Path,
-    violations: list[dict[str, Any]],
+    violations: list[ForbidVarsFixData],
     source: str,
     tree: ast.Module,
     encoding: str = "utf-8",
@@ -463,7 +477,7 @@ def _apply_fixes(
     # Step 1: Group violations by their enclosing scope. The caller
     # (ForbidVarsCheck.fix()) already filters to violations with a
     # suggestion and only calls here with a non-empty list.
-    violations_by_scope: dict[int | None, list[dict[str, Any]]] = {}
+    violations_by_scope: dict[int | None, list[ForbidVarsFixData]] = {}
     scope_nodes: dict[int | None, ast.AST] = {}
     for v in violations:
         scope_node = _find_enclosing_function(tree, v["line"])
@@ -478,6 +492,10 @@ def _apply_fixes(
         for v in scope_violations:
             old_name = v["name"]
             new_name = v["suggestion"]
+            # The caller only ever includes violations with a suggestion
+            # (see the module docstring above); this narrows str | None to
+            # str for the dict[str, str] below.
+            assert new_name is not None
             if old_name not in replacements:
                 # First violation of this name in this scope wins
                 replacements[old_name] = new_name
@@ -583,7 +601,10 @@ class ForbidVarsCheck:
                     col=v["col"],
                     message=message,
                     fixable=bool(v.get("suggestion")),
-                    fix_data=v,  # Store full violation data for fixing
+                    # Violation.fix_data is intentionally untyped (dict[str,
+                    # Any]) at this boundary; see ForbidVarsFixData above for
+                    # the shape check()/fix() actually agree on.
+                    fix_data=cast(dict[str, Any], v),
                 )
             )
 
@@ -610,7 +631,11 @@ class ForbidVarsCheck:
             True if fixes were applied successfully
         """
         # Extract fixable violations with suggestions
-        fixable = [v.fix_data for v in violations if v.fixable and v.fix_data]
+        fixable = [
+            cast(ForbidVarsFixData, v.fix_data)
+            for v in violations
+            if v.fixable and v.fix_data
+        ]
 
         if not fixable:
             return False

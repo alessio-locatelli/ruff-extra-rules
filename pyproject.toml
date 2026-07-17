@@ -69,8 +69,11 @@ exclude = ["tests/fixtures"]
 paths = ["src", "tests"]
 # visit_* are ast.NodeVisitor callbacks invoked via .visit() dispatch, not by
 # name; return_value/side_effect are unittest.mock attributes read by the
-# mock machinery. Vulture's static analysis can't see either kind of use.
-ignore_names = ["visit_*", "return_value", "side_effect"]
+# mock machinery. assign_line is a TypedDict field (RedundantAssignmentFixData
+# in redundant_assignment/autofix.py) read only via dict subscript
+# (fix_data["assign_line"]), never as an attribute — vulture's static
+# analysis can't see any of these three kinds of use.
+ignore_names = ["visit_*", "return_value", "side_effect", "assign_line"]
 
 # Coverage configuration lives in .coveragerc, not here: coverage.py reads
 # only the first config file it finds (.coveragerc, setup.cfg, tox.ini,

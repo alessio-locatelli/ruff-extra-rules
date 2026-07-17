@@ -35,7 +35,7 @@ from typing import Any
 from pre_commit_hooks._cache import CacheManager
 from pre_commit_hooks._prefilter import batch_filter_files
 
-from ._base import ASTCheck, Violation, read_source_with_encoding
+from ._base import ASTCheck, Violation, is_fixed, mark_fixed, read_source_with_encoding
 from .excessive_blank_lines import ExcessiveBlankLinesCheck
 from .forbid_vars import ForbidVarsCheck
 from .misplaced_comment import MisplacedCommentCheck
@@ -385,9 +385,7 @@ class CheckOrchestrator:
                     # caller's reporting loop shows [FIXED] correctly.
                     for v in violations:
                         if v.check_id == check.check_id and v.fixable:
-                            if v.fix_data is None:
-                                v.fix_data = {}
-                            v.fix_data["fixed"] = True
+                            mark_fixed(v)
             except Exception as fix_error:  # noqa: BLE001
                 logger.error(
                     "Fix failed for %s on %s: %s",
@@ -559,7 +557,7 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = 0
     for filepath, violations in sorted(all_violations.items()):
         for v in violations:
-            fixed = bool(v.fix_data and v.fix_data.get("fixed", False))
+            fixed = is_fixed(v)
             if fixed:
                 tag = "[FIXED] "
             elif v.fixable:

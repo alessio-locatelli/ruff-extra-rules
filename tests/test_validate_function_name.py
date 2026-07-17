@@ -460,9 +460,11 @@ def test_fix_applies_safe_suggestion(tmp_path: Path) -> None:
     violations = check.check(filepath, tree, source)
     assert len(violations) == 1
 
+    # Marking a violation "fixed" is the orchestrator's responsibility
+    # (CheckOrchestrator._apply_fixes), not this check's own fix() — calling
+    # fix() directly, as this test does, never sets it.
     assert check.fix(filepath, violations, source, tree) is True
     assert violations[0].fix_data is not None
-    assert violations[0].fix_data.get("fixed") is True
     assert "def is_data() -> bool:" in filepath.read_text()
 
 
