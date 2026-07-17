@@ -32,3 +32,11 @@ Not scoped yet. Would need to reconcile at least:
 ## Priority
 
 Idea only — no priority assigned until scoped.
+
+## Session Note (2026-07-17)
+
+Reviewed alongside the rest of `docs/work-items/` this session but not
+implemented: this needs a maintainer scoping decision (whether to extend
+self-checking to `tests/` at all, and if so how aggressively to reconcile
+the forbidden-name-heavy idiom noted above), not just an implementation.
+Left open for a future session once scoped.
