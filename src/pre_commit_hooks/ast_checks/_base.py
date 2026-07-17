@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import ast
 import io
 import logging
@@ -124,6 +125,39 @@ class ASTCheck(Protocol):
             True if fixes were successfully applied, False otherwise
         """
         ...
+
+    @classmethod
+    def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
+        """Register this check's own CLI arguments on the shared parser.
+
+        Optional — a check with no check-specific configuration doesn't
+        need to override this. Pair with `cli_kwargs_from_args()` to turn
+        the parsed values into this check's own `__init__` kwargs.
+        """
+        ...
+
+    @classmethod
+    def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
+        """Translate parsed CLI args into this check's own `__init__` kwargs.
+
+        Optional, paired with `add_cli_arguments()`.
+        """
+        ...
+
+
+class BaseCheck:
+    """No-op defaults for ASTCheck's optional CLI-argument extension
+    points, so a check with nothing check-specific doesn't have to repeat
+    the override itself (see ForbidVarsCheck for the one real usage).
+    """
+
+    @classmethod
+    def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
+        return
+
+    @classmethod
+    def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
+        return {}
 
 
 def byte_col_to_char_col(line: str, byte_col: int) -> int:

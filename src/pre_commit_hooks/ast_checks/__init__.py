@@ -486,11 +486,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Glob pattern(s) to exclude files/directories (comma-separated)",
     )
 
-    # Check-specific arguments
-    parser.add_argument(
-        "--forbid-vars-names",
-        help="Forbidden variable names for forbid-vars check (default: data,result)",
-    )
+    # Check-specific arguments: each check registers its own, if any
+    for check_class in ALL_CHECKS:
+        check_class.add_cli_arguments(parser)
 
     args = parser.parse_args(argv)
 
@@ -535,12 +533,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Error: Unknown checks: {checks_str}", file=sys.stderr)
             return 1
 
-    # Build check-specific arguments
+    # Build check-specific arguments: each check translates its own parsed
+    # CLI args into its own __init__ kwargs, if any
     check_args: dict[str, dict[str, Any]] = {}
-    if args.forbid_vars_names:
-        names_list = args.forbid_vars_names.split(",")
-        forbidden_names = {n.strip() for n in names_list if n.strip()}
-        check_args["forbid-vars"] = {"forbidden_names": forbidden_names}
+    for check_class in ALL_CHECKS:
+        kwargs = check_class.cli_kwargs_from_args(args)
+        if kwargs:
+            check_args[check_class().check_id] = kwargs
 
     # Load checks
     checks = load_checks(enabled=enabled, disabled=disabled, check_args=check_args)
