@@ -16,8 +16,7 @@ if TYPE_CHECKING:
 
 @pytest.fixture
 def temp_cache_dir(tmp_path: Path) -> Path:
-    cache_dir = tmp_path / ".cache"
-    return cache_dir
+    return tmp_path / ".cache"
 
 
 @pytest.fixture

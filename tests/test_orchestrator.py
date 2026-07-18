@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-import pytest
-
 from pre_commit_hooks import ast_checks
 from pre_commit_hooks.ast_checks import (
     ALL_CHECKS,
@@ -23,6 +21,8 @@ if TYPE_CHECKING:
     import argparse
     import ast
     from pathlib import Path
+
+    import pytest
 
 
 def test_filter_excluded_files_no_patterns_returns_all() -> None:

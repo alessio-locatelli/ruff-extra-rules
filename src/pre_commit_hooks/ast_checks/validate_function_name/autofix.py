@@ -7,8 +7,9 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from .._base import atomic_write_text, byte_col_to_char_col, read_source_with_encoding
-from .._scope import iter_within_scope
+from pre_commit_hooks.ast_checks._base import atomic_write_text, byte_col_to_char_col, read_source_with_encoding
+from pre_commit_hooks.ast_checks._scope import iter_within_scope
+
 from .analysis import Suggestion, attach_parents, read_source
 
 if TYPE_CHECKING:
@@ -292,7 +293,7 @@ class _ReferenceCollector(ast.NodeVisitor):
     so a same-named local helper's own call sites are never touched.
     """
 
-    def __init__(self, old_name: str, is_method: bool, target: ast.AST, lines: list[str]) -> None:
+    def __init__(self, old_name: str, target: ast.AST, lines: list[str], *, is_method: bool) -> None:
         self.old_name = old_name
         self.is_method = is_method
         self.target = target
@@ -417,7 +418,7 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
     if not is_method and _is_rebound_in_scope(scope_node, func_node.name, func_node):
         return False
 
-    collector = _ReferenceCollector(func_node.name, is_method, func_node, lines)
+    collector = _ReferenceCollector(func_node.name, func_node, lines, is_method=is_method)
     collector.visit(scope_node)
     positions.extend(collector.positions)
 
@@ -440,7 +441,8 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
 
     try:
         atomic_write_text(filepath, new_source, encoding)
-        return True
     except OSError as os_error:
         logger.warning("Filepath: %s. Error: %s", filepath, repr(os_error))
         return False
+    else:
+        return True

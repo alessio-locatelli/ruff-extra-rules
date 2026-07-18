@@ -376,7 +376,7 @@ class VariableTracker(ast.NodeVisitor):
     lifecycles, tracking where variables are assigned and where they're used.
     """
 
-    def __init__(self, source: str):
+    def __init__(self, source: str) -> None:
         """Initialize the tracker.
 
         Args:

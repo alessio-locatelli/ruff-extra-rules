@@ -561,7 +561,8 @@ class ForbidVarsCheck(BaseCheck):
 
         try:
             _apply_fixes(filepath, fixable, source, tree, encoding)
-            return True
-        except OSError as fix_error:
-            logger.error("Failed to apply fixes to %s: %s", filepath, repr(fix_error))
+        except OSError:
+            logger.exception("Failed to apply fixes to %s", filepath)
             return False
+        else:
+            return True

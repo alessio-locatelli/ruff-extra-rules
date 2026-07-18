@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .._base import find_ignored_lines, ignore_pattern_for, read_source_with_encoding
+from pre_commit_hooks.ast_checks._base import find_ignored_lines, ignore_pattern_for, read_source_with_encoding
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -58,8 +58,7 @@ def decorator_name(d: ast.AST) -> str | None:
         return d.id
     if isinstance(d, ast.Attribute):
         # e.g. abc.abstractmethod
-        name = _call_name(d)
-        return name
+        return _call_name(d)
     return None
 
 
@@ -72,7 +71,7 @@ def is_decorator_override_or_abstract(
         if not name:
             continue
         lname = name.lower()
-        if lname.endswith("override") or lname.endswith("abstractmethod"):
+        if lname.endswith(("override", "abstractmethod")):
             return True
     return False
 
@@ -215,7 +214,7 @@ def analyze_function(
             if lname.endswith((".is_valid", ".validate")):
                 flags["validates"] = True
             # transform detection
-            if lname.endswith(".transform") or lname.endswith(".map"):
+            if lname.endswith((".transform", ".map")):
                 flags["transforms"] = True
             # object creation: constructor calls heuristic
             if isinstance(node.func, ast.Name) and node.func.id and node.func.id[0].isupper():

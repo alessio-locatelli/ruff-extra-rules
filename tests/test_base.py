@@ -75,7 +75,7 @@ def test_atomic_write_text_cleans_up_temp_file_on_failure(tmp_path: Path) -> Non
     target = tmp_path / "mod.py"
     target.mkdir()
 
-    with pytest.raises(OSError):
+    with pytest.raises(IsADirectoryError):
         atomic_write_text(target, "new\n", "utf-8")
 
     assert list(tmp_path.glob(".mod.py.*.tmp")) == []

@@ -32,7 +32,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from .._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
+from pre_commit_hooks.ast_checks._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
+
 from .analysis import VariableTracker, detect_redundancy
 from .autofix import RedundantAssignmentFixData, apply_fixes
 from .semantic import should_autofix, should_report_violation
@@ -144,7 +145,7 @@ class RedundantAssignmentCheck(BaseCheck):
                 continue
 
             # Apply semantic filtering
-            if not should_report_violation(lifecycle, pattern, filepath):
+            if not should_report_violation(lifecycle, filepath):
                 continue
 
             # Determine if fixable (very conservative - only simplest cases).

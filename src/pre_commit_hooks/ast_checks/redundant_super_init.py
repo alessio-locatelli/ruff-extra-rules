@@ -26,7 +26,7 @@ IGNORE_PATTERN = ignore_pattern_for("TRI003")
 class SuperInitChecker(ast.NodeVisitor):
     """AST visitor to check for redundant super().__init__(**kwargs)."""
 
-    def __init__(self, filename: str):
+    def __init__(self, filename: str) -> None:
         self.filename = filename
         self.violations: list[tuple[int, str]] = []
         self.classes: dict[str, ast.ClassDef] = {}  # Track class definitions

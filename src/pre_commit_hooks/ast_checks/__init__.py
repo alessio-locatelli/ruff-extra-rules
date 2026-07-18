@@ -101,7 +101,7 @@ ALL_CHECKS: list[type[ASTCheck]] = [
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
 
-def _fingerprint_default(value: object) -> Any:
+def _fingerprint_default(value: object) -> object:
     """`json.dumps(..., default=...)` handler for the value shapes a check's
     own `vars()` can contain but that `json` can't natively serialize: a
     `set`'s iteration order depends on PYTHONHASHSEED (randomized per
@@ -176,12 +176,9 @@ class CheckOrchestrator:
             if check_patterns:
                 patterns.extend(check_patterns)
 
-        # Step 2: Pre-filter files (OR logic: file matches if it contains ANY pattern)
-        if patterns:
-            candidate_files = batch_filter_files(filepaths, patterns)
-        else:
-            # No patterns means all files need to be checked
-            candidate_files = filepaths
+        # Step 2: Pre-filter files (OR logic: file matches if it contains ANY pattern).
+        # No patterns means all files need to be checked.
+        candidate_files = batch_filter_files(filepaths, patterns) if patterns else filepaths
 
         if not candidate_files:
             return {}
@@ -248,23 +245,23 @@ class CheckOrchestrator:
                 return None
 
             # Deserialize violations
-            violations = []
-            for v_dict in cached.get("violations", []):
-                violations.append(
-                    Violation(
-                        check_id=v_dict["check_id"],
-                        error_code=v_dict["error_code"],
-                        line=v_dict["line"],
-                        col=v_dict["col"],
-                        message=v_dict["message"],
-                        fixable=v_dict["fixable"],
-                        fix_data=v_dict.get("fix_data"),
-                    )
+            violations = [
+                Violation(
+                    check_id=v_dict["check_id"],
+                    error_code=v_dict["error_code"],
+                    line=v_dict["line"],
+                    col=v_dict["col"],
+                    message=v_dict["message"],
+                    fixable=v_dict["fixable"],
+                    fix_data=v_dict.get("fix_data"),
                 )
-            return violations
+                for v_dict in cached.get("violations", [])
+            ]
         except (KeyError, TypeError, ValueError) as error:
             logger.debug("Cache deserialization failed: %s", repr(error))
             return None
+        else:
+            return violations
 
     def _cache_violations(self, filepath: Path, violations: list[Violation]) -> None:
         """Cache violations for a file.
@@ -276,19 +273,18 @@ class CheckOrchestrator:
         try:
             # Serialize violations (skip fix_data as it may contain
             # non-serializable objects like AST nodes)
-            serialized = []
-            for v in violations:
-                serialized.append(
-                    {
-                        "check_id": v.check_id,
-                        "error_code": v.error_code,
-                        "line": v.line,
-                        "col": v.col,
-                        "message": v.message,
-                        "fixable": v.fixable,
-                        # Note: fix_data is NOT cached as it may contain AST nodes
-                    }
-                )
+            serialized = [
+                {
+                    "check_id": v.check_id,
+                    "error_code": v.error_code,
+                    "line": v.line,
+                    "col": v.col,
+                    "message": v.message,
+                    "fixable": v.fixable,
+                    # Note: fix_data is NOT cached as it may contain AST nodes
+                }
+                for v in violations
+            ]
 
             self.cache.set_cached_result(filepath, "ruff-extra-rules", {"violations": serialized})
         except (TypeError, ValueError) as error:
@@ -310,14 +306,14 @@ class CheckOrchestrator:
         """
         try:
             return read_source_with_encoding(filepath)
-        except OSError as error:
-            logger.error("Failed to read %s: %s", filepath, repr(error))
+        except OSError:
+            logger.exception("Failed to read %s", filepath)
             return None
-        except SyntaxError as error:
-            logger.error("Failed to detect encoding for %s: %s", filepath, repr(error))
+        except SyntaxError:
+            logger.exception("Failed to detect encoding for %s", filepath)
             return None
-        except (UnicodeDecodeError, LookupError) as error:
-            logger.error("Failed to decode %s: %s", filepath, repr(error))
+        except UnicodeDecodeError, LookupError:
+            logger.exception("Failed to decode %s", filepath)
             return None
 
     def _check_file(self, filepath: Path) -> list[Violation] | None:
@@ -337,8 +333,8 @@ class CheckOrchestrator:
         try:
             # Parse AST once
             tree = ast.parse(source, filename=str(filepath))
-        except SyntaxError as syntax_error:
-            logger.error("Failed to parse %s: %s", filepath, repr(syntax_error))
+        except SyntaxError:
+            logger.exception("Failed to parse %s", filepath)
             return None
 
         # Run all checks on the same tree
@@ -347,13 +343,8 @@ class CheckOrchestrator:
             try:
                 violations = check.check(filepath, tree, source)
                 all_violations.extend(violations)
-            except Exception as check_error:  # noqa: BLE001
-                logger.error(
-                    "Check %s failed on %s: %s",
-                    check.check_id,
-                    filepath,
-                    repr(check_error),
-                )
+            except Exception:
+                logger.exception("Check %s failed on %s", check.check_id, filepath)
 
         # Apply fixes if in fix mode
         if self.fix_mode and all_violations:
@@ -408,13 +399,8 @@ class CheckOrchestrator:
                     for v in violations:
                         if v.check_id == check.check_id and v.fixable:
                             mark_fixed(v)
-            except Exception as fix_error:  # noqa: BLE001
-                logger.error(
-                    "Fix failed for %s on %s: %s",
-                    check.check_id,
-                    filepath,
-                    repr(fix_error),
-                )
+            except Exception:
+                logger.exception("Fix failed for %s on %s", check.check_id, filepath)
 
 
 def load_checks(
@@ -444,8 +430,8 @@ def load_checks(
     for check_class in ALL_CHECKS:
         try:
             check = check_class()
-        except Exception as init_error:  # noqa: BLE001
-            logger.error("Failed to load check %s: %s", check_class.__name__, repr(init_error))
+        except Exception:
+            logger.exception("Failed to load check %s", check_class.__name__)
             continue
 
         check_id = check.check_id
@@ -461,8 +447,8 @@ def load_checks(
         if args:
             try:
                 check = check_class(**args)
-            except Exception as init_error:  # noqa: BLE001
-                logger.error("Failed to load check %s: %s", check_id, repr(init_error))
+            except Exception:
+                logger.exception("Failed to load check %s", check_id)
                 continue
 
         checks.append(check)
@@ -515,10 +501,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # List checks if requested
     if args.list_checks:
-        print("Available checks:")
+        print("Available checks:")  # noqa: T201
         instances = sorted((cls() for cls in ALL_CHECKS), key=lambda c: c.check_id)
         for check in instances:
-            print(f"  - {check.check_id}: {check.error_code}")
+            print(f"  - {check.check_id}: {check.error_code}")  # noqa: T201
         return 0
 
     # No files to check
@@ -545,13 +531,13 @@ def main(argv: list[str] | None = None) -> int:
         invalid = select - all_check_ids
         if invalid:
             checks_str = ", ".join(sorted(invalid))
-            print(f"Error: Unknown checks: {checks_str}", file=sys.stderr)
+            print(f"Error: Unknown checks: {checks_str}", file=sys.stderr)  # noqa: T201
             return 1
     if ignore:
         invalid = ignore - all_check_ids
         if invalid:
             checks_str = ", ".join(sorted(invalid))
-            print(f"Error: Unknown checks: {checks_str}", file=sys.stderr)
+            print(f"Error: Unknown checks: {checks_str}", file=sys.stderr)  # noqa: T201
             return 1
 
     # Build check-specific arguments: each check translates its own parsed
@@ -566,7 +552,7 @@ def main(argv: list[str] | None = None) -> int:
     checks = load_checks(select=select, ignore=ignore, check_args=check_args)
 
     if not checks:
-        print("Error: No checks enabled", file=sys.stderr)
+        print("Error: No checks enabled", file=sys.stderr)  # noqa: T201
         return 1
 
     # Run orchestrator
@@ -585,7 +571,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 tag = ""
             hint = " Run with --fix to inline automatically." if v.fixable and not fixed else ""
-            print(
+            print(  # noqa: T201
                 f"{filepath}:{v.line}: {v.error_code}: {tag}{v.message}{hint}",
                 file=sys.stderr,
             )

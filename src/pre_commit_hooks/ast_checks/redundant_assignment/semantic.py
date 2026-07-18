@@ -648,14 +648,12 @@ def _is_named_constant_pattern(var_name: str, rhs_node: ast.expr) -> bool:
 
 def should_report_violation(
     lifecycle: VariableLifecycle,
-    pattern: PatternType,
     filepath: Path | None = None,
 ) -> bool:
     """Determine if a violation should be reported based on semantic analysis.
 
     Args:
         lifecycle: Variable lifecycle
-        pattern: Detected pattern type
         filepath: Path to file being analyzed (for test detection)
 
     Returns:

@@ -35,7 +35,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
-from .._base import BaseCheck, Violation
+from pre_commit_hooks.ast_checks._base import BaseCheck, Violation
+
 from .analysis import Suggestion, collect_suggestions
 from .autofix import apply_fix, should_autofix
 
@@ -158,12 +159,7 @@ class ValidateFunctionNameCheck(BaseCheck):
                 try:
                     if apply_fix(filepath, suggestion):
                         applied_any = True
-                except Exception as fix_error:  # noqa: BLE001
-                    logger_check.error(
-                        "Failed to apply fix for %s in %s: %s",
-                        suggestion.func_name,
-                        filepath,
-                        repr(fix_error),
-                    )
+                except Exception:
+                    logger_check.exception("Failed to apply fix for %s in %s", suggestion.func_name, filepath)
 
         return applied_any

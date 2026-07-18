@@ -190,12 +190,9 @@ def fix_file_content(source: str, tree: ast.Module) -> str:
                 # Check if this line is a class or function definition
                 # PEP 8 requires 2 blank lines before top-level class/function
                 # definitions
-                if _is_class_or_function_def(line):
-                    # Preserve 2 blank lines (or use existing if less than 2)
-                    target_blank_count = min(2, blank_count)
-                else:
-                    # Collapse to 1 blank line
-                    target_blank_count = 1
+                # Preserve up to 2 blank lines before a class/function def,
+                # else collapse to 1 blank line.
+                target_blank_count = min(2, blank_count) if _is_class_or_function_def(line) else 1
 
                 # Append the appropriate number of blank lines. target_blank_count
                 # is always <= blank_count (min(2, blank_count) or 1 when
@@ -277,7 +274,8 @@ class ExcessiveBlankLinesCheck(BaseCheck):
 
             # Write back to file
             atomic_write_text(filepath, fixed_content, encoding)
-            return True
-        except OSError as os_error:
-            logger.error("Failed to write %s: %s", filepath, repr(os_error))
+        except OSError:
+            logger.exception("Failed to write %s", filepath)
             return False
+        else:
+            return True
