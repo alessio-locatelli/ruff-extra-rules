@@ -889,7 +889,7 @@ def test_semantic_scoring_medium_length_expression() -> None:
     rhs_node = ast.parse(rhs_source + ")", mode="eval").body
 
     # Medium length (40-60 chars) should score +10 points.
-    assert calculate_semantic_value("x", rhs_source + ")", rhs_node, False) >= 10
+    assert calculate_semantic_value("x", rhs_source + ")", rhs_node, has_type_annotation=False) >= 10
 
 
 def test_should_autofix_call_with_simple_args() -> None:
@@ -1225,17 +1225,17 @@ def test_chained_operations_scoring() -> None:
     source = "obj[x][y]"
     rhs_node = ast.parse(source, mode="eval").body
     # 2 chains (+20) + "result" is 1 part (+0) + short expression (+0)
-    assert calculate_semantic_value("result", source, rhs_node, False) == 20
+    assert calculate_semantic_value("result", source, rhs_node, has_type_annotation=False) == 20
 
     source = "func()[x][y]"
     rhs_node = ast.parse(source, mode="eval").body
     # 3+ chains (+30) + 2-part name (+10)
-    assert calculate_semantic_value("my_value", source, rhs_node, False) == 40
+    assert calculate_semantic_value("my_value", source, rhs_node, has_type_annotation=False) == 40
 
     source = "obj.foo.bar"
     rhs_node = ast.parse(source, mode="eval").body
     # chained attributes (2 chains = +20)
-    assert calculate_semantic_value("result", source, rhs_node, False) >= 20
+    assert calculate_semantic_value("result", source, rhs_node, has_type_annotation=False) >= 20
 
 
 def test_augmented_assignment_with_global_variable() -> None:
@@ -1280,7 +1280,7 @@ def test_semantic_scoring_very_long_expression() -> None:
     source = "a" * 85
     rhs_node = ast.parse(source, mode="eval").body
     # Very long expression (80+ chars) scores +35.
-    assert calculate_semantic_value("x", source, rhs_node, False) >= 35
+    assert calculate_semantic_value("x", source, rhs_node, has_type_annotation=False) >= 35
 
 
 # === Autofix Safety Tests ===
@@ -2328,7 +2328,7 @@ def test_semantic_value_descriptive_boolean_prefix() -> None:
     rhs_node = ast.parse("check_something()", mode="eval").body
     # has_ prefix scores +50
     assert (
-        calculate_semantic_value("has_permission", "check_something()", rhs_node, False)
+        calculate_semantic_value("has_permission", "check_something()", rhs_node, has_type_annotation=False)
         >= 50
     )
 
@@ -2336,42 +2336,42 @@ def test_semantic_value_descriptive_boolean_prefix() -> None:
 def test_semantic_value_descriptive_suffix() -> None:
 
     rhs_node = ast.parse("len(items)", mode="eval").body
-    assert calculate_semantic_value("item_count", "len(items)", rhs_node, False) >= 40
+    assert calculate_semantic_value("item_count", "len(items)", rhs_node, has_type_annotation=False) >= 40
 
 
 def test_semantic_value_list_comprehension() -> None:
 
     source = "[x for x in items]"
     rhs_node = ast.parse(source, mode="eval").body
-    assert calculate_semantic_value("result", source, rhs_node, False) >= 30
+    assert calculate_semantic_value("result", source, rhs_node, has_type_annotation=False) >= 30
 
 
 def test_semantic_value_unary_operation() -> None:
 
     source = "-value"
     rhs_node = ast.parse(source, mode="eval").body
-    assert calculate_semantic_value("result", source, rhs_node, False) >= 10
+    assert calculate_semantic_value("result", source, rhs_node, has_type_annotation=False) >= 10
 
 
 def test_semantic_value_lambda_expression() -> None:
 
     source = "lambda x: x * 2"
     rhs_node = ast.parse(source, mode="eval").body
-    assert calculate_semantic_value("func", source, rhs_node, False) >= 25
+    assert calculate_semantic_value("func", source, rhs_node, has_type_annotation=False) >= 25
 
 
 def test_semantic_value_very_long_expression() -> None:
 
     source = "a" * 85
     rhs_node = ast.parse(source, mode="eval").body
-    assert calculate_semantic_value("x", source, rhs_node, False) >= 35
+    assert calculate_semantic_value("x", source, rhs_node, has_type_annotation=False) >= 35
 
 
 def test_semantic_value_long_expression_60_plus() -> None:
 
     source = "a" * 65
     rhs_node = ast.parse(source, mode="eval").body
-    assert calculate_semantic_value("x", source, rhs_node, False) >= 25
+    assert calculate_semantic_value("x", source, rhs_node, has_type_annotation=False) >= 25
 
 
 def test_no_false_positive_on_long_rhs_fixable_marking() -> None:
@@ -3734,14 +3734,14 @@ def test_calculate_semantic_value_binop() -> None:
     """Branch coverage: BinOp RHS adds 15 to semantic score (line 399)."""
 
     rhs_node = ast.parse("a + b", mode="eval").body
-    assert calculate_semantic_value("x", "a + b", rhs_node, False) >= 15
+    assert calculate_semantic_value("x", "a + b", rhs_node, has_type_annotation=False) >= 15
 
 
 def test_calculate_semantic_value_ifexp() -> None:
     """Branch coverage: IfExp RHS adds 20 to semantic score (line 405)."""
 
     rhs_node = ast.parse("1 if c else 0", mode="eval").body
-    assert calculate_semantic_value("x", "1 if c else 0", rhs_node, False) >= 20
+    assert calculate_semantic_value("x", "1 if c else 0", rhs_node, has_type_annotation=False) >= 20
 
 
 def test_should_report_violation_inline_comment_single_use() -> None:
@@ -3785,6 +3785,7 @@ def _make_single_use_lifecycle(
     rhs_source: str,
     rhs_node: ast.expr,
     var_name: str = "x",
+    *,
     in_loop: bool = False,
     in_control_flow: bool = False,
     preceded_by_call: bool = False,

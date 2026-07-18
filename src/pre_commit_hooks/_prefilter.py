@@ -19,7 +19,7 @@ logger = logging.getLogger("linter")
 
 
 def git_grep_filter(
-    filepaths: Sequence[str], pattern: str, fixed_string: bool = False
+    filepaths: Sequence[str], pattern: str, *, fixed_string: bool = False
 ) -> list[str]:
     """Uses git grep to quickly filter files containing a pattern. This is much
     faster than parsing every file with Python. Falls back to Python substring

@@ -628,7 +628,7 @@ def test_main_check_specific_cli_arg_round_trip(
             return None
 
         def check(
-            self, filepath: Path, tree: ast.Module, source: str
+            self, _filepath: Path, _tree: ast.Module, _source: str
         ) -> list[Violation]:
             return [
                 Violation(

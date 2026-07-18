@@ -148,7 +148,7 @@ def _has_await_expression(node: ast.expr) -> bool:
         def __init__(self) -> None:
             self.has_await = False
 
-        def visit_Await(self, node: ast.Await) -> None:
+        def visit_Await(self, _node: ast.Await) -> None:
             self.has_await = True
 
     detector = AwaitDetector()

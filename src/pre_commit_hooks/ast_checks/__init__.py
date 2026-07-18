@@ -146,6 +146,7 @@ class CheckOrchestrator:
     def __init__(
         self,
         checks: list[ASTCheck],
+        *,
         fix_mode: bool = False,
     ) -> None:
         """Initialize the orchestrator.

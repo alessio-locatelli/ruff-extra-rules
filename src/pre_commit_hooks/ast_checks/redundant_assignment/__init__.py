@@ -195,7 +195,7 @@ class RedundantAssignmentCheck(BaseCheck):
         filepath: Path,
         violations: list[Violation],
         source: str,
-        tree: ast.Module,
+        _tree: ast.Module,
         encoding: str = "utf-8",
     ) -> bool:
         """Apply fixes for redundant assignment violations.

@@ -182,11 +182,11 @@ class RedundantSuperInitCheck(BaseCheck):
 
     def fix(
         self,
-        filepath: Path,
-        violations: list[Violation],
-        source: str,
-        tree: ast.Module,
-        encoding: str = "utf-8",
+        _filepath: Path,
+        _violations: list[Violation],
+        _source: str,
+        _tree: ast.Module,
+        _encoding: str = "utf-8",
     ) -> bool:
         """No autofix support."""
         return False

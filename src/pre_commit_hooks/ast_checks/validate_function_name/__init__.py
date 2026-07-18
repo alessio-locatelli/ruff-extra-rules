@@ -114,9 +114,9 @@ class ValidateFunctionNameCheck(BaseCheck):
         self,
         filepath: Path,
         violations: list[Violation],
-        source: str,
-        tree: ast.Module,
-        encoding: str = "utf-8",
+        _source: str,
+        _tree: ast.Module,
+        _encoding: str = "utf-8",
     ) -> bool:
         """Apply fixes for function naming violations.
 

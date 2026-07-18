@@ -227,7 +227,7 @@ class ExcessiveBlankLinesCheck(BaseCheck):
         """Returns None because all files should be checked."""
         return None
 
-    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         file_violations = check_file_violations(source, tree)
         if not file_violations:
             return []

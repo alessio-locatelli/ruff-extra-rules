@@ -505,7 +505,7 @@ class ForbidVarsCheck(BaseCheck):
         """Returns all forbidden names as prefilter patterns."""
         return sorted(self.forbidden_names)
 
-    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         """Run check and return violations.
 
         Args:

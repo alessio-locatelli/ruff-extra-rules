@@ -274,6 +274,7 @@ def calculate_semantic_value(
     var_name: str,
     rhs_source: str,
     rhs_node: ast.expr,
+    *,
     has_type_annotation: bool = False,
     is_test_context: bool = False,
     filepath: Path | None = None,

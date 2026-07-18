@@ -149,7 +149,7 @@ class MisplacedCommentCheck(BaseCheck):
     def get_prefilter_pattern(self) -> list[str] | None:
         return ["#"]
 
-    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
         try:
             tokens = tuple(tokenize.generate_tokens(StringIO(source).readline))
         # Defensive: source is already parsed by AST, so tokenizing it can't
@@ -183,9 +183,9 @@ class MisplacedCommentCheck(BaseCheck):
     def fix(
         self,
         filepath: Path,
-        violations: list[Violation],
+        _violations: list[Violation],
         source: str,
-        tree: ast.Module,
+        _tree: ast.Module,
         encoding: str = "utf-8",
     ) -> bool:
         try:
