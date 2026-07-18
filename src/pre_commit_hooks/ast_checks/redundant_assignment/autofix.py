@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 from .._base import Violation, atomic_write_text, byte_col_to_char_col
+from .semantic import exceeds_line_length_when_inlined
 
 
 class RedundantAssignmentFixData(TypedDict):
@@ -219,13 +220,8 @@ def _can_safely_inline(
     # Get the line where variable is used
     use_line = source_lines[use_line_idx]
 
-    # Estimate new line length after inlining
-    # Change: remove var_name (len(var_name)) and add rhs_source (len(rhs_source))
-    len_diff = len(rhs_source) - len(var_name)
-    new_line_len = len(use_line.rstrip("\n\r")) + len_diff
-
     # Check if new line would exceed reasonable length (79 chars, PEP 8 default)
-    if new_line_len > 79:
+    if exceeds_line_length_when_inlined(var_name, rhs_source, use_line):
         return False
 
     # Check if the RHS expression contains newlines (multiline expressions)

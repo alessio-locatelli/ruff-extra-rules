@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from .analysis import PatternType, VariableLifecycle
+from .analysis import PatternType, UsageInfo, VariableLifecycle, is_preceded_by_call
 
 
 def _is_test_file(filepath: Path | None) -> bool:
@@ -446,10 +446,11 @@ def _would_exceed_line_length(
     """Check if inlining would likely cause usage lines to exceed line length.
 
     This is a conservative estimate based on RHS length and variable name,
-    not the actual usage line (which we don't have here). Two call sites use
-    different thresholds: reporting a violation is lenient (25 chars), while
-    deciding whether to *auto-fix* is stricter (40 chars) since a wrong
-    autofix is more costly than a missed report.
+    used only when the actual usage line isn't available to the caller (see
+    `exceeds_line_length_when_inlined` for the exact check used when it is).
+    Two call sites use different thresholds: reporting a violation is
+    lenient (25 chars), while deciding whether to *auto-fix* is stricter (40
+    chars) since a wrong autofix is more costly than a missed report.
 
     Args:
         lifecycle: Variable lifecycle
@@ -474,6 +475,35 @@ def _would_exceed_line_length(
     # Use threshold: if len_diff > 20, assume it might exceed
     len_diff = len(rhs_source) - len(var_name)
     return len_diff > 20
+
+
+def exceeds_line_length_when_inlined(
+    var_name: str,
+    rhs_source: str,
+    use_line: str,
+    *,
+    max_length: int = 79,
+) -> bool:
+    """Check if inlining rhs_source in place of var_name on use_line exceeds max_length.
+
+    This is the exact check (given the real usage line) shared by
+    `should_autofix` (deciding whether to report `[FIXABLE]`) and
+    `autofix.apply_fixes`'s `_can_safely_inline` (deciding whether to actually
+    apply the fix). Both must agree, or a violation can be reported fixable
+    and then silently skipped by `--fix`.
+
+    Args:
+        var_name: Variable name being replaced
+        rhs_source: RHS source code that would replace it
+        use_line: The line of source where the variable is used
+        max_length: Maximum allowed line length (79, PEP 8 default)
+
+    Returns:
+        True if the resulting line would exceed max_length
+    """
+    len_diff = len(rhs_source) - len(var_name)
+    new_line_len = len(use_line.rstrip("\n\r")) + len_diff
+    return new_line_len > max_length
 
 
 def _would_require_parentheses(rhs_node: ast.expr) -> bool:
@@ -741,10 +771,38 @@ def should_report_violation(
     return semantic_score < 50
 
 
+def _call_use_is_safe_to_inline(use: UsageInfo) -> bool:
+    """Check whether inlining a Call RHS at `use` preserves its execution
+    count and relative ordering.
+
+    Two independent risks, both specific to Call RHS (a Name/Attribute/
+    Constant RHS gives the same value no matter when or how many times it's
+    evaluated, given the single-assignment invariant already enforced
+    elsewhere in this module — a Call doesn't):
+    - Repeated/deferred execution: a use inside a loop or lambda body runs
+      0, 1, or many times, at a different point than the original
+      assignment (once, immediately) — e.g. `x = make(); for _ in r: f(x)`
+      would turn one call into N, and `x = make(); return lambda: x` would
+      defer the call to whenever (if ever) the lambda is later invoked.
+    - Reordering: a sibling expression evaluated before `use` within its
+      statement (see `is_preceded_by_call`) could run before the inlined
+      call, when it used to run after.
+
+    Args:
+        use: The single use being considered for inlining
+
+    Returns:
+        True if inlining won't change how often, when, or relative to what
+        else the call executes
+    """
+    return not use.in_loop and not use.in_lambda and not is_preceded_by_call(use)
+
+
 def should_autofix(
     lifecycle: VariableLifecycle,
     pattern: PatternType,
     filepath: Path | None = None,
+    source_lines: list[str] | None = None,
 ) -> bool:
     """Determine if a violation should be auto-fixed.
 
@@ -753,7 +811,11 @@ def should_autofix(
        - NOT inside loops or control flow
        - Semantic score ≤ 10 (extremely low semantic value)
        - Variable name ≤ 10 chars
-       - RHS must be simple: constant, name, or simple attribute
+       - RHS must be simple: constant, name, simple attribute, or zero-arg
+         call with no ast.Call evaluating before its use within the use's
+         statement (see analysis.is_preceded_by_call) — otherwise inlining
+         could reorder the call's side effects relative to a sibling
+         expression
        - Inlining must not exceed line length
        - RHS must not be multiline
 
@@ -768,6 +830,11 @@ def should_autofix(
         lifecycle: Variable lifecycle
         pattern: Detected pattern type
         filepath: Path to file being analyzed (for test detection)
+        source_lines: Source lines of the file being analyzed (no line
+            endings), used to check the *actual* usage line's length so the
+            `[FIXABLE]` label matches what `apply_fixes` will really do. When
+            omitted (e.g. direct unit tests), falls back to the conservative
+            RHS-length estimate.
 
     Returns:
         True if should auto-fix
@@ -787,9 +854,17 @@ def should_autofix(
     if "\n" in rhs_source or "\r" in rhs_source:
         return False
 
-    # Check if inlining would likely exceed line length (stricter threshold
-    # than reporting: a wrong autofix is more costly than a missed report)
-    if _would_exceed_line_length(lifecycle, absolute_threshold=40):
+    # Check if inlining would exceed line length. Prefer the exact check
+    # against the real usage line; fall back to the conservative RHS-length
+    # estimate (stricter threshold than reporting, since a wrong autofix is
+    # more costly than a missed report) when the usage line isn't available.
+    use_line_idx = lifecycle.uses[0].line - 1
+    if source_lines is not None and 0 <= use_line_idx < len(source_lines):
+        if exceeds_line_length_when_inlined(
+            assignment.var_name, rhs_source, source_lines[use_line_idx]
+        ):
+            return False
+    elif _would_exceed_line_length(lifecycle, absolute_threshold=40):
         return False
 
     # Calculate semantic value
@@ -819,9 +894,23 @@ def should_autofix(
             return True
 
         # Allow: simple attribute access (obj.attr, not obj.x.y.z)
-        return isinstance(rhs_node, ast.Attribute) and isinstance(
-            rhs_node.value, ast.Name
-        )
+        if isinstance(rhs_node, ast.Attribute) and isinstance(rhs_node.value, ast.Name):
+            return True
+
+        # Allow: zero-arg calls (e.g. `ForbidVarsCheck()`), but only when the
+        # use runs exactly once, at the same point the call already runs —
+        # not inside a loop/lambda (see _call_use_is_safe_to_inline) or
+        # preceded by another call/effect within its statement (see
+        # analysis.is_preceded_by_call), either of which could change how
+        # often, or in what order, the call's side effects occur.
+        if (
+            isinstance(rhs_node, ast.Call)
+            and not rhs_node.args
+            and not rhs_node.keywords
+        ):
+            return _call_use_is_safe_to_inline(lifecycle.uses[0])
+
+        return False
 
     # More aggressive auto-fix for single-use variables (used once in entire function).
     # All other patterns already returned above, so we are always in SINGLE_USE here.
@@ -838,9 +927,15 @@ def should_autofix(
     if isinstance(rhs_node, ast.Attribute):
         return True
 
-    # Allow: simple calls with no complex arguments
+    # Allow: simple calls with no complex arguments, but only when the use
+    # runs exactly once at the same point the call already runs (see
+    # _call_use_is_safe_to_inline) — otherwise inlining can change how often
+    # the call executes, e.g. moving it from once (at the assignment) into a
+    # loop body that runs N times.
     # Example: datetime.now(UTC), str(value), len(items)
-    if isinstance(rhs_node, ast.Call):
+    if isinstance(rhs_node, ast.Call) and _call_use_is_safe_to_inline(
+        lifecycle.uses[0]
+    ):
         # Only allow calls with simple arguments (no keyword unpacking, etc.)
         # and no more than 2 positional args
         if len(rhs_node.args) <= 2 and not rhs_node.keywords:

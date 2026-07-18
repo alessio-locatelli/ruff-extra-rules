@@ -209,6 +209,43 @@ def func():
     assert pattern == PatternType.SINGLE_USE
 
 
+def test_pattern_detection_augmented_assignment_use_is_not_redundant() -> None:
+    """An augmented-assignment target (`x += 1`) can't be inlined — the
+    result (`5 += 1`) is invalid syntax — and isn't the read-then-forward
+    pattern TRI005 targets anyway, so detect_redundancy must return None.
+    """
+    source = """
+def func():
+    x = 5
+    x += 1
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+
+    assert detect_redundancy(x_lifecycle) is None
+
+
+def test_match_statement_use_not_flagged() -> None:
+    """A use inside a match/case body must be treated as control flow (like
+    an if/elif branch), not as an ordinary use that always runs — otherwise
+    it could be reported/autofixed as if the case always matched.
+    """
+    source = """
+def f(command):
+    value = make()
+    match command:
+        case "go":
+            sink(value)
+"""
+    check = RedundantAssignmentCheck()
+    violations = check.check(Path("test.py"), ast.parse(source), source)
+
+    assert all("'value'" not in v.message for v in violations)
+
+
 def test_check_id_and_error_code() -> None:
     check = RedundantAssignmentCheck()
     assert check.check_id == "redundant-assignment"
@@ -852,6 +889,12 @@ def test_should_autofix_with_single_use_pattern() -> None:
         has_type_annotation=False,
     )
 
+    use_stmt = ast.parse("x.method()").body[0]
+    use_node = next(
+        n
+        for n in ast.walk(use_stmt)
+        if isinstance(n, ast.Name) and n.id == "x" and isinstance(n.ctx, ast.Load)
+    )
     lifecycle = VariableLifecycle(
         assignment=assignment,
         uses=[
@@ -862,6 +905,8 @@ def test_should_autofix_with_single_use_pattern() -> None:
                 stmt_index=4,  # Not immediate use
                 context="unknown",
                 scope_id=0,
+                node=use_node,
+                enclosing_stmt=use_stmt,
             )
         ],
     )
@@ -1989,6 +2034,12 @@ def test_should_autofix_single_use_with_keywords() -> None:
         has_type_annotation=False,
     )
 
+    use_stmt = ast.parse("x.method()").body[0]
+    use_node = next(
+        n
+        for n in ast.walk(use_stmt)
+        if isinstance(n, ast.Name) and n.id == "x" and isinstance(n.ctx, ast.Load)
+    )
     lifecycle = VariableLifecycle(
         assignment=assignment,
         uses=[
@@ -1999,6 +2050,8 @@ def test_should_autofix_single_use_with_keywords() -> None:
                 stmt_index=4,
                 context="unknown",
                 scope_id=0,
+                node=use_node,
+                enclosing_stmt=use_stmt,
             )
         ],
     )
@@ -2075,6 +2128,15 @@ def test_should_not_autofix_single_use_complex_call() -> None:
         has_type_annotation=False,
     )
 
+    # Use is in a safe (leading, non-loop, non-lambda) position, so this
+    # exercises the arg-count rejection specifically, not the execution-
+    # context check that _call_use_is_safe_to_inline also performs.
+    use_stmt = ast.parse("x.method()").body[0]
+    use_node = next(
+        n
+        for n in ast.walk(use_stmt)
+        if isinstance(n, ast.Name) and n.id == "x" and isinstance(n.ctx, ast.Load)
+    )
     lifecycle = VariableLifecycle(
         assignment=assignment,
         uses=[
@@ -2085,6 +2147,8 @@ def test_should_not_autofix_single_use_complex_call() -> None:
                 stmt_index=4,
                 context="unknown",
                 scope_id=0,
+                node=use_node,
+                enclosing_stmt=use_stmt,
             )
         ],
     )
@@ -2488,6 +2552,59 @@ def func():
     assert all(not v.fixable for v in value_violations)
 
 
+def test_no_false_positive_on_long_use_line_fixable_marking() -> None:
+    """Regression test (issue #22): [FIXABLE] used to lie when the RHS and
+    variable name were both short but the *use* line was long. should_autofix
+    only estimated line length from the RHS/var-name lengths (it never had
+    the real use line), so it said "safe" while apply_fixes' real length
+    check silently declined to touch the same violation.
+    """
+    source = """
+def f():
+    source = "..."
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    # comment
+    violations = check.check(Path("tests/test_long_name.py"), tree, source)
+"""
+    check = RedundantAssignmentCheck()
+    violations = check.check(Path("test.py"), ast.parse(source), source)
+
+    tree_violations = [v for v in violations if "'tree'" in v.message]
+    assert tree_violations
+    # The use line is too long for --fix to actually inline this safely.
+    assert all(not v.fixable for v in tree_violations)
+
+
+def test_zero_arg_call_immediate_single_use_is_fixable(tmp_path: Path) -> None:
+    """Regression test (issue #22): IMMEDIATE_SINGLE_USE never allowed a Call
+    RHS, even trivial zero-arg ones, so idiomatic test code like
+    `check = ForbidVarsCheck(); check.check(...)` was never auto-fixed. A
+    zero-arg call has no operands whose evaluation order inlining could
+    disturb, so it's safe to allow as a narrow carve-out.
+    """
+    source = """def test_something():
+    check = ForbidVarsCheck()
+    violations = check.check(Path("test.py"), tree, source)
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    check_violations = [v for v in violations if "'check'" in v.message]
+    assert check_violations
+    assert all(v.fixable for v in check_violations)
+
+    assert check.fix(filepath, violations, source, tree) is True
+
+    fixed_content = filepath.read_text()
+    assert "check = " not in fixed_content
+    assert "ForbidVarsCheck().check(" in fixed_content
+
+
 def test_magic_number_not_flagged() -> None:
     """Variables like max_search_depth = 10 give semantic meaning to raw numbers."""
     source = """
@@ -2562,6 +2679,291 @@ def test_retry():
 
     # Should not flag 'decorated_mock_func' - with block pattern.
     assert all("decorated_mock_func" not in v.message for v in violations)
+
+
+def test_augmented_assignment_use_not_flagged() -> None:
+    """Regression test: an augmented-assignment target (`x += 1`) is a
+    mutation, not a read-then-pass-through — and even if it were flagged,
+    inlining it would produce invalid syntax (`x = 5; x += 1` -> `5 += 1`).
+    It must never be reported, let alone marked fixable.
+    """
+    source = """
+def f():
+    x = 5
+    x += 1
+"""
+    check = RedundantAssignmentCheck()
+    violations = check.check(Path("test.py"), ast.parse(source), source)
+
+    assert all("'x'" not in v.message for v in violations)
+
+
+def test_augmented_assignment_use_not_flagged_for_zero_arg_call(
+    tmp_path: Path,
+) -> None:
+    """Regression test: the issue #22 zero-arg-call carve-out for
+    IMMEDIATE_SINGLE_USE must not make `x = Box(); x += 1` fixable — inlining
+    would produce invalid syntax (`Box() += 1`).
+    """
+    source = """def f():
+    x = Box()
+    x += 1
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert all("'x'" not in v.message for v in violations)
+
+    # Even if something slipped through and marked it fixable, fix() must
+    # never corrupt the file.
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_zero_arg_call_use_in_loop_body_not_fixable(tmp_path: Path) -> None:
+    """Regression test (P1 caught in review of issue #22's fix): a use
+    inside a loop body isn't "the same execution point" as the assignment —
+    `value = make(); for _ in r: sink(value)` runs make() once, but inlining
+    would make it run once per iteration.
+    """
+    source = """def f(r):
+    value = make()
+    for _ in r:
+        sink(value)
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    value_violations = [v for v in violations if "'value'" in v.message]
+    assert value_violations
+    assert all(not v.fixable for v in value_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_zero_arg_call_use_in_lambda_not_fixable(tmp_path: Path) -> None:
+    """Regression test (same P1): a use inside a lambda body executes later
+    (whenever the lambda is called, if ever) — not once at the assignment
+    point. `x = make(); return lambda: x` must not become
+    `return lambda: make()`, which defers (and can repeat) the call.
+    """
+    source = """def f():
+    x = make()
+    return lambda: x
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    x_violations = [v for v in violations if "'x'" in v.message]
+    assert x_violations
+    assert all(not v.fixable for v in x_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_zero_arg_call_use_after_await_not_fixable(tmp_path: Path) -> None:
+    """Regression test (2nd P1 caught in review of issue #22's fix): an
+    `await` is a suspension point where other code can run and change
+    state, so a use after one within the same statement must be treated
+    like a preceding call. `x = make(); return sink(await future, x)` must
+    not become `sink(await future, make())`, which runs make() after the
+    await instead of before it.
+    """
+    source = """async def f(future):
+    x = make()
+    return sink(await future, x)
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    x_violations = [v for v in violations if "'x'" in v.message]
+    assert x_violations
+    assert all(not v.fixable for v in x_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_single_use_call_in_loop_body_not_fixable(tmp_path: Path) -> None:
+    """Regression test: the pre-existing SINGLE_USE call allowance (args<=2)
+    has the exact same loop-repetition risk as the new zero-arg carve-out,
+    and predates this issue entirely — confirmed reproducible on main before
+    any of these changes. `value = make(); other(); for _ in r: sink(value)`
+    must not become `for _ in r: sink(make())`, which runs make() N times
+    instead of once.
+    """
+    source = """def f(r):
+    value = make()
+    other()
+    for _ in r:
+        sink(value)
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    value_violations = [v for v in violations if "'value'" in v.message]
+    assert value_violations
+    assert all(not v.fixable for v in value_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_zero_arg_call_use_as_dict_value_after_earlier_pair_not_fixable(
+    tmp_path: Path,
+) -> None:
+    """Regression test (4th P1 caught in review of issue #22's fix): a dict
+    literal's own AST field order (all keys, then all values) doesn't match
+    Python's real per-pair evaluation order, so a naive evaluation-order
+    walk would wrongly call `x` in `{"a": side_effect(), x: 1}` safe — it
+    isn't, since "a": side_effect() runs as a pair before x is reached.
+    """
+    source = """def f():
+    x = make()
+    d = {"a": side_effect(), x: 1}
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    x_violations = [v for v in violations if "'x'" in v.message]
+    assert x_violations
+    assert all(not v.fixable for v in x_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_zero_arg_call_use_after_operator_sibling_not_fixable(tmp_path: Path) -> None:
+    """Regression test (5th P1 caught in review of issue #22's fix): binary/
+    boolean/unary/compare operators can invoke arbitrary user code via
+    dunder overloads (`__add__`, `__eq__`, `__bool__`, ...), so a sibling
+    operator expression must count as a preceding effect too, not just
+    calls/attribute access. `x = make(); sink(a + b, x)` must not become
+    `sink(a + b, make())`, which could run `a.__add__(b)` before `make()`
+    instead of after it.
+    """
+    source = """def f():
+    x = make()
+    sink(a + b, x)
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    x_violations = [v for v in violations if "'x'" in v.message]
+    assert x_violations
+    assert all(not v.fixable for v in x_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_zero_arg_call_use_in_ternary_branch_not_fixable(tmp_path: Path) -> None:
+    """Regression test (6th/7th P1 caught in review of issue #22's fix): a
+    ternary's body/orelse are each conditional — never both run, never
+    unconditionally. `x = make(); sink(x if flag else 0)` must not become
+    `sink(make() if flag else 0)`, which skips make() entirely when flag
+    is falsy, unlike the original always-executed call.
+    """
+    source = """def f():
+    x = make()
+    sink(x if flag else 0)
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    x_violations = [v for v in violations if "'x'" in v.message]
+    assert x_violations
+    assert all(not v.fixable for v in x_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_zero_arg_call_use_in_short_circuited_boolop_not_fixable(
+    tmp_path: Path,
+) -> None:
+    """Regression test (same finding): `and`/`or` short-circuit, so a
+    non-first operand may never evaluate. `x = make(); sink(flag and x)`
+    must not become `sink(flag and make())`, which skips make() when flag
+    is falsy.
+    """
+    source = """def f():
+    x = make()
+    sink(flag and x)
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    x_violations = [v for v in violations if "'x'" in v.message]
+    assert x_violations
+    assert all(not v.fixable for v in x_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_zero_arg_call_use_as_assign_target_base_not_fixable(tmp_path: Path) -> None:
+    """Regression test (8th P1 caught in review of issue #22's fix): Python
+    evaluates an assignment's RHS *before* its target, the opposite of
+    ast.Assign's own field order. `x = make(); x.attr = side_effect()` must
+    not become `make().attr = side_effect()`, which runs side_effect()
+    before make() instead of after it.
+    """
+    source = """def f():
+    x = make()
+    x.attr = side_effect()
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    x_violations = [v for v in violations if "'x'" in v.message]
+    assert x_violations
+    assert all(not v.fixable for v in x_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
 
 
 def test_inline_comment_not_flagged() -> None:
@@ -3577,8 +3979,16 @@ def _make_single_use_lifecycle(
     var_name: str = "x",
     in_loop: bool = False,
     in_control_flow: bool = False,
+    preceded_by_call: bool = False,
 ) -> VariableLifecycle:
-    """Build a minimal VariableLifecycle for direct should_autofix tests."""
+    """Build a minimal VariableLifecycle for direct should_autofix tests.
+
+    The use's node/enclosing_stmt are built from a real parsed statement (not
+    hand-faked AST nodes) so analysis.is_preceded_by_call sees a genuinely
+    consistent tree: `{var_name}.method()` when preceded_by_call is False
+    (var_name is the first thing evaluated), or
+    `sink(side_effect(), {var_name})` when True (a sibling call precedes it).
+    """
     from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
         AssignmentInfo,
         UsageInfo,
@@ -3598,6 +4008,17 @@ def _make_single_use_lifecycle(
         in_control_flow=in_control_flow,
         in_global_scope=False,
     )
+    use_stmt_source = (
+        f"sink(side_effect(), {var_name})"
+        if preceded_by_call
+        else f"{var_name}.method()"
+    )
+    use_stmt = ast.parse(use_stmt_source).body[0]
+    use_node = next(
+        n
+        for n in ast.walk(use_stmt)
+        if isinstance(n, ast.Name) and n.id == var_name and isinstance(n.ctx, ast.Load)
+    )
     use = UsageInfo(
         var_name=var_name,
         line=2,
@@ -3605,6 +4026,8 @@ def _make_single_use_lifecycle(
         stmt_index=1,
         context="return",
         scope_id=1,
+        node=use_node,
+        enclosing_stmt=use_stmt,
     )
     return VariableLifecycle(assignment=assignment, uses=[use])
 
@@ -3686,6 +4109,441 @@ def test_should_autofix_returns_false_for_non_call_non_attr_rhs_single_use() -> 
     rhs_node = ast.parse("[1, 2, 3]", mode="eval").body
     lifecycle = _make_single_use_lifecycle("[1, 2, 3]", rhs_node)
     assert should_autofix(lifecycle, PatternType.SINGLE_USE) is False
+
+
+def test_should_autofix_allows_zero_arg_call_for_immediate_single_use() -> None:
+    """Issue #22 gap 2: IMMEDIATE_SINGLE_USE previously excluded every Call
+    RHS, even trivial zero-arg ones like `check = ForbidVarsCheck()`. A
+    zero-arg call with nothing else evaluating before its use (within the
+    use's statement) has no sibling operand whose order inlining could
+    disturb, so it gets a narrow carve-out here.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.semantic import should_autofix
+
+    rhs_node = ast.parse("ForbidVarsCheck()", mode="eval").body
+    lifecycle = _make_single_use_lifecycle(
+        "ForbidVarsCheck()",
+        rhs_node,
+        var_name="check",
+        preceded_by_call=False,
+    )
+    assert should_autofix(lifecycle, PatternType.IMMEDIATE_SINGLE_USE) is True
+
+
+def test_should_autofix_rejects_zero_arg_call_preceded_by_a_call() -> None:
+    """Regression test (P1 caught in review of issue #22's fix): a zero-arg
+    call must not be inlined when a sibling expression evaluates before it
+    within the same statement, or inlining reverses the original execution
+    order. Example: `value = next_value(); sink(side_effect(), value)` must
+    not become `sink(side_effect(), next_value())` — that runs next_value()
+    after side_effect() instead of before it.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.semantic import should_autofix
+
+    rhs_node = ast.parse("next_value()", mode="eval").body
+    lifecycle = _make_single_use_lifecycle(
+        "next_value()",
+        rhs_node,
+        var_name="value",
+        preceded_by_call=True,
+    )
+    assert should_autofix(lifecycle, PatternType.IMMEDIATE_SINGLE_USE) is False
+
+
+def test_is_preceded_by_call_across_multiline_statement() -> None:
+    """Regression test (2nd P1 caught in review of issue #22's fix): the
+    evaluation-order check must be AST-based, not line/column-text-based —
+    a text heuristic sees an empty same-line prefix for `x` here and
+    wrongly calls it safe, even though side_effect() (on the previous
+    physical line, same statement) already ran first.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    x = make()
+    sink(
+        side_effect(),
+        x,
+    )
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    assert is_preceded_by_call(x_lifecycle.uses[0]) is True
+
+
+def test_is_preceded_by_call_true_for_attribute_sibling() -> None:
+    """3rd finding caught in review of issue #22's fix: attribute/subscript
+    access (e.g. a @property getter) can run arbitrary code just like a
+    call, so a sibling attribute access must count as "preceding" too, not
+    just bare ast.Call nodes.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    value = make()
+    sink(obj.property, value)
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    value_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "value")
+    assert is_preceded_by_call(value_lifecycle.uses[0]) is True
+
+
+def test_is_preceded_by_call_true_for_dict_key_after_earlier_pair() -> None:
+    """4th finding caught in review of issue #22's fix: ast.Dict's own
+    _fields order is ('keys', 'values') — every key, then every value —
+    which does NOT match Python's real per-pair evaluation order. For
+    `{"a": side_effect(), x: 1}`, "a" and side_effect() run *before* x is
+    even reached, even though a naive field-order walk would see x right
+    after "a" (before side_effect()).
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    x = make()
+    d = {"a": side_effect(), x: 1}
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    assert is_preceded_by_call(x_lifecycle.uses[0]) is True
+
+
+def test_is_preceded_by_call_false_for_dict_sibling_without_calls() -> None:
+    """Branch coverage: a dict literal that doesn't contain the target at
+    all (and has no calls in it) must be walked fully — none of its
+    key/value pairs match, so this exercises the loop completing without
+    an early exit.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    x = make()
+    sink({"a": 1, "b": 2}, x)
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    assert is_preceded_by_call(x_lifecycle.uses[0]) is False
+
+
+def test_is_preceded_by_call_false_for_dict_first_key() -> None:
+    """The dict fix must stay precise: x as the very first key (nothing
+    evaluates before it, not even its own paired value) is still safe.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    x = make()
+    d = {x: 1, "b": side_effect()}
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    assert is_preceded_by_call(x_lifecycle.uses[0]) is False
+
+
+def test_is_preceded_by_call_true_for_dict_value_after_unpacking() -> None:
+    """Branch coverage: a None key marks **unpacking (evaluates only the
+    paired value, no separate key) — a value after one must still see it
+    as a preceding effect if that unpacked expression is a call.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    x = make()
+    d = {**other(), "b": x}
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    assert is_preceded_by_call(x_lifecycle.uses[0]) is True
+
+
+def test_is_preceded_by_call_true_for_assign_target_base_after_value() -> None:
+    """6th finding caught in review of issue #22's fix: for `obj.attr =
+    value`, Python evaluates `value` *before* `obj` — the opposite of
+    ast.Assign's own _fields order ('targets', 'value'). `x.attr =
+    side_effect()` must see `side_effect()` as preceding `x`, or inlining
+    would produce `make().attr = side_effect()`, reversing real order.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    x = make()
+    x.attr = side_effect()
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    assert is_preceded_by_call(x_lifecycle.uses[0]) is True
+
+
+def test_is_preceded_by_call_true_for_ifexp_branch() -> None:
+    """7th finding caught in review of issue #22's fix: exactly one of an
+    ternary's body/orelse ever runs — never both, never unconditionally —
+    so a call used there might not execute at all. `sink(x if flag else 0)`
+    must be treated as unsafe, since inlining would make the call
+    conditional on `flag` instead of always running.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    x = make()
+    sink(x if flag else 0)
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    assert is_preceded_by_call(x_lifecycle.uses[0]) is True
+
+
+def test_is_preceded_by_call_true_for_boolop_non_first_operand() -> None:
+    """8th finding caught in review of issue #22's fix: `and`/`or` short-
+    circuit, so only the first operand is guaranteed to evaluate. `sink(flag
+    and x)` must be treated as unsafe — if `flag` is falsy, `x` (and thus an
+    inlined call) never evaluates, unlike the original unconditional call.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    x = make()
+    sink(flag and x)
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    assert is_preceded_by_call(x_lifecycle.uses[0]) is True
+
+
+def test_is_preceded_by_call_true_for_ifexp_sibling_without_target() -> None:
+    """Branch coverage: a ternary that doesn't contain the target at all
+    (a plain sibling, e.g. `sink(a if flag else b, x)`) must still be
+    walked fully to completion (none of test/body/orelse match,
+    exercising the loop finishing without an early exit) — and, since
+    IfExp's `test` invokes `__bool__` the same way BoolOp's short-circuit
+    check does, it's still treated as a preceding effect even though it
+    doesn't contain the target.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    x = make()
+    sink(a if flag else b, x)
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    assert is_preceded_by_call(x_lifecycle.uses[0]) is True
+
+
+def test_is_preceded_by_call_true_for_boolop_sibling_without_target() -> None:
+    """Branch coverage: a BoolOp that doesn't contain the target at all
+    (`sink(flag and other, x)`) must still be walked fully to completion
+    (neither operand matches, exercising the loop finishing without an
+    early exit) — and, since BoolOp itself invokes `__bool__` on its left
+    operand to decide whether to short-circuit, it's still treated as a
+    preceding effect (same reasoning as the operator-dunder-overload fix),
+    even though it doesn't contain the target.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    x = make()
+    sink(flag and other, x)
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    assert is_preceded_by_call(x_lifecycle.uses[0]) is True
+
+
+def test_evaluation_order_children_assign_yields_value_before_targets() -> None:
+    """Branch coverage + contract test: for ast.Assign, _evaluation_order_children
+    must yield the RHS value before the target(s) — the opposite of
+    Assign._fields, which lists targets first — matching Python's real
+    evaluate-RHS-then-target(s) order.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        _evaluation_order_children,
+    )
+
+    tree = ast.parse("x.attr = value_expr")
+    assign_node = tree.body[0]
+    assert isinstance(assign_node, ast.Assign)
+    children = list(_evaluation_order_children(assign_node))
+
+    assert children == [(assign_node.value, False), (assign_node.targets[0], False)]
+
+
+def test_is_preceded_by_call_false_for_boolop_first_operand() -> None:
+    """The BoolOp fix must stay precise: the *first* operand always
+    evaluates unconditionally, so `sink(x and flag)` is still safe.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    x = make()
+    sink(x and flag)
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
+    assert is_preceded_by_call(x_lifecycle.uses[0]) is False
+
+
+def test_is_preceded_by_call_false_for_method_call_receiver() -> None:
+    """The issue's own motivating idiom must remain safe: `check` is the
+    receiver of `check.check(...)`, evaluated before any of that call's own
+    arguments — nothing precedes it.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        VariableTracker,
+        is_preceded_by_call,
+    )
+
+    source = """
+def f():
+    check = ForbidVarsCheck()
+    violations = check.check(Path("test.py"), tree, source)
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    lifecycles = tracker.build_lifecycles()
+
+    check_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "check")
+    assert is_preceded_by_call(check_lifecycle.uses[0]) is False
+
+
+def test_is_preceded_by_call_defaults_to_true_for_unknown_container() -> None:
+    """When the enclosing statement (or node) can't be determined,
+    is_preceded_by_call must default to the conservative "unsafe" answer
+    rather than guessing.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
+        UsageInfo,
+        is_preceded_by_call,
+    )
+
+    use = UsageInfo(
+        var_name="x", line=1, col=0, stmt_index=0, context="unknown", scope_id=1
+    )
+    assert is_preceded_by_call(use) is True
+
+
+def test_should_autofix_rejects_call_with_args_for_immediate_single_use() -> None:
+    """The zero-arg carve-out must stay narrow: a call with any argument is
+    still rejected for IMMEDIATE_SINGLE_USE/LITERAL_IDENTITY, unlike the more
+    permissive allowance already granted to SINGLE_USE.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.semantic import should_autofix
+
+    rhs_node = ast.parse("make_check(1)", mode="eval").body
+    lifecycle = _make_single_use_lifecycle("make_check(1)", rhs_node, var_name="check")
+    assert should_autofix(lifecycle, PatternType.IMMEDIATE_SINGLE_USE) is False
+
+
+def test_should_autofix_uses_real_use_line_length_when_available() -> None:
+    """Issue #22 gap 1: should_autofix's line-length check must reflect the
+    *actual* use line when the caller can supply it, not just the
+    conservative RHS/var-name-based estimate — otherwise a violation can be
+    reported [FIXABLE] and then silently skipped by apply_fixes' own,
+    accurate length check.
+    """
+    from pre_commit_hooks.ast_checks.redundant_assignment.semantic import should_autofix
+
+    rhs_node = ast.parse("ast.parse(source)", mode="eval").body
+    lifecycle = _make_single_use_lifecycle(
+        "ast.parse(source)", rhs_node, var_name="tree"
+    )
+
+    # Without the real use line, the conservative RHS/var-name estimate says
+    # inlining is safe (both are short).
+    assert should_autofix(lifecycle, PatternType.SINGLE_USE) is True
+
+    # _make_single_use_lifecycle fixes the use at line 2 (1-indexed).
+    long_use_line = (
+        "    violations = check.check("
+        'Path("tests/test_something_with_a_long_name.py"), tree, source)'
+    )
+    source_lines = ["def f():", long_use_line]
+    assert (
+        should_autofix(lifecycle, PatternType.SINGLE_USE, source_lines=source_lines)
+        is False
+    )
 
 
 def test_adds_verbosity_subscript_with_variable_slice() -> None:
