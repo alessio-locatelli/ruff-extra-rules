@@ -199,13 +199,12 @@ def _adds_verbosity_or_context(
             # For subscript: obj["key"] or obj[key]
             if isinstance(rhs_node.slice, ast.Constant):
                 rhs_key_or_method = str(rhs_node.slice.value).lower()
-        else:
-            # Must be ast.Call — the outer guard ensures Subscript | Call
-            # For calls: obj.method() or obj.method(args)
-            if isinstance(rhs_node.func, ast.Attribute):
-                rhs_key_or_method = rhs_node.func.attr.lower()
-            elif isinstance(rhs_node.func, ast.Name):
-                rhs_key_or_method = rhs_node.func.id.lower()
+        # Must be ast.Call — the outer guard ensures Subscript | Call
+        # For calls: obj.method() or obj.method(args)
+        elif isinstance(rhs_node.func, ast.Attribute):
+            rhs_key_or_method = rhs_node.func.attr.lower()
+        elif isinstance(rhs_node.func, ast.Name):
+            rhs_key_or_method = rhs_node.func.id.lower()
 
         # Check if variable name contains the RHS key/method but with additional context
         # Example: "raw_headers" contains "headers" but adds "raw_"

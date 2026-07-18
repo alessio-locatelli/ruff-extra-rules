@@ -184,7 +184,7 @@ class RedundantAssignmentCheck(BaseCheck):
                 # Violation.fix_data is intentionally untyped (dict[str,
                 # Any]) at this boundary; see RedundantAssignmentFixData in
                 # autofix.py for the shape check()/apply_fixes() agree on.
-                fix_data=cast(dict[str, Any], fix_data),
+                fix_data=cast("dict[str, Any]", fix_data),
             )
             violations.append(violation)
 

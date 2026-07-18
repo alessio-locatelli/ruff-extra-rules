@@ -67,7 +67,7 @@ def apply_fixes(
         raw_fix_data = v.fix_data
         if not raw_fix_data or raw_fix_data.get("use_line") is None:
             return (-1, -1)
-        fix_data = cast(RedundantAssignmentFixData, raw_fix_data)
+        fix_data = cast("RedundantAssignmentFixData", raw_fix_data)
         return (fix_data["use_line"], fix_data["use_col"])
 
     fixable_violations.sort(key=_use_position, reverse=True)
@@ -82,7 +82,7 @@ def apply_fixes(
         raw_fix_data = violation.fix_data
         if not raw_fix_data or raw_fix_data.get("use_line") is None:
             continue
-        fix_data = cast(RedundantAssignmentFixData, raw_fix_data)
+        fix_data = cast("RedundantAssignmentFixData", raw_fix_data)
 
         assign_line_idx = fix_data["assign_line"] - 1
         use_line_idx = fix_data["use_line"] - 1
