@@ -146,8 +146,14 @@ class RedundantAssignmentCheck(BaseCheck):
             if not should_report_violation(lifecycle, pattern, filepath):
                 continue
 
-            # Determine if fixable (very conservative - only simplest cases)
-            fixable = should_autofix(lifecycle, pattern, filepath)
+            # Determine if fixable (very conservative - only simplest cases).
+            # Pass the real source lines so the line-length check matches the
+            # actual usage line, not just a conservative RHS-length estimate
+            # (see docs: apply_fixes independently re-checks the real line,
+            # and the two must agree or [FIXABLE] can lie about --fix).
+            fixable = should_autofix(
+                lifecycle, pattern, filepath, source_lines=tracker.source_lines
+            )
 
             # Create violation
             message = format_message(lifecycle.assignment.var_name, pattern.name)

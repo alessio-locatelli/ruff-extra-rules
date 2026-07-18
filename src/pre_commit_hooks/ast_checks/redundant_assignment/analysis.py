@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum, auto
 
@@ -64,7 +65,21 @@ class UsageInfo:
         context: Usage context ('return', 'call', 'operation', etc.')
         scope_id: Scope identifier for isolation
         usage_has_await: Whether the usage is wrapped in an await expression
-        in_control_flow: Whether usage is inside control flow (if/try/with)
+        in_control_flow: Whether usage is inside control flow (if/try/with/match)
+        in_loop: Whether usage is inside a loop (for/while), independent of
+            whether the *assignment* is — used to reject inlining a call
+            whose single textual use would actually execute repeatedly
+        in_lambda: Whether usage is inside a lambda body — used to reject
+            inlining a call whose single textual use would actually execute
+            later (and possibly repeatedly) at call time, not once at the
+            original assignment point
+        node: The exact AST node for this use (identity, not just position).
+            None for usage kinds that don't track it.
+        enclosing_stmt: The statement containing `node`, for
+            `analysis.is_preceded_by_call`. Stored (not eagerly evaluated)
+            so the O(statement size) evaluation-order walk only runs for the
+            rare usages that actually need it (should_autofix's
+            zero-arg-call carve-out) instead of every Name-load in the file.
     """
 
     var_name: str
@@ -75,7 +90,11 @@ class UsageInfo:
     scope_id: int
     usage_has_await: bool = False
     in_control_flow: bool = False
+    in_loop: bool = False
+    in_lambda: bool = False
     in_comprehension: bool = False
+    node: ast.expr | None = None
+    enclosing_stmt: ast.stmt | None = None
 
 
 @dataclass
@@ -135,6 +154,162 @@ def _has_await_expression(node: ast.expr) -> bool:
     detector = AwaitDetector()
     detector.visit(node)
     return detector.has_await
+
+
+# Node types treated as "may run arbitrary user code, or suspend execution"
+# for evaluation-order purposes: an explicit call; attribute/subscript
+# access (`@property` getters and `__getitem__`/descriptors can execute
+# arbitrary code just as a call can); await/yield (suspension points where
+# other code can run and change state before control resumes); operators,
+# which can invoke arbitrary user code via dunder overloads (`__add__`,
+# `__eq__`, `__bool__`, etc.); and IfExp, whose `test` truthiness check
+# invokes `__bool__` the same way BoolOp's short-circuit check does.
+_POTENTIALLY_EFFECTFUL_NODE_TYPES = (
+    ast.Call,
+    ast.Attribute,
+    ast.Subscript,
+    ast.Await,
+    ast.Yield,
+    ast.YieldFrom,
+    ast.BinOp,
+    ast.BoolOp,
+    ast.UnaryOp,
+    ast.Compare,
+    ast.IfExp,
+)
+
+
+def _evaluation_order_children(node: ast.AST) -> Iterator[tuple[ast.AST, bool]]:
+    """Yield `node`'s children in Python's actual evaluation order.
+
+    Each child is paired with whether it's *conditionally* evaluated —
+    i.e. it might run zero times at runtime, unlike everything else here
+    which always runs exactly once if its parent does. Inlining a call into
+    a conditional position is just as unsafe as inlining it somewhere with
+    a preceding effect: both change whether/when the call actually fires
+    relative to the original, unconditional assignment.
+
+    `ast.iter_child_nodes` matches evaluation order and unconditional-ness
+    for most expression types, since their `_fields` are declared
+    left-to-right in evaluation order (BinOp.left before .right, Call.func
+    before .args before .keywords, etc.) and don't skip children at
+    runtime. The exceptions handled explicitly here:
+    - `ast.Dict`: `_fields` are `('keys', 'values')` — every key, then
+      every value — but Python evaluates each key/value *pair* together,
+      interleaved (e.g. `{"a": f(), x: 1}` evaluates "a", f(), x, 1 — not
+      "a", x, f(), 1). A `None` key marks `**unpacking`, which evaluates
+      only the paired value.
+    - `ast.Assign`: `_fields` are `('targets', 'value', ...)`, but Python
+      evaluates the RHS `value` *before* the target(s) (relevant when a
+      target is `obj.attr` or `obj[key]`, whose base expression `obj` is
+      itself evaluated then, after `value`).
+    - `ast.IfExp` (ternary): `test` always evaluates, but exactly one of
+      `body`/`orelse` does — never both, and never unconditionally.
+    - `ast.BoolOp` (`and`/`or`): short-circuits, so only the first operand
+      is guaranteed to evaluate; the rest are conditional on earlier ones.
+
+    Args:
+        node: Node whose children to yield
+
+    Returns:
+        (child, is_conditional) pairs in true evaluation order
+    """
+    if isinstance(node, ast.Dict):
+        for key, value in zip(node.keys, node.values, strict=True):
+            if key is not None:
+                yield key, False
+            yield value, False
+        return
+    if isinstance(node, ast.Assign):
+        yield node.value, False
+        for assign_target in node.targets:
+            yield assign_target, False
+        return
+    if isinstance(node, ast.IfExp):
+        yield node.test, False
+        yield node.body, True
+        yield node.orelse, True
+        return
+    if isinstance(node, ast.BoolOp):
+        for index, value in enumerate(node.values):
+            yield value, index > 0
+        return
+    for child in ast.iter_child_nodes(node):
+        yield child, False
+
+
+def _call_precedes_target(node: ast.AST, target: ast.AST) -> tuple[bool, bool, bool]:
+    """Walk `node`'s children in evaluation order looking for `target`.
+
+    It's AST-based rather than text/line-based specifically so it stays
+    correct across multi-line statements, where a sibling operand's
+    physical line/column says nothing about evaluation order.
+
+    Args:
+        node: Subtree to search
+        target: The exact node instance being searched for (identity, not
+            structural equality)
+
+    Returns:
+        A (found, effect_before_target, node_is_or_contains_effect) triple:
+        - found: whether `target` is `node` itself or within its subtree
+        - effect_before_target: whether a potentially effectful node (see
+          `_POTENTIALLY_EFFECTFUL_NODE_TYPES`) fully evaluated before
+          reaching `target`, OR `target` is only conditionally reachable
+          (see `_evaluation_order_children`) — only meaningful when
+          `found` is True
+        - node_is_or_contains_effect: whether `node` itself is (or
+          contains) a potentially effectful node that has fully evaluated —
+          only meaningful when `found` is False, since a call containing
+          `target` among its own arguments doesn't fire until after
+          `target` (and everything else in it) is evaluated
+    """
+    if node is target:
+        return True, False, False
+
+    seen_effect = False
+    for child, is_conditional in _evaluation_order_children(node):
+        found, effect_before, child_has_effect = _call_precedes_target(child, target)
+        if found:
+            return True, seen_effect or effect_before or is_conditional, False
+        if child_has_effect:
+            seen_effect = True
+
+    return (
+        False,
+        False,
+        seen_effect or isinstance(node, _POTENTIALLY_EFFECTFUL_NODE_TYPES),
+    )
+
+
+def is_preceded_by_call(use: UsageInfo) -> bool:
+    """Check if a potentially effectful expression evaluates before `use`.
+
+    Lazily walks `use.enclosing_stmt` looking for `use.node` — deferred to
+    call time (rather than computed eagerly per Name-load during the AST
+    walk) since it's O(statement size); running it for every Name-load
+    would be quadratic for wide expressions (e.g. a large tuple/list/dict
+    literal with many names).
+
+    Used to decide whether inlining a call in place of `use` could reorder
+    side effects relative to a sibling expression — see
+    `redundant_assignment.semantic.should_autofix`'s zero-arg-call carve-out
+    for why this matters (e.g. inlining `value` into
+    `sink(side_effect(), value)` would run the inlined call *after*
+    `side_effect()`, reversed from the original assign-then-use order).
+
+    Args:
+        use: The usage to check
+
+    Returns:
+        True if something potentially effectful precedes `use`, or
+        `use.node`/`use.enclosing_stmt` is unavailable so safety can't be
+        verified (conservative default)
+    """
+    if use.node is None or use.enclosing_stmt is None:
+        return True
+    _found, effect_before, _ = _call_precedes_target(use.enclosing_stmt, use.node)
+    return effect_before
 
 
 def _has_comment_above(line_number: int, source_lines: list[str]) -> bool:
@@ -231,14 +406,25 @@ class VariableTracker(ast.NodeVisitor):
         # Track if we're inside a loop (for, while)
         self.loop_depth = 0
 
-        # Track if we're inside control flow (if, try, with)
+        # Track if we're inside control flow (if, try, with, match)
         self.control_flow_depth = 0
 
         # Track if we're inside a comprehension (list/set/dict/generator)
         self.comprehension_depth = 0
 
+        # Track if we're inside a lambda body — a use here executes later
+        # (and possibly repeatedly, or never) at call time, not once at the
+        # point the lambda is defined
+        self.lambda_depth = 0
+
         # Track parent nodes for context detection
         self.parent_stack: list[ast.AST] = []
+
+        # Innermost enclosing statement of whatever node is currently being
+        # visited, updated in visit() below. Stored on each UsageInfo (not
+        # searched here) so is_preceded_by_call's evaluation-order walk can
+        # run lazily, later, only for the rare usages that need it.
+        self.current_stmt: ast.stmt | None = None
 
         # Track parent-child scope relationships for closure detection
         # Maps child_scope_id -> parent_scope_id
@@ -435,6 +621,34 @@ class VariableTracker(ast.NodeVisitor):
         self.generic_visit(node)
         self.control_flow_depth -= 1
 
+    def visit_Match(self, node: ast.Match) -> None:
+        """Visit match statement (track control flow depth).
+
+        Each case body only runs conditionally (if its pattern/guard
+        matches), same as an if/elif branch.
+
+        Args:
+            node: Match statement node
+        """
+        self.control_flow_depth += 1
+        self.generic_visit(node)
+        self.control_flow_depth -= 1
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        """Visit lambda expression (track lambda depth).
+
+        A lambda's body doesn't execute where it's defined — it executes
+        later, whenever (and however many times, including zero) the
+        lambda is called. Uses inside it must never be treated as
+        "the same execution point" as the surrounding statement.
+
+        Args:
+            node: Lambda expression node
+        """
+        self.lambda_depth += 1
+        self.generic_visit(node)
+        self.lambda_depth -= 1
+
     def _visit_comprehension(
         self,
         node: ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp,
@@ -612,6 +826,10 @@ class VariableTracker(ast.NodeVisitor):
                 context="attribute_or_subscript_assignment",
                 scope_id=scope_id,
                 in_control_flow=self.control_flow_depth > 0,
+                in_loop=self.loop_depth > 0,
+                in_lambda=self.lambda_depth > 0,
+                node=base,
+                enclosing_stmt=self.current_stmt,
             )
             key = (scope_id, var_name)
             if key not in self.uses:
@@ -722,6 +940,20 @@ class VariableTracker(ast.NodeVisitor):
         # Visit RHS to track any uses of other variables
         self.visit(node.value)
 
+    def visit(self, node: ast.AST) -> None:
+        """Dispatch to the type-specific visit_* method, tracking current_stmt.
+
+        Many statement visitors below (visit_Assign, visit_AnnAssign, ...)
+        don't call self.generic_visit(node) on themselves — they manually
+        visit only the parts they care about — so parent_stack alone can't
+        reconstruct "the enclosing statement" for an arbitrary node. This
+        override catches every ast.stmt as it's dispatched, regardless of
+        which visit_* method (or none) handles it next.
+        """
+        if isinstance(node, ast.stmt):
+            self.current_stmt = node
+        super().visit(node)
+
     def generic_visit(self, node: ast.AST) -> None:
         """Visit a node and track parent context."""
         self.parent_stack.append(node)
@@ -767,7 +999,11 @@ class VariableTracker(ast.NodeVisitor):
             scope_id=scope_id,
             usage_has_await=usage_has_await,
             in_control_flow=self.control_flow_depth > 0,
+            in_loop=self.loop_depth > 0,
+            in_lambda=self.lambda_depth > 0,
             in_comprehension=self.comprehension_depth > 0,
+            node=node,
+            enclosing_stmt=self.current_stmt,
         )
 
         # Store usage
@@ -867,6 +1103,15 @@ def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
     for use in lifecycle.uses:
         if use.scope_id != lifecycle.assignment.scope_id:
             # This is a closure - variable is captured by nested function
+            return None
+
+    # Augmented-assignment targets (x += 1) can never be inlined: the "use"
+    # IS an assignment target, and replacing it with the RHS expression
+    # produces invalid syntax (`x = 5; x += 1` -> `5 += 1`). This also isn't
+    # the read-then-pass-through pattern TRI005 targets — the variable is
+    # being mutated, not merely forwarded.
+    for use in lifecycle.uses:
+        if use.context == "augmented_assignment":
             return None
 
     # Pattern 3: Literal identity (e.g., foo = "foo")
