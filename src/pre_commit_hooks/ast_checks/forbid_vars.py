@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 import logging
 import re
-from typing import Any, TypedDict, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from ._base import (
     BaseCheck,

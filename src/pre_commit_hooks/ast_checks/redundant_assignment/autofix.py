@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import TypedDict, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, cast
 
 from .._base import Violation, atomic_write_text, byte_col_to_char_col
 from .semantic import exceeds_line_length_when_inlined

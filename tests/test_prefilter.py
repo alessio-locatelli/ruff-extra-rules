@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
@@ -12,7 +13,6 @@ from pre_commit_hooks._prefilter import (
     batch_filter_files,
     git_grep_filter,
 )
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path

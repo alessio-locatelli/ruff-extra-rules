@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import ast
 import logging
+from typing import TYPE_CHECKING
 
 from ._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -20,9 +20,9 @@ from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
 
 if TYPE_CHECKING:
-    from pathlib import Path
-    import ast
     import argparse
+    import ast
+    from pathlib import Path
 
 
 def test_filter_excluded_files_no_patterns_returns_all() -> None:

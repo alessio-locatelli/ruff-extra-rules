@@ -16,6 +16,7 @@ import re
 import tokenize
 from dataclasses import dataclass
 from io import StringIO
+from typing import TYPE_CHECKING
 
 from ._base import (
     BaseCheck,
@@ -24,11 +25,10 @@ from ._base import (
     find_ignored_lines,
     ignore_pattern_for,
 )
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from pathlib import Path
     import ast
+    from pathlib import Path
 
 logger = logging.getLogger("misplaced_comment")
 

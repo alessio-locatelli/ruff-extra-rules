@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import ast
+from typing import TYPE_CHECKING
 
 from .analysis import PatternType, UsageInfo, VariableLifecycle, is_preceded_by_call
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -697,7 +697,7 @@ def should_report_violation(
     # Rule 2: Don't report if RHS has await expression
     # Inlining await expressions requires parentheses which is bulky:
     #   json_resp = await resp.json(); return json_resp['key']  # noqa: ERA001
-    # Would become: return (await resp.json())['key']  # ugly  # noqa: ERA001
+    # Would become: return (await resp.json())['key']  # ugly
     if assignment.rhs_has_await:
         return False
 
@@ -729,7 +729,7 @@ def should_report_violation(
     # Rule 8: Don't report when assignment is outside control flow but usage is inside
     # This handles pytest.raises pattern where setup is intentionally separated:
     #   sample_class = SampleClass()  # setup outside  # noqa: ERA001
-    #   with pytest.raises(Error):     # usage inside  # noqa: ERA001
+    #   with pytest.raises(Error):     # usage inside
     #       sample_class.method()  # noqa: ERA001
     if (
         not assignment.in_control_flow
@@ -740,9 +740,9 @@ def should_report_violation(
 
     # Rule 9: Don't report when assignment is inside control flow but usage is outside
     # This handles context manager pattern to reduce nesting:
-    #   with file.open() as f:  # noqa: ERA001
+    #   with file.open() as f:
     #       config = load(f)  # assignment inside  # noqa: ERA001
-    #   # Use config outside to avoid deep nesting  # noqa: ERA001
+    #   # Use config outside to avoid deep nesting
     #   data = config.get(...)  # noqa: ERA001
     if (
         assignment.in_control_flow
@@ -754,9 +754,9 @@ def should_report_violation(
     # Rule 10: Don't report when all usages are inside a comprehension
     # Inlining would re-evaluate the RHS expression on every iteration,
     # causing a performance regression. For example:
-    #   iso_country = obj.iso_country          # cached once  # noqa: ERA001, E501
+    #   iso_country = obj.iso_country          # cached once  # noqa: ERA001
     #   result = [x for x in items if x.country == iso_country]  # O(1) lookup  # noqa: ERA001, E501
-    # Inlining would become O(n) attribute lookups inside the comprehension.  # noqa: ERA001, E501
+    # Inlining would become O(n) attribute lookups inside the comprehension.  # noqa: E501
     if lifecycle.uses and all(use.in_comprehension for use in lifecycle.uses):
         return False
 

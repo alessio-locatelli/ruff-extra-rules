@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import stat
+from typing import TYPE_CHECKING
 
 import pytest
 
 from pre_commit_hooks.ast_checks._base import atomic_write_text, byte_col_to_char_col
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path

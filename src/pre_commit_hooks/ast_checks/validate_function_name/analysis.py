@@ -5,9 +5,9 @@ from __future__ import annotations
 import ast
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from .._base import find_ignored_lines, ignore_pattern_for, read_source_with_encoding
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path

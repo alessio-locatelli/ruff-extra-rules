@@ -5,11 +5,11 @@ from __future__ import annotations
 import ast
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from .._base import atomic_write_text, byte_col_to_char_col, read_source_with_encoding
 from .._scope import iter_within_scope
 from .analysis import Suggestion, attach_parents, read_source
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pathlib import Path

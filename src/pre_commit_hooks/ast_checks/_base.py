@@ -11,11 +11,11 @@ import tempfile
 import tokenize
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    import ast
     import argparse
+    import ast
 
 logger = logging.getLogger("ast_checks")
 

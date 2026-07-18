@@ -33,15 +33,15 @@ Example:
 from __future__ import annotations
 
 import logging
-from typing import Any, TypedDict, cast, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from .._base import BaseCheck, Violation
 from .analysis import Suggestion, collect_suggestions
 from .autofix import apply_fix, should_autofix
 
 if TYPE_CHECKING:
-    from pathlib import Path
     import ast
+    from pathlib import Path
 
 ERROR_CODE = "TRI004"
 
