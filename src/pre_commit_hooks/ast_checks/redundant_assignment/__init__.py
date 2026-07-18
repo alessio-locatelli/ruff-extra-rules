@@ -30,14 +30,16 @@ Examples:
 
 from __future__ import annotations
 
-import ast
-from pathlib import Path
-from typing import Any, cast
+from typing import Any, cast, TYPE_CHECKING
 
 from .._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
 from .analysis import VariableTracker, detect_redundancy
 from .autofix import RedundantAssignmentFixData, apply_fixes
 from .semantic import should_autofix, should_report_violation
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    import ast
 
 # Format: # pytriage: ignore=TRI005
 IGNORE_PATTERN = ignore_pattern_for("TRI005")

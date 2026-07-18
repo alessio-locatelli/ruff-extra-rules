@@ -13,7 +13,6 @@ from __future__ import annotations
 import ast
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 
 from ._base import (
     BaseCheck,
@@ -22,6 +21,10 @@ from ._base import (
     find_ignored_lines,
     ignore_pattern_for,
 )
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger("excessive_blank_lines")
 

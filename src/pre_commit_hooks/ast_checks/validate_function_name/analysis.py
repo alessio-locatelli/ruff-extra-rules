@@ -5,9 +5,12 @@ from __future__ import annotations
 import ast
 import logging
 from dataclasses import dataclass
-from pathlib import Path
 
 from .._base import find_ignored_lines, ignore_pattern_for, read_source_with_encoding
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger("validate_function_name")
 
@@ -445,13 +448,13 @@ def is_simple_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
     if not isinstance(node, ast.Return) or node.value is None:
         return False
     value = node.value
-    # self.attr or obj.attr
+    # self.attr or obj.attr  # noqa: ERA001
     if isinstance(value, ast.Attribute):
         return True
-    # obj['key'] or obj[expr]
+    # obj['key'] or obj[expr]  # noqa: ERA001
     if isinstance(value, ast.Subscript):
         return True
-    # obj.get(...) or some_dict.get(...)
+    # obj.get(...) or some_dict.get(...)  # noqa: ERA001
     if isinstance(value, ast.Call):
         call_name = _call_name(value.func)
         if (call_name and call_name.endswith(".get")) or (

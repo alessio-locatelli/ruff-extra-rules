@@ -13,9 +13,11 @@ import hashlib
 import json
 import logging
 import time
-from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 __all__ = ["CacheManager"]
 

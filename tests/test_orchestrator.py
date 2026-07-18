@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import argparse
-import ast
-from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import pytest
 
@@ -21,6 +18,11 @@ from pre_commit_hooks.ast_checks._base import Violation
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    import ast
+    import argparse
 
 
 def test_filter_excluded_files_no_patterns_returns_all() -> None:

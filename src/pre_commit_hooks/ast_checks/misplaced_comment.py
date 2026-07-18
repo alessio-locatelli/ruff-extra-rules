@@ -10,14 +10,12 @@ Inline ignore: # pytriage: ignore=STYLE-001
 
 from __future__ import annotations
 
-import ast
 import functools
 import logging
 import re
 import tokenize
 from dataclasses import dataclass
 from io import StringIO
-from pathlib import Path
 
 from ._base import (
     BaseCheck,
@@ -26,6 +24,11 @@ from ._base import (
     find_ignored_lines,
     ignore_pattern_for,
 )
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    import ast
 
 logger = logging.getLogger("misplaced_comment")
 

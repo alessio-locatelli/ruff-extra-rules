@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
-from typing import TypedDict, cast
+from typing import TypedDict, cast, TYPE_CHECKING
 
 from .._base import Violation, atomic_write_text, byte_col_to_char_col
 from .semantic import exceeds_line_length_when_inlined
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class RedundantAssignmentFixData(TypedDict):

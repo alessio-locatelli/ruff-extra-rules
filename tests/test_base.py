@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import stat
-from pathlib import Path
 
 import pytest
 
 from pre_commit_hooks.ast_checks._base import atomic_write_text, byte_col_to_char_col
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def test_byte_col_to_char_col_ascii_line_is_identity() -> None:
