@@ -70,6 +70,8 @@ ignore = [
   "EM101",
   # Avoid specifying long messages outside the exception class
   "TRY003",
+  # print
+  "T201",
 ]
 
 [tool.ruff.lint.per-file-ignores]
