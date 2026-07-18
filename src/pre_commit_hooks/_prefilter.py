@@ -12,7 +12,7 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
-__all__ = ["git_grep_filter", "batch_filter_files"]
+__all__ = ["batch_filter_files", "git_grep_filter"]
 
 
 logger = logging.getLogger("linter")
@@ -64,12 +64,11 @@ def git_grep_filter(
                     matches.append(input_map[resolved])
 
             return matches
-        elif git_grep_result.returncode == 1:
+        if git_grep_result.returncode == 1:
             # No matches found (not an error)
             return []
-        else:
-            # Error occurred, fall back to Python
-            return _python_fallback_filter(filepaths, pattern)
+        # Error occurred, fall back to Python
+        return _python_fallback_filter(filepaths, pattern)
 
     except (
         subprocess.SubprocessError,

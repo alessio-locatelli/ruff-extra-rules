@@ -550,7 +550,7 @@ class ForbidVarsCheck(BaseCheck):
                     # Violation.fix_data is intentionally untyped (dict[str,
                     # Any]) at this boundary; see ForbidVarsFixData above for
                     # the shape check()/fix() actually agree on.
-                    fix_data=cast(dict[str, Any], v),
+                    fix_data=cast("dict[str, Any]", v),
                 )
             )
 
@@ -578,7 +578,7 @@ class ForbidVarsCheck(BaseCheck):
         """
         # Extract fixable violations with suggestions
         fixable = [
-            cast(ForbidVarsFixData, v.fix_data)
+            cast("ForbidVarsFixData", v.fix_data)
             for v in violations
             if v.fixable and v.fix_data
         ]

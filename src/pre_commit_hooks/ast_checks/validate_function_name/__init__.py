@@ -104,7 +104,7 @@ class ValidateFunctionNameCheck(BaseCheck):
                     # Violation.fix_data is intentionally untyped (dict[str,
                     # Any]) at this boundary; see ValidateFunctionNameFixData
                     # above for the shape check()/fix() actually agree on.
-                    fix_data=cast(dict[str, Any], fix_data),
+                    fix_data=cast("dict[str, Any]", fix_data),
                 )
             )
 
@@ -146,7 +146,7 @@ class ValidateFunctionNameCheck(BaseCheck):
             if not violation.fix_data:
                 continue
 
-            fix_data = cast(ValidateFunctionNameFixData, violation.fix_data)
+            fix_data = cast("ValidateFunctionNameFixData", violation.fix_data)
             suggestion = fix_data.get("suggestion")
             if not suggestion:
                 continue

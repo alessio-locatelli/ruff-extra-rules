@@ -138,11 +138,8 @@ def analyze_function(
 
     # property
     for deco in func_node.decorator_list:
-        if (
-            isinstance(deco, ast.Name)
-            and deco.id == "property"
-            or isinstance(deco, ast.Attribute)
-            and deco.attr.endswith("property")
+        if (isinstance(deco, ast.Name) and deco.id == "property") or (
+            isinstance(deco, ast.Attribute) and deco.attr.endswith("property")
         ):
             flags["is_property"] = True
 
@@ -457,10 +454,8 @@ def is_simple_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
     # obj.get(...) or some_dict.get(...)
     if isinstance(value, ast.Call):
         call_name = _call_name(value.func)
-        if (
-            call_name
-            and call_name.endswith(".get")
-            or (isinstance(value.func, ast.Name) and value.func.id == "get")
+        if (call_name and call_name.endswith(".get")) or (
+            isinstance(value.func, ast.Name) and value.func.id == "get"
         ):
             return True
     return False
