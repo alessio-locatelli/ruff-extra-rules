@@ -71,6 +71,9 @@ ignore = [
   "TRY003",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["SLF001"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
