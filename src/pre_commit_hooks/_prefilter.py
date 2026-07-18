@@ -78,7 +78,7 @@ def git_grep_filter(
         FileNotFoundError,
         subprocess.TimeoutExpired,
     ) as error:
-        logger.error(repr(error))
+        logger.exception(repr(error))
         # git not available or timeout, fall back
         return _python_fallback_filter(filepaths, pattern)
 
@@ -87,12 +87,12 @@ def _python_fallback_filter(filepaths: Sequence[str], pattern: str) -> list[str]
     matches = []
     for filepath in filepaths:
         try:
-            with open(filepath, encoding="utf-8") as f:
+            with Path(filepath).open(encoding="utf-8") as f:
                 content = f.read()
                 if pattern in content:
                     matches.append(filepath)
         except (OSError, UnicodeDecodeError) as error:
-            logger.error("File: %s, error: %s", filepath, repr(error))
+            logger.exception("File: %s, error: %s", filepath, repr(error))
             # Include file if we can't read it (let hook handle error)
             matches.append(filepath)
     return matches

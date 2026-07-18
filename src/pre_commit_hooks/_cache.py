@@ -74,7 +74,7 @@ class CacheManager:
         process's write silently clobber another's (lost update).
         """
         lock_file = cache_file.with_suffix(".lock")
-        with open(lock_file, "a", encoding="utf-8") as lock_fp:
+        with lock_file.open("a", encoding="utf-8") as lock_fp:
             fcntl.flock(lock_fp, fcntl.LOCK_EX)
             try:
                 yield
@@ -119,7 +119,7 @@ class CacheManager:
 
             with self._locked(cache_file):
                 # Load cache metadata
-                with open(cache_file, encoding="utf-8") as f:
+                with cache_file.open(encoding="utf-8") as f:
                     cache_data = json.load(f)
 
                 # Version check
@@ -165,7 +165,7 @@ class CacheManager:
                 # Load existing cache or create new
                 cache_data = None
                 if cache_file.exists():
-                    with open(cache_file, encoding="utf-8") as f:
+                    with cache_file.open(encoding="utf-8") as f:
                         cache_data = json.load(f)
                     if cache_data.get("version") != self.cache_version:
                         # Stale format/logic version: results under it may
@@ -209,7 +209,7 @@ class CacheManager:
     def compute_file_hash(filepath: Path) -> str:
         """Returns SHA-1 hex digest."""
         sha1 = hashlib.sha1()
-        with open(filepath, "rb") as f:
+        with filepath.open("rb") as f:
             # Read in 64KB chunks for large files
             for chunk in iter(lambda: f.read(65536), b""):
                 sha1.update(chunk)
@@ -231,7 +231,7 @@ class CacheManager:
         """Uses temp file + rename for atomic write on POSIX systems."""
         temp_file = cache_file.with_suffix(".tmp")
         try:
-            with open(temp_file, "w", encoding="utf-8") as f:
+            with temp_file.open("w", encoding="utf-8") as f:
                 json.dump(cache_data, f, indent=2)
             temp_file.replace(cache_file)  # Atomic on POSIX
         finally:

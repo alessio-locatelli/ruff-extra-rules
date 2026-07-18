@@ -179,28 +179,14 @@ def analyze_function(
                 continue
             lname = name.lower()
             # disk read/write
-            if (
-                lname in ("open",)
-                or lname.endswith(".read")
-                or lname.endswith(".read_text")
-                or lname.endswith(".read_bytes")
-                or lname.endswith(".load")
-            ):
+            if lname == "open" or lname.endswith((".read", ".read_text", ".read_bytes", ".load")):
                 flags["disk_read"] = True
-            if (
-                lname.endswith(".write")
-                or lname.endswith(".save")
-                or lname.endswith(".dump")
-            ):
+            if lname.endswith((".write", ".save", ".dump")):
                 flags["disk_write"] = True
             # json/yaml loads/dumps
-            if (
-                lname.endswith("json.loads")
-                or lname.endswith("yaml.safe_load")
-                or lname.endswith("yaml.load")
-            ):
+            if lname.endswith(("json.loads", "yaml.safe_load", "yaml.load")):
                 flags["parses"] = True
-            if lname.endswith("json.dumps") or lname.endswith("yaml.dump"):
+            if lname.endswith(("json.dumps", "yaml.dump")):
                 flags["renders"] = True
             # network
             if any(
@@ -217,16 +203,11 @@ def analyze_function(
                 ):
                     flags["network_write"] = True
             # logger / print
-            if lname in ("print",) or (
+            if lname == "print" or (
                 lname.endswith(".write") and ("stdout" in lname or "stderr" in lname)
             ):
                 flags["outputs"] = True
-            if (
-                lname.endswith(".info")
-                or lname.endswith(".debug")
-                or lname.endswith(".warning")
-                or lname.endswith(".error")
-            ):
+            if lname.endswith((".info", ".debug", ".warning", ".error")):
                 flags["outputs"] = True
             # aggregate helpers
             if lname in (
@@ -238,14 +219,10 @@ def analyze_function(
             ) or lname.endswith(".aggregate"):
                 flags["aggregates"] = True
             # search/match
-            if (
-                lname.endswith(".find")
-                or lname.endswith(".search")
-                or lname.endswith(".index")
-            ):
+            if lname.endswith((".find", ".search", ".index")):
                 flags["searches"] = True
             # validation
-            if lname.endswith(".is_valid") or lname.endswith(".validate"):
+            if lname.endswith((".is_valid", ".validate")):
                 flags["validates"] = True
             # transform detection
             if lname.endswith(".transform") or lname.endswith(".map"):
