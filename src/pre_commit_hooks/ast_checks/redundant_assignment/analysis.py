@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class PatternType(Enum):

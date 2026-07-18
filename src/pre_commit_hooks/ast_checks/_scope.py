@@ -10,7 +10,10 @@ this module is the one shared implementation of that traversal.
 from __future__ import annotations
 
 import ast
-from collections.abc import Iterator
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 SCOPE_NODES: tuple[type[ast.AST], ...] = (
     ast.FunctionDef,

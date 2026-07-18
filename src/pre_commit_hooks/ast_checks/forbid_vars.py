@@ -11,8 +11,7 @@ from __future__ import annotations
 import ast
 import logging
 import re
-from pathlib import Path
-from typing import Any, TypedDict, cast
+from typing import Any, TypedDict, cast, TYPE_CHECKING
 
 from ._base import (
     BaseCheck,
@@ -23,6 +22,9 @@ from ._base import (
     ignore_pattern_for,
 )
 from ._scope import collect_scope_names, iter_within_scope
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger("forbid_vars")
 

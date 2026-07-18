@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
-import ast
 import io
 import logging
 import os
@@ -13,7 +11,11 @@ import tempfile
 import tokenize
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import ast
+    import argparse
 
 logger = logging.getLogger("ast_checks")
 

@@ -11,9 +11,12 @@ from __future__ import annotations
 
 import ast
 import logging
-from pathlib import Path
 
 from ._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 logger = logging.getLogger("redundant_super_init")
 

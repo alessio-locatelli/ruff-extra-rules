@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import logging
 import subprocess
-from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = ["batch_filter_files", "git_grep_filter"]
 

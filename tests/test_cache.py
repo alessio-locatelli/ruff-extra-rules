@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import time
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
 import pytest
 
 from pre_commit_hooks._cache import CacheManager
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 @pytest.fixture
