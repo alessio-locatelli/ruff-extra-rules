@@ -92,7 +92,11 @@ def run_check(name: str, command: list[str], files: list[str]) -> dict[str, Any]
         Dict with timing and result info
     """
     start = time.perf_counter()
-    result = subprocess.run(
+    # command is one of this module's own hardcoded CHECKS entries and files
+    # comes from local globbing in get_test_files(), never from untrusted
+    # external input, so no shell is involved and no argument here can
+    # inject another command.
+    result = subprocess.run(  # noqa: S603
         [*command, *files],
         capture_output=True,
         text=True,
@@ -126,10 +130,7 @@ def benchmark_iteration(files: list[str], label: str) -> dict[str, Any]:
     for name, command in CHECKS.items():
         result = run_check(name, command, files)
         results.append(result)
-        print(
-            f"  {name:30s} {result['elapsed_ms']:8.2f} ms "
-            f"({result['files_checked']} files)"
-        )
+        print(f"  {name:30s} {result['elapsed_ms']:8.2f} ms ({result['files_checked']} files)")
 
     total_elapsed = time.perf_counter() - total_start
 
@@ -209,10 +210,7 @@ def main() -> None:
     print("-" * 60)
 
     for name in CHECKS:
-        check_times = [
-            next(c["elapsed_ms"] for c in r["checks"] if c["name"] == name)
-            for r in cold_results
-        ]
+        check_times = [next(c["elapsed_ms"] for c in r["checks"] if c["name"] == name) for r in cold_results]
         avg_time = sum(check_times) / len(check_times)
         print(f"  {name:30s} {avg_time:8.2f} ms")
 
@@ -221,15 +219,11 @@ def main() -> None:
     print("-" * 60)
 
     for name in CHECKS:
-        check_times = [
-            next(c["elapsed_ms"] for c in r["checks"] if c["name"] == name)
-            for r in warm_results
-        ]
+        check_times = [next(c["elapsed_ms"] for c in r["checks"] if c["name"] == name) for r in warm_results]
         avg_time = sum(check_times) / len(check_times)
-        cold_time = sum(
-            next(c["elapsed_ms"] for c in r["checks"] if c["name"] == name)
-            for r in cold_results
-        ) / len(cold_results)
+        cold_time = sum(next(c["elapsed_ms"] for c in r["checks"] if c["name"] == name) for r in cold_results) / len(
+            cold_results
+        )
         speedup = (1 - avg_time / cold_time) * 100 if cold_time > 0 else 0
         print(f"  {name:30s} {avg_time:8.2f} ms ({speedup:+6.1f}%)")
 
