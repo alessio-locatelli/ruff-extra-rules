@@ -44,7 +44,13 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
         cmd.extend(["-e", pattern, "--"])
         cmd.extend(filepaths)
 
-        git_grep_result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+        # cmd is built entirely from this function's own hardcoded git-grep
+        # flags plus filepaths supplied by this hook's own CLI invocation
+        # (never from untrusted external input), so no shell is involved and
+        # no argument here can inject another command.
+        git_grep_result = subprocess.run(  # noqa: S603
+            cmd, capture_output=True, text=True, check=False, timeout=30
+        )
 
         if git_grep_result.returncode == 0:
             # Parse null-separated output
@@ -73,8 +79,8 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
         subprocess.SubprocessError,
         FileNotFoundError,
         subprocess.TimeoutExpired,
-    ) as error:
-        logger.exception(repr(error))
+    ):
+        logger.exception("git grep failed")
         # git not available or timeout, fall back
         return _python_fallback_filter(filepaths, pattern)
 
@@ -87,8 +93,8 @@ def _python_fallback_filter(filepaths: Sequence[str], pattern: str) -> list[str]
                 content = f.read()
                 if pattern in content:
                     matches.append(filepath)
-        except (OSError, UnicodeDecodeError) as error:
-            logger.exception("File: %s, error: %s", filepath, repr(error))
+        except OSError, UnicodeDecodeError:
+            logger.exception("File: %s", filepath)
             # Include file if we can't read it (let hook handle error)
             matches.append(filepath)
     return matches

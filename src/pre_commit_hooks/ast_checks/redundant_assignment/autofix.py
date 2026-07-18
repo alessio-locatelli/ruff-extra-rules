@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING, TypedDict, cast
 
-from .._base import Violation, atomic_write_text, byte_col_to_char_col
+from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, byte_col_to_char_col
+
 from .semantic import exceeds_line_length_when_inlined
 
 if TYPE_CHECKING:

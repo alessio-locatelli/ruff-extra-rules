@@ -154,11 +154,11 @@ class BaseCheck:
     """
 
     @classmethod
-    def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
+    def add_cli_arguments(cls, _parser: argparse.ArgumentParser) -> None:
         return
 
     @classmethod
-    def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
+    def cli_kwargs_from_args(cls, _args: argparse.Namespace) -> dict[str, Any]:
         return {}
 
 

@@ -140,12 +140,12 @@ class CacheManager:
                     self._write_cache(cache_file, cache_data)
                     return cache_data.get("hook_results", {}).get(hook_name)
 
-            # Content changed, cache invalid
-            return None
-
         except (OSError, json.JSONDecodeError, KeyError) as error:
             logger.warning("File: %s, hook name: %s, error: %s", filepath, hook_name, repr(error))
             # Treat any error as cache miss
+            return None
+        else:
+            # Content changed, cache invalid
             return None
 
     def set_cached_result(self, filepath: Path, hook_name: str, hook_result: dict[str, Any]) -> None:
@@ -191,7 +191,7 @@ class CacheManager:
         .cache/pre_commit_hooks/ab/abc123...def.json
         """
         # Hash the filepath (not content) to get stable cache location
-        file_hash = hashlib.sha1(str(filepath.resolve()).encode()).hexdigest()
+        file_hash = hashlib.sha1(str(filepath.resolve()).encode(), usedforsecurity=False).hexdigest()
         cache_subdir = self.cache_dir / file_hash[:2]  # first 2 hex chars as prefix
         cache_subdir.mkdir(exist_ok=True)
         return cache_subdir / f"{file_hash}.json"
@@ -199,7 +199,7 @@ class CacheManager:
     @staticmethod
     def compute_file_hash(filepath: Path) -> str:
         """Returns SHA-1 hex digest."""
-        sha1 = hashlib.sha1()
+        sha1 = hashlib.sha1(usedforsecurity=False)
         with filepath.open("rb") as f:
             # Read in 64KB chunks for large files
             for chunk in iter(lambda: f.read(65536), b""):
@@ -213,7 +213,7 @@ class CacheManager:
         disk itself — measured ~0.2ms for this repo's own src/ tree,
         negligible next to per-invocation interpreter startup.
         """
-        sha1 = hashlib.sha1()
+        sha1 = hashlib.sha1(usedforsecurity=False)
         for py_file in sorted(root.rglob("*.py")):
             sha1.update(py_file.read_bytes())
         return sha1.hexdigest()

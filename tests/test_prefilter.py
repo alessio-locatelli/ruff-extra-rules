@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest import mock
 
 import pytest
@@ -13,9 +14,6 @@ from pre_commit_hooks._prefilter import (
     batch_filter_files,
     git_grep_filter,
 )
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 @pytest.fixture
@@ -85,14 +83,18 @@ def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None
     `git grep` always errors out and they only ever exercise the Python
     fallback path.
     """
-    original_dir = os.getcwd()
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
     try:
         os.chdir(tmp_path)
-        subprocess.run(["git", "init", "-q"], check=True)
+        # Args are hardcoded test setup, not untrusted input.
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         file1 = tmp_path / "file1.py"
         file1.write_text("def get_name():\n    return 'foo'\n")
-        subprocess.run(["git", "add", "file1.py"], check=True, cwd=tmp_path)
+        subprocess.run([git, "add", "file1.py"], check=True, cwd=tmp_path)  # noqa: S603
 
         matches = git_grep_filter([str(file1)], "def get_", fixed_string=True)
         assert matches == [str(file1)]
