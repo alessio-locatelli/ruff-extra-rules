@@ -16,5 +16,5 @@ Only the hook id and the CLI's `prog=` string are renamed. The Python package st
 
 - `forbid-vars`, `validate-function-name`, and `redundant-assignment` renames now auto-apply under `--fix` in this repo's own `src/` dogfooding hook, with no separate report-only gate forcing a human to review the suggested name before it lands. Each check already gates its own fix safety internally (complexity/collision checks), so this trades a human judgment call on naming quality for less friction — a deliberate choice, not a safety regression.
 - `--list-checks` and `--exclude` are pre-existing and unaffected (`--exclude` already matches ruff's own flag name); they are not part of this redesign's scope.
-- `docs/work-items/10-lint-tests-directory.md` (extending self-checking to `tests/`) is put on hold until this redesign lands, since it would otherwise be scoped against a CLI surface that's about to change.
+- `docs/work-items/archived/10-lint-tests-directory.md` (extending self-checking to `tests/`) is put on hold until this redesign lands, since it would otherwise be scoped against a CLI surface that's about to change. (Resolved: see `docs/adr/0009-lint-tests-directory.md`.)
 - Tracked as `docs/work-items/11-ruff-check-cli-parity.md`.

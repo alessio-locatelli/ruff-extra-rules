@@ -21,9 +21,8 @@ def func_scope():
     x = "foo"
     func(x=x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) >= 1
     violation = violations[0]
@@ -37,9 +36,8 @@ def example():
     result = get_value()
     return result
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) >= 1
     assert any("result" in v.message for v in violations)
@@ -51,9 +49,8 @@ def func_scope():
     foo = "foo"
     process(foo)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) >= 1
     assert any("foo" in v.message for v in violations)
@@ -65,9 +62,8 @@ def func_scope():
     SOME_VALUE = "somevalue"
     process(SOME_VALUE)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) >= 1
 
@@ -79,9 +75,8 @@ print(value)
 log(value)
 return value
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -92,9 +87,8 @@ def example():
     formatted_timestamp = format_iso8601(raw_ts)
     return formatted_timestamp
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -104,9 +98,8 @@ def test_inline_suppression_respected() -> None:
 x = "foo"  # pytriage: ignore=TRI005
 func(x=x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -116,9 +109,8 @@ def test_inline_suppression_case_insensitive() -> None:
 x = "foo"  # PYTRIAGE: IGNORE=TRI005
 func(x=x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -133,8 +125,7 @@ def outer():
     return x
 """
     tracker = VariableTracker(source)
-    tree = ast.parse(source)
-    tracker.visit(tree)
+    tracker.visit(ast.parse(source))
     lifecycles = tracker.build_lifecycles()
 
     x_lifecycles = [lc for lc in lifecycles if lc.assignment.var_name == "x"]
@@ -148,9 +139,8 @@ def func():
     state = "active"
     return state
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -161,9 +151,8 @@ def example():
     result: ComplexType = calculate()
     return result
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Type annotation should increase semantic value enough to skip
     # (15 points for annotation + other factors)
@@ -177,9 +166,8 @@ def test_comprehension_not_causing_errors() -> None:
 result = [x for x in items]
 return result
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Comprehensions add semantic value (30 points), so likely won't be flagged
     # Just verify no crashes
@@ -193,8 +181,7 @@ def func():
     print(x)
 """
     tracker = VariableTracker(source)
-    tree = ast.parse(source)
-    tracker.visit(tree)
+    tracker.visit(ast.parse(source))
     lifecycles = tracker.build_lifecycles()
 
     x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
@@ -212,8 +199,7 @@ def func():
     print(x)
 """
     tracker = VariableTracker(source)
-    tree = ast.parse(source)
-    tracker.visit(tree)
+    tracker.visit(ast.parse(source))
     lifecycles = tracker.build_lifecycles()
 
     x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
@@ -241,9 +227,8 @@ def func_scope():
     x = "foo"
     func(x=x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) >= 1
     # Simple case: constant assignment, immediate use, short name, no control flow.
@@ -256,9 +241,8 @@ def example():
     calculated_value = expensive_operation()
     return calculated_value
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # 'calculated_value' has semantic value (transformative verb 'calculated')
     # so it should not be flagged at all
@@ -353,7 +337,6 @@ def test_autofix_skips_violation_without_fix_data(tmp_path: Path) -> None:
     filepath.write_text(source)
 
     check = RedundantAssignmentCheck()
-    tree = ast.parse(source)
 
     violations = [
         Violation(
@@ -367,7 +350,7 @@ def test_autofix_skips_violation_without_fix_data(tmp_path: Path) -> None:
         )
     ]
 
-    assert check.fix(filepath, violations, source, tree) is False
+    assert check.fix(filepath, violations, source, ast.parse(source)) is False
 
 
 def test_autofix_skips_violation_with_invalid_fix_data(tmp_path: Path) -> None:
@@ -382,7 +365,6 @@ def test_autofix_skips_violation_with_invalid_fix_data(tmp_path: Path) -> None:
     filepath.write_text(source)
 
     check = RedundantAssignmentCheck()
-    tree = ast.parse(source)
 
     # Create a violation with invalid fix_data (missing 'use_line')
     violations = [
@@ -397,7 +379,7 @@ def test_autofix_skips_violation_with_invalid_fix_data(tmp_path: Path) -> None:
         )
     ]
 
-    assert check.fix(filepath, violations, source, tree) is False
+    assert check.fix(filepath, violations, source, ast.parse(source)) is False
 
 
 def test_autofix_skips_multiline_rhs() -> None:
@@ -445,7 +427,6 @@ def test_autofix_with_invalid_assignment_line(tmp_path: Path) -> None:
     filepath.write_text(source)
 
     check = RedundantAssignmentCheck()
-    tree = ast.parse(source)
 
     violations = [
         Violation(
@@ -466,7 +447,7 @@ def test_autofix_with_invalid_assignment_line(tmp_path: Path) -> None:
         )
     ]
 
-    assert check.fix(filepath, violations, source, tree) is False
+    assert check.fix(filepath, violations, source, ast.parse(source)) is False
 
 
 def test_autofix_with_invalid_usage_line(tmp_path: Path) -> None:
@@ -481,7 +462,6 @@ def test_autofix_with_invalid_usage_line(tmp_path: Path) -> None:
     filepath.write_text(source)
 
     check = RedundantAssignmentCheck()
-    tree = ast.parse(source)
 
     violations = [
         Violation(
@@ -502,7 +482,7 @@ def test_autofix_with_invalid_usage_line(tmp_path: Path) -> None:
         )
     ]
 
-    assert check.fix(filepath, violations, source, tree) is False
+    assert check.fix(filepath, violations, source, ast.parse(source)) is False
 
 
 def test_autofix_with_multiple_uses(tmp_path: Path) -> None:
@@ -517,7 +497,6 @@ def test_autofix_with_multiple_uses(tmp_path: Path) -> None:
     filepath.write_text(source)
 
     check = RedundantAssignmentCheck()
-    tree = ast.parse(source)
 
     # RedundantAssignmentCheck.check() leaves use_line/use_col unset
     # whenever a lifecycle doesn't have exactly one use.
@@ -540,7 +519,8 @@ def test_autofix_with_multiple_uses(tmp_path: Path) -> None:
         )
     ]
 
-    assert check.fix(filepath, violations, source, tree) is False  # multiple uses
+    # multiple uses
+    assert check.fix(filepath, violations, source, ast.parse(source)) is False
 
 
 def test_autofix_with_unsafe_inlining(tmp_path: Path) -> None:
@@ -559,7 +539,6 @@ def test_autofix_with_unsafe_inlining(tmp_path: Path) -> None:
     filepath.write_text(source)
 
     check = RedundantAssignmentCheck()
-    tree = ast.parse(source)
 
     violations = [
         Violation(
@@ -580,7 +559,7 @@ def test_autofix_with_unsafe_inlining(tmp_path: Path) -> None:
         )
     ]
 
-    assert check.fix(filepath, violations, source, tree) is False
+    assert check.fix(filepath, violations, source, ast.parse(source)) is False
 
 
 def test_fix_method_with_no_fixable_violations() -> None:
@@ -616,9 +595,8 @@ def outer():
         return x
     return inner()
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert all("modified" not in v.message for v in violations)
 
@@ -629,9 +607,8 @@ def example():
     x: str = "foo"
     func(x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Type annotation adds 15 points, but 'x' literal is still low value.
     assert len(violations) >= 1
@@ -644,9 +621,8 @@ def example():
     another: str = "test"
     return result, another
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Both assignments should be tracked normally
     assert isinstance(violations, list)
@@ -659,9 +635,8 @@ def example():
     x = "value"
     return x
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Only the assignment with value should be tracked
     assert isinstance(violations, list)
@@ -675,9 +650,8 @@ class MyClass:
     def method(self):
         self.x = "bar"
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -688,9 +662,8 @@ def example():
     x = very_long_function_name_that_exceeds_sixty_characters_in_total()
     return x
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Long expression should still be flagged if var name adds no value
     # But it might get some points for length
@@ -702,9 +675,8 @@ def test_semantic_scoring_comprehension() -> None:
 result = [x * 2 for x in range(10)]
 print(result)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Comprehensions add 30 points, should help avoid flagging
     assert isinstance(violations, list)
@@ -715,9 +687,8 @@ def test_semantic_scoring_binary_op() -> None:
 result = a + b
 print(result)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Binary op adds 15 points
     assert isinstance(violations, list)
@@ -728,9 +699,8 @@ def test_semantic_scoring_unary_op() -> None:
 result = -value
 print(result)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Unary op adds 10 points
     assert isinstance(violations, list)
@@ -741,9 +711,8 @@ def test_semantic_scoring_ternary() -> None:
 result = x if condition else y
 print(result)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Ternary adds 20 points
     assert isinstance(violations, list)
@@ -754,9 +723,8 @@ def test_semantic_scoring_lambda() -> None:
 func = lambda x: x * 2
 result = func(10)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Lambda adds 25 points
     assert isinstance(violations, list)
@@ -768,9 +736,8 @@ def example():
     user_email_address = get_email()
     return user_email_address
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # 3+ parts adds 20 points
     assert isinstance(violations, list)
@@ -781,9 +748,8 @@ def test_tuple_unpacking_not_analyzed() -> None:
 x, y = get_coords()
 print(x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Tuple unpacking should not be flagged
     assert len(violations) == 0
@@ -855,9 +821,8 @@ def example():
     x = "foo"
     y = "bar"
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -1038,9 +1003,8 @@ def outer():
         nonlocal x
         x: str = "modified"
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Nonlocal annotated assignment should be skipped
     assert isinstance(violations, list)
@@ -1051,12 +1015,9 @@ def test_get_source_segment_error_handling() -> None:
         VariableTracker,
     )
 
-    source = "x = 1"
-    tracker = VariableTracker(source)
-
     node = ast.Constant(value=1, lineno=-1, col_offset=-1)
 
-    assert tracker._get_source_segment(node) == ""
+    assert VariableTracker("x = 1")._get_source_segment(node) == ""
 
 
 def test_multiple_assignments_to_same_variable() -> None:
@@ -1067,9 +1028,8 @@ def example():
     x = "second"
     print(x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Each assignment should be tracked separately
     assert isinstance(violations, list)
@@ -1083,9 +1043,8 @@ def example():
     x: str = "second"
     print(x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Each annotated assignment should be tracked separately
     assert isinstance(violations, list)
@@ -1099,9 +1058,8 @@ def example():
     print(x)
     return x
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Second assignment (x = x + 1) has two uses (print and return)
     # First assignment (x = 1) has one use (x + 1 RHS)
@@ -1164,9 +1122,8 @@ def func(v):
 
     print(msg)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # 1. Both assignments are in different branches (if/else)
     # 2. The variable is used in an augmented assignment (msg += ...)
@@ -1182,8 +1139,7 @@ def example():
     print(x)
 """
     tracker = VariableTracker(source)
-    tree = ast.parse(source)
-    tracker.visit(tree)
+    tracker.visit(ast.parse(source))
     lifecycles = tracker.build_lifecycles()
 
     # Augmented assignments are tracked as usages, not new assignments.
@@ -1203,9 +1159,8 @@ def example():
     x = 1
     x += 1
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # The first assignment (x = 1) is used once (in x += 1)
     # This could be flagged as it's a simple pattern
@@ -1225,9 +1180,8 @@ def example():
     x += 1
     x += 2
 """
-    tree = ast.parse(source)
     tracker = VariableTracker(source)
-    tracker.visit(tree)
+    tracker.visit(ast.parse(source))
 
     lifecycles = tracker.build_lifecycles()
     lc = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
@@ -1243,9 +1197,8 @@ def find_place_document(place_id):
     collection_places = singleton_factory(mongo_client)[DATABASE_NAME]["places"]
     return collection_places.find_one({"_id": place_id})
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # 1. It's a long expression (70+ chars)
     # 2. It has chained subscript operations
@@ -1263,9 +1216,8 @@ def func():
     filepath = tmp_path / "source.py"
     filepath.write_text(source)
 
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
+    violations = check.check(filepath, ast.parse(source), source)
 
     # Long variable names (>10 chars) are excluded from autofix as a
     # conservative proxy for lines that would grow too long when inlined.
@@ -1288,10 +1240,9 @@ def func(index):
 
     assert any(v.fixable for v in violations)
     check.fix(filepath, violations, source, tree)
-    fixed = filepath.read_text()
 
     # Should only replace the standalone 'x', not 'max' or 'index'
-    assert "max(5, index)" in fixed
+    assert "max(5, index)" in filepath.read_text()
 
 
 def test_chained_operations_scoring() -> None:
@@ -1321,9 +1272,8 @@ def func():
     global x
     x += 1
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -1336,9 +1286,8 @@ def outer():
         nonlocal x
         x += 1
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert isinstance(violations, list)
 
@@ -1348,9 +1297,8 @@ def test_augmented_assignment_with_attribute() -> None:
 def func():
     obj.x += 1
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -1376,9 +1324,8 @@ for i in range(10):
     x = i * 2
     print(x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -1390,9 +1337,8 @@ def example():
         x = "value"
         process(x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # May detect but should not be fixable due to control flow
     for v in violations:
@@ -1404,9 +1350,8 @@ def test_autofix_not_long_names() -> None:
 very_long_descriptive_name = 42
 use(very_long_descriptive_name)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not be fixable due to long variable name (> 10 chars).
     assert all(not v.fixable for v in violations)
@@ -1418,9 +1363,8 @@ def example():
     x = func(arg1, arg2)
     return x
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     for v in violations:
         assert not v.fixable
@@ -1442,8 +1386,8 @@ def test_autofix_simple_constant(tmp_path: Path) -> None:
     # Simple constant should be fixable.
     fixable_violations = [v for v in violations if v.fixable]
     assert fixable_violations
-    result = check.fix(filepath, fixable_violations, source, tree)
-    assert result is True
+    fix_applied = check.fix(filepath, fixable_violations, source, tree)
+    assert fix_applied is True
 
     fixed_content = filepath.read_text()
     assert "y = 42" not in fixed_content
@@ -1465,8 +1409,8 @@ def test_autofix_simple_attribute(tmp_path: Path) -> None:
     # Simple attribute access should be fixable.
     fixable_violations = [v for v in violations if v.fixable]
     assert fixable_violations
-    result = check.fix(filepath, fixable_violations, source, tree)
-    assert result is True
+    fix_applied = check.fix(filepath, fixable_violations, source, tree)
+    assert fix_applied is True
 
     fixed_content = filepath.read_text()
     assert "v = obj.attr" not in fixed_content
@@ -1488,8 +1432,8 @@ def test_autofix_word_boundaries(tmp_path: Path) -> None:
 
     fixable_violations = [v for v in violations if v.fixable]
     assert fixable_violations
-    result = check.fix(filepath, fixable_violations, source, tree)
-    assert result is True
+    fix_applied = check.fix(filepath, fixable_violations, source, tree)
+    assert fix_applied is True
 
     fixed_content = filepath.read_text()
     # Should replace 'x' but not affect 'max'
@@ -1510,9 +1454,8 @@ def test_problem_1_loop_reassignment() -> None:
             latest_datetime = destination_datetime_utc
             break
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag latest_datetime in loop reassignment.
     assert all("latest_datetime" not in v.message for v in violations)
@@ -1526,9 +1469,8 @@ def test_problem_2_boolean_descriptive_names() -> None:
     if not all((out_edge_count, in_edge_count, has_cycle)):
         raise ValueError("Invalid graph")
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag descriptive boolean variable has_cycle.
     assert all("has_cycle" not in v.message for v in violations)
@@ -1547,9 +1489,8 @@ def test_problem_4_multiple_exception_assignments() -> None:
         error = key_error
     raise error
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # `error` is assigned multiple times (once per except branch), so it is
     # skipped entirely rather than risk autofix producing concatenated
@@ -1563,9 +1504,8 @@ def test_problem_5_conditional_assignment_logic_change() -> None:
         service_name = get_caller_module_name()
     return configure_service(service_name)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # `service_name` is assigned inside an `if` block but used outside it, so
     # it is skipped entirely rather than risk autofix changing program logic
@@ -1583,9 +1523,8 @@ def test_same_variable_different_scopes() -> None:
         log(result)
     return result
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # 1. It's assigned in different branches
     # 2. It's used after the if/else block
@@ -1762,9 +1701,8 @@ def test_global_scope_without_underscore_not_flagged() -> None:
 parent_url = "https://example.com"
 print(parent_url)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -1774,9 +1712,8 @@ def test_global_scope_with_underscore_flagged() -> None:
 _temp = "foo"
 print(_temp)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) >= 1
     assert any("_temp" in v.message for v in violations)
@@ -1788,9 +1725,8 @@ def test_global_scope_with_comment_above_not_flagged() -> None:
 _url = "https://example.com"
 print(_url)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -1801,9 +1737,8 @@ def func():
     x = "foo"
     print(x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) >= 1
     assert any("x" in v.message for v in violations)
@@ -1815,9 +1750,8 @@ async def test_json(client):
     response = await get_test_response(client, '/null_content')
     assert await response.json() is None
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -1836,9 +1770,8 @@ async def test_func():
     x = await get_value()
     process(x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -1849,9 +1782,8 @@ async def test_func():
     x = get_value()
     result = await x.fetch()
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) >= 1
     assert any("x" in v.message for v in violations)
@@ -1865,9 +1797,8 @@ DEFAULT_URL = "https://default.example.com"
 parent_url = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_URL
 print(parent_url)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -1878,9 +1809,8 @@ def func(condition):
     value = "yes" if condition else "no"
     return value
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -1891,9 +1821,8 @@ def func():
     variable = compute_something_with_very_long_function_name()
     assert variable.attribute_name
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'variable' if inlining would exceed 79 characters
     # The heuristic checks if len(rhs_source) >= 25 or len_diff > 15
@@ -1909,9 +1838,8 @@ def auto_clear_fixture():
     cache_prefixes = ("responses", "redirects")
     process(cache_prefixes)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -1922,9 +1850,8 @@ def func():
     prefixes = ("responses", "redirects")
     process(prefixes)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag because RHS is 26 chars (>= 25)
     # len('("responses", "redirects")') = 26
@@ -1940,9 +1867,8 @@ def func():
     variable = calculate_value()
     return variable
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag because there's a comment on the line directly above
     assert len(violations) == 0
@@ -1953,8 +1879,7 @@ def test_would_require_parentheses_binop() -> None:
         _would_require_parentheses,
     )
 
-    source = "len(x) + 1"
-    rhs_node = ast.parse(source, mode="eval").body
+    rhs_node = ast.parse("len(x) + 1", mode="eval").body
     assert _would_require_parentheses(rhs_node) is True
 
 
@@ -1963,8 +1888,7 @@ def test_would_require_parentheses_boolop() -> None:
         _would_require_parentheses,
     )
 
-    source = "a and b"
-    rhs_node = ast.parse(source, mode="eval").body
+    rhs_node = ast.parse("a and b", mode="eval").body
     assert _would_require_parentheses(rhs_node) is True
 
 
@@ -1973,8 +1897,7 @@ def test_would_require_parentheses_compare() -> None:
         _would_require_parentheses,
     )
 
-    source = "x == y"
-    rhs_node = ast.parse(source, mode="eval").body
+    rhs_node = ast.parse("x == y", mode="eval").body
     assert _would_require_parentheses(rhs_node) is True
 
 
@@ -1983,8 +1906,7 @@ def test_would_require_parentheses_simple() -> None:
         _would_require_parentheses,
     )
 
-    source = "len(x)"
-    rhs_node = ast.parse(source, mode="eval").body
+    rhs_node = ast.parse("len(x)", mode="eval").body
     assert _would_require_parentheses(rhs_node) is False
 
 
@@ -1994,9 +1916,8 @@ def func():
     len_prefix = len(x) + 1
     return arr[len_prefix:]
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -2182,9 +2103,8 @@ async def test_func(faker):
 
     await inner_func()
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -2202,9 +2122,8 @@ async def test_func():
     await inner_func()
     assert mock.call_count == 1
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -2219,9 +2138,8 @@ def outer():
 
     return inner
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -2241,9 +2159,8 @@ def level1():
 
     return level2()
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -2267,9 +2184,8 @@ async def test_rate_limited_decorator_exceeds_limit(
         assert await func() == return_value
     assert mock.call_count == limit
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -2281,9 +2197,8 @@ def test_func():
     x = "foo"
     return x
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) >= 1
     assert any("x" in v.message for v in violations)
@@ -2340,9 +2255,8 @@ async def request_json(
     raw_headers = kwargs.get("headers")
     headers = CIMultiDict(raw_headers or {})
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'raw_headers' - it adds verbosity.
     assert all("raw_headers" not in v.message for v in violations)
@@ -2368,9 +2282,8 @@ def load_translations(language, template_name):
             if k in {TRANSLATIONS_GENERAL, TEMPLATES_TO_TRANSLATIONS[template_name]}
         }
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'translations' - it adds context.
     assert all("translations" not in v.message for v in violations)
@@ -2383,9 +2296,8 @@ def get_firestore():
     firestore_client = db.client()
     return firestore_client
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'firestore_client' - it's more specific.
     assert all("firestore_client" not in v.message for v in violations)
@@ -2398,9 +2310,8 @@ def process_user(data):
     user_email = data["email"]
     send_notification(user_email)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'user_email' - it adds verbosity.
     assert all("user_email" not in v.message for v in violations)
@@ -2413,9 +2324,8 @@ def process_input(data):
     raw_data = fetch_from_api()
     return raw_data
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'raw_data' - 'raw' is descriptive.
     assert all("raw_data" not in v.message for v in violations)
@@ -2478,9 +2388,8 @@ def func():
     )
     return value
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     value_violations = [v for v in violations if "value" in v.message]
     assert value_violations
@@ -2570,9 +2479,8 @@ def func():
     value = some_func(a, b, c)
     return value
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     value_violations = [v for v in violations if "value" in v.message]
     assert value_violations
@@ -2591,9 +2499,8 @@ def find_project_root():
             return current_dir
         current_dir = current_dir.parent
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'max_search_depth' - avoids magic number.
     assert all("max_search_depth" not in v.message for v in violations)
@@ -2606,9 +2513,8 @@ def calculate_spacing():
     coords = (x, y + height * line_spacing)
     return coords
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'line_spacing' - avoids magic number.
     assert all("line_spacing" not in v.message for v in violations)
@@ -2621,9 +2527,8 @@ async def find_nicosia(database):
     place = await database.find_one({"_id": nicosia_in_cyprus_id})
     return place
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'nicosia_in_cyprus_id' - avoids magic number.
     assert all("nicosia_in_cyprus_id" not in v.message for v in violations)
@@ -2637,9 +2542,8 @@ def test_rate_limit():
     with pytest.raises(RateLimitError):
         sample_class.sample_method()
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'sample_class' - pytest.raises pattern.
     assert all("sample_class" not in v.message for v in violations)
@@ -2653,9 +2557,8 @@ def test_retry():
     with pytest.raises(ValueError, match=error_msg):
         decorated_mock_func()
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'decorated_mock_func' - with block pattern.
     assert all("decorated_mock_func" not in v.message for v in violations)
@@ -2670,9 +2573,8 @@ def get_cache_file(cache):
     assert redirects_file.startswith(cache_dir)
     return redirects_file
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'redirects_file' - has inline comment.
     assert all("redirects_file" not in v.message for v in violations)
@@ -2699,9 +2601,8 @@ async def test_websocket():
     await resp.close()
     assert cancelled is True
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'cancelled' - captured by nonlocal.
     assert all("cancelled" not in v.message for v in violations)
@@ -2721,9 +2622,8 @@ def outer():
     inner()
     return x + y
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'x' or 'y' - captured by nonlocal.
     assert all("'x'" not in v.message and "'y'" not in v.message for v in violations)
@@ -2790,9 +2690,8 @@ def process():
         x = x + 1
     return x
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'x' in while loop.
     assert all("'x'" not in v.message for v in violations)
@@ -2806,9 +2705,8 @@ async def process(items):
         result = result + [item]
     return result
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag loop var.
     assert all("'result'" not in v.message for v in violations)
@@ -2821,10 +2719,9 @@ async def process():
         x = ctx.value
         return x
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
     # Just verify it doesn't crash - async with should be tracked
-    _ = check.check(Path("test.py"), tree, source)
+    _ = check.check(Path("test.py"), ast.parse(source), source)
 
 
 def test_global_attribute_assignment_not_tracked() -> None:
@@ -2835,9 +2732,8 @@ def modify_global():
     global global_obj
     global_obj.attr = "value"
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
     assert len(violations) == 0
 
 
@@ -2850,9 +2746,8 @@ def measure():
     do_work()
     return start
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'start' - nondeterministic.
     assert all("start" not in v.message for v in violations)
@@ -2864,9 +2759,8 @@ def func():
     a = b = c = some_value()
     return a + b + c
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
     # Multiple assignment targets are skipped entirely.
     assert all("'a'" not in v.message for v in violations)
     assert all("'b'" not in v.message for v in violations)
@@ -2897,9 +2791,8 @@ def func(condition):
     result = "yes" if condition else "no"
     return result
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag ternary expression.
     assert all("result" not in v.message for v in violations)
@@ -2917,9 +2810,8 @@ def test_flow_control_binary(protocol, out_low_limit, parser_low_limit):
     res = out_low_limit._buffer[0]
     assert res == WSMessageBinary(data=large_payload, size=large_payload_size, extra="")
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'large_payload_size' - has _size suffix.
     assert all("large_payload_size" not in v.message for v in violations)
@@ -2931,9 +2823,8 @@ def process(data):
     buffer_length = len(data)
     return process_with_length(data, buffer_length)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'buffer_length' - has _length suffix.
     assert all("buffer_length" not in v.message for v in violations)
@@ -2945,9 +2836,8 @@ def get_user(data):
     user_id = data.get("id")
     return fetch_user(user_id)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'user_id' - has _id suffix.
     assert all("user_id" not in v.message for v in violations)
@@ -2959,11 +2849,10 @@ def test_camel_to_under():
     camel_case_sample = "RandomClassName"
     assert camel_to_under(camel_case_sample) == "random_class_name"
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
 
     # File in tests/ directory should not flag test setup variables
-    violations = check.check(Path("tests/test_utils.py"), tree, source)
+    violations = check.check(Path("tests/test_utils.py"), ast.parse(source), source)
 
     # Should not flag test setup variable in test file.
     assert all("camel_case_sample" not in v.message for v in violations)
@@ -2976,11 +2865,10 @@ def test_translate_templates():
     translator = MockTranslator(templates)
     assert translator.templates == templates
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
 
     # File with test_ prefix should not flag test variables
-    violations = check.check(Path("test_translator.py"), tree, source)
+    violations = check.check(Path("test_translator.py"), ast.parse(source), source)
 
     # Should not flag test data variable in test file.
     assert all("templates" not in v.message for v in violations)
@@ -2993,10 +2881,9 @@ def test_landmark_equal_to_none():
     result = landmark.__eq__(None)
     assert result is NotImplemented
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
 
-    violations = check.check(Path("tests/test_model.py"), tree, source)
+    violations = check.check(Path("tests/test_model.py"), ast.parse(source), source)
 
     # Should not flag 'result' in test file.
     assert all("result" not in v.message for v in violations)
@@ -3010,10 +2897,9 @@ def test_prepare_photo():
     result = gcp_vision._prepare_photo(file_obj)
     assert result == mock_image
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
 
-    violations = check.check(Path("tests/test_vision.py"), tree, source)
+    violations = check.check(Path("tests/test_vision.py"), ast.parse(source), source)
 
     # Should not flag mock object in test file.
     assert all("mock_image" not in v.message for v in violations)
@@ -3028,10 +2914,9 @@ def test_airport_connectivity():
         for iata in some_european_airports
     )
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
 
-    violations = check.check(Path("tests/test_kiwi_api.py"), tree, source)
+    violations = check.check(Path("tests/test_kiwi_api.py"), ast.parse(source), source)
 
     # Should not flag semantic test data in test file.
     assert all("some_european_airports" not in v.message for v in violations)
@@ -3046,10 +2931,11 @@ def generate_price_data():
         for _ in days_with_routes_in_a_row
     ]
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
 
-    violations = check.check(Path("tests/test_flight_prices.py"), tree, source)
+    violations = check.check(
+        Path("tests/test_flight_prices.py"), ast.parse(source), source
+    )
 
     # Should not flag descriptive range in test file.
     assert all("days_with_routes_in_a_row" not in v.message for v in violations)
@@ -3061,11 +2947,10 @@ def process_data():
     x = "foo"
     return x
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
 
     # Non-test file should still flag simple redundant assignments
-    violations = check.check(Path("src/processor.py"), tree, source)
+    violations = check.check(Path("src/processor.py"), ast.parse(source), source)
 
     msg = "Should flag simple redundant assignment in non-test file"
     assert len(violations) > 0, msg
@@ -3112,9 +2997,8 @@ def load_config():
     value = config.get("key", {})
     return value
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag context manager pattern.
     assert all("config" not in v.message for v in violations)
@@ -3138,9 +3022,8 @@ def load_paths_to_ignore(project_root, src_dir):
         paths_to_ignore |= set(src_dir.glob(pattern))
     return paths_to_ignore
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag config in context manager pattern.
     assert all("config" not in v.message for v in violations)
@@ -3155,9 +3038,8 @@ def fetch_user(user_id):
     # Process user_data outside connection to avoid holding it open
     return process_user(user_data)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag database pattern.
     assert all("user_data" not in v.message for v in violations)
@@ -3172,9 +3054,8 @@ def process():
     result = transform(data)
     return result
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag if block pattern.
     assert all("data" not in v.message for v in violations)
@@ -3190,9 +3071,8 @@ def load_with_fallback():
     # Use data outside try block
     return process(data)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag try block pattern.
     assert all("data" not in v.message for v in violations)
@@ -3211,9 +3091,8 @@ def find_routes(depot_data, depots):
     depot_iso_country = depot_data.iso_country
     return [x for x in depots if x.country == depot_iso_country]
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag comprehension-cached variable.
     assert all("depot_iso_country" not in v.message for v in violations)
@@ -3225,9 +3104,8 @@ def transform(multiplier, items):
     factor = multiplier.value
     return [x * factor for x in items]
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag comprehension element variable.
     assert all("factor" not in v.message for v in violations)
@@ -3239,9 +3117,8 @@ def build_map(source_obj, keys):
     prefix = source_obj.namespace
     return {k: f"{prefix}_{k}" for k in keys}
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag dict-comprehension-cached variable.
     assert all("prefix" not in v.message for v in violations)
@@ -3253,9 +3130,8 @@ def unique_suffixes(config, items):
     suffix = config.default_suffix
     return {item + suffix for item in items}
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag set-comprehension-cached variable.
     assert all("suffix" not in v.message for v in violations)
@@ -3267,9 +3143,8 @@ def total_score(config, players):
     bonus = config.bonus_points
     return sum(p.score + bonus for p in players)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag generator-expression-cached variable.
     assert all("bonus" not in v.message for v in violations)
@@ -3285,9 +3160,8 @@ def example(obj, items):
     result = [x for x in items if x == val]
     return val
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Multi-use variable should not be flagged.
     assert all("val" not in v.message for v in violations)
@@ -3301,8 +3175,7 @@ def func(obj, items):
     return result
 """
     tracker = VariableTracker(source)
-    tree = ast.parse(source)
-    tracker.visit(tree)
+    tracker.visit(ast.parse(source))
     lifecycles = tracker.build_lifecycles()
 
     cached_lifecycle = next(
@@ -3319,8 +3192,7 @@ def func():
     print(x)
 """
     tracker = VariableTracker(source)
-    tree = ast.parse(source)
-    tracker.visit(tree)
+    tracker.visit(ast.parse(source))
     lifecycles = tracker.build_lifecycles()
 
     x_lifecycle = next(lc for lc in lifecycles if lc.assignment.var_name == "x")
@@ -3431,9 +3303,8 @@ def func(depot_data, depots):
     depot_iso_country = depot_data.iso_country  # pytriage: ignore=TRI005
     return [x for x in depots if x.country == depot_iso_country]
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Both the new rule (Rule 10) and the ignore comment suppress this warning.
     assert len(violations) == 0
@@ -3453,9 +3324,8 @@ def call_it():
     x = "foo"; note = "# pytriage: ignore=TRI005"
     func(x=x)
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     assert any(v.line == 3 and "'x'" in v.message for v in violations)
 
@@ -3478,9 +3348,8 @@ def _make_app():
 
     return app
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'app' - used in decorator and return statement.
     assert all("'app'" not in v.message for v in violations)
@@ -3498,8 +3367,7 @@ def outer():
     return app
 """
     tracker = VariableTracker(source)
-    tree = ast.parse(source)
-    tracker.visit(tree)
+    tracker.visit(ast.parse(source))
     lifecycles = tracker.build_lifecycles()
 
     app_lifecycle = next(
@@ -3523,8 +3391,7 @@ def factory():
     return validator
 """
     tracker = VariableTracker(source)
-    tree = ast.parse(source)
-    tracker.visit(tree)
+    tracker.visit(ast.parse(source))
     lifecycles = tracker.build_lifecycles()
 
     lc = next(
@@ -3582,10 +3449,8 @@ def outer():
     get_obj().attr = "value"
     return 42
 """
-    tracker = VariableTracker(source)
-    tree = ast.parse(source)
     # Must not raise; call-result targets are silently skipped
-    tracker.visit(tree)
+    VariableTracker(source).visit(ast.parse(source))
 
 
 def test_track_attribute_assignment_key_already_in_uses() -> None:
@@ -3604,8 +3469,7 @@ def outer():
     return obj
 """
     tracker = VariableTracker(source)
-    tree = ast.parse(source)
-    tracker.visit(tree)
+    tracker.visit(ast.parse(source))
     lifecycles = tracker.build_lifecycles()
 
     obj_lifecycle = next(
@@ -3630,9 +3494,8 @@ def func():
     x = "foo"
     return x
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     fixable_violations = [v for v in violations if v.fixable]
     assert fixable_violations, "Expected at least one fixable violation for this test"
@@ -3683,9 +3546,8 @@ def func():
     x = "foo"  # some comment
     return x
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag 'x' - has inline comment.
     assert all("'x'" not in v.message for v in violations)
@@ -3702,9 +3564,8 @@ def func(c):
     x = 1 if c else 0
     return x
 """
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = check.check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag short IfExp.
     assert all("'x'" not in v.message for v in violations)
@@ -3860,9 +3721,9 @@ def test_adds_verbosity_call_with_subscript_func() -> None:
     )
 
     rhs_node = ast.parse('funcs["load"](data)', mode="eval").body
-    rhs_src = 'funcs["load"](data)'
     assert isinstance(
-        _adds_verbosity_or_context("configuration", rhs_src, rhs_node), bool
+        _adds_verbosity_or_context("configuration", 'funcs["load"](data)', rhs_node),
+        bool,
     )
 
 
@@ -3885,9 +3746,9 @@ def test_adds_verbosity_parse_func_with_subscript_func() -> None:
 
     # parsers["json"](data) — func is a Subscript, not Name or Attribute
     rhs_node = ast.parse('parsers["json"](data)', mode="eval").body
-    rhs_src = 'parsers["json"](data)'
     assert isinstance(
-        _adds_verbosity_or_context("parsed_data", rhs_src, rhs_node), bool
+        _adds_verbosity_or_context("parsed_data", 'parsers["json"](data)', rhs_node),
+        bool,
     )
 
 

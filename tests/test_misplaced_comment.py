@@ -24,9 +24,10 @@ def test_prefilter_pattern_is_hash() -> None:
 
 def test_detects_trailing_comment_on_closing_paren() -> None:
     source = "result = func(\n    arg\n)  # Comment here\n"
-    tree = ast.parse(source)
 
-    violations = MisplacedCommentCheck().check(Path("test.py"), tree, source)
+    violations = MisplacedCommentCheck().check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert len(violations) == 1
     assert violations[0].error_code == "STYLE-001"
@@ -36,9 +37,10 @@ def test_detects_trailing_comment_on_closing_paren() -> None:
 
 def test_no_violation_for_correct_code() -> None:
     source = "result = func(\n    arg  # Comment inline on expression\n)\n"
-    tree = ast.parse(source)
 
-    violations = MisplacedCommentCheck().check(Path("test.py"), tree, source)
+    violations = MisplacedCommentCheck().check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert violations == []
 
@@ -93,9 +95,10 @@ def test_check_returns_no_violations_when_nothing_to_fix(tmp_path: Path) -> None
 
 def test_inline_ignore_suppresses_violation() -> None:
     source = "result = func(\n    arg\n)  # Comment  # pytriage: ignore=STYLE-001\n"
-    tree = ast.parse(source)
 
-    violations = MisplacedCommentCheck().check(Path("test.py"), tree, source)
+    violations = MisplacedCommentCheck().check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert violations == []
 
@@ -104,30 +107,32 @@ def test_inline_ignore_is_respected_by_fix(tmp_path: Path) -> None:
     test_file = tmp_path / "test.py"
     source = "result = func(\n    arg\n)  # Comment  # pytriage: ignore=STYLE-001\n"
     test_file.write_text(source)
-    tree = ast.parse(source)
-    check = MisplacedCommentCheck()
 
     # No violations reported, so the orchestrator would never call fix() with
     # anything to do here — but fix() must independently honor the ignore
     # comment too, since it re-scans the source rather than trusting violations.
-    assert check.fix(test_file, [], source, tree) is False
+    assert (
+        MisplacedCommentCheck().fix(test_file, [], source, ast.parse(source)) is False
+    )
     assert test_file.read_text() == source
 
 
 def test_non_comment_tokens_between_bracket_and_comment_not_flagged() -> None:
     """`[1, 2][0]  # c`: tokens between the first `]` and the comment aren't COMMENT."""
     source = "items = [1, 2][0]  # not a bracket-only line\n"
-    tree = ast.parse(source)
 
-    assert MisplacedCommentCheck().check(Path("test.py"), tree, source) == []
+    assert (
+        MisplacedCommentCheck().check(Path("test.py"), ast.parse(source), source) == []
+    )
 
 
 def test_dedupes_multiple_closing_brackets_on_one_line() -> None:
     """`))  # c` visits the scanner once per bracket token but is one violation."""
     source = "foo(\n    bar(x\n))  # dedup comment\n"
-    tree = ast.parse(source)
 
-    violations = MisplacedCommentCheck().check(Path("test.py"), tree, source)
+    violations = MisplacedCommentCheck().check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert len(violations) == 1
 
@@ -164,9 +169,10 @@ def test_fixes_match_golden_fixtures(fixture_name: str, tmp_path: Path) -> None:
 )
 def test_correctly_placed_comments_not_flagged(fixture_name: str) -> None:
     source = (FIXTURES_DIR / "good" / f"{fixture_name}.py").read_text()
-    tree = ast.parse(source)
 
-    assert MisplacedCommentCheck().check(Path("test.py"), tree, source) == []
+    assert (
+        MisplacedCommentCheck().check(Path("test.py"), ast.parse(source), source) == []
+    )
 
 
 def test_preserves_linter_pragma_comments(tmp_path: Path) -> None:

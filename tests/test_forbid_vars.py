@@ -22,9 +22,7 @@ class ChosenEdge(NamedTuple):
     data: str  # Should NOT be flagged - class provides context
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0, (
         "Class attributes should not be analyzed - class name provides context"
@@ -42,9 +40,7 @@ class UserData:
     result: str  # Should NOT be flagged
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0, "Dataclass fields should not be analyzed"
 
@@ -56,9 +52,7 @@ class Config:
     result = None  # Class attribute - should NOT be flagged
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0, "Regular class attributes should not be analyzed"
 
@@ -79,9 +73,7 @@ class Email(BaseModel):
         return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -99,9 +91,7 @@ class MyModel(BaseModel):
         return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0
 
@@ -120,9 +110,7 @@ class MyModel(BaseModel):
         return result
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
     assert "result" in violations[0].message
@@ -138,9 +126,7 @@ class MyModel(BaseModel):
         return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
     assert "data" in violations[0].message
@@ -153,9 +139,7 @@ def process():
     return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1, "Function-level variables should be analyzed"
     assert violations[0].line == 3
@@ -168,9 +152,7 @@ def process(data):  # Should be flagged
     return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1, "Function parameters should be analyzed"
     assert violations[0].line == 2
@@ -183,9 +165,7 @@ data = {}  # Should be flagged
 result = None  # Should be flagged
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 2, "Module-level variables should be analyzed"
 
@@ -198,9 +178,7 @@ def create_model():
     return Model
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0, (
         "Class attributes inside functions should not be analyzed"
@@ -214,9 +192,7 @@ def process():
     return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0, "Inline ignore comments should suppress violations"
 
@@ -228,9 +204,7 @@ def fetch_users():
     return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
     assert violations[0].fixable, "Violation should be fixable"
@@ -245,9 +219,7 @@ def process():
     return data, result
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 2, "Both 'data' and 'result' should be flagged"
     names = {v.message.split("'")[1] for v in violations}
@@ -260,9 +232,7 @@ async def fetch(data):  # Should be flagged
     return await data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1, "Async function parameters should be analyzed"
     assert violations[0].line == 2
@@ -276,9 +246,7 @@ async def fetch():
     return result
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1, "Async function variables should be analyzed"
     assert "result" in violations[0].message
@@ -290,9 +258,7 @@ def process(*data):  # Should be flagged
     return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1, "*args parameters should be analyzed"
     assert "data" in violations[0].message
@@ -304,9 +270,7 @@ def process(**data):  # Should be flagged
     return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1, "**kwargs parameters should be analyzed"
     assert "data" in violations[0].message
@@ -319,9 +283,7 @@ def process():
     return None
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1, (
         "Annotated assignments without value should be analyzed"
@@ -437,9 +399,7 @@ def test_multiple_violations_same_scope() -> None:
     return result
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 2
     names = {v.fix_data["name"] for v in violations if v.fix_data}
@@ -482,16 +442,13 @@ def test_no_violations_when_all_suppressed() -> None:
     return data, result
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0, "All violations should be suppressed"
 
 
 def test_prefilter_pattern() -> None:
-    check = ForbidVarsCheck()
-    patterns = check.get_prefilter_pattern()
+    patterns = ForbidVarsCheck().get_prefilter_pattern()
 
     # Returns ALL forbidden names so files with only 'result =' aren't
     # silently skipped during pre-filtering.
@@ -513,9 +470,7 @@ def compute():
     return result
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
     assert "result" in violations[0].message
@@ -535,9 +490,7 @@ class TestSomething:
         assert result is not None
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
     assert "result" in violations[0].message
@@ -548,9 +501,7 @@ def test_positional_only_parameters() -> None:
     return data, other
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1, "Positional-only parameters should be analyzed"
     assert "data" in violations[0].message
@@ -562,9 +513,7 @@ def test_multiple_assignment_targets_ignored() -> None:
     return data, result
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     # Should not flag the assignment (multiple targets not supported), but
     # may flag in get_values if it exists.
@@ -582,9 +531,7 @@ def test_nested_function_scope() -> None:
     return data + inner()
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 2
 
@@ -593,9 +540,7 @@ def test_tokenize_error_handling() -> None:
     # Deliberately malformed so tokenizing may raise partway through.
     source = "def func():\n    data = 1  # missing closing quote"
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) >= 1
 
@@ -612,9 +557,7 @@ def test_keyword_only_parameters() -> None:
     return data, other
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1, "Keyword-only parameters should be analyzed"
     assert "data" in violations[0].message
@@ -625,9 +568,7 @@ def test_all_violations_suppressed_returns_empty() -> None:
     data = 1  # pytriage: ignore=TRI001
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 0, "Suppressed violations should be filtered out"
 
@@ -636,9 +577,7 @@ def test_module_level_annotated_assignment_with_value() -> None:
     source = """data: dict = {}  # Should be flagged
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
     assert "data" in violations[0].message
@@ -650,9 +589,7 @@ def test_function_annotated_assignment_with_value() -> None:
     return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
     assert "data" in violations[0].message
@@ -663,15 +600,13 @@ def test_suggestion_fallback_when_in_forbidden_names() -> None:
     produce a forbidden name; the fix then falls back to a generic 'var'
     name instead of introducing a new violation.
     """
-    check = ForbidVarsCheck()
 
     source = """def fetch():
     result = get_result()
     return result
 """
 
-    tree = ast.parse(source)
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
     assert violations[0].fixable
@@ -691,9 +626,7 @@ def test_name_conflict_counter_increment() -> None:
         filepath = Path(tmpdir) / "test.py"
         filepath.write_text(source)
 
-        tree = ast.parse(source)
-        check = ForbidVarsCheck()
-        violations = check.check(filepath, tree, source)
+        violations = ForbidVarsCheck().check(filepath, ast.parse(source), source)
 
         assert len(violations) == 1
         assert violations[0].fix_data is not None
@@ -701,15 +634,13 @@ def test_name_conflict_counter_increment() -> None:
 
 
 def test_semantic_naming_with_regex_groups() -> None:
-    check = ForbidVarsCheck()
 
     source = """def process():
     data = get_user()
     return data
 """
 
-    tree = ast.parse(source)
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
     assert violations[0].fixable
@@ -724,9 +655,7 @@ def test_cached_scope_names_reuse() -> None:
     return result
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 2
     names = {v.fix_data["name"] for v in violations if v.fix_data}
@@ -744,9 +673,7 @@ def test_generate_unique_name_cache_hit_for_repeated_reassignment() -> None:
     return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 2
     suggestions = {v.fix_data["suggestion"] for v in violations if v.fix_data}
@@ -763,9 +690,7 @@ def test_find_best_match_prefers_higher_specificity() -> None:
     return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
     assert violations[0].fix_data is not None
@@ -778,7 +703,6 @@ def test_semantic_naming_false_when_match_not_on_target_line() -> None:
     different line than the target (e.g. a parenthesized multi-line RHS),
     that lookup finds nothing and the raw group-reference name is kept as-is.
     """
-    check = ForbidVarsCheck()
 
     source = """def process():
     data = (
@@ -787,8 +711,7 @@ def test_semantic_naming_false_when_match_not_on_target_line() -> None:
     return data
 """
 
-    tree = ast.parse(source)
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
     assert violations[0].fix_data is not None
@@ -807,9 +730,7 @@ def test_annotated_attribute_assignment_is_not_checked() -> None:
         self.data: int = 5
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert violations == []
 
@@ -833,9 +754,7 @@ def test_model_validator_decorator_skips_arg_check() -> None:
         return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     flagged_functions = {v.fix_data["name"] for v in violations if v.fix_data}
     assert flagged_functions == {"data"}
@@ -852,9 +771,7 @@ def test_async_model_validator_decorator_skips_arg_check() -> None:
         return data
 """
 
-    tree = ast.parse(source)
-    check = ForbidVarsCheck()
-    violations = check.check(Path("test.py"), tree, source)
+    violations = ForbidVarsCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert violations == []
 

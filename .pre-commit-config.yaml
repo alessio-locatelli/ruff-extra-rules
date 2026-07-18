@@ -27,16 +27,14 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  # Our own hooks, run against src/ only. tests/ is excluded: its fixtures
-  # under tests/fixtures/ are deliberately "bad" example code for our own
-  # test suite, and the test suite itself idiomatically uses forbidden names
-  # like `result` far more than production code does (see
-  # docs/work-items/10-lint-tests-directory.md).
+  # Our own hooks, run against src/ and tests/. tests/fixtures/ is excluded:
+  # it deliberately contains "bad" (and otherwise non-representative) example
+  # code for our own test suite (see docs/adr/0009-lint-tests-directory.md).
   - repo: local
     hooks:
       - id: ruff-extra-rules
         name: Extra Python rule checks (self-check)
-        description: Run our own AST-based checks against src/
+        description: Run our own AST-based checks against src/ and tests/
         # `uv run` resolves this project's own managed venv regardless of
         # the ambient shell's PATH, since `language: system` hooks run
         # outside any pre-commit-managed environment (a plain `git commit`,
@@ -45,7 +43,8 @@ repos:
         entry: uv run python -m pre_commit_hooks.ast_checks
         language: system
         types: [python]
-        files: ^src/
+        files: ^(src|tests)/
+        exclude: ^tests/fixtures/
         args: [--fix]
 
   - repo: https://github.com/Yelp/detect-secrets

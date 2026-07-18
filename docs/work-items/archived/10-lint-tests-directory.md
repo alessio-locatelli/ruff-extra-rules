@@ -1,6 +1,6 @@
 # Consider running ast-checks against tests/ in this repo's own config
 
-Status: On hold — see docs/work-items/11-ruff-check-cli-parity.md
+Status: Resolved — see docs/adr/0009-lint-tests-directory.md; implemented
 Kind: Feature (future)
 
 ## Problem
@@ -51,3 +51,21 @@ hook with `ruff check`-style `--fix`/`--select`/`--ignore` flags. See
 `docs/work-items/11-ruff-check-cli-parity.md`. Scoping _this_ item (whether
 and how to lint `tests/`) against a CLI surface that's about to change
 would be wasted effort, so it's on hold until item 11 lands.
+
+## Resolved (2026-07-18)
+
+Item 11 landed, unblocking this. Rather than debating the scope in the
+abstract, ran all 6 checks against `tests/*.py` (excluding
+`tests/fixtures/`) to measure actual friction: only `forbid-vars` (25
+violations, all `result`) and `redundant-assignment` (255 violations,
+overwhelmingly the `tree = ast.parse(source)` / `check = XCheck()`
+arrange-step idiom) fired at all — the other four checks were already
+clean. Decision: extend self-checking to `tests/` for all 6 checks and
+reconcile every violation by fixing the test code (198 via `--fix`, 82 by
+hand), rather than carving out a `tests/`-specific relaxation. See
+`docs/adr/0009-lint-tests-directory.md` for the full decision record and
+`.pre-commit-config.yaml` for the resulting hook config
+(`files: ^(src|tests)/`, `exclude: ^tests/fixtures/`). Two pre-existing
+`redundant-assignment` autofix gaps surfaced during the manual pass are
+tracked separately in
+[issue #22](https://github.com/alessio-locatelli/ruff-extra-rules/issues/22).

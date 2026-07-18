@@ -30,14 +30,14 @@ def test_filter_excluded_files_no_patterns_returns_all() -> None:
 
 def test_filter_excluded_files_excludes_matching_file() -> None:
     files = ["a.py", "b.py", "migrations/0001_init.py"]
-    result = filter_excluded_files(files, ["migrations/*.py"])
-    assert result == ["a.py", "b.py"]
+    filtered_files = filter_excluded_files(files, ["migrations/*.py"])
+    assert filtered_files == ["a.py", "b.py"]
 
 
 def test_filter_excluded_files_excludes_matching_parent_dir() -> None:
     files = ["src/main.py", "vendor/lib/thing.py"]
-    result = filter_excluded_files(files, ["vendor"])
-    assert result == ["src/main.py"]
+    filtered_files = filter_excluded_files(files, ["vendor"])
+    assert filtered_files == ["src/main.py"]
 
 
 def test_filter_excluded_files_no_match_keeps_file() -> None:
@@ -113,10 +113,10 @@ def test_apply_fixes_recomputes_stale_positions(tmp_path: Path) -> None:
     )
     assert redundant_assignment_fixed
 
-    result = filepath.read_text(encoding="utf-8")
-    assert 'x = "foo"' not in result
-    assert "print(" in result
-    assert '"foo"' in result
+    file_content = filepath.read_text(encoding="utf-8")
+    assert 'x = "foo"' not in file_content
+    assert "print(" in file_content
+    assert '"foo"' in file_content
 
 
 def test_fix_honors_pep263_encoding_declaration(tmp_path: Path) -> None:
@@ -132,9 +132,9 @@ def test_fix_honors_pep263_encoding_declaration(tmp_path: Path) -> None:
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations[str(filepath)][0].fix_data == {"fixed": True}
-    result = filepath.read_bytes().decode("latin-1")
-    assert "x  # caf\xe9" in result
-    assert ")\n" in result
+    fixed_content = filepath.read_bytes().decode("latin-1")
+    assert "x  # caf\xe9" in fixed_content
+    assert ")\n" in fixed_content
 
 
 def test_fix_preserves_crlf_line_endings(tmp_path: Path) -> None:
@@ -149,9 +149,9 @@ def test_fix_preserves_crlf_line_endings(tmp_path: Path) -> None:
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations[str(filepath)][0].fix_data == {"fixed": True}
-    result = filepath.read_bytes()
-    assert b"\r\nother = 1\r\n" in result
-    assert b"x  # comment" in result
+    fixed_content = filepath.read_bytes()
+    assert b"\r\nother = 1\r\n" in fixed_content
+    assert b"x  # comment" in fixed_content
 
 
 def test_process_files_empty_filepaths_returns_empty() -> None:
@@ -257,8 +257,8 @@ def test_get_cached_violations_ignores_corrupted_cache_entry(
         filepath, "ruff-extra-rules", {"violations": [{}]}
     )
 
-    result = orchestrator._get_cached_violations(filepath)
-    assert result is None
+    cached_violations = orchestrator._get_cached_violations(filepath)
+    assert cached_violations is None
 
 
 def test_cache_violations_serialization_error_is_caught(
@@ -517,8 +517,7 @@ def test_load_checks_skips_check_whose_init_raises(
 
     monkeypatch.setattr(ast_checks, "ALL_CHECKS", [*ALL_CHECKS, BrokenCheck])
 
-    checks = load_checks()
-    assert len(checks) == len(ALL_CHECKS)
+    assert len(load_checks()) == len(ALL_CHECKS)
 
 
 def test_load_checks_skips_check_when_custom_args_raise() -> None:
@@ -530,8 +529,7 @@ def test_load_checks_skips_check_when_custom_args_raise() -> None:
 
 
 def test_main_list_checks(capsys: pytest.CaptureFixture[str]) -> None:
-    exit_code = main(["--list-checks"])
-    assert exit_code == 0
+    assert main(["--list-checks"]) == 0
 
     out = capsys.readouterr().out
     assert "Available checks:" in out
@@ -667,8 +665,7 @@ def test_main_check_specific_cli_arg_round_trip(
     )
     assert exit_code == 1
 
-    err = capsys.readouterr().err
-    assert "custom-message" in err
+    assert "custom-message" in capsys.readouterr().err
 
 
 def test_main_unknown_select_check_returns_one(
@@ -680,8 +677,7 @@ def test_main_unknown_select_check_returns_one(
     exit_code = main([str(filepath), "--select", "not-a-real-check"])
     assert exit_code == 1
 
-    err = capsys.readouterr().err
-    assert "Unknown checks: not-a-real-check" in err
+    assert "Unknown checks: not-a-real-check" in capsys.readouterr().err
 
 
 def test_main_unknown_ignore_check_returns_one(
@@ -693,8 +689,7 @@ def test_main_unknown_ignore_check_returns_one(
     exit_code = main([str(filepath), "--ignore", "not-a-real-check"])
     assert exit_code == 1
 
-    err = capsys.readouterr().err
-    assert "Unknown checks: not-a-real-check" in err
+    assert "Unknown checks: not-a-real-check" in capsys.readouterr().err
 
 
 def test_main_ignoring_all_checks_returns_one(
@@ -707,8 +702,7 @@ def test_main_ignoring_all_checks_returns_one(
     exit_code = main([str(filepath), "--ignore", all_ids])
     assert exit_code == 1
 
-    err = capsys.readouterr().err
-    assert "Error: No checks enabled" in err
+    assert "Error: No checks enabled" in capsys.readouterr().err
 
 
 def test_main_select_and_ignore_compose(
@@ -732,5 +726,4 @@ def test_main_select_and_ignore_compose(
     )
     assert exit_code == 0
 
-    err = capsys.readouterr().err
-    assert "TRI001" not in err
+    assert "TRI001" not in capsys.readouterr().err

@@ -230,9 +230,7 @@ def get_or_create_item(key):
     filepath = tmp_path / "source.py"
     filepath.write_text(source)
 
-    suggestions = process_file(filepath)
-
-    for suggestion in suggestions:
+    for suggestion in process_file(filepath):
         assert not suggestion.suggested_name.startswith("update_"), (
             f"Should not suggest update_ for cache pattern, "
             f"got: {suggestion.suggested_name}"
@@ -305,9 +303,9 @@ def get_placeholder_backend(original_exception):
     filepath = tmp_path / "source.py"
     filepath.write_text(source)
 
-    suggestions = process_file(filepath)
-
-    assert suggestions == [], "Functions returning classes should keep get_ prefix"
+    assert process_file(filepath) == [], (
+        "Functions returning classes should keep get_ prefix"
+    )
 
 
 def test_docstring_verb_combine_detected(tmp_path: Path) -> None:
@@ -385,10 +383,9 @@ def test_check_uses_given_tree_and_source_not_disk(tmp_path: Path) -> None:
     filepath.write_text("x = 1\n")
 
     source = "def get_data() -> bool:\n    return True\n"
-    tree = ast.parse(source)
 
     check = ValidateFunctionNameCheck()
-    violations = check.check(filepath, tree, source)
+    violations = check.check(filepath, ast.parse(source), source)
 
     assert len(violations) == 1
     assert "get_data" in violations[0].message
@@ -402,10 +399,9 @@ def test_get_prefilter_pattern() -> None:
 def test_fix_with_no_violations_returns_false(tmp_path: Path) -> None:
     filepath = tmp_path / "mod.py"
     filepath.write_text("x = 1\n")
-    tree = ast.parse("x = 1\n")
 
     check = ValidateFunctionNameCheck()
-    assert check.fix(filepath, [], "x = 1\n", tree) is False
+    assert check.fix(filepath, [], "x = 1\n", ast.parse("x = 1\n")) is False
 
 
 def test_fix_skips_violation_without_fix_data(tmp_path: Path) -> None:
@@ -413,7 +409,6 @@ def test_fix_skips_violation_without_fix_data(tmp_path: Path) -> None:
 
     filepath = tmp_path / "mod.py"
     filepath.write_text("def get_data() -> bool:\n    return True\n")
-    tree = ast.parse("x = 1\n")
 
     violation = Violation(
         check_id="validate-function-name",
@@ -426,7 +421,7 @@ def test_fix_skips_violation_without_fix_data(tmp_path: Path) -> None:
     )
 
     check = ValidateFunctionNameCheck()
-    assert check.fix(filepath, [violation], "x = 1\n", tree) is False
+    assert check.fix(filepath, [violation], "x = 1\n", ast.parse("x = 1\n")) is False
 
 
 def test_fix_skips_violation_without_suggestion_key(tmp_path: Path) -> None:
@@ -434,7 +429,6 @@ def test_fix_skips_violation_without_suggestion_key(tmp_path: Path) -> None:
 
     filepath = tmp_path / "mod.py"
     filepath.write_text("def get_data() -> bool:\n    return True\n")
-    tree = ast.parse("x = 1\n")
 
     violation = Violation(
         check_id="validate-function-name",
@@ -447,7 +441,7 @@ def test_fix_skips_violation_without_suggestion_key(tmp_path: Path) -> None:
     )
 
     check = ValidateFunctionNameCheck()
-    assert check.fix(filepath, [violation], "x = 1\n", tree) is False
+    assert check.fix(filepath, [violation], "x = 1\n", ast.parse("x = 1\n")) is False
 
 
 def test_fix_applies_safe_suggestion(tmp_path: Path) -> None:

@@ -13,8 +13,9 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "redundant_super_init"
 
 
 def _check(source: str) -> list[str]:
-    tree = ast.parse(source)
-    violations = RedundantSuperInitCheck().check(Path("test.py"), tree, source)
+    violations = RedundantSuperInitCheck().check(
+        Path("test.py"), ast.parse(source), source
+    )
     return [v.message for v in violations]
 
 
@@ -73,8 +74,9 @@ class Child(Base):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 """
-    tree = ast.parse(source)
-    violations = RedundantSuperInitCheck().check(Path("test.py"), tree, source)
+    violations = RedundantSuperInitCheck().check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert len(violations) == 1
     violation = violations[0]
@@ -113,8 +115,7 @@ class Child(Base):
 
 
 def test_class_without_init_not_flagged() -> None:
-    source = "class Foo:\n    pass\n"
-    assert _check(source) == []
+    assert _check("class Foo:\n    pass\n") == []
 
 
 def test_super_call_without_forwarding_kwargs_not_flagged() -> None:

@@ -87,9 +87,9 @@ def test_apply_fix_does_not_corrupt_unrelated_string_literal(tmp_path: Path) -> 
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
-    assert f"def {suggestion.suggested_name}(self):" in result
-    assert 'ROUTES = {"get_data": "/api/legacy-endpoint"}' in result
+    file_content = test_file.read_text()
+    assert f"def {suggestion.suggested_name}(self):" in file_content
+    assert 'ROUTES = {"get_data": "/api/legacy-endpoint"}' in file_content
 
 
 def test_apply_fix_does_not_rename_unrelated_class_method(tmp_path: Path) -> None:
@@ -116,12 +116,12 @@ def test_apply_fix_does_not_rename_unrelated_class_method(tmp_path: Path) -> Non
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     new_name = suggestion.suggested_name
-    assert f"class Reader:\n    def {new_name}(self):" in result
-    assert f"return self.{new_name}()" in result
-    assert "class OtherReader:\n    def get_data(self):" in result
-    assert 'return "unrelated"' in result
+    assert f"class Reader:\n    def {new_name}(self):" in file_content
+    assert f"return self.{new_name}()" in file_content
+    assert "class OtherReader:\n    def get_data(self):" in file_content
+    assert 'return "unrelated"' in file_content
 
 
 def test_should_autofix_rejects_methods(tmp_path: Path) -> None:
@@ -175,11 +175,11 @@ def test_apply_fix_renames_recursive_call(tmp_path: Path) -> None:
     )
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     new_name = suggestion.suggested_name
-    assert f"def {new_name}(n):" in result
-    assert f"return {new_name}(n - 1) + 1" in result
-    assert "get_data" not in result
+    assert f"def {new_name}(n):" in file_content
+    assert f"return {new_name}(n - 1) + 1" in file_content
+    assert "get_data" not in file_content
 
 
 def test_apply_fix_updates_call_site_of_nested_target_function(tmp_path: Path) -> None:
@@ -205,11 +205,11 @@ def test_apply_fix_updates_call_site_of_nested_target_function(tmp_path: Path) -
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     new_name = suggestion.suggested_name
-    assert f"    def {new_name}():\n" in result
-    assert f"    return {new_name}() and x\n" in result
-    assert "get_data" not in result
+    assert f"    def {new_name}():\n" in file_content
+    assert f"    return {new_name}() and x\n" in file_content
+    assert "get_data" not in file_content
 
 
 def test_apply_fix_refuses_when_name_is_rebound(tmp_path: Path) -> None:
@@ -258,11 +258,11 @@ def test_apply_fix_updates_free_function_call_sites(tmp_path: Path) -> None:
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     new_name = suggestion.suggested_name
-    assert f"def {new_name}():" in result
-    assert result.count(f"{new_name}()") == 3  # def + two call sites
-    assert "get_data" not in result
+    assert f"def {new_name}():" in file_content
+    assert file_content.count(f"{new_name}()") == 3  # def + two call sites
+    assert "get_data" not in file_content
 
 
 def test_apply_fix_renames_call_site_on_line_with_non_ascii_text(
@@ -286,11 +286,11 @@ def test_apply_fix_renames_call_site_on_line_with_non_ascii_text(
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     new_name = suggestion.suggested_name
-    assert f"def {new_name}():" in result
-    assert f"{new_name}()" in result
-    assert "get_data" not in result
+    assert f"def {new_name}():" in file_content
+    assert f"{new_name}()" in file_content
+    assert "get_data" not in file_content
 
 
 def test_apply_fix_leaves_subclass_super_call_untouched(tmp_path: Path) -> None:
@@ -316,11 +316,11 @@ def test_apply_fix_leaves_subclass_super_call_untouched(tmp_path: Path) -> None:
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     new_name = suggestion.suggested_name
-    assert f"class Base:\n    def {new_name}(self):" in result
-    assert "class Child(Base):\n    def get_data(self):" in result
-    assert "return super().get_data()" in result
+    assert f"class Base:\n    def {new_name}(self):" in file_content
+    assert "class Child(Base):\n    def get_data(self):" in file_content
+    assert "return super().get_data()" in file_content
 
 
 def test_apply_fix_does_not_rename_nested_shadowing_function(tmp_path: Path) -> None:
@@ -352,12 +352,12 @@ def test_apply_fix_does_not_rename_nested_shadowing_function(tmp_path: Path) -> 
     assert suggestion.lineno == 1
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     new_name = suggestion.suggested_name
-    assert f"def {new_name}():" in result
-    assert "    def get_data():\n        return 2\n" in result
-    assert "    return get_data()\n" in result
-    assert f"    return {new_name}() + 1\n" in result
+    assert f"def {new_name}():" in file_content
+    assert "    def get_data():\n        return 2\n" in file_content
+    assert "    return get_data()\n" in file_content
+    assert f"    return {new_name}() + 1\n" in file_content
 
 
 def test_apply_fix_does_not_rename_parameter_shadowed_call(tmp_path: Path) -> None:
@@ -380,11 +380,11 @@ def test_apply_fix_does_not_rename_parameter_shadowed_call(tmp_path: Path) -> No
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     new_name = suggestion.suggested_name
-    assert f"def {new_name}():" in result
-    assert "def wrapper(get_data):\n    return get_data()\n" in result
-    assert f"    return {new_name}() + 1\n" in result
+    assert f"def {new_name}():" in file_content
+    assert "def wrapper(get_data):\n    return get_data()\n" in file_content
+    assert f"    return {new_name}() + 1\n" in file_content
 
 
 def test_apply_fix_does_not_rename_lambda_parameter_shadowed_reference(
@@ -406,10 +406,10 @@ def test_apply_fix_does_not_rename_lambda_parameter_shadowed_reference(
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     new_name = suggestion.suggested_name
-    assert f"def {new_name}():" in result
-    assert "lambda get_data: get_data.value" in result
+    assert f"def {new_name}():" in file_content
+    assert "lambda get_data: get_data.value" in file_content
 
 
 @pytest.mark.parametrize(
@@ -454,10 +454,10 @@ def test_apply_fix_renames_reference_inside_non_shadowing_lambda(
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     new_name = suggestion.suggested_name
-    assert f"def {new_name}():" in result
-    assert f"lambda x: {new_name}().value" in result
+    assert f"def {new_name}():" in file_content
+    assert f"lambda x: {new_name}().value" in file_content
 
 
 def test_should_autofix_rejects_low_confidence_suggestion(tmp_path: Path) -> None:
@@ -583,8 +583,8 @@ def test_apply_fix_does_not_rename_call_shadowed_by_nested_class(
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
-    assert "    class get_data:\n        pass\n    return get_data()\n" in result
+    file_content = test_file.read_text()
+    assert "    class get_data:\n        pass\n    return get_data()\n" in file_content
 
 
 def test_apply_fix_does_not_rename_call_shadowed_by_local_import(
@@ -607,8 +607,10 @@ def test_apply_fix_does_not_rename_call_shadowed_by_local_import(
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
-    assert "    from other_module import get_data\n    return get_data()\n" in result
+    file_content = test_file.read_text()
+    assert (
+        "    from other_module import get_data\n    return get_data()\n" in file_content
+    )
 
 
 def test_apply_fix_refuses_when_name_rebound_via_import(tmp_path: Path) -> None:
@@ -652,10 +654,10 @@ def test_apply_fix_does_not_rename_call_shadowed_by_nested_async_function(
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     assert (
         "    async def get_data():\n        return 2\n    return await get_data()\n"
-        in result
+        in file_content
     )
 
 
@@ -709,8 +711,8 @@ def test_apply_fix_does_not_rename_call_shadowed_by_nested_assignment(
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
-    assert "        get_data = compute()\n        return get_data\n" in result
+    file_content = test_file.read_text()
+    assert "        get_data = compute()\n        return get_data\n" in file_content
 
 
 def test_apply_fix_renames_reference_inside_non_shadowing_async_function(
@@ -734,6 +736,6 @@ def test_apply_fix_renames_reference_inside_non_shadowing_async_function(
     suggestion = _suggestion_for(test_file, "get_data")
     assert apply_fix(test_file, suggestion)
 
-    result = test_file.read_text()
+    file_content = test_file.read_text()
     new_name = suggestion.suggested_name
-    assert f"        return {new_name}()\n" in result
+    assert f"        return {new_name}()\n" in file_content

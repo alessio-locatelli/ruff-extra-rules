@@ -14,8 +14,9 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "excessive_blank_lines"
 
 
 def _check(source: str) -> list[str]:
-    tree = ast.parse(source)
-    violations = ExcessiveBlankLinesCheck().check(Path("test.py"), tree, source)
+    violations = ExcessiveBlankLinesCheck().check(
+        Path("test.py"), ast.parse(source), source
+    )
     return [v.message for v in violations]
 
 
@@ -73,8 +74,7 @@ def test_leading_blank_lines_before_first_code_with_no_header() -> None:
     before the first code line, has no non-blank header line to find, so the
     whole leading run is treated as the gap before the first code line.
     """
-    source = "\n\n\nimport os\n"
-    assert _check(source) == [
+    assert _check("\n\n\nimport os\n") == [
         "Excessive blank lines (3) should be collapsed to 1. Add "
         "'# pytriage: ignore=TRI002' to the line following the blank run "
         "to suppress."
@@ -92,7 +92,6 @@ def test_inline_ignore_is_respected_by_fix(tmp_path: Path) -> None:
     source = '"""Docstring."""\n\n\n\ndef foo():  # pytriage: ignore=TRI002\n    pass\n'
     test_file = tmp_path / "module.py"
     test_file.write_text(source)
-    tree = ast.parse(source)
     check = ExcessiveBlankLinesCheck()
 
     # A stale violation (as if collected before the ignore comment was
@@ -106,7 +105,7 @@ def test_inline_ignore_is_respected_by_fix(tmp_path: Path) -> None:
         message="stale",
         fixable=True,
     )
-    assert check.fix(test_file, [stale_violation], source, tree) is False
+    assert check.fix(test_file, [stale_violation], source, ast.parse(source)) is False
     assert test_file.read_text() == source
 
 
@@ -120,7 +119,6 @@ def test_fix_with_stale_violation_and_no_current_violation_returns_false(
     source = '"""Docstring."""\n\ndef foo():\n    pass\n'
     test_file = tmp_path / "module.py"
     test_file.write_text(source)
-    tree = ast.parse(source)
     check = ExcessiveBlankLinesCheck()
 
     stale_violation = Violation(
@@ -131,7 +129,7 @@ def test_fix_with_stale_violation_and_no_current_violation_returns_false(
         message="stale",
         fixable=True,
     )
-    assert check.fix(test_file, [stale_violation], source, tree) is False
+    assert check.fix(test_file, [stale_violation], source, ast.parse(source)) is False
     assert test_file.read_text() == source
 
 
@@ -143,12 +141,11 @@ def test_fix_file_content_empty_source_returns_unchanged() -> None:
 
 def test_fix_with_no_violations_returns_false(tmp_path: Path) -> None:
     source = "x = 1\n"
-    tree = ast.parse(source)
     test_file = tmp_path / "module.py"
     test_file.write_text(source)
 
     check = ExcessiveBlankLinesCheck()
-    assert check.fix(test_file, [], source, tree) is False
+    assert check.fix(test_file, [], source, ast.parse(source)) is False
 
 
 def test_fix_leading_blank_lines_before_first_code_with_no_header(
