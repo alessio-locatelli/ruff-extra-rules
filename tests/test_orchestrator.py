@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import sys
+import types
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -267,6 +269,25 @@ def test_generate_cache_key_changes_when_source_tree_changes(tmp_path: Path, mon
     key_before = orchestrator._generate_cache_key()
 
     (fake_root / "module.py").write_text("x = 2\n")
+    key_after = orchestrator._generate_cache_key()
+
+    assert key_before != key_after
+
+
+def test_generate_cache_key_changes_when_python_version_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ast.parse()'s output for identical source isn't guaranteed stable
+    # across Python minor versions, so a .cache directory shared across an
+    # interpreter upgrade must not silently reuse the old interpreter's
+    # results. Patches the `sys` name binding inside the ast_checks module
+    # (not the real global sys module) so only _generate_cache_key() sees a
+    # different version.
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    key_before = orchestrator._generate_cache_key()
+
+    fake_sys = types.SimpleNamespace(
+        version_info=types.SimpleNamespace(major=sys.version_info.major, minor=sys.version_info.minor + 1)
+    )
+    monkeypatch.setattr(ast_checks, "sys", fake_sys)
     key_after = orchestrator._generate_cache_key()
 
     assert key_before != key_after

@@ -12,6 +12,7 @@ import fcntl
 import hashlib
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -73,6 +74,12 @@ class CacheManager:
         self.cache_dir = cache_dir or self.DEFAULT_CACHE_DIR
         self.hook_name = hook_name
         self.cache_version = cache_version
+        # Set by _ensure_cache_dir() below on failure. Checked first by
+        # get_cached_result()/set_cached_result() so a cache directory that
+        # was never available doesn't pay a doomed mkdir()/file-hash attempt
+        # (and log another warning) on every single file for the rest of
+        # this run — one warning at construction is enough.
+        self._cache_dir_unavailable = False
         self._ensure_cache_dir()
 
     @contextlib.contextmanager
@@ -114,17 +121,41 @@ class CacheManager:
                 fcntl.flock(lock_fp, fcntl.LOCK_UN)
 
     def _ensure_cache_dir(self) -> None:
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        """Best-effort: an unavailable cache directory (permission denied,
+        read-only filesystem, missing parent that can't be created, ...)
+        must degrade to running uncached, not crash construction. Sets
+        `self._cache_dir_unavailable` on failure so `get_cached_result()`/
+        `set_cached_result()` short-circuit to a no-op for every file this
+        run, instead of each repeating (and logging) the same doomed
+        `mkdir()` attempt — the latter would still degrade safely via their
+        own `except OSError`, just with a per-file `stat()`/hash and a
+        warning wasted on every file instead of one clear warning here.
+        """
+        try:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Create CACHEDIR.TAG to mark this as a cache directory
-        # See: https://bford.info/cachedir/
-        tag_file = self.cache_dir / "CACHEDIR.TAG"
-        if not tag_file.exists():
-            tag_file.write_text(
-                "Signature: 8a477f597d28d172789f06886806bc55\n"
-                "# This directory is a cache directory for pre_commit_hooks.\n"
-                "# It is safe to delete this directory to clear the cache.\n"
-            )
+            # Create CACHEDIR.TAG to mark this as a cache directory
+            # See: https://bford.info/cachedir/
+            tag_file = self.cache_dir / "CACHEDIR.TAG"
+            if not tag_file.exists():
+                tag_file.write_text(
+                    "Signature: 8a477f597d28d172789f06886806bc55\n"
+                    "# This directory is a cache directory for pre_commit_hooks.\n"
+                    "# It is safe to delete this directory to clear the cache.\n"
+                )
+
+            # A directory that already existed (e.g. from a previous run,
+            # now chmodded read-only, or a read-only mount) makes both
+            # mkdir(exist_ok=True) above and an already-present CACHEDIR.TAG
+            # succeed without ever attempting a write — os.access() is a
+            # cheap, side-effect-free way to actually verify writability
+            # instead of relying on a write happening to be attempted.
+            if not os.access(self.cache_dir, os.W_OK):
+                msg = f"{self.cache_dir} is not writable"
+                raise PermissionError(msg)
+        except OSError as error:
+            logger.warning("Cache directory %s is unavailable, running without cache: %s", self.cache_dir, repr(error))
+            self._cache_dir_unavailable = True
 
     def get_cached_result(  # pytriage: ignore=TRI004
         self, filepath: Path, hook_name: str | None = None
@@ -141,6 +172,8 @@ class CacheManager:
             Cached result dict or None if cache invalid/missing
         """
         hook_name = hook_name or self.hook_name
+        if self._cache_dir_unavailable:
+            return None
         try:
             # Get file stats
             stat = filepath.stat()
@@ -181,6 +214,8 @@ class CacheManager:
             return None
 
     def set_cached_result(self, filepath: Path, hook_name: str, hook_result: dict[str, Any]) -> None:
+        if self._cache_dir_unavailable:
+            return
         try:
             stat = filepath.stat()
             file_hash = self.compute_file_hash(filepath)

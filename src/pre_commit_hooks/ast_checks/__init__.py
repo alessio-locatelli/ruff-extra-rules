@@ -259,18 +259,30 @@ class CheckOrchestrator:
         return all_violations
 
     def _generate_cache_key(self) -> str:
-        """Cache key from the enabled checks, their own config, and this
-        package's own source — replaces a hand-maintained CACHE_VERSION
-        constant that a developer had to remember to bump whenever any
-        check's behavior changed (a real bug, commit 0e3efba, already came
-        from forgetting to). Any of the three changing invalidates every
-        cached result for every check — deliberately coarse-grained in
-        exchange for never missing a real change again.
+        """Cache key from the enabled checks, their own config, this
+        package's own source, and the running interpreter's own version —
+        replaces a hand-maintained CACHE_VERSION constant that a developer
+        had to remember to bump whenever any check's behavior changed (a
+        real bug, commit 0e3efba, already came from forgetting to). Any of
+        the four changing invalidates every cached result for every check —
+        deliberately coarse-grained in exchange for never missing a real
+        change again.
+
+        The interpreter version is included because every check's results
+        come from `ast.parse()`'s output, and that output isn't guaranteed
+        identical for the same source text across Python minor versions
+        (grammar and AST-shape changes between releases) — so a `.cache`
+        directory shared across an interpreter upgrade must not silently
+        reuse results computed under the old one. Only major.minor is used:
+        bugfix releases don't change the grammar, and including the full
+        version (e.g. build metadata) would invalidate the cache on every
+        patch release for no behavioral reason.
         """
         check_ids = sorted(check.check_id for check in self.checks)
         fingerprints = sorted(f"{check.check_id}={_fingerprint_check(check)}" for check in self.checks)
         tree_hash = CacheManager.compute_tree_hash(_PACKAGE_ROOT)
-        return "|".join([",".join(check_ids), ",".join(fingerprints), tree_hash])
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+        return "|".join([",".join(check_ids), ",".join(fingerprints), tree_hash, python_version])
 
     def _get_cached_violations(self, filepath: Path) -> list[Violation] | None:
         """Retrieve cached violations for a file.
