@@ -1,5 +1,3 @@
-"""Tests for redundant_super_init hook (TRI003)."""
-
 from __future__ import annotations
 
 import ast

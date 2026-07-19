@@ -1,5 +1,3 @@
-"""Shared polyfactory factories for domain dataclasses used across tests."""
-
 from __future__ import annotations
 
 from polyfactory.factories import DataclassFactory

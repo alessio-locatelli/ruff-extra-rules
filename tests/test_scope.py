@@ -1,5 +1,3 @@
-"""Tests for the shared _scope traversal utility."""
-
 from __future__ import annotations
 
 import ast

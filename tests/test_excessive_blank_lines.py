@@ -1,5 +1,3 @@
-"""Tests for excessive_blank_lines hook (TRI002)."""
-
 from __future__ import annotations
 
 import ast

@@ -1,5 +1,3 @@
-"""Tests for misplaced-comment (STYLE-001)."""
-
 from __future__ import annotations
 
 import ast

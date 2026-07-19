@@ -1,5 +1,3 @@
-"""Tests for the ast_checks._base shared utilities."""
-
 from __future__ import annotations
 
 import stat

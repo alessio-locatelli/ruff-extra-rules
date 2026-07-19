@@ -1,5 +1,3 @@
-"""Tests for CheckOrchestrator (ast_checks/__init__.py)."""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any

@@ -1,5 +1,3 @@
-"""Tests for forbid_vars hook (TRI001)."""
-
 from __future__ import annotations
 
 import ast
