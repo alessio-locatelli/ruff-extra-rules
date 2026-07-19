@@ -190,6 +190,65 @@ def test_cache_write_errors_do_not_crash(cache_manager: CacheManager, sample_fil
         temp_cache_dir.chmod(0o755)
 
 
+def test_construction_does_not_crash_when_cache_dir_is_unavailable(tmp_path: Path, sample_file: Path) -> None:
+    # Regression: CacheManager.__init__ used to let mkdir()'s PermissionError
+    # (or any other OSError creating/tagging the cache dir) propagate
+    # uncaught, crashing the whole hook instead of degrading to uncached
+    # execution. A read-only parent directory means the cache dir itself can
+    # never be created.
+    readonly_parent = tmp_path / "readonly_parent"
+    readonly_parent.mkdir()
+    readonly_parent.chmod(0o555)
+
+    try:
+        cache = CacheManager(cache_dir=readonly_parent / "cache", hook_name="test-hook", cache_version="1")
+
+        assert cache.get_cached_result(sample_file, "test-hook") is None
+        cache.set_cached_result(sample_file, "test-hook", {"violations": []})
+        assert cache.get_cached_result(sample_file, "test-hook") is None
+    finally:
+        readonly_parent.chmod(0o755)
+
+
+def test_construction_detects_pre_existing_read_only_cache_dir(tmp_path: Path) -> None:
+    # Regression: a cache dir that already exists (from a prior run) with
+    # its CACHEDIR.TAG already written makes both mkdir(exist_ok=True) and
+    # the "if not tag_file.exists()" write-skip succeed without ever
+    # attempting a write, so a directory later chmodded read-only (or
+    # mounted read-only) looked exactly like an available one -- the
+    # os.access(W_OK) check exists specifically to catch this case, which
+    # neither a raised OSError nor a first write attempt would.
+    existing_cache_dir = tmp_path / "cache"
+    CacheManager(cache_dir=existing_cache_dir, hook_name="test-hook", cache_version="1")
+    existing_cache_dir.chmod(0o555)
+
+    try:
+        cache = CacheManager(cache_dir=existing_cache_dir, hook_name="test-hook", cache_version="1")
+        assert cache._cache_dir_unavailable is True
+    finally:
+        existing_cache_dir.chmod(0o755)
+
+
+def test_unavailable_cache_dir_short_circuits_without_touching_filesystem(
+    temp_cache_dir: Path, sample_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: once the cache directory is known unavailable, later calls
+    # must not repeat the doomed mkdir() attempt (and its warning) per file
+    # -- set_cached_result() used to hash the file's full content before
+    # even reaching the failing mkdir(), wasted work on every processed file
+    # for the rest of the run.
+    cache = CacheManager(cache_dir=temp_cache_dir, hook_name="test-hook", cache_version="1")
+    cache._cache_dir_unavailable = True
+
+    def boom(*_args: object, **_kwargs: object) -> Path:
+        raise AssertionError("_get_cache_path should not run once the cache dir is known unavailable")
+
+    monkeypatch.setattr(cache, "_get_cache_path", boom)
+
+    assert cache.get_cached_result(sample_file, "test-hook") is None
+    cache.set_cached_result(sample_file, "test-hook", {"violations": []})
+
+
 def test_write_cache_cleans_up_temp_file_on_write_error(
     cache_manager: CacheManager,
 ) -> None:
