@@ -18,8 +18,10 @@ from ._base import (
     Violation,
     atomic_write_text,
     byte_col_to_char_col,
+    fast_get_source_segment,
     find_ignored_lines,
     ignore_pattern_for,
+    split_lines_like_ast,
 )
 from ._scope import collect_scope_names, iter_within_scope
 
@@ -132,6 +134,10 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         self.forbidden_names = forbidden_names
         self.source = source  # Store full source (optimization: avoid reconstruction)
         self.source_lines = source.splitlines()
+        # For fast_get_source_segment only: split on the same line
+        # boundaries ast's own lineno/end_lineno use, unlike
+        # self.source_lines above (see split_lines_like_ast).
+        self._ast_lines = split_lines_like_ast(source)
         self.violations: list[ForbidVarsFixData] = []
         # Scope tracking for scope-aware name generation and replacement
         self.current_scope: list[ast.AST] = []
@@ -270,9 +276,11 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         """Visit regular assignment nodes: data = 1."""
         if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             target = node.targets[0]
-            # Use pre-stored source instead of rebuilding (performance optimization)
-            rhs_source = ast.get_source_segment(self.source, node.value)
-            # get_source_segment always resolves given a consistent
+            # Reuses self.source_lines (computed once) instead of
+            # ast.get_source_segment's own per-call re-split of the whole
+            # file — see fast_get_source_segment.
+            rhs_source = fast_get_source_segment(self.source, self._ast_lines, node.value)
+            # fast_get_source_segment always resolves given a consistent
             # tree/source pair, which check() guarantees.
             assert rhs_source
             match = self._find_best_match(rhs_source)
@@ -284,8 +292,8 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         """Visit annotated assignment nodes: data: int = 1."""
         if isinstance(node.target, ast.Name):
             if node.value:
-                # Use pre-stored source instead of rebuilding (performance optimization)
-                rhs_source = ast.get_source_segment(self.source, node.value)
+                # See visit_Assign above.
+                rhs_source = fast_get_source_segment(self.source, self._ast_lines, node.value)
                 match = self._find_best_match(rhs_source) if rhs_source else None
             else:
                 match = None

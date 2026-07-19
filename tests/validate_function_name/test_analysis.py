@@ -37,6 +37,21 @@ def _func(source: str, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
     )
 
 
+def test_attach_parents_handles_deeply_nested_source_without_recursion_error() -> None:
+    # A recursive implementation hits Python's default recursion limit
+    # (1000) around this depth, even though ast.parse itself accepts
+    # source nested far deeper than this as ordinary, valid Python.
+    source = "x = " + "not " * 1500 + "True\n"
+    tree = ast.parse(source)
+
+    attach_parents(tree)
+
+    deepest: ast.AST = tree
+    while (child := next(ast.iter_child_nodes(deepest), None)) is not None:
+        deepest = child
+    assert deepest.parent is not None  # type: ignore[attr-defined]
+
+
 @pytest.mark.parametrize(
     ("source", "func_name", "flags"),
     [

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import stat
 from contextlib import nullcontext
 from typing import TYPE_CHECKING
@@ -10,10 +11,12 @@ from pre_commit_hooks.ast_checks._base import (
     FixValidationError,
     atomic_write_text,
     byte_col_to_char_col,
+    fast_get_source_segment,
     is_fix_errored,
     is_fix_rejected,
     mark_fix_errored,
     mark_fix_rejected,
+    split_lines_like_ast,
 )
 from tests.factories import ViolationFactory
 
@@ -35,6 +38,68 @@ def test_byte_col_to_char_col(line: str, needle: bytes) -> None:
     byte_offset = line.encode("utf-8").index(needle)
     char_offset = line.index(needle.decode())
     assert byte_col_to_char_col(line, byte_offset) == char_offset
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "x = compute(1, 2)\n",
+        "café = compute(x)  # café\n",
+        "x = (\n    1 +\n    2\n)\n",
+        "x = [1, 2, 3][0]\n",
+        "x = 1",
+        # A raw form-feed byte is legal intra-line whitespace to Python's
+        # own tokenizer (end_lineno stays equal to lineno), but
+        # str.splitlines() treats it as a line boundary and would
+        # truncate the fast path's result if used directly — the reason
+        # fast_get_source_segment requires split_lines_like_ast's lines,
+        # not source.splitlines()'s.
+        'x = requests.get("\x0curl", timeout=1)\n',
+    ],
+    ids=[
+        "single-line",
+        "unicode-before-node",
+        "multiline-parenthesized",
+        "single-line-subscript",
+        "no-trailing-newline",
+        "form-feed-inside-single-line-node",
+    ],
+)
+def test_fast_get_source_segment_matches_ast_get_source_segment(source: str) -> None:
+    tree = ast.parse(source)
+    assign = next(node for node in ast.walk(tree) if isinstance(node, ast.Assign))
+
+    fast_result = fast_get_source_segment(source, split_lines_like_ast(source), assign.value)
+
+    assert fast_result == ast.get_source_segment(source, assign.value)
+
+
+def test_fast_get_source_segment_returns_none_without_end_position() -> None:
+    source = "x = 1\n"
+    tree = ast.parse(source)
+    assign = next(node for node in ast.walk(tree) if isinstance(node, ast.Assign))
+    assign.value.end_lineno = None
+
+    assert fast_get_source_segment(source, split_lines_like_ast(source), assign.value) is None
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "x = 1\ny = 2\n",
+        "x = 1\r\ny = 2\r\n",
+        "x = 1\ry = 2\r",
+        "x = 1",
+        'x = "a\x0cb"\ny = 2\n',
+        "",
+    ],
+    ids=["lf", "crlf", "cr", "no-trailing-newline", "form-feed-is-not-a-boundary", "empty"],
+)
+def test_split_lines_like_ast_matches_ast_own_line_numbering(source: str) -> None:
+    # ast._splitlines_no_ff is the private stdlib function
+    # split_lines_like_ast deliberately reimplements rather than depends
+    # on directly; this proves the two stay in agreement.
+    assert split_lines_like_ast(source) == ast._splitlines_no_ff(source)  # type: ignore[attr-defined]
 
 
 def _setup_plain(tmp_path: Path) -> Path:

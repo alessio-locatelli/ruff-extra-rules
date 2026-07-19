@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import fcntl
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
 
 import pytest
 
+from pre_commit_hooks import _cache as cache_module
 from pre_commit_hooks._cache import CacheManager
 
 if TYPE_CHECKING:
@@ -219,6 +221,51 @@ def test_different_files_different_cache_paths(cache_manager: CacheManager, tmp_
     path2 = cache_manager._get_cache_path(file2)
 
     assert path1 != path2
+
+
+def test_get_cached_result_degrades_to_cache_miss_when_lock_times_out(
+    cache_manager: CacheManager, sample_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # fcntl.flock's own LOCK_EX blocks indefinitely, with no timeout. A
+    # peer that's still holding the lock past _LOCK_TIMEOUT_SECONDS must
+    # make this raise (and degrade to a cache miss) rather than hang.
+    monkeypatch.setattr(cache_module, "_LOCK_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(cache_module, "_LOCK_POLL_INTERVAL_SECONDS", 0.01)
+
+    cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
+    lock_path = cache_manager._get_cache_path(sample_file).with_suffix(".lock")
+
+    # A distinct file descriptor opened on the same path holds its own,
+    # independent flock -- the same contention a second real process
+    # opening the same lock file would cause.
+    with lock_path.open("a", encoding="utf-8") as blocker_fp:
+        fcntl.flock(blocker_fp, fcntl.LOCK_EX)
+
+        start = time.monotonic()
+        cached = cache_manager.get_cached_result(sample_file, "test-hook")
+        elapsed = time.monotonic() - start
+
+    assert cached is None
+    assert elapsed < 2.0
+
+
+def test_set_cached_result_does_not_hang_when_lock_times_out(
+    cache_manager: CacheManager, sample_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cache_module, "_LOCK_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(cache_module, "_LOCK_POLL_INTERVAL_SECONDS", 0.01)
+
+    cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
+    lock_path = cache_manager._get_cache_path(sample_file).with_suffix(".lock")
+
+    with lock_path.open("a", encoding="utf-8") as blocker_fp:
+        fcntl.flock(blocker_fp, fcntl.LOCK_EX)
+
+        start = time.monotonic()
+        cache_manager.set_cached_result(sample_file, "test-hook", {"violations": ["new"]})
+        elapsed = time.monotonic() - start
+
+    assert elapsed < 2.0
 
 
 def test_concurrent_writers_do_not_lose_updates(cache_manager: CacheManager, sample_file: Path) -> None:

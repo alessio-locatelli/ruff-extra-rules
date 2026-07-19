@@ -23,6 +23,17 @@ __all__ = ["CacheManager"]
 
 logger = logging.getLogger("cache")
 
+# How long _locked() waits for another process's lock before giving up.
+# fcntl.flock(LOCK_EX) alone blocks indefinitely; under prek's parallel
+# execution (see _locked's own docstring) a slow or stuck peer holding this
+# lock must not be able to hang every other process waiting on the same
+# per-file cache blob forever. A crashed process releases its flock
+# automatically when its file descriptor closes (the OS does this even on
+# SIGKILL), so this is only ever reached by a peer that's still genuinely
+# running — a generous ceiling, not a tight one.
+_LOCK_TIMEOUT_SECONDS = 10.0
+_LOCK_POLL_INTERVAL_SECONDS = 0.02
+
 
 class CacheManager:
     """Content-hash-based file cache with mtime optimization.
@@ -72,10 +83,31 @@ class CacheManager:
         target the same per-file cache blob for different hook names at the
         same time. Without this lock, a read-modify-write race would let one
         process's write silently clobber another's (lost update).
+
+        Polls with a non-blocking lock attempt instead of a single blocking
+        `LOCK_EX`, so a peer that's still holding the lock past
+        `_LOCK_TIMEOUT_SECONDS` raises `TimeoutError` rather than hanging
+        this process indefinitely. `TimeoutError` is a subclass of
+        `OSError`, so both `get_cached_result` and `set_cached_result`'s
+        existing `except OSError` already treat it the same as any other
+        cache failure — degrade to an uncached result, don't crash.
+
+        Raises:
+            TimeoutError: if the lock can't be acquired within
+                `_LOCK_TIMEOUT_SECONDS`.
         """
         lock_file = cache_file.with_suffix(".lock")
         with lock_file.open("a", encoding="utf-8") as lock_fp:
-            fcntl.flock(lock_fp, fcntl.LOCK_EX)
+            deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+            while True:
+                try:
+                    fcntl.flock(lock_fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        msg = f"Timed out after {_LOCK_TIMEOUT_SECONDS}s waiting for lock on {lock_file}"
+                        raise TimeoutError(msg) from None
+                    time.sleep(_LOCK_POLL_INTERVAL_SECONDS)
             try:
                 yield
             finally:

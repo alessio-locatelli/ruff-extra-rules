@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import io
 import logging
 import os
@@ -15,7 +16,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     import argparse
-    import ast
 
 logger = logging.getLogger("ast_checks")
 
@@ -198,6 +198,68 @@ def byte_col_to_char_col(line: str, byte_col: int) -> int:
         The equivalent character offset into `line`
     """
     return len(line.encode("utf-8")[:byte_col].decode("utf-8"))
+
+
+# Matches ast's own private _splitlines_no_ff: split only on \r\n / \n / \r
+# (keeping the separator on each line), the same line boundaries the parser
+# itself uses for lineno/end_lineno. Deliberately not reusing that private
+# function directly (an implementation detail of the ast module, not a
+# public contract) — this is a small, stable regex to own instead.
+_AST_LINE_PATTERN = re.compile(r"(.*?(?:\r\n|\n|\r|$))")
+
+
+def split_lines_like_ast(source: str) -> list[str]:
+    """Split `source` into lines the same way `ast`'s own line numbers
+    (`lineno`/`end_lineno`) are computed: only on `\\r\\n`/`\\n`/`\\r`.
+
+    Deliberately not `source.splitlines()`: that also splits on form feed
+    and several other Unicode line-separator characters (`\\x0b`, `\\x1c`
+    -`\\x1e`, `\\x85`, `\\u2028`, `\\u2029`) that Python's own tokenizer
+    treats as ordinary intra-line whitespace/content, not a line boundary —
+    all legal, if unusual, inside otherwise ordinary Python source. Indexing
+    into `source.splitlines()` by an AST line number can silently return a
+    truncated line whenever the source contains one of those characters;
+    indexing into this function's result never diverges from the AST's own
+    line numbering.
+    """
+    return _AST_LINE_PATTERN.findall(source)
+
+
+def fast_get_source_segment(source: str, ast_lines: list[str], node: ast.expr) -> str | None:
+    """Equivalent to `ast.get_source_segment(source, node)` for a
+    single-line node, without that stdlib function's own per-call cost.
+
+    `ast.get_source_segment()` re-splits the *entire* `source` into lines
+    on every call (see its implementation), which is fine for a handful of
+    calls but turns a hot per-node loop — one call per assignment, across
+    every assignment in a file — into O(nodes x source size) instead of
+    O(source size) overall. `ast_lines` is computed once by the caller via
+    `split_lines_like_ast()` and reused across every call.
+
+    Falls back to the real `ast.get_source_segment` for a node spanning
+    multiple lines: reconstructing a multi-line segment correctly needs
+    each line's own newline still attached (which `split_lines_like_ast`'s
+    lines already have, but the fallback is simplest — rare enough among
+    the assignment/call RHS expressions this is used for that the fast
+    path not covering it doesn't matter).
+
+    Args:
+        source: Full source the node was parsed from
+        ast_lines: `split_lines_like_ast(source)` — not `source.splitlines()`,
+            whose broader definition of a line boundary can misalign with
+            AST line numbers (see `split_lines_like_ast`)
+        node: The expression node to extract source for
+
+    Returns:
+        The source segment, or None if `node` is missing end-position info
+        (mirrors `ast.get_source_segment`'s own contract)
+    """
+    if node.end_lineno is None or node.end_col_offset is None:
+        return None
+    if node.end_lineno != node.lineno:
+        return ast.get_source_segment(source, node)
+    line = ast_lines[node.lineno - 1]
+    return line.encode()[node.col_offset : node.end_col_offset].decode()
 
 
 def read_source_with_encoding(filepath: Path) -> tuple[str, str]:

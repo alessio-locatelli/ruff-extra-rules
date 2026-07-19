@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
+from pre_commit_hooks.ast_checks._base import fast_get_source_segment, split_lines_like_ast
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -384,6 +386,10 @@ class VariableTracker(ast.NodeVisitor):
         """
         self.source = source
         self.source_lines = source.splitlines()
+        # For _get_source_segment only: split on the same line boundaries
+        # ast's own lineno/end_lineno use, unlike self.source_lines above
+        # (see split_lines_like_ast).
+        self._ast_lines = split_lines_like_ast(source)
 
         # Scope tracking
         self.current_scope_id = 0
@@ -490,6 +496,12 @@ class VariableTracker(ast.NodeVisitor):
     def _get_source_segment(self, node: ast.expr) -> str:
         """Get source code for an AST node.
 
+        Reuses self._ast_lines (computed once in __init__) via
+        fast_get_source_segment instead of ast.get_source_segment's own
+        per-call re-split of the whole file — called once per assignment
+        across the whole file, so the difference is O(source size) total
+        instead of O(assignments x source size).
+
         Args:
             node: AST node
 
@@ -497,11 +509,12 @@ class VariableTracker(ast.NodeVisitor):
             Source code string, or empty string if unavailable
         """
         try:
-            return ast.get_source_segment(self.source, node) or ""
-        # Defensive: get_source_segment slices source by byte offset and
-        # decodes it, which could raise (ValueError/UnicodeDecodeError, or
-        # TypeError) if a node's position were ever inconsistent with this
-        # source — not expected for a node resolved against its own tree.
+            return fast_get_source_segment(self.source, self._ast_lines, node) or ""
+        # Defensive: fast_get_source_segment slices source by byte offset
+        # and decodes it, which could raise (ValueError/UnicodeDecodeError,
+        # or TypeError) if a node's position were ever inconsistent with
+        # this source — not expected for a node resolved against its own
+        # tree.
         except ValueError, TypeError:  # pragma: no cover
             return ""
 

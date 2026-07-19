@@ -353,10 +353,21 @@ def analyze_function(
 
 
 def attach_parents(node: ast.AST) -> None:
-    """Attach parent references to AST nodes for better analysis."""
-    for child in ast.iter_child_nodes(node):
-        child.parent = node  # type: ignore[attr-defined]
-        attach_parents(child)
+    """Attach parent references to AST nodes for better analysis.
+
+    Iterative (explicit stack), not recursive: this runs on every file
+    `collect_suggestions` processes, unconditionally and over the whole
+    tree, so its traversal depth is the file's full AST depth — a
+    recursive version hits Python's default recursion limit around 1000
+    levels of nesting (e.g. `not not not ... True`), well within what
+    `ast.parse` itself still accepts as valid, ordinary-looking Python.
+    """
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        for child in ast.iter_child_nodes(current):
+            child.parent = current  # type: ignore[attr-defined]
+            stack.append(child)
 
 
 def _get_base_name(node: ast.expr) -> str | None:
