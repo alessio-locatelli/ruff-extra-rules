@@ -76,7 +76,12 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["SLF001"]
+"tests/**" = [
+  # private-member-access
+  "SLF001",
+  # boolean-type-hint-positional-argument
+  "FBT001",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
