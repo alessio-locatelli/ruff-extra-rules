@@ -35,7 +35,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
-from pre_commit_hooks.ast_checks._base import BaseCheck, FixValidationError, Violation, mark_fix_rejected
+from pre_commit_hooks.ast_checks._base import (
+    BaseCheck,
+    FixValidationError,
+    Violation,
+    mark_fix_errored,
+    mark_fix_rejected,
+)
 
 from .analysis import Suggestion, collect_suggestions
 from .autofix import apply_fix, should_autofix
@@ -167,6 +173,13 @@ class ValidateFunctionNameCheck(BaseCheck):
                     # specific violation instead of the whole batch).
                     mark_fix_rejected(violation)
                 except Exception:
+                    # A bug in apply_fix() itself, distinct from
+                    # FixValidationError above: mark it so the orchestrator's
+                    # post-fix re-check reports this specific violation as
+                    # [FIX ERRORED] rather than an ordinary, retryable
+                    # [FIXABLE] — re-running --fix would just fail here
+                    # identically again.
                     logger_check.exception("Failed to apply fix for %s in %s", suggestion.func_name, filepath)
+                    mark_fix_errored(violation)
 
         return applied_any

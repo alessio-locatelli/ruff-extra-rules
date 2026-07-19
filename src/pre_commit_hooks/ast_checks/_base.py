@@ -364,3 +364,20 @@ def mark_fix_rejected(violation: Violation) -> None:
 def is_fix_rejected(violation: Violation) -> bool:
     """Whether `mark_fix_rejected()` has already been called on `violation`."""
     return bool(violation.fix_data and violation.fix_data.get("fix_rejected", False))
+
+
+def mark_fix_errored(violation: Violation) -> None:
+    """Record that `fix()` itself raised an exception other than
+    `FixValidationError` while attempting `violation` — a bug in the
+    check's own fix logic, distinct from `mark_fix_rejected()` (fix() ran
+    to completion but its *output* didn't parse). Mirrors
+    `mark_fixed()`/`is_fixed()`'s `fix_data["fixed"]` convention.
+    """
+    if violation.fix_data is None:
+        violation.fix_data = {}
+    violation.fix_data["fix_errored"] = True
+
+
+def is_fix_errored(violation: Violation) -> bool:
+    """Whether `mark_fix_errored()` has already been called on `violation`."""
+    return bool(violation.fix_data and violation.fix_data.get("fix_errored", False))

@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import pre_commit_hooks.ast_checks.validate_function_name as module
-from pre_commit_hooks.ast_checks._base import FixValidationError, is_fix_rejected
+from pre_commit_hooks.ast_checks._base import FixValidationError, is_fix_errored, is_fix_rejected
 from pre_commit_hooks.ast_checks.validate_function_name import ValidateFunctionNameCheck
 from tests.factories import ViolationFactory
 
@@ -124,7 +124,15 @@ def test_fix_returns_false_when_apply_fix_fails_without_raising(
     assert not (violations[0].fix_data and violations[0].fix_data.get("fixed"))
 
 
-def test_fix_logs_and_continues_when_apply_fix_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fix_marks_violation_errored_and_continues_when_apply_fix_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A rename that raises something other than FixValidationError is a bug
+    # in apply_fix() itself. Must be marked distinctly (mark_fix_errored)
+    # so main() reports [FIX ERRORED] with a "this is a bug" hint rather
+    # than the ordinary [FIXABLE]/"Run with --fix" — CheckOrchestrator's own
+    # equivalent handling in _apply_fixes never even sees this, since it
+    # never escapes this method's own try/except.
     filepath = tmp_path / "mod.py"
     source = "def get_data() -> bool:\n    return True\n"
     filepath.write_text(source)
@@ -140,6 +148,9 @@ def test_fix_logs_and_continues_when_apply_fix_raises(tmp_path: Path, monkeypatc
     monkeypatch.setattr(module, "apply_fix", boom)
 
     assert check.fix(filepath, violations, source, tree) is False
+    assert is_fix_errored(violations[0])
+    assert not is_fix_rejected(violations[0])
+    assert filepath.read_text() == source
 
 
 def test_fix_marks_violation_rejected_when_apply_fix_raises_fix_validation_error(

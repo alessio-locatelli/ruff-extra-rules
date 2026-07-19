@@ -31,3 +31,7 @@ _Avoid_: autofix is fine informally; "fix" is the protocol method name
 **Fix rejection**:
 The outcome when `atomic_write_text()` refuses a fix because the content it was asked to write doesn't parse as valid Python. Reported as `[FIX REJECTED]`, distinct from `[FIXED]`/`[FIXABLE]` — it signals a bug in the check's own fix logic, not something re-running `--fix` will resolve.
 _Avoid_: failed fix, broken fix — "rejected" is the term the CLI output and `is_fix_rejected()`/`mark_fix_rejected()` use
+
+**Fix error**:
+The outcome when a check's own `fix()` raises an exception other than `FixValidationError` — a bug in the check's fix logic itself, distinct from a fix rejection (which means `fix()` ran to completion but its _output_ didn't parse). Reported as `[FIX ERRORED]`, also not something re-running `--fix` will resolve (see `docs/adr/0012-behavioral-contract-audit-internal-errors-exit-codes.md`).
+_Avoid_: fix rejection, crash — "errored" is the term the CLI output and `is_fix_errored()`/`mark_fix_errored()` use; a fix rejection never reaches this path since it's a normal, expected outcome, not an unhandled exception

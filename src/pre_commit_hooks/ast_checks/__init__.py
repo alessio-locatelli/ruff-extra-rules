@@ -40,8 +40,10 @@ from ._base import (
     ASTCheck,
     FixValidationError,
     Violation,
+    is_fix_errored,
     is_fix_rejected,
     is_fixed,
+    mark_fix_errored,
     mark_fix_rejected,
     mark_fixed,
     read_source_with_encoding,
@@ -170,6 +172,16 @@ class CheckOrchestrator:
         # reset at the start of each call, so main() can report them instead
         # of letting them vanish silently from all_violations with no trace.
         self.unprocessable_files: list[str] = []
+        # (filepath, check_id) pairs where a check's own check() or fix()
+        # raised unexpectedly (in _check_file or _apply_fixes respectively)
+        # — reset at the start of each process_files() call, same as
+        # unprocessable_files. Without this, a check that crashes on every
+        # file it sees would make the whole run look clean (zero
+        # violations, exit code 0) whenever no other check reports
+        # anything for the same files; and a fix() that raises after
+        # already resolving every violation it was given would otherwise
+        # leave no trace at all once every one of them gets marked fixed.
+        self.rule_failures: list[tuple[str, str]] = []
 
     def process_files(self, filepaths: list[str]) -> dict[str, list[Violation]]:
         """Process files and return violations for each file.
@@ -181,9 +193,13 @@ class CheckOrchestrator:
             Dict mapping filepath to list of violations. A file that
             couldn't be read or parsed has no entry here (indistinguishable
             from "processed, zero violations") — check
-            `self.unprocessable_files` for those.
+            `self.unprocessable_files` for those. A file where one check
+            crashed while others ran fine can still have an entry here (the
+            other checks' violations), but its results are incomplete —
+            check `self.rule_failures` for those.
         """
         self.unprocessable_files = []
+        self.rule_failures = []
 
         if not filepaths:
             return {}
@@ -221,14 +237,20 @@ class CheckOrchestrator:
                 violations = cached_violations
             else:
                 # Cache miss - run checks
+                rule_failures_before = len(self.rule_failures)
                 violations = self._check_file(filepath)
+                had_rule_failure = len(self.rule_failures) > rule_failures_before
 
                 if violations is None:
                     # Unreadable, undecodable, or unparseable — _check_file
                     # already logged the specific cause.
                     self.unprocessable_files.append(filepath_str)
-                elif not self.fix_mode:
-                    # Cache results (only if not in fix mode)
+                elif not self.fix_mode and not had_rule_failure:
+                    # Cache results (only if not in fix mode). Never cache a
+                    # result collected while one of this file's checks
+                    # crashed — it's known incomplete, and caching it would
+                    # let a future cache-hit run silently keep treating the
+                    # crash as "clean" until the tree hash changes.
                     self._cache_violations(filepath, violations)
 
             if violations is not None and violations:
@@ -368,6 +390,7 @@ class CheckOrchestrator:
                 all_violations.extend(violations)
             except Exception:
                 logger.exception("Check %s failed on %s", check.check_id, filepath)
+                self.rule_failures.append((str(filepath), check.check_id))
 
         # Apply fixes if in fix mode
         if self.fix_mode and all_violations:
@@ -387,8 +410,8 @@ class CheckOrchestrator:
             violations: All violations found in file so far this run.
                 Mutated in place: each fixable check's own stale entries
                 (collected once, before any fix ran) are replaced with a
-                freshly recomputed list, each marked fixed/rejected/left
-                alone against the file's actual post-fix state. Matching a
+                freshly recomputed list, each marked fixed/rejected/errored/
+                left alone against the file's actual post-fix state. Matching a
                 stale entry back to "is this the same violation, now fixed"
                 by identity isn't reliable — an earlier check's own fix can
                 shift line/col numbers, and two distinct violations can
@@ -436,6 +459,43 @@ class CheckOrchestrator:
                     )
                     for v in fresh_violations:
                         mark_fix_rejected(v)
+                except Exception:
+                    # fix() itself raised — a bug in the check's own fix
+                    # logic, distinct from FixValidationError (which means
+                    # fix() ran to completion but atomic_write_text()
+                    # rejected its output). Caught here, specifically around
+                    # the fix() call, rather than only by this method's
+                    # outer except Exception below: that outer handler also
+                    # covers benign races (e.g. the file disappearing before
+                    # a re-read), which must not be reported as a fix bug.
+                    #
+                    # A check that writes more than once per fix() call
+                    # (looping over violations individually, like
+                    # validate_function_name) can have already committed some
+                    # of fresh_violations before this exception interrupted a
+                    # later one — re-check against the file's real state
+                    # rather than assuming every violation in this batch is
+                    # still broken, the same way the success path below
+                    # already must (a bool return isn't precise enough
+                    # either).
+                    logger.exception(
+                        "Fix for %s raised an unexpected exception on %s.",
+                        check.check_id,
+                        filepath,
+                    )
+                    # Always recorded, even if every fresh_violations entry
+                    # turns out resolved below (e.g. fix() committed its
+                    # edits, then raised afterwards during unrelated
+                    # cleanup): an exception genuinely happened here, and
+                    # that must never become invisible to the user just
+                    # because nothing is left to mark [FIX ERRORED].
+                    self.rule_failures.append((str(filepath), check.check_id))
+                    still_present = self._mark_resolved_and_get_still_present(filepath, check, fresh_violations)
+                    for v in fresh_violations:
+                        if (v.line, v.col, v.message) in still_present:
+                            mark_fix_errored(v)
+                        # else: already resolved (mark_fixed() already called
+                        # by the re-check above) before fix() raised.
                 else:
                     # A check's own bool return isn't precise enough to know
                     # which violations were actually resolved: a
@@ -443,28 +503,12 @@ class CheckOrchestrator:
                     # should_autofix) can skip some violations while fixing
                     # others in the same call. Re-check against the file's
                     # real post-fix state instead of trusting the return
-                    # value. fresh_violations and this re-check are computed
-                    # close enough together (only this one fix() call runs
-                    # in between) that matching by (line, col, message) is
-                    # reliable here, unlike matching against the outer,
-                    # possibly long-stale `violations` list.
-                    post_read_result = self._read_source(filepath)
-                    if post_read_result is not None:
-                        post_source, _post_encoding = post_read_result
-                        post_tree = ast.parse(post_source, filename=str(filepath))
-                        still_present = {
-                            (v.line, v.col, v.message)
-                            for v in check.check(filepath, post_tree, post_source)
-                            if v.fixable
-                        }
-                        for v in fresh_violations:
-                            if (v.line, v.col, v.message) not in still_present:
-                                mark_fixed(v)
-                            # else: still present — either rejected (already
-                            # marked via mark_fix_rejected() inside a
-                            # multi-write check's own per-violation loop) or
-                            # left alone by a per-violation guard; either
-                            # way, not fixed.
+                    # value.
+                    self._mark_resolved_and_get_still_present(filepath, check, fresh_violations)
+                    # else: still present — either rejected (already marked
+                    # via mark_fix_rejected() inside a multi-write check's
+                    # own per-violation loop) or left alone by a
+                    # per-violation guard; either way, not fixed.
 
                 # fresh_violations replaces this check_id's stale entries
                 # wholesale: its positions are accurate as of just before
@@ -474,6 +518,44 @@ class CheckOrchestrator:
                 violations.extend(fresh_violations)
             except Exception:
                 logger.exception("Fix failed for %s on %s", check.check_id, filepath)
+
+    def _mark_resolved_and_get_still_present(
+        self,
+        filepath: Path,
+        check: ASTCheck,
+        fresh_violations: list[Violation],
+    ) -> set[tuple[int, int, str]]:
+        """Re-check `filepath` against its actual current on-disk content
+        and call `mark_fixed()` on every violation in `fresh_violations`
+        that's no longer present there — regardless of whether `check.fix()`
+        returned normally or raised partway through. A check that writes
+        more than once per `fix()` call (looping over violations
+        individually, like `validate_function_name`) can have already
+        committed some violations before a later one failed or raised;
+        matching by (line, col, message) against the file's real state,
+        rather than trusting a bool return or "fix() didn't raise", is what
+        catches that.
+
+        Returns:
+            The (line, col, message) keys of `fresh_violations` still
+            present, so a caller with more context (e.g. "fix() itself
+            raised for this check") can mark those specifically, distinct
+            from the ones already resolved by this call. If the file
+            couldn't be re-read (e.g. deleted concurrently), conservatively
+            returns every key unresolved — nothing is marked fixed on an
+            unverifiable outcome.
+        """
+        post_read_result = self._read_source(filepath)
+        if post_read_result is None:
+            return {(v.line, v.col, v.message) for v in fresh_violations}
+
+        post_source, _post_encoding = post_read_result
+        post_tree = ast.parse(post_source, filename=str(filepath))
+        still_present = {(v.line, v.col, v.message) for v in check.check(filepath, post_tree, post_source) if v.fixable}
+        for v in fresh_violations:
+            if (v.line, v.col, v.message) not in still_present:
+                mark_fixed(v)
+        return still_present
 
 
 def load_checks(
@@ -536,7 +618,26 @@ def main(argv: list[str] | None = None) -> int:
         argv: Command-line arguments
 
     Returns:
-        Exit code (0 if no violations, 1 if violations found)
+        0: no violations, and every requested file was read, parsed, and
+            checked without error (this includes a `--fix` run that
+            resolved every violation — matching the pre-commit convention
+            that a hook only reports success when the working tree needs
+            no further review, not `ruff check --fix`'s own bare-CLI
+            default of exit 0 on a fully-fixed run).
+        1: any of — a violation is present in the report (fixed, fixable,
+            rejected, errored, or non-fixable; see the tags in each printed
+            line); a file couldn't be read, decoded, or parsed
+            (`--list-checks` and `--exclude`d files, so also `orchestrator.
+            unprocessable_files`); a check raised while analyzing a file
+            (`orchestrator.rule_failures`); or invalid CLI input (unknown
+            `--select`/`--ignore` check id, or every check disabled).
+            `--list-checks` and no-files-to-check return 0 unconditionally,
+            before any of the above can apply.
+
+        `argparse` itself calls `sys.exit(2)` directly (bypassing this
+        function's own return) for malformed CLI arguments themselves (e.g.
+        an unknown flag) — a third, separate value from this function's
+        0/1 contract above.
     """
     parser = argparse.ArgumentParser(
         prog="ruff-extra-rules",
@@ -642,14 +743,28 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{filepath}: error: could not be read or parsed; file skipped", file=sys.stderr)
         exit_code = 1
 
+    # A check that crashes on every file it sees must not look like a clean
+    # run merely because no other check reported anything for the same
+    # files — report the specific check and file, and fail the run.
+    for filepath, check_id in sorted(orchestrator.rule_failures):
+        print(
+            f"{filepath}: error: check '{check_id}' raised an unexpected exception; "
+            "its results for this file may be incomplete",
+            file=sys.stderr,
+        )
+        exit_code = 1
+
     for filepath, violations in sorted(all_violations.items()):
         for v in violations:
             fixed = is_fixed(v)
             rejected = is_fix_rejected(v)
+            errored = is_fix_errored(v)
             if fixed:
                 tag = "[FIXED] "
             elif rejected:
                 tag = "[FIX REJECTED] "
+            elif errored:
+                tag = "[FIX ERRORED] "
             elif v.fixable:
                 tag = "[FIXABLE] "
             else:
@@ -657,6 +772,11 @@ def main(argv: list[str] | None = None) -> int:
             if rejected:
                 hint = (
                     " --fix produced invalid syntax, so the change was discarded — this is a bug, "
+                    "please report it: https://github.com/alessio-locatelli/ruff-extra-rules/issues"
+                )
+            elif errored:
+                hint = (
+                    " --fix raised an unexpected internal error and was not applied — this is a bug, "
                     "please report it: https://github.com/alessio-locatelli/ruff-extra-rules/issues"
                 )
             elif v.fixable and not fixed:

@@ -13,7 +13,7 @@ from pre_commit_hooks.ast_checks import (
     load_checks,
     main,
 )
-from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, is_fix_rejected
+from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, is_fix_errored, is_fix_rejected
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
@@ -321,6 +321,57 @@ def test_process_files_check_exception_is_logged_and_skipped(tmp_path: Path, mon
     assert error_codes == {"TRI002"}
 
 
+def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Regression: a check whose check() raises used to leave no trace at all
+    # outside a debug log line — indistinguishable from that check having
+    # run cleanly and found nothing. If it's the only check enabled, this
+    # used to make the whole file (and the whole run) look completely clean.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    forbid_vars = ForbidVarsCheck()
+
+    def boom(*_args: object, **_kwargs: object) -> list[Violation]:
+        raise ValueError("simulated check failure")
+
+    monkeypatch.setattr(forbid_vars, "check", boom)
+
+    orchestrator = CheckOrchestrator(checks=[forbid_vars])
+    violations = orchestrator.process_files([str(filepath)])
+
+    assert violations == {}
+    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]
+
+
+def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A result collected while a check crashed must never be cached: caching
+    # it would let a later run's cache hit keep serving the crash's "empty"
+    # result forever (until the tree hash changes), rather than actually
+    # retrying the check.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    forbid_vars = ForbidVarsCheck()
+    original_check = forbid_vars.check
+    calls = {"n": 0}
+
+    def flaky_check(fp: Path, tree: ast.Module, source: str) -> list[Violation]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ValueError("simulated check failure")
+        return original_check(fp, tree, source)
+
+    monkeypatch.setattr(forbid_vars, "check", flaky_check)
+
+    orchestrator = CheckOrchestrator(checks=[forbid_vars])
+    first = orchestrator.process_files([str(filepath)])
+    assert first == {}
+    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]
+
+    second = orchestrator.process_files([str(filepath)])
+    assert second[str(filepath)][0].error_code == "TRI001"
+
+
 def test_apply_fixes_skips_check_with_no_fixable_violations(tmp_path: Path) -> None:
     # redundant-super-init never marks violations fixable; when mixed with
     # a fixable forbid-vars violation in the same file, its check must be
@@ -457,6 +508,114 @@ def test_apply_fixes_marks_violation_rejected_when_fix_produces_invalid_syntax(
     assert "data = requests.get(url)" in filepath.read_text()
 
 
+def test_apply_fixes_marks_violation_errored_when_fix_raises_unexpectedly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A bug in a check's own fix() (raising something other than
+    # FixValidationError) must be marked distinctly from a rejected fix:
+    # fix() never even produced output to validate here, so this isn't
+    # "atomic_write_text() refused a bad write" but "the check's fix logic
+    # itself blew up." An unrelated check's fix in the same file must still
+    # apply normally.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("\n\n\ndata = requests.get(url)\n")
+
+    forbid_vars = ForbidVarsCheck()
+
+    def broken_fix(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("simulated fix bug")
+
+    monkeypatch.setattr(forbid_vars, "fix", broken_fix)
+
+    checks: list[ASTCheck] = [forbid_vars, ExcessiveBlankLinesCheck()]
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    by_check = {v.check_id: v for v in violations[str(filepath)]}
+    forbid_vars_violation = by_check["forbid-vars"]
+    blank_lines_violation = by_check["excessive-blank-lines"]
+
+    assert is_fix_errored(forbid_vars_violation)
+    assert not is_fix_rejected(forbid_vars_violation)
+    assert not (forbid_vars_violation.fix_data and forbid_vars_violation.fix_data.get("fixed"))
+    assert not is_fix_errored(blank_lines_violation)
+    assert blank_lines_violation.fix_data == {"fixed": True}
+    assert "data = requests.get(url)" in filepath.read_text()
+
+
+def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: a check that writes more than once per fix() call
+    # (looping over violations individually, like validate_function_name)
+    # can commit some violations before a later write raises. Marking every
+    # violation in the batch [FIX ERRORED] regardless would misreport an
+    # already-applied fix as "not applied", leaving the user unable to tell
+    # which change actually landed on disk. Only the violation(s) still
+    # present after the crash must be marked errored.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = requests.get(url)\nresult = things.fetchall()\n")
+
+    forbid_vars = ForbidVarsCheck()
+
+    def partial_then_raise(fp: Path, *_args: object, **_kwargs: object) -> None:
+        # Simulates a multi-write check that already committed the fix for
+        # "data" before crashing while attempting "result".
+        atomic_write_text(fp, "response = requests.get(url)\nresult = things.fetchall()\n", "utf-8")
+        raise RuntimeError("simulated fix bug partway through")
+
+    monkeypatch.setattr(forbid_vars, "fix", partial_then_raise)
+
+    orchestrator = CheckOrchestrator(checks=[forbid_vars], fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    by_line = {v.line: v for v in violations[str(filepath)]}
+    data_violation = by_line[1]
+    result_violation = by_line[2]
+
+    assert data_violation.fix_data is not None
+    assert data_violation.fix_data.get("fixed") is True
+    assert not is_fix_errored(data_violation)
+
+    assert is_fix_errored(result_violation)
+    assert not (result_violation.fix_data and result_violation.fix_data.get("fixed"))
+
+    fixed_content = filepath.read_text()
+    assert "response = requests.get(url)" in fixed_content
+    assert "result = things.fetchall()" in fixed_content
+
+
+def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: if fix() commits every requested edit successfully and
+    # then raises afterwards (e.g. during unrelated cleanup), every
+    # violation ends up correctly marked [FIXED] and none are left to mark
+    # [FIX ERRORED] — but the exception itself must still be recorded
+    # somewhere, or a genuine internal failure would be completely
+    # invisible behind what looks like a fully successful fix.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = requests.get(url)\n")
+
+    forbid_vars = ForbidVarsCheck()
+
+    def fix_then_raise(fp: Path, *_args: object, **_kwargs: object) -> None:
+        atomic_write_text(fp, "response = requests.get(url)\n", "utf-8")
+        raise RuntimeError("simulated cleanup bug after a successful fix")
+
+    monkeypatch.setattr(forbid_vars, "fix", fix_then_raise)
+
+    orchestrator = CheckOrchestrator(checks=[forbid_vars], fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    violation = violations[str(filepath)][0]
+    assert violation.fix_data is not None
+    assert violation.fix_data.get("fixed") is True
+    assert not is_fix_errored(violation)
+    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]
+    assert filepath.read_text() == "response = requests.get(url)\n"
+
+
 def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -502,6 +661,56 @@ def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
     fixed_content = filepath.read_text()
     assert "def get_config" not in fixed_content
     assert 'def get_active(user: dict) -> bool:\n    return user.get("status") == "active"\n' in fixed_content
+
+
+def test_apply_fixes_marks_errored_violation_of_a_multi_write_check_when_apply_fix_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: validate-function-name's own fix() already catches any
+    # exception apply_fix() raises other than FixValidationError internally
+    # (logging it and moving on to the next violation), so it never
+    # propagates to CheckOrchestrator._apply_fixes' own [FIX ERRORED]
+    # handling at all — that handling is only reachable for single-write
+    # checks. The check itself must mark the specific violation it failed
+    # to fix, the same way it already does for a rejected fix.
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def get_config():\n"
+        '    with open("config.json") as f:\n'
+        "        return f.read()\n"
+        "\n\n"
+        "def get_active(user: dict) -> bool:\n"
+        '    return user.get("status") == "active"\n'
+    )
+
+    original_apply_fix = vfn_module.apply_fix
+
+    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
+        if suggestion.func_name == "get_active":
+            raise RuntimeError("simulated apply_fix bug")
+        return original_apply_fix(fp, suggestion)
+
+    monkeypatch.setattr(vfn_module, "apply_fix", flaky_apply_fix)
+
+    checks = load_checks(select={"validate-function-name"})
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    by_func_name = {v.fix_data["suggestion"].func_name: v for v in violations[str(filepath)] if v.fix_data}
+    get_config_violation = by_func_name["get_config"]
+    get_active_violation = by_func_name["get_active"]
+    get_config_fix_data = get_config_violation.fix_data
+    assert get_config_fix_data is not None
+
+    assert get_config_fix_data.get("fixed") is True
+    assert not is_fix_errored(get_config_violation)
+    assert is_fix_errored(get_active_violation)
+    assert not is_fix_rejected(get_active_violation)
+    assert not (get_active_violation.fix_data and get_active_violation.fix_data.get("fixed"))
+
+    fixed_content = filepath.read_text()
+    assert "def get_config" not in fixed_content
+    assert "def get_active(user: dict) -> bool:" in fixed_content
 
 
 def _disappear_before_refetch(
@@ -558,6 +767,26 @@ def _recompute_finds_no_fixable_violations(
     monkeypatch.setattr(forbid_vars, "check", flaky_check)
 
 
+def _recompute_raises(
+    _orchestrator: CheckOrchestrator, forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A crash in _apply_fixes' own pre-fix recompute call is distinct from
+    # fix() itself raising (which is caught separately and marked [FIX
+    # ERRORED], see test_apply_fixes_marks_violation_errored_when_fix_raises_unexpectedly)
+    # — fix() is never even reached here. The original, already-reported
+    # violation must stay exactly as it was rather than silently vanishing.
+    original_check = forbid_vars.check
+    calls = {"n": 0}
+
+    def flaky_check(fp: Path, tree: ast.Module, source: str) -> list[Violation]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return original_check(fp, tree, source)
+        raise ValueError("simulated recompute failure")
+
+    monkeypatch.setattr(forbid_vars, "check", flaky_check)
+
+
 def _fix_returns_false(
     _orchestrator: CheckOrchestrator, forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -579,6 +808,7 @@ def _fix_raises(
         _disappear_before_refetch,
         _disappear_after_fix,
         _recompute_finds_no_fixable_violations,
+        _recompute_raises,
         _fix_returns_false,
         _fix_raises,
     ],
@@ -586,6 +816,7 @@ def _fix_raises(
         "file-disappears-before-refetch",
         "file-disappears-after-fix",
         "recompute-finds-no-fixable-violations",
+        "recompute-raises",
         "fix-returns-false",
         "fix-raises",
     ],
@@ -706,6 +937,26 @@ def test_main_unparseable_file_returns_one(tmp_path: Path, capsys: pytest.Captur
     assert f"{filepath}: error: could not be read or parsed; file skipped" in capsys.readouterr().err
 
 
+def test_main_check_crash_returns_one_and_reports_check_and_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Regression: a check that crashes on every file it sees used to make
+    # the whole run look clean (exit code 0, nothing printed) whenever no
+    # other check reported a violation for the same files.
+    def boom(*_args: object, **_kwargs: object) -> list[Violation]:
+        raise ValueError("simulated check failure")
+
+    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    exit_code = main([str(filepath), "--select", "forbid-vars"])
+    assert exit_code == 1
+
+    assert f"{filepath}: error: check 'forbid-vars' raised an unexpected exception" in capsys.readouterr().err
+
+
 def test_main_reports_non_fixable_violation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text(
@@ -776,6 +1027,61 @@ def test_main_fix_flag_reports_rejected_fix(
     assert "[FIXED]" not in err
     assert "Run with --fix" not in err
     assert filepath.read_text() == "data = requests.get(url)\n"
+
+
+def test_main_fix_flag_reports_errored_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # A fix() that raises something other than FixValidationError must be
+    # reported distinctly from [FIXED], [FIX REJECTED], and the ordinary
+    # [FIXABLE]/"Run with --fix" hint — re-running --fix would just crash
+    # identically again, so suggesting it would be misleading.
+    def broken_fix(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("simulated fix bug")
+
+    monkeypatch.setattr(ForbidVarsCheck, "fix", broken_fix)
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = requests.get(url)\n")
+
+    exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "[FIX ERRORED]" in err
+    assert "please report it" in err
+    assert "https://github.com/alessio-locatelli/ruff-extra-rules/issues" in err
+    assert "[FIXED]" not in err
+    assert "[FIX REJECTED]" not in err
+    assert "Run with --fix" not in err
+    assert filepath.read_text() == "data = requests.get(url)\n"
+
+
+def test_main_reports_rule_failure_when_fix_raises_after_resolving_everything(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Regression: fix() can commit every requested edit and then raise
+    # afterwards (e.g. during unrelated cleanup) — every violation ends up
+    # correctly reported [FIXED], but the exception itself must still
+    # surface in the run's own output, or a genuine internal failure would
+    # be completely invisible behind what reads as full success.
+    def fix_then_raise(_self: object, filepath: Path, *_args: object, **_kwargs: object) -> None:
+        atomic_write_text(filepath, "response = requests.get(url)\n", "utf-8")
+        raise RuntimeError("simulated cleanup bug after a successful fix")
+
+    monkeypatch.setattr(ForbidVarsCheck, "fix", fix_then_raise)
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = requests.get(url)\n")
+
+    exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "[FIXED]" in err
+    assert "[FIX ERRORED]" not in err
+    assert f"{filepath}: error: check 'forbid-vars' raised an unexpected exception" in err
+    assert filepath.read_text() == "response = requests.get(url)\n"
 
 
 def test_main_exclude_pattern_excludes_all_files_returns_zero(
@@ -885,3 +1191,16 @@ def test_main_select_and_ignore_compose(tmp_path: Path, capsys: pytest.CaptureFi
     assert exit_code == 0
 
     assert "TRI001" not in capsys.readouterr().err
+
+
+def test_main_malformed_cli_argument_exits_via_argparse(capsys: pytest.CaptureFixture[str]) -> None:
+    # argparse's own error handling for a malformed argument (e.g. an
+    # unknown flag) bypasses main()'s own return value entirely via
+    # sys.exit(2) — a third, separate value from this project's own 0/1
+    # exit-code contract, worth locking down explicitly rather than leaving
+    # it as undocumented, incidental argparse behavior.
+    with pytest.raises(SystemExit) as exc_info:
+        main(["--not-a-real-flag"])
+
+    assert exc_info.value.code == 2
+    assert "unrecognized arguments" in capsys.readouterr().err
