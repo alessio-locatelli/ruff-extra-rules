@@ -136,6 +136,13 @@ class ASTCheck(Protocol):
         `FixValidationError` around each individual write and call
         `mark_fix_rejected()` on that specific violation, so a later write
         in the same call still gets attempted.
+
+        `OSError` from `atomic_write_text()` (missing parent directory,
+        permission denied, disk full) is different: every implementation
+        must catch it itself and return `False`, matching this method's own
+        "`True`/`False`, never raises" contract — `CheckOrchestrator`'s own
+        outer `except Exception` only protects the full pipeline, not a
+        caller that calls a check's `fix()` directly.
         """
         ...
 

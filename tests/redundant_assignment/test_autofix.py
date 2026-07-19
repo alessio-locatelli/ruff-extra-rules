@@ -93,6 +93,25 @@ def test_fix_chained_assignment_where_use_line_is_another_assign_line(
     assert "return x" in fixed_content
 
 
+def test_fix_write_failure_returns_false(tmp_path: Path) -> None:
+    # Regression: apply_fixes() used to let atomic_write_text()'s OSError
+    # propagate uncaught instead of returning False like every other check's
+    # fix().
+    source = """def func_scope():
+    x = "foo"
+    func(x=x)
+"""
+    # Point at a path inside a directory that doesn't exist so the
+    # temp-file-then-rename write raises OSError.
+    filepath = tmp_path / "missing_dir" / "source.py"
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert check.fix(filepath, violations, source, tree) is False
+
+
 def test_autofix_skips_violation_without_fix_data(tmp_path: Path) -> None:
     source = "x = 1\nprint(x)\n"
     filepath = tmp_path / "source.py"

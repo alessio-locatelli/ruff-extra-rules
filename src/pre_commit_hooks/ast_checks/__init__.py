@@ -165,6 +165,11 @@ class CheckOrchestrator:
         self.checks = checks
         self.fix_mode = fix_mode
         self.cache = CacheManager(hook_name="ruff-extra-rules", cache_version=self._generate_cache_key())
+        # Populated by process_files() with every candidate file _check_file()
+        # returned None for (couldn't be read/decoded or failed to parse) —
+        # reset at the start of each call, so main() can report them instead
+        # of letting them vanish silently from all_violations with no trace.
+        self.unprocessable_files: list[str] = []
 
     def process_files(self, filepaths: list[str]) -> dict[str, list[Violation]]:
         """Process files and return violations for each file.
@@ -173,8 +178,13 @@ class CheckOrchestrator:
             filepaths: List of file paths to check
 
         Returns:
-            Dict mapping filepath to list of violations
+            Dict mapping filepath to list of violations. A file that
+            couldn't be read or parsed has no entry here (indistinguishable
+            from "processed, zero violations") — check
+            `self.unprocessable_files` for those.
         """
+        self.unprocessable_files = []
+
         if not filepaths:
             return {}
 
@@ -213,8 +223,12 @@ class CheckOrchestrator:
                 # Cache miss - run checks
                 violations = self._check_file(filepath)
 
-                # Cache results (only if not in fix mode)
-                if not self.fix_mode and violations is not None:
+                if violations is None:
+                    # Unreadable, undecodable, or unparseable — _check_file
+                    # already logged the specific cause.
+                    self.unprocessable_files.append(filepath_str)
+                elif not self.fix_mode:
+                    # Cache results (only if not in fix mode)
                     self._cache_violations(filepath, violations)
 
             if violations is not None and violations:
@@ -620,6 +634,14 @@ def main(argv: list[str] | None = None) -> int:
 
     # Report results
     exit_code = 0
+
+    # A file that couldn't be read or parsed must never look identical to a
+    # clean file: report it and fail the run, rather than letting it vanish
+    # from all_violations with only a debug log line as evidence.
+    for filepath in sorted(orchestrator.unprocessable_files):
+        print(f"{filepath}: error: could not be read or parsed; file skipped", file=sys.stderr)
+        exit_code = 1
+
     for filepath, violations in sorted(all_violations.items()):
         for v in violations:
             fixed = is_fixed(v)

@@ -224,6 +224,10 @@ class MisplacedCommentCheck(BaseCheck):
             fixed_any = True
 
         if fixed_any:
-            atomic_write_text(filepath, "".join(lines), encoding)
+            try:
+                atomic_write_text(filepath, "".join(lines), encoding)
+            except OSError:
+                logger.exception("Failed to write %s", filepath)
+                return False
 
         return fixed_any

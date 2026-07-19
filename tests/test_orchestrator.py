@@ -189,6 +189,38 @@ def test_process_files_unreadable_file_is_skipped(tmp_path: Path, write_file: Ca
     assert violations == {}
 
 
+def test_process_files_records_unprocessable_file(tmp_path: Path) -> None:
+    # Regression: a file _check_file() can't parse used to vanish from the
+    # result with no trace at all — indistinguishable from a clean file with
+    # zero violations. ExcessiveBlankLinesCheck has no prefilter pattern (see
+    # its get_prefilter_pattern()), so the file reaches _check_file()
+    # regardless of its content.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("def foo(:\n")
+
+    orchestrator = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()])
+    violations = orchestrator.process_files([str(filepath)])
+
+    assert violations == {}
+    assert orchestrator.unprocessable_files == [str(filepath)]
+
+
+def test_process_files_resets_unprocessable_files_between_calls(tmp_path: Path) -> None:
+    # A file that failed to parse on the first call must not keep showing up
+    # as unprocessable on a later call where it isn't even part of the input.
+    bad_filepath = tmp_path / "bad.py"
+    bad_filepath.write_text("def foo(:\n")
+    good_filepath = tmp_path / "good.py"
+    good_filepath.write_text("x = 1\n")
+
+    orchestrator = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()])
+    orchestrator.process_files([str(bad_filepath)])
+    assert orchestrator.unprocessable_files == [str(bad_filepath)]
+
+    orchestrator.process_files([str(good_filepath)])
+    assert orchestrator.unprocessable_files == []
+
+
 def test_process_files_second_call_uses_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
@@ -659,6 +691,19 @@ def test_main_no_violations_returns_zero(tmp_path: Path) -> None:
     filepath.write_text("x = 1\n")
 
     assert main([str(filepath)]) == 0
+
+
+def test_main_unparseable_file_returns_one(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Regression: an unparseable file used to be silently dropped with exit
+    # code 0 — indistinguishable from a clean run with nothing to report.
+    # Content includes "data" so the file clears every check's prefilter
+    # pattern and actually reaches parsing rather than being dropped as a
+    # non-candidate beforehand.
+    filepath = tmp_path / "broken.py"
+    filepath.write_text("data = foo(:\n")
+
+    assert main([str(filepath)]) == 1
+    assert f"{filepath}: error: could not be read or parsed; file skipped" in capsys.readouterr().err
 
 
 def test_main_reports_non_fixable_violation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
