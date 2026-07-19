@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import TYPE_CHECKING, TypedDict, cast
 
@@ -11,6 +12,8 @@ from .semantic import exceeds_line_length_when_inlined
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+logger = logging.getLogger("redundant_assignment")
 
 
 class RedundantAssignmentFixData(TypedDict):
@@ -147,7 +150,11 @@ def apply_fixes(
 
         # Write the fixed source back to file
         new_source = "".join(source_lines)
-        atomic_write_text(filepath, new_source, encoding)
+        try:
+            atomic_write_text(filepath, new_source, encoding)
+        except OSError:
+            logger.exception("Failed to write %s", filepath)
+            return False
         return True
 
     return False

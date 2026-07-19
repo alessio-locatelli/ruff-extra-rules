@@ -104,6 +104,22 @@ def test_fix_is_noop_when_nothing_to_fix(source: str, tmp_path: Path) -> None:
     assert test_file.read_text() == source
 
 
+def test_fix_write_failure_returns_false(tmp_path: Path) -> None:
+    # Regression: fix() used to let atomic_write_text()'s OSError propagate
+    # uncaught instead of returning False like every other check's fix().
+    source = "result = func(\n    arg\n)  # Comment here\n"
+
+    # Point at a path inside a directory that doesn't exist so the
+    # temp-file-then-rename write raises OSError.
+    filepath = tmp_path / "missing_dir" / "test.py"
+
+    tree = ast.parse(source)
+    check = MisplacedCommentCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert check.fix(filepath, violations, source, tree) is False
+
+
 @pytest.mark.parametrize(
     "fixture_name",
     ["bracket_comments", "trailing_on_paren", "trailing_on_bracket", "trailing_on_brace"],
