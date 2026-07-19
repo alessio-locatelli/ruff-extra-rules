@@ -11,6 +11,7 @@ import pytest
 from pre_commit_hooks._cache import CacheManager
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -32,42 +33,30 @@ def sample_file(tmp_path: Path) -> Path:
 
 
 @pytest.mark.usefixtures("cache_manager")
-def test_cache_dir_created(temp_cache_dir: Path) -> None:
-    assert temp_cache_dir.exists()
-    assert (temp_cache_dir / "CACHEDIR.TAG").exists()
-
-
-@pytest.mark.usefixtures("cache_manager")
-def test_cachedir_tag_has_correct_signature(temp_cache_dir: Path) -> None:
-    tag_content = (temp_cache_dir / "CACHEDIR.TAG").read_text()
-    assert "Signature: 8a477f597d28d172789f06886806bc55" in tag_content
+def test_cache_dir_created_with_cachedir_tag(temp_cache_dir: Path) -> None:
+    tag = temp_cache_dir / "CACHEDIR.TAG"
+    assert tag.exists()
+    assert "Signature: 8a477f597d28d172789f06886806bc55" in tag.read_text()
 
 
 def test_cache_miss_on_first_access(cache_manager: CacheManager, sample_file: Path) -> None:
     assert cache_manager.get_cached_result(sample_file, "test-hook") is None
 
 
-def test_cache_hit_after_set(cache_manager: CacheManager, sample_file: Path) -> None:
+@pytest.mark.parametrize(
+    "call_args",
+    [("test-hook",), ()],
+    ids=["explicit-hook-name", "defaults-to-constructor-hook-name"],
+)
+def test_cache_hit_after_set(cache_manager: CacheManager, sample_file: Path, call_args: tuple[str, ...]) -> None:
     test_result = {"violations": [], "checked_at": int(time.time())}
-
     cache_manager.set_cached_result(sample_file, "test-hook", test_result)
 
-    cached = cache_manager.get_cached_result(sample_file, "test-hook")
+    cached = cache_manager.get_cached_result(sample_file, *call_args)
+
     assert cached is not None
     assert cached["violations"] == []
     assert "checked_at" in cached
-
-
-def test_get_cached_result_defaults_to_constructor_hook_name(cache_manager: CacheManager, sample_file: Path) -> None:
-    """hook_name is optional on get_cached_result: it falls back to the
-    hook_name the CacheManager was constructed with (`cache_manager` fixture
-    uses "test-hook")."""
-    test_result: dict[str, list[str]] = {"violations": []}
-    cache_manager.set_cached_result(sample_file, "test-hook", test_result)
-
-    cached = cache_manager.get_cached_result(sample_file)
-    assert cached is not None
-    assert cached["violations"] == []
 
 
 def test_cache_invalidated_on_content_change(cache_manager: CacheManager, sample_file: Path) -> None:
@@ -80,15 +69,6 @@ def test_cache_invalidated_on_content_change(cache_manager: CacheManager, sample
 
     cached = cache_manager.get_cached_result(sample_file, "test-hook")
     assert cached is None
-
-
-def test_mtime_fast_path_skips_rehash_on_unmodified_file(cache_manager: CacheManager, sample_file: Path) -> None:
-    test_result: dict[str, list[str]] = {"violations": []}
-
-    cache_manager.set_cached_result(sample_file, "test-hook", test_result)
-
-    cached = cache_manager.get_cached_result(sample_file, "test-hook")
-    assert cached is not None
 
 
 def test_mtime_changed_but_content_same(cache_manager: CacheManager, sample_file: Path) -> None:
@@ -131,15 +111,13 @@ def test_cache_version_mismatch(temp_cache_dir: Path, sample_file: Path) -> None
 
 
 def test_cache_version_mismatch_recovers_on_rewrite(temp_cache_dir: Path, sample_file: Path) -> None:
-    """A version bump must not pin a file to permanent cache misses.
-
-    set_cached_result() used to load the on-disk blob (still tagged with
-    the old version) and only patch individual keys, leaving the stale
-    version tag in place forever — so every later run would keep missing
-    and rewriting under the same never-updated old tag. Writing a fresh
-    result under the new version must actually persist that version, so
-    the immediately following read is a hit.
-    """
+    # A version bump must not pin a file to permanent cache misses.
+    # set_cached_result() used to load the on-disk blob (still tagged with
+    # the old version) and only patch individual keys, leaving the stale
+    # version tag in place forever — so every later run would keep missing
+    # and rewriting under the same never-updated old tag. Writing a fresh
+    # result under the new version must actually persist that version, so
+    # the immediately following read is a hit.
     cache_v1 = CacheManager(cache_dir=temp_cache_dir, cache_version="1.0.0")
     cache_v1.set_cached_result(sample_file, "test-hook", {"violations": ["old"]})
 
@@ -165,32 +143,24 @@ def test_compute_file_hash(sample_file: Path) -> None:
     assert hash1 != hash3
 
 
-def test_compute_tree_hash_stable_for_unchanged_tree(tmp_path: Path) -> None:
-    (tmp_path / "a.py").write_text("x = 1\n")
-    (tmp_path / "b.py").write_text("y = 2\n")
-
-    assert CacheManager.compute_tree_hash(tmp_path) == CacheManager.compute_tree_hash(tmp_path)
-
-
-def test_compute_tree_hash_changes_when_any_file_changes(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("mutate", "changes"),
+    [
+        (lambda _: None, False),
+        (lambda p: (p / "b.py").write_text("y = 3\n"), True),
+        (lambda p: (p / "notes.txt").write_text("unrelated content"), False),
+    ],
+    ids=["unchanged-tree-is-stable", "python-file-change-changes-hash", "non-python-file-ignored"],
+)
+def test_compute_tree_hash(tmp_path: Path, mutate: Callable[[Path], object], *, changes: bool) -> None:
     (tmp_path / "a.py").write_text("x = 1\n")
     (tmp_path / "b.py").write_text("y = 2\n")
     hash1 = CacheManager.compute_tree_hash(tmp_path)
 
-    (tmp_path / "b.py").write_text("y = 3\n")
+    mutate(tmp_path)
     hash2 = CacheManager.compute_tree_hash(tmp_path)
 
-    assert hash1 != hash2
-
-
-def test_compute_tree_hash_ignores_non_python_files(tmp_path: Path) -> None:
-    (tmp_path / "a.py").write_text("x = 1\n")
-    hash1 = CacheManager.compute_tree_hash(tmp_path)
-
-    (tmp_path / "notes.txt").write_text("unrelated content")
-    hash2 = CacheManager.compute_tree_hash(tmp_path)
-
-    assert hash1 == hash2
+    assert (hash1 != hash2) is changes
 
 
 def test_atomic_write(cache_manager: CacheManager, sample_file: Path) -> None:
@@ -223,9 +193,8 @@ def test_cache_write_errors_do_not_crash(cache_manager: CacheManager, sample_fil
 def test_write_cache_cleans_up_temp_file_on_write_error(
     cache_manager: CacheManager,
 ) -> None:
-    """The .tmp file is removed even when writing to it fails partway
-    (e.g. non-JSON-serializable data), instead of being left behind.
-    """
+    # The .tmp file is removed even when writing to it fails partway (e.g.
+    # non-JSON-serializable data), instead of being left behind.
     cache_file = cache_manager.cache_dir / "some_hash.json"
 
     with pytest.raises(TypeError):
@@ -255,13 +224,12 @@ def test_different_files_different_cache_paths(cache_manager: CacheManager, tmp_
 
 
 def test_concurrent_writers_do_not_lose_updates(cache_manager: CacheManager, sample_file: Path) -> None:
-    """Concurrent set_cached_result calls for different hook names on the same
-    file must not clobber each other's entries.
-
-    Regression: the read-modify-write of the shared per-file cache blob was
-    unsynchronized, so under prek's parallel hook execution one writer's
-    update could silently overwrite another's (lost update).
-    """
+    # Concurrent set_cached_result calls for different hook names on the
+    # same file must not clobber each other's entries.
+    #
+    # Regression: the read-modify-write of the shared per-file cache blob
+    # was unsynchronized, so under prek's parallel hook execution one
+    # writer's update could silently overwrite another's (lost update).
     hook_names = [f"hook-{i}" for i in range(20)]
 
     with ThreadPoolExecutor(max_workers=len(hook_names)) as executor:

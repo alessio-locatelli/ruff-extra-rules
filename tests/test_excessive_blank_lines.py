@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from pre_commit_hooks.ast_checks._base import Violation
 from pre_commit_hooks.ast_checks.excessive_blank_lines import (
     ExcessiveBlankLinesCheck,
     fix_file_content,
 )
+from tests.factories import ViolationFactory
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "excessive_blank_lines"
 
@@ -48,33 +48,31 @@ def test_ignore_fixtures_are_not_flagged(fixture_path: Path) -> None:
     assert _check(fixture_path.read_text()) == []
 
 
-def test_raw_prefixed_docstring_header_is_detected() -> None:
-    """Regression: raw/byte-prefixed docstrings must be detected via the AST.
-
-    A raw-text quote-prefix scan misses the r/b prefix entirely and would
-    treat the whole file as one giant docstring.
-    """
-    source = 'r"""Raw docstring."""\n\n\n\nimport os\n'
-    assert _check(source)
-
-
-def test_comment_only_file_has_no_violations() -> None:
-    """A file with only comments (no code at all) has no first code line, so
-    the header-end scan runs off the end of the file.
-    """
-    source = "# just a comment\n\n# another comment\n"
-    assert _check(source) == []
-
-
-def test_empty_file_has_no_violations() -> None:
-    assert _check("") == []
+@pytest.mark.parametrize(
+    ("source", "flagged"),
+    [
+        # Regression: raw/byte-prefixed docstrings must be detected via the
+        # AST — a raw-text quote-prefix scan misses the r/b prefix entirely
+        # and would treat the whole file as one giant docstring.
+        ('r"""Raw docstring."""\n\n\n\nimport os\n', True),
+        # A file with only comments (no code at all) has no first code
+        # line, so the header-end scan runs off the end of the file.
+        ("# just a comment\n\n# another comment\n", False),
+        ("", False),
+        # The blank run's own line is blank, so the ignore comment goes on
+        # the first code line after it instead.
+        ('"""Docstring."""\n\n\n\ndef foo():  # pytriage: ignore=TRI002\n    pass\n', False),
+    ],
+    ids=["raw-prefixed-docstring", "comment-only-file", "empty-file", "inline-ignore"],
+)
+def test_check_edge_cases(source: str, *, flagged: bool) -> None:
+    assert bool(_check(source)) is flagged
 
 
 def test_leading_blank_lines_before_first_code_with_no_header() -> None:
-    """A file with no docstring/comment header, just leading blank lines
-    before the first code line, has no non-blank header line to find, so the
-    whole leading run is treated as the gap before the first code line.
-    """
+    # No docstring/comment header, just leading blank lines before the
+    # first code line, so the whole leading run is treated as the gap
+    # before the first code line.
     assert _check("\n\n\nimport os\n") == [
         "Excessive blank lines (3) should be collapsed to 1. Add "
         "'# pytriage: ignore=TRI002' to the line following the blank run "
@@ -82,54 +80,25 @@ def test_leading_blank_lines_before_first_code_with_no_header() -> None:
     ]
 
 
-def test_inline_ignore_suppresses_violation() -> None:
-    """The blank run's own line is blank, so the ignore comment goes on the
-    first code line after it instead."""
-    source = '"""Docstring."""\n\n\n\ndef foo():  # pytriage: ignore=TRI002\n    pass\n'
-    assert _check(source) == []
-
-
-def test_inline_ignore_is_respected_by_fix(tmp_path: Path) -> None:
-    source = '"""Docstring."""\n\n\n\ndef foo():  # pytriage: ignore=TRI002\n    pass\n'
+@pytest.mark.parametrize(
+    "source",
+    [
+        '"""Docstring."""\n\n\n\ndef foo():  # pytriage: ignore=TRI002\n    pass\n',
+        '"""Docstring."""\n\ndef foo():\n    pass\n',
+    ],
+    ids=["ignore-comment-respected", "no-current-violation"],
+)
+def test_fix_ignores_stale_violation(source: str, tmp_path: Path) -> None:
     test_file = tmp_path / "module.py"
     test_file.write_text(source)
     check = ExcessiveBlankLinesCheck()
 
-    # A stale violation (as if collected before the ignore comment was
-    # added) must not cause fix() to collapse the blank run anyway — fix()
-    # independently re-checks ignored_lines rather than trusting its input.
-    stale_violation = Violation(
-        check_id=check.check_id,
-        error_code=check.error_code,
-        line=2,
-        col=0,
-        message="stale",
-        fixable=True,
-    )
-    assert check.fix(test_file, [stale_violation], source, ast.parse(source)) is False
-    assert test_file.read_text() == source
+    # A caller-supplied violations list can be stale — e.g. an ignore
+    # comment was added since, or a previous fix in the same run already
+    # collapsed the blank run — so fix() must recheck the current source
+    # rather than trusting it.
+    stale_violation = ViolationFactory.build(check_id=check.check_id, error_code=check.error_code)
 
-
-def test_fix_with_stale_violation_and_no_current_violation_returns_false(
-    tmp_path: Path,
-) -> None:
-    """A caller-supplied violations list can be stale (e.g. a previous fix in
-    the same run already collapsed the blank run) — fix() must recheck the
-    current source rather than trusting it.
-    """
-    source = '"""Docstring."""\n\ndef foo():\n    pass\n'
-    test_file = tmp_path / "module.py"
-    test_file.write_text(source)
-    check = ExcessiveBlankLinesCheck()
-
-    stale_violation = Violation(
-        check_id=check.check_id,
-        error_code=check.error_code,
-        line=2,
-        col=0,
-        message="stale",
-        fixable=True,
-    )
     assert check.fix(test_file, [stale_violation], source, ast.parse(source)) is False
     assert test_file.read_text() == source
 
