@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
@@ -14,6 +15,9 @@ from pre_commit_hooks._prefilter import (
     batch_filter_files,
     git_grep_filter,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @pytest.fixture
@@ -39,37 +43,28 @@ def sample_files(tmp_path: Path) -> list[str]:
     return files
 
 
-def test_git_grep_filter_single_match(sample_files: list[str]) -> None:
-    matches = git_grep_filter(sample_files, "def get_", fixed_string=True)
-
-    assert len(matches) == 1
-    assert matches[0].endswith("file1.py")
-
-
-def test_git_grep_filter_multiple_matches(sample_files: list[str]) -> None:
-    matches = git_grep_filter(sample_files, "data", fixed_string=True)
-
-    assert len(matches) == 2
-    assert any(m.endswith("file2.py") for m in matches)
-    assert any(m.endswith("file3.py") for m in matches)
-
-
-def test_git_grep_filter_no_matches(sample_files: list[str]) -> None:
-    matches = git_grep_filter(sample_files, "nonexistent", fixed_string=True)
-
-    assert len(matches) == 0
+@pytest.mark.parametrize(
+    ("pattern", "expected_names"),
+    [
+        ("def get_", {"file1.py"}),
+        ("data", {"file2.py", "file3.py"}),
+        ("nonexistent", set()),
+    ],
+    ids=["single-match", "multiple-matches", "no-matches"],
+)
+def test_git_grep_filter_fixed_string(sample_files: list[str], pattern: str, expected_names: set[str]) -> None:
+    matches = git_grep_filter(sample_files, pattern, fixed_string=True)
+    assert {Path(m).name for m in matches} == expected_names
 
 
 def test_git_grep_filter_empty_input() -> None:
-    matches = git_grep_filter([], "pattern")
-    assert len(matches) == 0
+    assert git_grep_filter([], "pattern") == []
 
 
 def test_git_grep_filter_regex_pattern(sample_files: list[str]) -> None:
-    """If files aren't in a git repo, this falls back to Python substring
-    search, which doesn't support regex, so the pattern used here must work
-    either way.
-    """
+    # If files aren't in a git repo, this falls back to Python substring
+    # search, which doesn't support regex, so the pattern used here must
+    # work either way.
     matches = git_grep_filter(sample_files, "def get_", fixed_string=False)
 
     assert len(matches) >= 1
@@ -77,12 +72,11 @@ def test_git_grep_filter_regex_pattern(sample_files: list[str]) -> None:
 
 
 def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None:
-    """Exercises the actual git-grep-succeeded (returncode == 0) and
-    git-grep-found-nothing (returncode == 1) branches without mocking
-    subprocess. The other tests here use files outside any git repo, so
-    `git grep` always errors out and they only ever exercise the Python
-    fallback path.
-    """
+    # Exercises the actual git-grep-succeeded (returncode == 0) and
+    # git-grep-found-nothing (returncode == 1) branches without mocking
+    # subprocess. The other tests here use files outside any git repo, so
+    # `git grep` always errors out and they only ever exercise the Python
+    # fallback path.
     git = shutil.which("git")
     assert git is not None
 
@@ -106,14 +100,13 @@ def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None
 
 
 def test_git_grep_filter_skips_unresolvable_git_paths(tmp_path: Path) -> None:
-    """Defensive: if git's null-separated output includes a path that
-    doesn't resolve back to one of the requested filepaths, it's skipped
-    rather than included as a bogus match.
-
-    The file content deliberately doesn't contain "data" so that the
-    assertion can only pass via the mocked git-grep-success branch, not by
-    coincidentally falling through to the Python substring fallback.
-    """
+    # Defensive: if git's null-separated output includes a path that
+    # doesn't resolve back to one of the requested filepaths, it's skipped
+    # rather than included as a bogus match.
+    #
+    # The file content deliberately doesn't contain "data" so the assertion
+    # can only pass via the mocked git-grep-success branch, not by
+    # coincidentally falling through to the Python substring fallback.
     file1 = tmp_path / "file1.py"
     file1.write_text("value = 1\n")
 
@@ -129,40 +122,34 @@ def test_git_grep_filter_skips_unresolvable_git_paths(tmp_path: Path) -> None:
     assert matches == [str(file1)]
 
 
-def test_git_grep_fallback_when_not_in_git_repo(tmp_path: Path) -> None:
-    non_git_dir = tmp_path / "non_git"
-    non_git_dir.mkdir()
+def _fail_not_a_git_repo(mock_run: mock.MagicMock) -> None:
+    mock_run.return_value = subprocess.CompletedProcess(
+        args=[], returncode=2, stdout="", stderr="fatal: not a git repository"
+    )
 
-    file1 = non_git_dir / "test.py"
-    file1.write_text("data = 123\n")
 
+def _fail_timeout(mock_run: mock.MagicMock) -> None:
+    mock_run.side_effect = subprocess.TimeoutExpired(cmd="git grep", timeout=30)
+
+
+def _fail_git_not_found(mock_run: mock.MagicMock) -> None:
+    mock_run.side_effect = FileNotFoundError("git not found")
+
+
+@pytest.mark.parametrize(
+    "configure_mock",
+    [_fail_not_a_git_repo, _fail_timeout, _fail_git_not_found],
+    ids=["not-a-git-repo", "timeout", "git-not-found"],
+)
+def test_git_grep_filter_falls_back_to_python_search(
+    sample_files: list[str], configure_mock: Callable[[mock.MagicMock], None]
+) -> None:
     with mock.patch("subprocess.run") as mock_run:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=2, stdout="", stderr="fatal: not a git repository"
-        )
-
-        matches = git_grep_filter([str(file1)], "data", fixed_string=True)
-
-        assert len(matches) == 1
-        assert matches[0] == str(file1)
-
-
-def test_git_grep_fallback_on_timeout(sample_files: list[str]) -> None:
-    with mock.patch("subprocess.run") as mock_run:
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="git grep", timeout=30)
-
+        configure_mock(mock_run)
         matches = git_grep_filter(sample_files, "data", fixed_string=True)
 
-        assert len(matches) >= 1
-
-
-def test_git_grep_fallback_on_file_not_found(sample_files: list[str]) -> None:
-    with mock.patch("subprocess.run") as mock_run:
-        mock_run.side_effect = FileNotFoundError("git not found")
-
-        matches = git_grep_filter(sample_files, "data", fixed_string=True)
-
-        assert len(matches) >= 1
+    assert len(matches) >= 1
+    assert any(m.endswith("file2.py") for m in matches)
 
 
 def test_python_fallback_includes_unreadable_files(tmp_path: Path) -> None:
@@ -185,29 +172,6 @@ def test_python_fallback_includes_unreadable_files(tmp_path: Path) -> None:
         file2.chmod(0o644)
 
 
-def test_batch_filter_files_match_any(sample_files: list[str]) -> None:
-    matches = batch_filter_files(sample_files, ["data", "def get_"])
-
-    assert len(matches) == 3
-    assert any(m.endswith("file1.py") for m in matches)
-    assert any(m.endswith("file2.py") for m in matches)
-    assert any(m.endswith("file3.py") for m in matches)
-
-
-def test_batch_filter_files_empty_patterns_returns_all(
-    sample_files: list[str],
-) -> None:
-    matches = batch_filter_files(sample_files, [])
-
-    assert len(matches) == len(sample_files)
-
-
-def test_batch_filter_files_no_matches(sample_files: list[str]) -> None:
-    matches = batch_filter_files(sample_files, ["nonexistent1", "nonexistent2"])
-
-    assert len(matches) == 0
-
-
 def test_git_grep_handles_binary_files(tmp_path: Path) -> None:
     binary_file = tmp_path / "binary.pyc"
     binary_file.write_bytes(b"\x00\x01\x02\x03data\x04\x05")
@@ -218,3 +182,17 @@ def test_git_grep_handles_binary_files(tmp_path: Path) -> None:
     matches = git_grep_filter([str(binary_file), str(text_file)], "data")
 
     assert any(m.endswith("text.py") for m in matches)
+
+
+@pytest.mark.parametrize(
+    ("patterns", "expected_names"),
+    [
+        (["data", "def get_"], {"file1.py", "file2.py", "file3.py"}),
+        ([], {"file1.py", "file2.py", "file3.py", "file4.py"}),
+        (["nonexistent1", "nonexistent2"], set()),
+    ],
+    ids=["match-any-pattern", "empty-patterns-returns-all", "no-matches"],
+)
+def test_batch_filter_files(sample_files: list[str], patterns: list[str], expected_names: set[str]) -> None:
+    matches = batch_filter_files(sample_files, patterns)
+    assert {Path(m).name for m in matches} == expected_names

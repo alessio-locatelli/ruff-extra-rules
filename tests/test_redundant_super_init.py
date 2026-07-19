@@ -82,8 +82,11 @@ class Child(Base):
     assert "Base.__init__()" in violation.message
 
 
-def test_inline_ignore_suppresses_violation() -> None:
-    source = """class Base:
+@pytest.mark.parametrize(
+    ("source", "flagged"),
+    [
+        (
+            """class Base:
     def __init__(self):
         pass
 
@@ -91,13 +94,13 @@ def test_inline_ignore_suppresses_violation() -> None:
 class Child(Base):
     def __init__(self, **kwargs):  # pytriage: ignore=TRI003
         super().__init__(**kwargs)
-"""
-    assert _check(source) == []
-
-
-def test_init_without_kwargs_param_not_flagged() -> None:
-    """No **kwargs parameter at all means nothing can be redundantly forwarded."""
-    source = """class Base:
+""",
+            False,
+        ),
+        (
+            # No **kwargs parameter at all means nothing can be redundantly
+            # forwarded.
+            """class Base:
     def __init__(self):
         pass
 
@@ -106,19 +109,14 @@ class Child(Base):
     def __init__(self, value):
         self.value = value
         super().__init__()
-"""
-    assert _check(source) == []
-
-
-def test_class_without_init_not_flagged() -> None:
-    assert _check("class Foo:\n    pass\n") == []
-
-
-def test_super_call_without_forwarding_kwargs_not_flagged() -> None:
-    """super().__init__() called with no ** forwarding is never flagged,
-    even though the class itself accepts **kwargs.
-    """
-    source = """class Base:
+""",
+            False,
+        ),
+        ("class Foo:\n    pass\n", False),
+        (
+            # super().__init__() called with no ** forwarding is never
+            # flagged, even though the class itself accepts **kwargs.
+            """class Base:
     def __init__(self):
         pass
 
@@ -127,15 +125,13 @@ class Child(Base):
     def __init__(self, **kwargs):
         super().__init__()
         self.extra = kwargs
-"""
-    assert _check(source) == []
-
-
-def test_non_super_call_in_init_not_flagged() -> None:
-    """A call that looks similar (e.g. self.setup(**kwargs)) but isn't
-    super().__init__ must not be mistaken for one.
-    """
-    source = """class Base:
+""",
+            False,
+        ),
+        (
+            # A call that looks similar (e.g. self.setup(**kwargs)) but
+            # isn't super().__init__ must not be mistaken for one.
+            """class Base:
     def __init__(self):
         pass
 
@@ -146,13 +142,12 @@ class Child(Base):
 
     def setup(self, **kwargs):
         pass
-"""
-    assert _check(source) == []
-
-
-def test_super_init_attr_not_named_init_not_flagged() -> None:
-    """super().other_method(**kwargs) isn't a super().__init__ call."""
-    source = """class Base:
+""",
+            False,
+        ),
+        (
+            # super().other_method(**kwargs) isn't a super().__init__ call.
+            """class Base:
     def __init__(self):
         pass
 
@@ -160,15 +155,13 @@ def test_super_init_attr_not_named_init_not_flagged() -> None:
 class Child(Base):
     def __init__(self, **kwargs):
         super().other_method(**kwargs)
-"""
-    assert _check(source) == []
-
-
-def test_super_call_value_not_a_call_not_flagged() -> None:
-    """A bare `super.__init__(**kwargs)` (no call parens on `super`) isn't
-    the `super()` pattern this check looks for.
-    """
-    source = """class Base:
+""",
+            False,
+        ),
+        (
+            # A bare `super.__init__(**kwargs)` (no call parens on `super`)
+            # isn't the `super()` pattern this check looks for.
+            """class Base:
     def __init__(self):
         pass
 
@@ -176,13 +169,13 @@ def test_super_call_value_not_a_call_not_flagged() -> None:
 class Child(Base):
     def __init__(self, **kwargs):
         super.__init__(**kwargs)
-"""
-    assert _check(source) == []
-
-
-def test_call_whose_func_value_is_not_super_name_not_flagged() -> None:
-    """obj().__init__(**kwargs) where obj() isn't `super()` is not flagged."""
-    source = """class Base:
+""",
+            False,
+        ),
+        (
+            # obj().__init__(**kwargs) where obj() isn't `super()` is not
+            # flagged.
+            """class Base:
     def __init__(self):
         pass
 
@@ -190,39 +183,34 @@ def test_call_whose_func_value_is_not_super_name_not_flagged() -> None:
 class Child(Base):
     def __init__(self, **kwargs):
         factory().__init__(**kwargs)
-"""
-    assert _check(source) == []
-
-
-def test_base_that_is_not_a_name_is_skipped() -> None:
-    """A base class expressed as something other than a plain Name (e.g. an
-    attribute access like `module.Base`) can't be resolved, so it's skipped
-    rather than flagged.
-    """
-    source = """import external
+""",
+            False,
+        ),
+        (
+            # A base class expressed as something other than a plain Name
+            # (e.g. an attribute access like `module.Base`) can't be
+            # resolved, so it's skipped rather than flagged.
+            """import external
 
 class Child(external.Base):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-"""
-    assert _check(source) == []
-
-
-def test_unknown_external_base_not_flagged() -> None:
-    """A base class not defined in this file (e.g. imported) can't be
-    introspected, so it's never flagged.
-    """
-    source = """from somewhere import ExternalBase
+""",
+            False,
+        ),
+        (
+            # A base class not defined in this file (e.g. imported) can't
+            # be introspected, so it's never flagged.
+            """from somewhere import ExternalBase
 
 class Child(ExternalBase):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-"""
-    assert _check(source) == []
-
-
-def test_parent_with_positional_args_beyond_self_accepts_args() -> None:
-    source = """class Base:
+""",
+            False,
+        ),
+        (
+            """class Base:
     def __init__(self, name):
         self.name = name
 
@@ -230,12 +218,11 @@ def test_parent_with_positional_args_beyond_self_accepts_args() -> None:
 class Child(Base):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-"""
-    assert _check(source) == []
-
-
-def test_parent_with_keyword_only_args_accepts_args() -> None:
-    source = """class Base:
+""",
+            False,
+        ),
+        (
+            """class Base:
     def __init__(self, *, name=None):
         self.name = name
 
@@ -243,12 +230,11 @@ def test_parent_with_keyword_only_args_accepts_args() -> None:
 class Child(Base):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-"""
-    assert _check(source) == []
-
-
-def test_parent_with_positional_only_args_accepts_args() -> None:
-    source = """class Base:
+""",
+            False,
+        ),
+        (
+            """class Base:
     def __init__(self, value, /):
         self.value = value
 
@@ -256,15 +242,13 @@ def test_parent_with_positional_only_args_accepts_args() -> None:
 class Child(Base):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-"""
-    assert _check(source) == []
-
-
-def test_parent_with_only_self_positional_only_does_not_accept_args() -> None:
-    """`self` alone as a positional-only parameter is not itself an
-    argument the caller can pass.
-    """
-    source = """class Base:
+""",
+            False,
+        ),
+        (
+            # `self` alone as a positional-only parameter is not itself an
+            # argument the caller can pass.
+            """class Base:
     def __init__(self, /):
         pass
 
@@ -272,32 +256,56 @@ def test_parent_with_only_self_positional_only_does_not_accept_args() -> None:
 class Child(Base):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-"""
-    assert _check(source)
-
-
-def test_base_is_exception_accepts_kwargs_implicitly() -> None:
-    source = """class Child(Exception):
+""",
+            True,
+        ),
+        (
+            """class Child(Exception):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-"""
-    assert _check(source) == []
-
-
-def test_base_is_base_exception_accepts_kwargs_implicitly() -> None:
-    source = """class Child(BaseException):
+""",
+            False,
+        ),
+        (
+            """class Child(BaseException):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-"""
-    assert _check(source) == []
+""",
+            False,
+        ),
+    ],
+    ids=[
+        "inline-ignore-suppresses-violation",
+        "init-without-kwargs-param",
+        "class-without-init",
+        "super-call-without-forwarding-kwargs",
+        "non-super-call-in-init",
+        "super-attr-not-named-init",
+        "super-value-not-a-call",
+        "func-value-not-super-name",
+        "base-not-a-name-is-skipped",
+        "unknown-external-base",
+        "parent-accepts-positional-args-beyond-self",
+        "parent-accepts-keyword-only-args",
+        "parent-accepts-positional-only-args",
+        "parent-self-only-positional-only-does-not-accept-args",
+        "base-is-exception-accepts-kwargs-implicitly",
+        "base-is-base-exception-accepts-kwargs-implicitly",
+    ],
+)
+def test_check_flags_only_redundant_forwarding(source: str, *, flagged: bool) -> None:
+    assert bool(_check(source)) is flagged
 
 
-def test_recursive_parent_lookup_skips_non_name_base_and_keeps_checking() -> None:
-    """When an intermediate class (no __init__ of its own) has multiple
-    bases, a non-Name base (can't be resolved) is skipped, and the search
-    continues into the remaining bases rather than stopping there.
-    """
-    source = """class GrandBase:
+@pytest.mark.parametrize(
+    ("source", "expected_substring"),
+    [
+        (
+            # When an intermediate class (no __init__ of its own) has
+            # multiple bases, a non-Name base (can't be resolved) is
+            # skipped, and the search continues into the remaining bases
+            # rather than stopping there.
+            """class GrandBase:
     def __init__(self):
         pass
 
@@ -309,17 +317,13 @@ class Middle(unresolved_module.SomeBase, GrandBase):
 class Child(Middle):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-"""
-    violations = _check(source)
-    assert len(violations) == 1
-    assert "Middle.__init__()" in violations[0]
-
-
-def test_multiple_bases_only_one_flagged() -> None:
-    """Multiple inheritance: each base is checked independently, and a
-    violation is reported per non-accepting base.
-    """
-    source = """class Base1:
+""",
+            "Middle.__init__()",
+        ),
+        (
+            # Multiple inheritance: each base is checked independently,
+            # and a violation is reported per non-accepting base.
+            """class Base1:
     def __init__(self):
         pass
 
@@ -332,7 +336,14 @@ class Base2:
 class Child(Base1, Base2):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-"""
+""",
+            "Base1.__init__()",
+        ),
+    ],
+    ids=["recursive-parent-lookup-skips-non-name-base", "multiple-bases-only-one-flagged"],
+)
+def test_check_reports_single_violation_with_offending_base(source: str, expected_substring: str) -> None:
     violations = _check(source)
+
     assert len(violations) == 1
-    assert "Base1.__init__()" in violations[0]
+    assert expected_substring in violations[0]
