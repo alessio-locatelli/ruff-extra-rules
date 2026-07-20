@@ -416,6 +416,10 @@ data = load_from_database()  # pytriage: ignore=TRI001
 
 **Note:** The ignore comment must be on the same line as the violation.
 
+### Cache Location
+
+Check results are cached under `.cache/pre_commit_hooks/` relative to the process's current working directory, not a project root discovered independently of it — the same convention `mypy` (`.mypy_cache`) uses. `prek`/`pre-commit` always invoke this hook with the working directory set to the repository root, so the cache location is consistent there; running the CLI directly from elsewhere (see `AGENTS.md`) creates a separate `.cache/pre_commit_hooks/` under that directory instead. The cache itself is safe to delete at any time (see the `CACHEDIR.TAG` file it writes).
+
 ## License
 
 MIT License. See [LICENSE](LICENSE) file for details.

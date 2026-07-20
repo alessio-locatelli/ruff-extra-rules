@@ -1722,7 +1722,9 @@ def test_main_unknown_check_name_returns_one(tmp_path: Path, capsys: pytest.Capt
     exit_code = main([str(filepath), flag, "not-a-real-check"])
     assert exit_code == 1
 
-    assert "Unknown checks: not-a-real-check" in capsys.readouterr().err
+    # The offending flag is named in the message, not just the bad value —
+    # otherwise --select and --ignore errors are indistinguishable.
+    assert f"Unknown checks in {flag}: not-a-real-check" in capsys.readouterr().err
 
 
 def test_main_ignoring_all_checks_returns_one(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1734,6 +1736,46 @@ def test_main_ignoring_all_checks_returns_one(tmp_path: Path, capsys: pytest.Cap
     assert exit_code == 1
 
     assert "Error: No checks enabled" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("flag", "forbid_vars_runs"),
+    [("--select", True), ("--ignore", False)],
+    ids=["select", "ignore"],
+)
+def test_main_trailing_comma_does_not_report_blank_unknown_check(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str, forbid_vars_runs: bool
+) -> None:
+    # Regression: a trailing comma left an empty string in the parsed set,
+    # reported as a confusing blank "Unknown checks: " instead of being
+    # tolerated like --exclude's own comma list already is. Asserting on the
+    # TRI001 violation itself (not just the exit code) is what actually
+    # proves forbid-vars was recognized: both the fixed and the reverted
+    # behavior exit 1 for --select (a real violation vs. the old bogus
+    # "Unknown checks" error), so the exit code alone can't tell them apart.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    exit_code = main([str(filepath), flag, "forbid-vars,"])
+    err = capsys.readouterr().err
+
+    assert "Unknown checks" not in err
+    assert ("TRI001" in err) is forbid_vars_runs
+    assert exit_code == (1 if forbid_vars_runs else 0)
+
+
+def test_main_select_only_commas_reports_no_checks_enabled(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # A --select value naming no real check (once blanks are filtered) must
+    # report "no checks enabled", not a blank "Unknown checks: ".
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    exit_code = main([str(filepath), "--select", ",,"])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "Unknown checks:" not in err
+    assert "Error: No checks enabled" in err
 
 
 def test_main_select_and_ignore_compose(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

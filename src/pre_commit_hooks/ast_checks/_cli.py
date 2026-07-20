@@ -100,22 +100,17 @@ def main(argv: list[str] | None = None) -> int:
     if not filenames:
         return 0
 
-    select = {c.strip() for c in args.select.split(",")} if args.select else None
-    ignore = {c.strip() for c in args.ignore.split(",")} if args.ignore else None
+    select = {c.strip() for c in args.select.split(",") if c.strip()} if args.select else None
+    ignore = {c.strip() for c in args.ignore.split(",") if c.strip()} if args.ignore else None
 
     all_check_ids = {cls().check_id for cls in ALL_CHECKS}
-    if select:
-        invalid = select - all_check_ids
-        if invalid:
-            checks_str = ", ".join(sorted(invalid))
-            print(f"Error: Unknown checks: {checks_str}", file=sys.stderr)
-            return 1
-    if ignore:
-        invalid = ignore - all_check_ids
-        if invalid:
-            checks_str = ", ".join(sorted(invalid))
-            print(f"Error: Unknown checks: {checks_str}", file=sys.stderr)
-            return 1
+    for flag_name, check_ids in (("--select", select), ("--ignore", ignore)):
+        if check_ids:
+            invalid = check_ids - all_check_ids
+            if invalid:
+                checks_str = ", ".join(sorted(invalid))
+                print(f"Error: Unknown checks in {flag_name}: {checks_str}", file=sys.stderr)
+                return 1
 
     # Each check translates its own parsed CLI args into its own __init__ kwargs, if any.
     check_args: dict[str, dict[str, Any]] = {}
