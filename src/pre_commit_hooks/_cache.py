@@ -8,7 +8,6 @@ and invalidated when file content changes.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import json
 import logging
@@ -16,6 +15,16 @@ import os
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+try:
+    import fcntl
+except ImportError:  # pragma: win32 cover
+    # fcntl is POSIX-only; Windows has no equivalent module. CacheManager
+    # disables caching entirely on such a platform (with a one-time
+    # warning, see __init__) rather than running the cache unlocked, so
+    # this import failing degrades gracefully instead of crashing the
+    # whole package before anything can run.
+    fcntl = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -80,6 +89,21 @@ class CacheManager:
         # (and log another warning) on every single file for the rest of
         # this run — one warning at construction is enough.
         self._cache_dir_unavailable = False
+        # fcntl is None on platforms without it (Windows). _locked() exists
+        # specifically to stop two processes from racing on the same
+        # deterministic cache/temp-file path (its own docstring); without
+        # it, running "unlocked" would reintroduce exactly that race rather
+        # than degrade safely, so the whole cache is disabled here instead —
+        # checked once, for the same "one warning, not one per file" reason
+        # as _cache_dir_unavailable above.
+        self._locking_unavailable = fcntl is None
+        if self._locking_unavailable:
+            logger.warning(
+                "fcntl is unavailable on this platform (os.name=%r); running without a cache, since "
+                "concurrent hook runs could otherwise corrupt or lose cache entries without cross-process "
+                "locking.",
+                os.name,
+            )
         self._ensure_cache_dir()
 
     @contextlib.contextmanager
@@ -166,7 +190,7 @@ class CacheManager:
         `hook_name` defaults to the hook name this CacheManager was constructed with.
         """
         hook_name = hook_name or self.hook_name
-        if self._cache_dir_unavailable:
+        if self._cache_dir_unavailable or self._locking_unavailable:
             return None
         try:
             stat = filepath.stat()
@@ -203,7 +227,7 @@ class CacheManager:
             return None
 
     def set_cached_result(self, filepath: Path, hook_name: str, hook_result: dict[str, Any]) -> None:
-        if self._cache_dir_unavailable:
+        if self._cache_dir_unavailable or self._locking_unavailable:
             return
         try:
             stat = filepath.stat()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fcntl
+import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING
@@ -325,6 +326,46 @@ def test_set_cached_result_does_not_hang_when_lock_times_out(
         elapsed = time.monotonic() - start
 
     assert elapsed < 2.0
+
+
+def test_construction_warns_and_continues_when_fcntl_unavailable(
+    temp_cache_dir: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Windows has no fcntl module at all. `import fcntl` at module import
+    # time used to make the whole package fail to import there before any
+    # warning could even be printed (ch. 14: "MUST NOT hard-crash merely
+    # because an optional platform feature is unavailable"). Simulated here
+    # by monkeypatching the already-imported module-level name, the same
+    # way test_main.py's SIGTERM tests simulate an unavailable platform
+    # feature without a real Windows machine.
+    monkeypatch.setattr(cache_module, "fcntl", None)
+
+    with caplog.at_level(logging.WARNING, logger="cache"):
+        cache = CacheManager(cache_dir=temp_cache_dir, hook_name="test-hook", cache_version="1")
+
+    assert cache._locking_unavailable is True
+    assert "fcntl" in caplog.text
+
+
+def test_cache_disabled_entirely_without_fcntl(
+    temp_cache_dir: Path, sample_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # _locked() exists specifically to stop two processes racing on the same
+    # deterministic cache/temp-file path -- running unlocked would
+    # reintroduce that exact race rather than degrade safely, so the whole
+    # cache (not just locking) is disabled when fcntl is unavailable.
+    monkeypatch.setattr(cache_module, "fcntl", None)
+    cache = CacheManager(cache_dir=temp_cache_dir, hook_name="test-hook", cache_version="1")
+
+    cache.set_cached_result(sample_file, "test-hook", {"violations": []})
+    cached = cache.get_cached_result(sample_file, "test-hook")
+
+    assert cached is None
+    # No cache file was ever written, and no .lock file was ever opened --
+    # _locked() (which would touch an fcntl API that isn't there) was never
+    # even reached.
+    assert list(cache.cache_dir.rglob("*.json")) == []
+    assert list(cache.cache_dir.rglob("*.lock")) == []
 
 
 def test_concurrent_writers_do_not_lose_updates(cache_manager: CacheManager, sample_file: Path) -> None:

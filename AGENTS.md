@@ -18,7 +18,7 @@ Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside 
 - Support only the current stable Python version (currently `>=3.14`). Support for older versions is best-effort only ("may still work, no guarantee") and must not bloat the code with compatibility branches — this limits ongoing maintenance effort.
 - `except SomeError, OtherError:` (no parentheses) is valid Python 3.14 syntax — [PEP 758](https://peps.python.org/pep-0758/) — equivalent to `except (SomeError, OtherError):`. It is not Python 2's `except Type, name:` catch-and-bind form (that form was removed in Python 3.0). Do not "fix" it and do not re-investigate it as a bug. A vulture warning flagging this syntax as suspicious is a false positive from a linter that predates PEP 758 and can be ignored.
 - Assume every file these hooks process already passed `check-ast` and `ruff` (see `.pre-commit-config.yaml`) — i.e. it's syntactically valid Python. Don't add defensive handling for invalid syntax or non-Python input.
-- Assume Linux (or WSL) only. Don't add if/else branches to support Windows or macOS.
+- Develop and test against Linux (or WSL) only — don't add new Windows- or macOS-specific code paths or features. Where a stdlib API this codebase already depends on is genuinely POSIX-only (e.g. `fcntl`), guard its import/use so an unsupported platform degrades with one clear warning instead of hard-crashing; see `docs/adr/0020-behavioral-contract-audit-cross-platform-behavior.md`.
 - Reuse existing shared code (`_cache.py`, `_prefilter.py`, `_scope.py`, etc.) rather than reimplementing it per check.
 
 ### Suggested Check Architecture
