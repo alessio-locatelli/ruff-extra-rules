@@ -19,23 +19,17 @@ logger = logging.getLogger("validate-function-name")
 
 _FuncNode = ast.FunctionDef | ast.AsyncFunctionDef
 
+type SourcePosition = tuple[int, int]  # (1-indexed line, 0-indexed character column)
+
 
 def _count_nesting_depth(func_node: _FuncNode) -> int:
-    """Calculate maximum nesting depth of control flow in function.
-
-    Args:
-        func_node: Function AST node
-
-    Returns:
-        Maximum nesting depth (0 = no nesting, 1 = single level, etc.)
-    """
+    """0 = no nesting, 1 = single level of control flow, etc."""
     max_depth = 0
 
     def _walk_depth(node: ast.AST, current_depth: int) -> None:
         nonlocal max_depth
         max_depth = max(max_depth, current_depth)
 
-        # Increase depth for control flow structures
         if isinstance(node, (ast.If, ast.For, ast.While, ast.With, ast.Try)):
             for child in ast.iter_child_nodes(node):
                 _walk_depth(child, current_depth + 1)
@@ -43,7 +37,6 @@ def _count_nesting_depth(func_node: _FuncNode) -> int:
             for child in ast.iter_child_nodes(node):
                 _walk_depth(child, current_depth)
 
-    # Start from function body
     for stmt in func_node.body:
         _walk_depth(stmt, 0)
 
@@ -51,27 +44,11 @@ def _count_nesting_depth(func_node: _FuncNode) -> int:
 
 
 def _count_returns(func_node: _FuncNode) -> int:
-    """Count number of return statements in function.
-
-    Args:
-        func_node: Function AST node
-
-    Returns:
-        Number of return statements
-    """
     return sum(1 for node in ast.walk(func_node) if isinstance(node, ast.Return))
 
 
 def _count_function_lines(func_node: _FuncNode) -> int:
-    """Count lines of code in function, excluding docstring.
-
-    Args:
-        func_node: Function AST node
-
-    Returns:
-        Number of lines (excluding docstring)
-    """
-    # Check if first statement is a docstring
+    """Line count excludes the docstring, if any."""
     docstring_lines = 0
     if (
         func_node.body
@@ -79,28 +56,15 @@ def _count_function_lines(func_node: _FuncNode) -> int:
         and isinstance(func_node.body[0].value, ast.Constant)
         and isinstance(func_node.body[0].value.value, str)
     ):
-        # Count docstring lines
         docstring_node = func_node.body[0]
         docstring_lines = docstring_node.end_lineno - docstring_node.lineno + 1  # type: ignore[operator]
 
-    # Total function lines
     total_lines = func_node.end_lineno - func_node.lineno + 1  # type: ignore[operator]
 
-    # Subtract docstring lines
     return total_lines - docstring_lines
 
 
 def _find_function_node(tree: ast.Module, name: str, lineno: int) -> _FuncNode | None:
-    """Find the function/async function definition matching name and line.
-
-    Args:
-        tree: Parsed AST tree
-        name: Function name to find
-        lineno: Line number the function is defined on
-
-    Returns:
-        The matching function node, or None if not found
-    """
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name and node.lineno == lineno:
             return node
@@ -122,19 +86,11 @@ def should_autofix(filepath: Path, suggestion: Suggestion) -> bool:
     differently-named receiver (e.g. `reader.get_report()` in a free
     function elsewhere in the file). Renaming the definition without being
     able to find every such call site would break real, unrenamed callers.
-
-    Args:
-        filepath: Path to the file containing the function
-        suggestion: Naming suggestion to evaluate
-
-    Returns:
-        True if safe to auto-fix, False otherwise
     """
     # Check 1: Confidence
     if suggestion.reason == "no confident suggestion":
         return False
 
-    # Parse file and find the function
     try:
         tree = ast.parse(read_source(filepath))
     except (OSError, SyntaxError, UnicodeDecodeError, LookupError) as error:
@@ -165,18 +121,9 @@ def should_autofix(filepath: Path, suggestion: Suggestion) -> bool:
     return returns <= 1
 
 
-def _def_name_position(lines: list[str], func_node: _FuncNode) -> tuple[int, int]:
-    """Locate the exact (line, col) of the function name in its `def` statement.
-
-    Searches only the `def`/`async def` line, starting at the node's own
+def _def_name_position(lines: list[str], func_node: _FuncNode) -> SourcePosition:
+    """Searches only the `def`/`async def` line, starting at the node's own
     column offset, so it can never match text elsewhere in the file.
-
-    Args:
-        lines: Source lines (with line endings)
-        func_node: Function AST node
-
-    Returns:
-        (1-indexed line number, 0-indexed column) of the name
     """
     line_idx = func_node.lineno - 1
     # AST line numbers are always valid for the source that produced them.
@@ -190,16 +137,8 @@ def _def_name_position(lines: list[str], func_node: _FuncNode) -> tuple[int, int
     return (func_node.lineno, match.start(1))
 
 
-def _attr_name_position(node: ast.Attribute, lines: list[str]) -> tuple[int, int]:
-    """Locate the (line, col) of the attribute name in `obj.attr`.
-
-    Args:
-        node: Attribute AST node
-        lines: Source lines (with line endings), for byte-to-char conversion
-
-    Returns:
-        (1-indexed line number, 0-indexed column) of the attribute name
-    """
+def _attr_name_position(node: ast.Attribute, lines: list[str]) -> SourcePosition:
+    """Locates the attribute name in `obj.attr`."""
     # Always populated for a real node from a parsed tree.
     assert node.end_lineno is not None
     assert node.end_col_offset is not None
@@ -298,7 +237,7 @@ class _ReferenceCollector(ast.NodeVisitor):
         self.is_method = is_method
         self.target = target
         self.lines = lines
-        self.positions: list[tuple[int, int]] = []
+        self.positions: list[SourcePosition] = []
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         if not self.is_method and _binds_name(node, self.old_name, self.target):
@@ -352,17 +291,10 @@ def _is_self_like_receiver(value: ast.expr) -> bool:
 
 
 def _resolve_rename_scope(tree: ast.Module, func_node: _FuncNode) -> tuple[ast.AST, bool]:
-    """Determine the AST subtree in which call-site references may be renamed.
-
-    Args:
-        tree: Parsed AST tree (with parent links attached)
-        func_node: The function being renamed
-
-    Returns:
-        (scope_node, is_method) — scope_node is the enclosing class (for
-        methods, so unrelated classes are never touched), the enclosing
-        function (for nested/closure functions), or the whole module (for
-        top-level functions).
+    """Returns (scope_node, is_method) — scope_node is the enclosing class (for
+    methods, so unrelated classes are never touched), the enclosing function
+    (for nested/closure functions), or the whole module (for top-level
+    functions). `tree` must already have parent links attached.
     """
     parent = getattr(func_node, "parent", None)
     if isinstance(parent, ast.ClassDef):
@@ -373,20 +305,11 @@ def _resolve_rename_scope(tree: ast.Module, func_node: _FuncNode) -> tuple[ast.A
 
 
 def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
-    """Apply a rename fix to a file.
-
-    Strategy: AST-scoped rename. Renames the function definition itself plus
-    true call-site references (`Name`/`Attribute` nodes reached via normal
-    AST traversal) within the scope the function is visible in. Never
-    touches string/byte literals, comments, or identically-named symbols in
+    """AST-scoped rename: renames the function definition itself plus true
+    call-site references (`Name`/`Attribute` nodes reached via normal AST
+    traversal) within the scope the function is visible in. Never touches
+    string/byte literals, comments, or identically-named symbols in
     unrelated scopes (e.g. a same-named method on a different class).
-
-    Args:
-        filepath: Path to the file to fix
-        suggestion: Naming suggestion to apply
-
-    Returns:
-        True if fix was applied successfully, False otherwise
     """
     try:
         source, encoding = read_source_with_encoding(filepath)
@@ -408,7 +331,7 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
 
     lines = source.splitlines(keepends=True)
 
-    positions: list[tuple[int, int]] = [_def_name_position(lines, func_node)]
+    positions: list[SourcePosition] = [_def_name_position(lines, func_node)]
 
     scope_node, is_method = _resolve_rename_scope(tree, func_node)
 

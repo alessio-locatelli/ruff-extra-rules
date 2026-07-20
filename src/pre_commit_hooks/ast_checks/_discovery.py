@@ -10,15 +10,6 @@ logger = logging.getLogger("ast_checks")
 
 
 def filter_excluded_files(filepaths: list[str], exclude_patterns: list[str]) -> list[str]:
-    """Filter out files matching exclude patterns.
-
-    Args:
-        filepaths: List of file paths to filter
-        exclude_patterns: List of glob patterns to exclude
-
-    Returns:
-        Filtered list of file paths
-    """
     if not exclude_patterns:
         return filepaths
 
@@ -28,12 +19,10 @@ def filter_excluded_files(filepaths: list[str], exclude_patterns: list[str]) -> 
         excluded = False
 
         for pattern in exclude_patterns:
-            # Check if file matches pattern using glob-style matching
-            # Support both relative and absolute patterns
             if filepath.match(pattern):
                 excluded = True
                 break
-            # Also check if any parent directory matches
+            # Also match against each parent directory component.
             if any(part for part in filepath.parts if Path(part).match(pattern)):
                 excluded = True
                 break
@@ -59,15 +48,11 @@ def expand_directories(filenames: list[str]) -> list[str]:
     discarded as unresolvable — the run reported zero violations, exit code
     0, having actually checked nothing.
 
-    Args:
-        filenames: Raw CLI filename arguments, files and/or directories mixed
-
-    Returns:
-        `filenames` with each directory entry replaced by the `.py` files
-        found under it (see `_list_python_files_in_dir`); a non-directory
-        entry (an ordinary file, or a path that doesn't exist at all) is
-        kept as-is so the existing unreadable/unprocessable-file reporting
-        still applies to it downstream.
+    Each directory entry in `filenames` is replaced by the `.py` files found
+    under it (see `_list_python_files_in_dir`); a non-directory entry (an
+    ordinary file, or a path that doesn't exist at all) is kept as-is so the
+    existing unreadable/unprocessable-file reporting still applies to it
+    downstream.
     """
     expanded: list[str] = []
     for name in filenames:

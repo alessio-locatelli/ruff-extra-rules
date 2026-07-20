@@ -30,6 +30,16 @@ Hybrid pipeline:
 
 See [docs/adding-a-check.md](docs/adding-a-check.md) for the full walkthrough of implementing and registering a new check.
 
+## Docstrings and code comments
+
+- Do **not** add docstrings.
+- Do **not** add code comments.
+- You may add a concise docstring or code comment **only with**:
+  - Business or architecture decisions that cannot be derived from the code (e.g., `"""We use service X instead of Y because of rate limits."""`).
+  - Non‑obvious hacks or pitfalls that may look like a code problem if not explained (e.g., `# Temporarily reduce the batch size to work around the OOM in the cloud.`).
+  - A need to reference an external resource (e.g., `Related issue <link>.` or `See ADR-0042`).
+  - A need to explain **why** a non-obvious action is taken (e.g., "Early exit because all items were processed", "Used a real ID in a test because …").
+
 ## Commands
 
 ### Setup

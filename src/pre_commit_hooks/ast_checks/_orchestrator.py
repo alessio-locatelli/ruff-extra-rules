@@ -36,6 +36,10 @@ logger = logging.getLogger("ast_checks")
 # code it depends on, changes.
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
+# Matches a pre-fix Violation against a fresh check() re-run's own new
+# Violation objects, which can never share object identity with it.
+type ViolationKey = tuple[int, int, str]  # (line, col, message)
+
 
 def _fingerprint_default(value: object) -> object:
     """`json.dumps(..., default=...)` handler for the value shapes a check's
@@ -83,12 +87,6 @@ class CheckOrchestrator:
         *,
         fix_mode: bool = False,
     ) -> None:
-        """Initialize the orchestrator.
-
-        Args:
-            checks: List of check instances to run
-            fix_mode: If True, apply auto-fixes for fixable violations
-        """
         self.checks = checks
         self.fix_mode = fix_mode
         self.cache = CacheManager(hook_name="ruff-extra-rules", cache_version=self._generate_cache_key())
@@ -109,19 +107,12 @@ class CheckOrchestrator:
         self.rule_failures: list[tuple[str, str]] = []
 
     def process_files(self, filepaths: list[str]) -> dict[str, list[Violation]]:
-        """Process files and return violations for each file.
-
-        Args:
-            filepaths: List of file paths to check
-
-        Returns:
-            Dict mapping filepath to list of violations. A file that
-            couldn't be read or parsed has no entry here (indistinguishable
-            from "processed, zero violations") — check
-            `self.unprocessable_files` for those. A file where one check
-            crashed while others ran fine can still have an entry here (the
-            other checks' violations), but its results are incomplete —
-            check `self.rule_failures` for those.
+        """A file that couldn't be read or parsed has no entry in the
+        returned dict (indistinguishable from "processed, zero
+        violations") — check `self.unprocessable_files` for those. A file
+        where one check crashed while others ran fine can still have an
+        entry here (the other checks' violations), but its results are
+        incomplete — check `self.rule_failures` for those.
         """
         self.unprocessable_files = []
         self.rule_failures = []
@@ -129,39 +120,36 @@ class CheckOrchestrator:
         if not filepaths:
             return {}
 
-        # Step 1: Aggregate pre-filter patterns from all checks
         patterns = []
         for check in self.checks:
             check_patterns = check.get_prefilter_pattern()
             if check_patterns:
                 patterns.extend(check_patterns)
 
-        # Step 2: Pre-filter files (OR logic: file matches if it contains ANY pattern).
-        # No patterns means all files need to be checked.
+        # OR logic: a file is a candidate if it contains ANY pattern. No
+        # patterns means every file needs to be checked.
         candidate_files = batch_filter_files(filepaths, patterns) if patterns else filepaths
 
         if not candidate_files:
             return {}
 
-        # Step 3: Process each file. self.cache's own cache_version (set at
-        # construction from _generate_cache_key()) already gates staleness —
-        # no separate per-file cache_key needed here.
+        # self.cache's own cache_version (set at construction from
+        # _generate_cache_key()) already gates staleness — no separate
+        # per-file cache_key needed here.
         all_violations: dict[str, list[Violation]] = {}
 
         for filepath_str in candidate_files:
             filepath = Path(filepath_str)
 
-            # Try cache first (skip in fix mode since file will be modified)
+            # Skip the cache in fix mode, since the file will be modified.
             cached_violations: list[Violation] | None = None
             if not self.fix_mode:
                 cached_violations = self._get_cached_violations(filepath)
 
             violations: list[Violation] | None
             if cached_violations is not None:
-                # Cache hit
                 violations = cached_violations
             else:
-                # Cache miss - run checks
                 rule_failures_before = len(self.rule_failures)
                 violations = self._check_file(filepath)
                 had_rule_failure = len(self.rule_failures) > rule_failures_before
@@ -210,14 +198,6 @@ class CheckOrchestrator:
         return "|".join([",".join(check_ids), ",".join(fingerprints), tree_hash, python_version])
 
     def _get_cached_violations(self, filepath: Path) -> list[Violation] | None:
-        """Retrieve cached violations for a file.
-
-        Args:
-            filepath: Path to file
-
-        Returns:
-            List of violations if cache hit, None if cache miss
-        """
         try:
             # self.cache's own cache_version already rejects a stale entry
             # (enabled checks, their config, or this package's own source
@@ -226,7 +206,6 @@ class CheckOrchestrator:
             if cached is None:
                 return None
 
-            # Deserialize violations
             violations = [
                 Violation(
                     check_id=v_dict["check_id"],
@@ -246,15 +225,7 @@ class CheckOrchestrator:
             return violations
 
     def _cache_violations(self, filepath: Path, violations: list[Violation]) -> None:
-        """Cache violations for a file.
-
-        Args:
-            filepath: Path to file
-            violations: List of violations to cache
-        """
         try:
-            # Serialize violations (skip fix_data as it may contain
-            # non-serializable objects like AST nodes)
             serialized = [
                 {
                     "check_id": v.check_id,
@@ -273,18 +244,9 @@ class CheckOrchestrator:
             logger.warning("Cache serialization failed: %s", repr(error))
 
     def _read_source(self, filepath: Path) -> tuple[str, str] | None:
-        """Read a file's content, honoring a PEP 263 encoding declaration.
-
-        Thin error-handling wrapper around read_source_with_encoding: logs
+        """Thin error-handling wrapper around read_source_with_encoding: logs
         and returns None on any failure instead of raising, since every
         caller here treats "file couldn't be processed" the same way.
-
-        Args:
-            filepath: Path to file
-
-        Returns:
-            (source, encoding) so a fix() can write back in the same
-            encoding, or None if the file couldn't be read/decoded
 
         Debug-only logging: every caller already turns a None return into
         its own clean, user-facing diagnostic (_check_file's own caller
@@ -308,21 +270,12 @@ class CheckOrchestrator:
             return None
 
     def _check_file(self, filepath: Path) -> list[Violation] | None:
-        """Check a file with all enabled checks.
-
-        Args:
-            filepath: Path to file
-
-        Returns:
-            List of violations, or None if file couldn't be processed
-        """
         read_result = self._read_source(filepath)
         if read_result is None:
             return None
         source, _encoding = read_result
 
         try:
-            # Parse AST once
             tree = ast.parse(source, filename=str(filepath))
         except SyntaxError:
             # Debug-only: the caller reports this via unprocessable_files —
@@ -331,7 +284,6 @@ class CheckOrchestrator:
             logger.debug("Failed to parse %s", filepath, exc_info=True)
             return None
 
-        # Run all checks on the same tree
         all_violations: list[Violation] = []
         for check in self.checks:
             try:
@@ -344,7 +296,6 @@ class CheckOrchestrator:
                 logger.debug("Check %s failed on %s", check.check_id, filepath, exc_info=True)
                 self.rule_failures.append((str(filepath), check.check_id))
 
-        # Apply fixes if in fix mode
         if self.fix_mode and all_violations:
             self._apply_fixes(filepath, all_violations)
 
@@ -355,24 +306,18 @@ class CheckOrchestrator:
         filepath: Path,
         violations: list[Violation],
     ) -> None:
-        """Apply fixes for fixable violations.
-
-        Args:
-            filepath: Path to file
-            violations: All violations found in file so far this run.
-                Mutated in place: each fixable check's own stale entries
-                (collected once, before any fix ran) are replaced with a
-                freshly recomputed list, each marked fixed/rejected/errored/
-                left alone against the file's actual post-fix state. Matching a
-                stale entry back to "is this the same violation, now fixed"
-                by identity isn't reliable — an earlier check's own fix can
-                shift line/col numbers, and two distinct violations can
-                share an identical message (e.g. a same-named free function
-                and method both suggesting the same rename) — so the stale
-                entries for this check_id are discarded outright rather
-                than matched.
+        """`violations` holds all violations found in the file so far this
+        run, and is mutated in place: each fixable check's own stale entries
+        (collected once, before any fix ran) are replaced with a freshly
+        recomputed list, each marked fixed/rejected/errored/left alone
+        against the file's actual post-fix state. Matching a stale entry
+        back to "is this the same violation, now fixed" by identity isn't
+        reliable — an earlier check's own fix can shift line/col numbers,
+        and two distinct violations can share an identical message (e.g. a
+        same-named free function and method both suggesting the same
+        rename) — so the stale entries for this check_id are discarded
+        outright rather than matched.
         """
-        # Which checks reported at least one fixable violation
         fixable_check_ids = {v.check_id for v in violations if v.fixable}
 
         # Whether any check's fix() actually resolved at least one violation
@@ -382,7 +327,6 @@ class CheckOrchestrator:
         # its own extra read+parse+recheck.
         file_changed = False
 
-        # Apply fixes for each check
         for check in self.checks:
             if check.check_id not in fixable_check_ids:
                 continue
@@ -558,9 +502,7 @@ class CheckOrchestrator:
         violation would be worse than leaving its position stale (ch. 34:
         "MUST prefer a visible failure over a silent incorrect result").
 
-        Args:
-            filepath: Path to file
-            violations: Same list `_apply_fixes` mutates in place
+        `violations` is the same list `_apply_fixes` mutates in place.
         """
         final_read = self._read_source(filepath)
         if final_read is None:
@@ -601,7 +543,7 @@ class CheckOrchestrator:
         filepath: Path,
         check: ASTCheck,
         fresh_violations: list[Violation],
-    ) -> set[tuple[int, int, str]]:
+    ) -> set[ViolationKey]:
         """Re-check `filepath` against its actual current on-disk content
         and call `mark_fixed()` on every violation in `fresh_violations`
         that's no longer present there — regardless of whether `check.fix()`
@@ -609,18 +551,16 @@ class CheckOrchestrator:
         more than once per `fix()` call (looping over violations
         individually, like `validate_function_name`) can have already
         committed some violations before a later one failed or raised;
-        matching by (line, col, message) against the file's real state,
-        rather than trusting a bool return or "fix() didn't raise", is what
+        matching by `ViolationKey` against the file's real state, rather
+        than trusting a bool return or "fix() didn't raise", is what
         catches that.
 
-        Returns:
-            The (line, col, message) keys of `fresh_violations` still
-            present, so a caller with more context (e.g. "fix() itself
-            raised for this check") can mark those specifically, distinct
-            from the ones already resolved by this call. If the file
-            couldn't be re-read (e.g. deleted concurrently), conservatively
-            returns every key unresolved — nothing is marked fixed on an
-            unverifiable outcome.
+        Returns the keys of `fresh_violations` still present, so a caller
+        with more context (e.g. "fix() itself raised for this check") can
+        mark those specifically, distinct from the ones already resolved by
+        this call. If the file couldn't be re-read (e.g. deleted
+        concurrently), conservatively returns every key unresolved —
+        nothing is marked fixed on an unverifiable outcome.
         """
         post_read_result = self._read_source(filepath)
         if post_read_result is None:
@@ -628,7 +568,9 @@ class CheckOrchestrator:
 
         post_source, _post_encoding = post_read_result
         post_tree = ast.parse(post_source, filename=str(filepath))
-        still_present = {(v.line, v.col, v.message) for v in check.check(filepath, post_tree, post_source) if v.fixable}
+        still_present: set[ViolationKey] = {
+            (v.line, v.col, v.message) for v in check.check(filepath, post_tree, post_source) if v.fixable
+        }
         for v in fresh_violations:
             if (v.line, v.col, v.message) not in still_present:
                 mark_fixed(v)
@@ -640,19 +582,9 @@ def load_checks(
     ignore: set[str] | None = None,
     check_args: dict[str, Any] | None = None,
 ) -> list[ASTCheck]:
-    """Load and instantiate checks based on select/ignore sets.
-
-    Mirrors `ruff check --select`/`--ignore`: `select` narrows the
+    """Mirrors `ruff check --select`/`--ignore`: `select` narrows the
     candidate set (None = all checks), and `ignore` always subtracts from
     whatever that candidate set is, whether or not `select` was given.
-
-    Args:
-        select: Set of check IDs to restrict to (None = all checks)
-        ignore: Set of check IDs to exclude, applied on top of `select`
-        check_args: Dict of check-specific arguments
-
-    Returns:
-        List of instantiated check objects
     """
     if check_args is None:
         check_args = {}
@@ -668,13 +600,12 @@ def load_checks(
 
         check_id = check.check_id
 
-        # Determine if check should be loaded
         if select is not None and check_id not in select:
             continue
         if ignore is not None and check_id in ignore:
             continue
 
-        # Re-instantiate with check-specific arguments, if any were given
+        # Re-instantiate with check-specific arguments, if any were given.
         args = check_args.get(check_id, {})
         if args:
             try:

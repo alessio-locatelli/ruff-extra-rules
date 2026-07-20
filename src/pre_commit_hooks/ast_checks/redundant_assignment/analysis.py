@@ -5,17 +5,17 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pre_commit_hooks.ast_checks._base import fast_get_source_segment, split_lines_like_ast
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+type UsageContext = Literal["attribute_or_subscript_assignment", "augmented_assignment", "unknown"]
+
 
 class PatternType(Enum):
-    """Types of redundant assignment patterns."""
-
     IMMEDIATE_SINGLE_USE = auto()  # x = "foo"; func(x=x)
     SINGLE_USE = auto()  # x = calc(); return x
     LITERAL_IDENTITY = auto()  # foo = "foo"
@@ -23,25 +23,6 @@ class PatternType(Enum):
 
 @dataclass
 class AssignmentInfo:
-    """Tracks a variable assignment.
-
-    Attributes:
-        var_name: Variable name
-        line: Line number of assignment
-        col: Column offset of assignment
-        stmt_index: Position in scope body (for distance calculation)
-        rhs_node: Right-hand side AST node
-        rhs_source: Right-hand side source code
-        scope_id: Scope identifier for isolation
-        has_type_annotation: Whether assignment has type annotation
-        in_loop: Whether assignment is inside a loop
-        in_control_flow: Whether assignment is inside control flow (if/try/with)
-        in_global_scope: Whether assignment is in global/module scope
-        has_comment_above: Whether there's a comment right above the assignment
-        has_inline_comment: Whether there's an inline comment on the assignment line
-        rhs_has_await: Whether the RHS contains an await expression
-    """
-
     var_name: str
     line: int
     col: int
@@ -60,68 +41,44 @@ class AssignmentInfo:
 
 @dataclass
 class UsageInfo:
-    """Tracks a variable usage.
-
-    Attributes:
-        var_name: Variable name
-        line: Line number of usage
-        col: Column offset of usage
-        stmt_index: Position in scope body
-        context: Usage context ('return', 'call', 'operation', etc.')
-        scope_id: Scope identifier for isolation
-        usage_has_await: Whether the usage is wrapped in an await expression
-        in_control_flow: Whether usage is inside control flow (if/try/with/match)
-        in_loop: Whether usage is inside a loop (for/while), independent of
-            whether the *assignment* is — used to reject inlining a call
-            whose single textual use would actually execute repeatedly
-        in_lambda: Whether usage is inside a lambda body — used to reject
-            inlining a call whose single textual use would actually execute
-            later (and possibly repeatedly) at call time, not once at the
-            original assignment point
-        node: The exact AST node for this use (identity, not just position).
-            None for usage kinds that don't track it.
-        enclosing_stmt: The statement containing `node`, for
-            `analysis.is_preceded_by_call`. Stored (not eagerly evaluated)
-            so the O(statement size) evaluation-order walk only runs for the
-            rare usages that actually need it (should_autofix's
-            zero-arg-call carve-out) instead of every Name-load in the file.
-    """
-
     var_name: str
     line: int
     col: int
     stmt_index: int
-    context: str
+    context: UsageContext
     scope_id: int
     usage_has_await: bool = False
     in_control_flow: bool = False
+    # Independent of whether the *assignment* is in a loop — used to reject
+    # inlining a call whose single textual use would actually execute
+    # repeatedly.
     in_loop: bool = False
+    # A use inside a lambda body executes later (and possibly repeatedly, or
+    # never) at call time, not once at the point the lambda is defined.
     in_lambda: bool = False
     in_comprehension: bool = False
+    # Identity of the node for this use, not just its position. None for
+    # usage kinds that don't track it.
     node: ast.expr | None = None
+    # The statement containing `node`, for is_preceded_by_call below. Stored
+    # (not eagerly evaluated) so its O(statement size) evaluation-order walk
+    # only runs for the rare usages that actually need it (should_autofix's
+    # zero-arg-call carve-out) instead of every Name-load in the file.
     enclosing_stmt: ast.stmt | None = None
 
 
 @dataclass
 class VariableLifecycle:
-    """Complete lifecycle of a variable in its scope.
-
-    Attributes:
-        assignment: Assignment information
-        uses: List of all uses of the variable
-    """
-
     assignment: AssignmentInfo
     uses: list[UsageInfo]
 
     @property
     def is_single_use(self) -> bool:
-        """Check if variable is used exactly once."""
         return len(self.uses) == 1
 
     @property
     def is_immediate_use(self) -> bool:
-        """Check if first use is within 0-1 statements from assignment.
+        """First use is 0-1 statements after the assignment.
 
         Uses in different scopes (closures) are never considered immediate,
         even if their statement index appears close, because they're in
@@ -131,24 +88,13 @@ class VariableLifecycle:
             return False
         first_use = self.uses[0]
 
-        # If the use is in a different scope, it's a closure - not immediate
         if first_use.scope_id != self.assignment.scope_id:
             return False
 
-        # Immediate = same statement or next statement, same scope
         return first_use.stmt_index <= self.assignment.stmt_index + 1
 
 
 def _has_await_expression(node: ast.expr) -> bool:
-    """Check if an AST node contains an await expression.
-
-    Args:
-        node: AST expression node
-
-    Returns:
-        True if node contains await expression
-    """
-
     class AwaitDetector(ast.NodeVisitor):
         def __init__(self) -> None:
             self.has_await = False
@@ -212,12 +158,6 @@ def _evaluation_order_children(node: ast.AST) -> Iterator[tuple[ast.AST, bool]]:
       `body`/`orelse` does — never both, and never unconditionally.
     - `ast.BoolOp` (`and`/`or`): short-circuits, so only the first operand
       is guaranteed to evaluate; the rest are conditional on earlier ones.
-
-    Args:
-        node: Node whose children to yield
-
-    Returns:
-        (child, is_conditional) pairs in true evaluation order
     """
     if isinstance(node, ast.Dict):
         for key, value in zip(node.keys, node.values, strict=True):
@@ -248,26 +188,20 @@ def _call_precedes_target(node: ast.AST, target: ast.AST) -> tuple[bool, bool, b
 
     It's AST-based rather than text/line-based specifically so it stays
     correct across multi-line statements, where a sibling operand's
-    physical line/column says nothing about evaluation order.
+    physical line/column says nothing about evaluation order. `target` is
+    matched by identity, not structural equality.
 
-    Args:
-        node: Subtree to search
-        target: The exact node instance being searched for (identity, not
-            structural equality)
-
-    Returns:
-        A (found, effect_before_target, node_is_or_contains_effect) triple:
-        - found: whether `target` is `node` itself or within its subtree
-        - effect_before_target: whether a potentially effectful node (see
-          `_POTENTIALLY_EFFECTFUL_NODE_TYPES`) fully evaluated before
-          reaching `target`, OR `target` is only conditionally reachable
-          (see `_evaluation_order_children`) — only meaningful when
-          `found` is True
-        - node_is_or_contains_effect: whether `node` itself is (or
-          contains) a potentially effectful node that has fully evaluated —
-          only meaningful when `found` is False, since a call containing
-          `target` among its own arguments doesn't fire until after
-          `target` (and everything else in it) is evaluated
+    Returns a (found, effect_before_target, node_is_or_contains_effect) triple:
+    - found: whether `target` is `node` itself or within its subtree
+    - effect_before_target: whether a potentially effectful node (see
+      `_POTENTIALLY_EFFECTFUL_NODE_TYPES`) fully evaluated before reaching
+      `target`, OR `target` is only conditionally reachable (see
+      `_evaluation_order_children`) — only meaningful when `found` is True
+    - node_is_or_contains_effect: whether `node` itself is (or contains) a
+      potentially effectful node that has fully evaluated — only meaningful
+      when `found` is False, since a call containing `target` among its own
+      arguments doesn't fire until after `target` (and everything else in
+      it) is evaluated
     """
     if node is target:
         return True, False, False
@@ -303,13 +237,8 @@ def is_preceded_by_call(use: UsageInfo) -> bool:
     `sink(side_effect(), value)` would run the inlined call *after*
     `side_effect()`, reversed from the original assign-then-use order).
 
-    Args:
-        use: The usage to check
-
-    Returns:
-        True if something potentially effectful precedes `use`, or
-        `use.node`/`use.enclosing_stmt` is unavailable so safety can't be
-        verified (conservative default)
+    Returns True conservatively when `use.node`/`use.enclosing_stmt` is
+    unavailable, since safety can't be verified in that case.
     """
     if use.node is None or use.enclosing_stmt is None:
         return True
@@ -318,39 +247,19 @@ def is_preceded_by_call(use: UsageInfo) -> bool:
 
 
 def _has_comment_above(line_number: int, source_lines: list[str]) -> bool:
-    """Check if there's a comment right above the given line.
-
-    Args:
-        line_number: Line number (1-indexed)
-        source_lines: List of source code lines
-
-    Returns:
-        True if there's a comment on the line directly above
-    """
     if line_number <= 1 or line_number > len(source_lines):
         return False
 
-    # Check the line above (convert to 0-indexed)
+    # -2, not -1: the line *above* `line_number`, converted to 0-indexed.
     prev_line = source_lines[line_number - 2].strip()
 
-    # Check if it's a comment line (starts with #)
     return prev_line.startswith("#")
 
 
 def _has_inline_comment(line_number: int, source_lines: list[str]) -> bool:
-    """Check if there's an inline comment on the given line.
-
-    Args:
-        line_number: Line number (1-indexed)
-        source_lines: List of source code lines
-
-    Returns:
-        True if there's an inline comment on the line
-    """
     if line_number < 1 or line_number > len(source_lines):
         return False
 
-    # Get the line (convert to 0-indexed)
     line = source_lines[line_number - 1]
 
     # Simple check: look for # that's not inside a string
@@ -372,18 +281,9 @@ def _has_inline_comment(line_number: int, source_lines: list[str]) -> bool:
 
 
 class VariableTracker(ast.NodeVisitor):
-    """Tracks variable assignments and uses across scopes.
-
-    This visitor traverses the AST and builds a comprehensive map of variable
-    lifecycles, tracking where variables are assigned and where they're used.
-    """
+    """Builds a map of variable lifecycles: where each variable is assigned and where it's used, across scopes."""
 
     def __init__(self, source: str) -> None:
-        """Initialize the tracker.
-
-        Args:
-            source: Source code being analyzed
-        """
         self.source = source
         self.source_lines = source.splitlines()
         # For _get_source_segment only: split on the same line boundaries
@@ -391,42 +291,29 @@ class VariableTracker(ast.NodeVisitor):
         # (see split_lines_like_ast).
         self._ast_lines = split_lines_like_ast(source)
 
-        # Scope tracking
         self.current_scope_id = 0
-        self.scope_stack: list[int] = [0]  # Start with module scope
-
-        # Statement index tracking within current scope
+        self.scope_stack: list[int] = [0]  # 0 = module scope
         self.stmt_index_stack: list[int] = [0]
-
-        # Track assignments: (scope_id, var_name) -> list[AssignmentInfo]
         self.assignments: dict[tuple[int, str], list[AssignmentInfo]] = {}
-
-        # Track uses: (scope_id, var_name) -> list[UsageInfo]
         self.uses: dict[tuple[int, str], list[UsageInfo]] = {}
-
-        # Track global/nonlocal declarations to skip them
         self.global_vars: set[tuple[int, str]] = set()
         self.nonlocal_vars: set[tuple[int, str]] = set()
 
-        # Track which names are currently being assigned (to avoid treating
-        # the LHS of an assignment as a use)
+        # So the LHS of an assignment is never itself treated as a use.
         self.currently_assigning: set[str] = set()
 
-        # Track if we're inside a loop (for, while)
         self.loop_depth = 0
 
-        # Track if we're inside control flow (if, try, with, match)
+        # if/try/with/match — excludes loops, tracked separately above.
         self.control_flow_depth = 0
 
-        # Track if we're inside a comprehension (list/set/dict/generator)
         self.comprehension_depth = 0
 
-        # Track if we're inside a lambda body — a use here executes later
-        # (and possibly repeatedly, or never) at call time, not once at the
-        # point the lambda is defined
+        # A use inside a lambda body executes later (and possibly
+        # repeatedly, or never) at call time, not once at the point the
+        # lambda is defined.
         self.lambda_depth = 0
 
-        # Track parent nodes for context detection
         self.parent_stack: list[ast.AST] = []
 
         # Innermost enclosing statement of whatever node is currently being
@@ -435,78 +322,51 @@ class VariableTracker(ast.NodeVisitor):
         # run lazily, later, only for the rare usages that need it.
         self.current_stmt: ast.stmt | None = None
 
-        # Track parent-child scope relationships for closure detection
-        # Maps child_scope_id -> parent_scope_id
+        # child_scope_id -> parent_scope_id, for closure detection.
         self.scope_parents: dict[int, int] = {}
 
     def _enter_scope(self) -> None:
-        """Enter a new scope (function, class, etc.)."""
         parent_scope_id = self._get_current_scope_id()
         self.current_scope_id += 1
         child_scope_id = self.current_scope_id
 
-        # Track parent-child relationship
         self.scope_parents[child_scope_id] = parent_scope_id
 
         self.scope_stack.append(child_scope_id)
         self.stmt_index_stack.append(0)
 
     def _exit_scope(self) -> None:
-        """Exit the current scope."""
         self.scope_stack.pop()
         self.stmt_index_stack.pop()
 
     def _increment_stmt_index(self) -> None:
-        """Increment the statement index in the current scope.
-
-        stmt_index_stack is initialized with [0] and only ever grows/shrinks
-        in balanced pairs via _enter_scope/_exit_scope, so it's never empty.
-        """
+        # stmt_index_stack is initialized with [0] and only ever grows/shrinks
+        # in balanced pairs via _enter_scope/_exit_scope, so it's never empty.
         self.stmt_index_stack[-1] += 1
 
     def _get_current_scope_id(self) -> int:
-        """Get the current scope ID."""
         return self.scope_stack[-1] if self.scope_stack else 0
 
     def _get_current_stmt_index(self) -> int:
-        """Get the current statement index."""
         return self.stmt_index_stack[-1] if self.stmt_index_stack else 0
 
     def _get_child_scopes(self, scope_id: int) -> list[int]:
-        """Get all direct and indirect child scopes of a given scope.
-
-        This is used to detect closures - variables assigned in an outer scope
-        but used in nested function scopes.
-
-        Args:
-            scope_id: Parent scope ID
-
-        Returns:
-            List of all descendant scope IDs
+        """All direct and indirect child scopes of `scope_id`, to detect closures —
+        variables assigned in an outer scope but used in nested function scopes.
         """
         children = []
-        # Find all direct children
         for child_id, parent_id in self.scope_parents.items():
             if parent_id == scope_id:
                 children.append(child_id)
-                # Recursively get grandchildren
                 children.extend(self._get_child_scopes(child_id))
         return children
 
     def _get_source_segment(self, node: ast.expr) -> str:
-        """Get source code for an AST node.
-
-        Reuses self._ast_lines (computed once in __init__) via
+        """Reuses self._ast_lines (computed once in __init__) via
         fast_get_source_segment instead of ast.get_source_segment's own
         per-call re-split of the whole file — called once per assignment
         across the whole file, so the difference is O(source size) total
         instead of O(assignments x source size).
-
-        Args:
-            node: AST node
-
-        Returns:
-            Source code string, or empty string if unavailable
         """
         try:
             return fast_get_source_segment(self.source, self._ast_lines, node) or ""
@@ -519,46 +379,29 @@ class VariableTracker(ast.NodeVisitor):
             return ""
 
     def _is_simple_name_target(self, target: ast.expr) -> bool:
-        """Check if assignment target is a simple name (not tuple, attribute, etc.).
-
-        Args:
-            target: Assignment target node
-
-        Returns:
-            True if target is a simple name
-        """
         return isinstance(target, ast.Name)
 
     def visit_Global(self, node: ast.Global) -> None:
-        """Track global declarations."""
         scope_id = self._get_current_scope_id()
         for name in node.names:
             self.global_vars.add((scope_id, name))
         self.generic_visit(node)
 
     def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
-        """Track nonlocal declarations."""
         scope_id = self._get_current_scope_id()
         for name in node.names:
             self.nonlocal_vars.add((scope_id, name))
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        """Visit function definition (enter new scope).
-
-        Decorators are evaluated in the outer (enclosing) scope before the
+        """Decorators are evaluated in the outer (enclosing) scope before the
         function body, so they must be visited before entering the new scope.
-
-        Args:
-            node: Function definition node
         """
-        # Visit decorators in the OUTER scope — they're evaluated there
         for decorator in node.decorator_list:
             self.visit(decorator)
 
         self._enter_scope()
 
-        # Visit function body
         for stmt in node.body:
             self.visit(stmt)
             self._increment_stmt_index()
@@ -568,98 +411,52 @@ class VariableTracker(ast.NodeVisitor):
     visit_AsyncFunctionDef = visit_FunctionDef  # noqa: N815
 
     def visit_For(self, node: ast.For) -> None:
-        """Visit for loop (track loop depth).
-
-        Args:
-            node: For loop node
-        """
         self.loop_depth += 1
         self.generic_visit(node)
         self.loop_depth -= 1
 
     def visit_While(self, node: ast.While) -> None:
-        """Visit while loop (track loop depth).
-
-        Args:
-            node: While loop node
-        """
         self.loop_depth += 1
         self.generic_visit(node)
         self.loop_depth -= 1
 
     def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
-        """Visit async for loop (track loop depth).
-
-        Args:
-            node: Async for loop node
-        """
         self.loop_depth += 1
         self.generic_visit(node)
         self.loop_depth -= 1
 
     def visit_If(self, node: ast.If) -> None:
-        """Visit if statement (track control flow depth).
-
-        Args:
-            node: If statement node
-        """
         self.control_flow_depth += 1
         self.generic_visit(node)
         self.control_flow_depth -= 1
 
     def visit_Try(self, node: ast.Try) -> None:
-        """Visit try statement (track control flow depth).
-
-        Args:
-            node: Try statement node
-        """
         self.control_flow_depth += 1
         self.generic_visit(node)
         self.control_flow_depth -= 1
 
     def visit_With(self, node: ast.With) -> None:
-        """Visit with statement (track control flow depth).
-
-        Args:
-            node: With statement node
-        """
         self.control_flow_depth += 1
         self.generic_visit(node)
         self.control_flow_depth -= 1
 
     def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
-        """Visit async with statement (track control flow depth).
-
-        Args:
-            node: Async with statement node
-        """
         self.control_flow_depth += 1
         self.generic_visit(node)
         self.control_flow_depth -= 1
 
     def visit_Match(self, node: ast.Match) -> None:
-        """Visit match statement (track control flow depth).
-
-        Each case body only runs conditionally (if its pattern/guard
-        matches), same as an if/elif branch.
-
-        Args:
-            node: Match statement node
-        """
+        # Each case body only runs conditionally (if its pattern/guard
+        # matches), same as an if/elif branch.
         self.control_flow_depth += 1
         self.generic_visit(node)
         self.control_flow_depth -= 1
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        """Visit lambda expression (track lambda depth).
-
-        A lambda's body doesn't execute where it's defined — it executes
+        """A lambda's body doesn't execute where it's defined — it executes
         later, whenever (and however many times, including zero) the
         lambda is called. Uses inside it must never be treated as
         "the same execution point" as the surrounding statement.
-
-        Args:
-            node: Lambda expression node
         """
         self.lambda_depth += 1
         self.generic_visit(node)
@@ -669,76 +466,39 @@ class VariableTracker(ast.NodeVisitor):
         self,
         node: ast.ListComp | ast.SetComp | ast.GeneratorExp | ast.DictComp,
     ) -> None:
-        """Visit a comprehension node (track comprehension depth).
-
-        Args:
-            node: Comprehension node (list, set, dict, or generator)
-        """
         self.comprehension_depth += 1
         self.generic_visit(node)
         self.comprehension_depth -= 1
 
     def visit_ListComp(self, node: ast.ListComp) -> None:
-        """Visit list comprehension.
-
-        Args:
-            node: List comprehension node
-        """
         self._visit_comprehension(node)
 
     def visit_SetComp(self, node: ast.SetComp) -> None:
-        """Visit set comprehension.
-
-        Args:
-            node: Set comprehension node
-        """
         self._visit_comprehension(node)
 
     def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:
-        """Visit generator expression.
-
-        Args:
-            node: Generator expression node
-        """
         self._visit_comprehension(node)
 
     def visit_DictComp(self, node: ast.DictComp) -> None:
-        """Visit dict comprehension.
-
-        Args:
-            node: Dict comprehension node
-        """
         self._visit_comprehension(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """Visit class definition (enter new scope).
-
-        We skip class-level assignments as they're attributes, not local variables.
-        Decorators are evaluated in the outer scope before the class body.
-
-        Args:
-            node: Class definition node
+        """We skip class-level assignments as they're attributes, not local
+        variables. Decorators are evaluated in the outer scope before the
+        class body.
         """
-        # Visit decorators in the OUTER scope — they're evaluated there
         for decorator in node.decorator_list:
             self.visit(decorator)
 
         self._enter_scope()
 
-        # Visit class body but don't track assignments at class level
         for stmt in node.body:
             if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
                 self.visit(stmt)
-            # Skip direct assignments in class body (class attributes)
 
         self._exit_scope()
 
     def visit_Assign(self, node: ast.Assign) -> None:
-        """Track simple assignments.
-
-        Args:
-            node: Assignment node
-        """
         scope_id = self._get_current_scope_id()
         stmt_index = self._get_current_stmt_index()
 
@@ -746,7 +506,6 @@ class VariableTracker(ast.NodeVisitor):
         # These patterns often intentionally assign intermediate variables
         # and avoid re-reading class attributes
         if len(node.targets) > 1:
-            # Still visit RHS to track any variable uses
             self.visit(node.value)
             return
 
@@ -756,17 +515,12 @@ class VariableTracker(ast.NodeVisitor):
                 assert isinstance(target, ast.Name)  # Type narrowing
                 var_name = target.id
 
-                # Skip global/nonlocal variables
                 if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
                     continue
 
-                # Mark as currently assigning to avoid treating LHS as use
                 self.currently_assigning.add(var_name)
-
-                # Get RHS source
                 rhs_source = self._get_source_segment(node.value)
 
-                # Create assignment info
                 assignment = AssignmentInfo(
                     var_name=var_name,
                     line=node.lineno,
@@ -784,50 +538,31 @@ class VariableTracker(ast.NodeVisitor):
                     rhs_has_await=_has_await_expression(node.value),
                 )
 
-                # Store assignment
                 key = (scope_id, var_name)
                 if key not in self.assignments:
                     self.assignments[key] = []
                 self.assignments[key].append(assignment)
             elif isinstance(target, ast.Attribute | ast.Subscript):
-                # Track attribute/subscript assignments
-                # (e.g., obj.attr = value, obj[key] = value)
-                # The base object is being USED, so we need to track it
                 self._track_attribute_or_subscript_base_usage(target, stmt_index)
 
-        # Visit RHS to track any variable uses
         self.visit(node.value)
-
-        # Clear currently assigning
         self.currently_assigning.clear()
 
     def _track_attribute_or_subscript_base_usage(self, node: ast.Attribute | ast.Subscript, stmt_index: int) -> None:
-        """Track usage of base variable in attribute/subscript assignments.
-
-        When we have `obj.attr = value` or `obj[key] = value`, the `obj` variable
-        is being USED (read), so we need to track it as a usage.
-
-        Args:
-            node: Attribute or Subscript node
-            stmt_index: Current statement index
-        """
+        """In `obj.attr = value` or `obj[key] = value`, `obj` is being read, so it counts as a usage."""
         scope_id = self._get_current_scope_id()
 
-        # Find the base variable
         base: ast.expr = node
         while isinstance(base, ast.Attribute | ast.Subscript):
             # Both Attribute and Subscript have .value as the base
             base = base.value
 
-        # If the base is a simple name, track it as a usage
         if isinstance(base, ast.Name):
             var_name = base.id
 
-            # Skip if this is a global/nonlocal variable
             if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
                 return
 
-            # Track as usage
             usage = UsageInfo(
                 var_name=var_name,
                 line=base.lineno,
@@ -847,30 +582,19 @@ class VariableTracker(ast.NodeVisitor):
             self.uses[key].append(usage)
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
-        """Track annotated assignments.
-
-        Args:
-            node: Annotated assignment node
-        """
         scope_id = self._get_current_scope_id()
         stmt_index = self._get_current_stmt_index()
 
-        # Only track simple name assignments
         if self._is_simple_name_target(node.target) and node.value is not None:
             assert isinstance(node.target, ast.Name)  # Type narrowing
             var_name = node.target.id
 
-            # Skip global/nonlocal variables
             if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
                 return
 
-            # Mark as currently assigning
             self.currently_assigning.add(var_name)
-
-            # Get RHS source
             rhs_source = self._get_source_segment(node.value)
 
-            # Create assignment info
             assignment = AssignmentInfo(
                 var_name=var_name,
                 line=node.lineno,
@@ -879,7 +603,7 @@ class VariableTracker(ast.NodeVisitor):
                 rhs_node=node.value,
                 rhs_source=rhs_source,
                 scope_id=scope_id,
-                has_type_annotation=True,  # This is an annotated assignment
+                has_type_annotation=True,
                 in_loop=self.loop_depth > 0,
                 in_control_flow=self.control_flow_depth > 0,
                 in_global_scope=(scope_id == 0),
@@ -888,23 +612,17 @@ class VariableTracker(ast.NodeVisitor):
                 rhs_has_await=_has_await_expression(node.value),
             )
 
-            # Store assignment
             key = (scope_id, var_name)
             if key not in self.assignments:
                 self.assignments[key] = []
             self.assignments[key].append(assignment)
 
-            # Visit RHS
             self.visit(node.value)
-
-            # Clear currently assigning
             self.currently_assigning.clear()
 
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
-        """Track augmented assignments (+=, -=, etc.).
-
-        Augmented assignments READ the variable (to get current value) and then
-        mutate it in place. We track the READ as a usage, which prevents false
+        """`x += 1` reads `x` (to get its current value) and then mutates it in
+        place, so the read is tracked as a usage — this prevents false
         positives for patterns like:
             if condition:
                 msg = "foo"
@@ -912,27 +630,20 @@ class VariableTracker(ast.NodeVisitor):
                 msg = "bar"
             msg += " suffix"  # This USES the conditional value
 
-        We don't track augmented assignments as NEW assignments because they're
-        mutations of existing variables, not fresh assignments that could be
-        inlined.
-
-        Args:
-            node: Augmented assignment node
+        It's not tracked as a new assignment: it mutates an existing
+        variable rather than producing a fresh one that could be inlined.
         """
         scope_id = self._get_current_scope_id()
         stmt_index = self._get_current_stmt_index()
 
-        # Only track simple name targets
         if self._is_simple_name_target(node.target):
             assert isinstance(node.target, ast.Name)  # Type narrowing
             var_name = node.target.id
 
-            # Skip global/nonlocal variables
             if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
                 self.generic_visit(node)
                 return
 
-            # Track the READ (use) of the current value
             usage = UsageInfo(
                 var_name=var_name,
                 line=node.lineno,
@@ -947,7 +658,6 @@ class VariableTracker(ast.NodeVisitor):
                 self.uses[key] = []
             self.uses[key].append(usage)
 
-        # Visit RHS to track any uses of other variables
         self.visit(node.value)
 
     def visit(self, node: ast.AST) -> None:
@@ -965,17 +675,11 @@ class VariableTracker(ast.NodeVisitor):
         super().visit(node)
 
     def generic_visit(self, node: ast.AST) -> None:
-        """Visit a node and track parent context."""
         self.parent_stack.append(node)
         super().generic_visit(node)
         self.parent_stack.pop()
 
     def visit_Name(self, node: ast.Name) -> None:
-        """Track variable uses (loads).
-
-        Args:
-            node: Name node
-        """
         # Only track loads (uses), not stores (assignments)
         if not isinstance(node.ctx, ast.Load):
             return
@@ -988,16 +692,14 @@ class VariableTracker(ast.NodeVisitor):
         scope_id = self._get_current_scope_id()
         stmt_index = self._get_current_stmt_index()
 
-        # Check if this usage is wrapped in an await expression
         usage_has_await = any(isinstance(parent, ast.Await) for parent in self.parent_stack)
 
-        # Determine context
-        context = "unknown"
-        # Walk up parent nodes to determine context
-        # (This is a simplified version - a full implementation would use
-        # a parent tracking system)
+        # Name-load context isn't resolved to anything more specific than
+        # "unknown" — that would need walking parent nodes with a real
+        # parent-tracking system. Only the other two UsageContext values
+        # (set by the assignment-visiting methods above) are ever compared.
+        context: UsageContext = "unknown"
 
-        # Create usage info
         usage = UsageInfo(
             var_name=node.id,
             line=node.lineno,
@@ -1014,50 +716,35 @@ class VariableTracker(ast.NodeVisitor):
             enclosing_stmt=self.current_stmt,
         )
 
-        # Store usage
         key = (scope_id, node.id)
         if key not in self.uses:
             self.uses[key] = []
         self.uses[key].append(usage)
 
     def build_lifecycles(self) -> list[VariableLifecycle]:
-        """Build variable lifecycles from tracked assignments and uses.
-
-        Returns:
-            List of variable lifecycles
-        """
         lifecycles: list[VariableLifecycle] = []
 
-        # For each assignment, find its corresponding uses
         for (scope_id, var_name), assignment_list in self.assignments.items():
-            # For each assignment to this variable
             for assignment in assignment_list:
-                # Find uses of this variable in the same scope after this assignment
                 key = (scope_id, var_name)
                 all_uses = self.uses.get(key, [])
-
-                # Filter uses that come after this assignment
-                # (by comparing statement indices)
                 relevant_uses = [use for use in all_uses if use.stmt_index >= assignment.stmt_index]
 
-                # CLOSURE DETECTION: Also check for uses in nested scopes
-                # Variables captured by closures should not be marked as redundant
+                # Variables captured by closures should not be marked as redundant.
                 child_scopes = self._get_child_scopes(scope_id)
 
-                # Check if variable is declared nonlocal in any child scope
-                # This means the closure captures and potentially modifies it,
-                # so we should not flag the outer assignment as redundant
+                # A child scope's `nonlocal` declaration means the closure
+                # captures and potentially modifies this variable, so the
+                # outer assignment must not be flagged as redundant.
                 is_captured_by_nonlocal = any(
                     (child_scope_id, var_name) in self.nonlocal_vars for child_scope_id in child_scopes
                 )
                 if is_captured_by_nonlocal:
-                    # Skip this assignment entirely - it's captured by a closure
                     continue
 
                 for child_scope_id in child_scopes:
                     child_key = (child_scope_id, var_name)
                     child_uses = self.uses.get(child_key, [])
-                    # Add all uses from child scopes (closures)
                     relevant_uses.extend(child_uses)
 
                 # If there's a subsequent assignment to the same variable,
@@ -1070,15 +757,14 @@ class VariableTracker(ast.NodeVisitor):
                         next_assignment = other_assignment
 
                 if next_assignment:
-                    # Only include uses before the next assignment
-                    # (but keep ALL child scope uses since they're closures)
+                    # Keep ALL child scope uses since they're closures, even
+                    # past the next assignment.
                     relevant_uses = [
                         use
                         for use in relevant_uses
                         if use.stmt_index < next_assignment.stmt_index or use.scope_id in child_scopes
                     ]
 
-                # Create lifecycle
                 lifecycle = VariableLifecycle(
                     assignment=assignment,
                     uses=relevant_uses,
@@ -1089,23 +775,12 @@ class VariableTracker(ast.NodeVisitor):
 
 
 def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
-    """Detect if a variable lifecycle represents a redundant assignment.
-
-    Args:
-        lifecycle: Variable lifecycle to analyze
-
-    Returns:
-        Pattern type if redundant, None otherwise
-    """
-    # Must be single use
     if not lifecycle.is_single_use:
         return None
 
-    # Check if variable is used in a closure (different scope)
-    # Variables captured by closures should NEVER be considered redundant
+    # Variables captured by closures should NEVER be considered redundant.
     for use in lifecycle.uses:
         if use.scope_id != lifecycle.assignment.scope_id:
-            # This is a closure - variable is captured by nested function
             return None
 
     # Augmented-assignment targets (x += 1) can never be inlined: the "use"
@@ -1130,29 +805,18 @@ def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
 
 
 def _is_literal_identity(lifecycle: VariableLifecycle) -> bool:
-    """Check if assignment is a literal identity (e.g., foo = "foo").
-
-    Args:
-        lifecycle: Variable lifecycle to check
-
-    Returns:
-        True if literal identity
-    """
+    """True for a literal identity assignment, e.g. `foo = "foo"` (case- and underscore-insensitive)."""
     assignment = lifecycle.assignment
     rhs_node = assignment.rhs_node
 
-    # Check if RHS is a string literal
     if isinstance(rhs_node, ast.Constant) and isinstance(rhs_node.value, str):
-        # Check if variable name matches literal value (case-insensitive)
         var_name = assignment.var_name.lower()
         literal_value = rhs_node.value.lower()
 
-        # Direct match or variable name matches literal
         if var_name == literal_value:
             return True
 
-        # Also check if variable name is literal with case changes
-        # (e.g., FOO = "foo")
+        # Allow underscore differences too, e.g. variable FOO vs literal "foo"
         if var_name.replace("_", "") == literal_value.replace("_", ""):
             return True
 
