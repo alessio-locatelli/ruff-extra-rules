@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pre_commit_hooks.ast_checks import CheckOrchestrator
 from pre_commit_hooks.ast_checks.__main__ import _install_sigterm_handler, _raise_keyboard_interrupt, run
+from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

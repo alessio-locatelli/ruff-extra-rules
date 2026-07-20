@@ -12,16 +12,11 @@ from unittest import mock
 import pytest
 
 import pre_commit_hooks.ast_checks.validate_function_name as vfn_module
-from pre_commit_hooks import ast_checks
-from pre_commit_hooks.ast_checks import (
-    ALL_CHECKS,
-    CheckOrchestrator,
-    expand_directories,
-    filter_excluded_files,
-    load_checks,
-    main,
-)
+from pre_commit_hooks.ast_checks import ALL_CHECKS, _cli, _orchestrator
 from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, is_fix_errored, is_fix_rejected, is_fixed
+from pre_commit_hooks.ast_checks._cli import main
+from pre_commit_hooks.ast_checks._discovery import expand_directories, filter_excluded_files
+from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, load_checks
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
@@ -575,7 +570,7 @@ def test_generate_cache_key_changes_when_source_tree_changes(tmp_path: Path, mon
     fake_root = tmp_path / "pre_commit_hooks"
     fake_root.mkdir()
     (fake_root / "module.py").write_text("x = 1\n")
-    monkeypatch.setattr(ast_checks, "_PACKAGE_ROOT", fake_root)
+    monkeypatch.setattr(_orchestrator, "_PACKAGE_ROOT", fake_root)
 
     orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
     key_before = orchestrator._generate_cache_key()
@@ -590,16 +585,16 @@ def test_generate_cache_key_changes_when_python_version_changes(monkeypatch: pyt
     # ast.parse()'s output for identical source isn't guaranteed stable
     # across Python minor versions, so a .cache directory shared across an
     # interpreter upgrade must not silently reuse the old interpreter's
-    # results. Patches the `sys` name binding inside the ast_checks module
-    # (not the real global sys module) so only _generate_cache_key() sees a
-    # different version.
+    # results. Patches the `sys` name binding inside the _orchestrator
+    # module (not the real global sys module) so only _generate_cache_key()
+    # sees a different version.
     orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
     key_before = orchestrator._generate_cache_key()
 
     fake_sys = types.SimpleNamespace(
         version_info=types.SimpleNamespace(major=sys.version_info.major, minor=sys.version_info.minor + 1)
     )
-    monkeypatch.setattr(ast_checks, "sys", fake_sys)
+    monkeypatch.setattr(_orchestrator, "sys", fake_sys)
     key_after = orchestrator._generate_cache_key()
 
     assert key_before != key_after
@@ -1206,7 +1201,7 @@ def test_load_checks_check_specific_args_are_applied(
         def __init__(self, custom: str = "default") -> None:
             self.custom = custom
 
-    monkeypatch.setattr(ast_checks, "ALL_CHECKS", [*ALL_CHECKS, ConfigurableCheck])
+    monkeypatch.setattr(_orchestrator, "ALL_CHECKS", [*ALL_CHECKS, ConfigurableCheck])
 
     checks = load_checks(
         select={"configurable"},
@@ -1225,7 +1220,7 @@ def test_load_checks_skips_check_whose_init_raises(
         def __init__(self) -> None:
             raise RuntimeError("simulated broken check")
 
-    monkeypatch.setattr(ast_checks, "ALL_CHECKS", [*ALL_CHECKS, BrokenCheck])
+    monkeypatch.setattr(_orchestrator, "ALL_CHECKS", [*ALL_CHECKS, BrokenCheck])
 
     assert len(load_checks()) == len(ALL_CHECKS)
 
@@ -1694,7 +1689,13 @@ def test_main_check_specific_cli_arg_round_trip(
         def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
             return {"marker": args.configurable_marker}
 
-    monkeypatch.setattr(ast_checks, "ALL_CHECKS", [*ALL_CHECKS, ConfigurableCheck])
+    # main() and load_checks() each hold their own `ALL_CHECKS` name binding
+    # (imported via `from . import ALL_CHECKS` into `_cli.py` and
+    # `_orchestrator.py` respectively) -- both need patching for the
+    # synthetic check to reach both main()'s own CLI-arg wiring and
+    # load_checks()'s instantiation.
+    monkeypatch.setattr(_cli, "ALL_CHECKS", [*ALL_CHECKS, ConfigurableCheck])
+    monkeypatch.setattr(_orchestrator, "ALL_CHECKS", [*ALL_CHECKS, ConfigurableCheck])
 
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1\n")

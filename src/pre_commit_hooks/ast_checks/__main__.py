@@ -10,7 +10,7 @@ import signal
 import sys
 from typing import TYPE_CHECKING
 
-from . import main
+from ._cli import main
 
 if TYPE_CHECKING:
     from types import FrameType

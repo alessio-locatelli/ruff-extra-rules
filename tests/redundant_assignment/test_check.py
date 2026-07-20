@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pre_commit_hooks.ast_checks import CheckOrchestrator
+from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator
 from pre_commit_hooks.ast_checks.redundant_assignment import RedundantAssignmentCheck
 from tests.redundant_assignment._helpers import _check
 
