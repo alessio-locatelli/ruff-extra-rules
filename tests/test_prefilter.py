@@ -206,7 +206,7 @@ def test_git_grep_filter_falls_back_to_python_search(
     assert any(m.endswith("file2.py") for m in matches)
 
 
-def test_python_fallback_includes_unreadable_files(tmp_path: Path) -> None:
+def test_python_fallback_includes_unreadable_files(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     file1 = tmp_path / "readable.py"
     file1.write_text("data = 123")
 
@@ -215,7 +215,7 @@ def test_python_fallback_includes_unreadable_files(tmp_path: Path) -> None:
     file2.chmod(0o000)
 
     try:
-        with mock.patch("subprocess.run") as mock_run:
+        with mock.patch("subprocess.run") as mock_run, caplog.at_level("DEBUG"):
             mock_run.side_effect = FileNotFoundError()
 
             matches = git_grep_filter([str(file1), str(file2)], "data")
@@ -224,6 +224,16 @@ def test_python_fallback_includes_unreadable_files(tmp_path: Path) -> None:
             assert str(file2) in matches
     finally:
         file2.chmod(0o644)
+
+    # Regression: both the git-unavailable fallback and this file's own
+    # unreadable-file fallback are self-healing (the caller already keeps
+    # the file in as a candidate and the actual hook cleanly reports the
+    # read failure downstream) -- logging them at ERROR/.exception() level
+    # used to leak a raw traceback onto the user's stderr by default
+    # (nothing in this codebase configures logging, so Python's own
+    # lastResort handler prints WARNING+ straight to stderr), duplicating
+    # and cluttering the clean diagnostic the hook already prints.
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
 def test_git_grep_handles_binary_files(tmp_path: Path) -> None:

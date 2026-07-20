@@ -32,7 +32,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, cast
 
-from pre_commit_hooks.ast_checks._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
+from pre_commit_hooks.ast_checks._base import (
+    BaseCheck,
+    Violation,
+    byte_col_to_char_col,
+    find_ignored_lines,
+    ignore_pattern_for,
+)
 
 from .analysis import VariableTracker, detect_redundancy
 from .autofix import RedundantAssignmentFixData, apply_fixes
@@ -174,11 +180,19 @@ class RedundantAssignmentCheck(BaseCheck):
                 "use_col": single_use.col,
             }
 
+            # lifecycle.assignment.col is a UTF-8 byte offset (from
+            # ast.col_offset); the reported diagnostic column is a
+            # character offset (matching misplaced-comment's own
+            # tokenize-derived column), so convert before storing it on the
+            # Violation. fix_data's own "use_col" above is intentionally
+            # left as a raw byte offset: autofix.py re-reads and converts
+            # it itself, against whatever line the fix actually targets.
+            assign_line_text = tracker.source_lines[lifecycle.assignment.line - 1]
             violation = Violation(
                 check_id=self.check_id,
                 error_code=self.error_code,
                 line=lifecycle.assignment.line,
-                col=lifecycle.assignment.col,
+                col=byte_col_to_char_col(assign_line_text, lifecycle.assignment.col),
                 message=message,
                 fixable=fixable,
                 # Violation.fix_data is intentionally untyped (dict[str,

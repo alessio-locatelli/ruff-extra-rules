@@ -13,8 +13,10 @@ from pre_commit_hooks.ast_checks._base import (
     byte_col_to_char_col,
     fast_get_source_segment,
     is_fix_errored,
+    is_fix_failed,
     is_fix_rejected,
     mark_fix_errored,
+    mark_fix_failed,
     mark_fix_rejected,
     split_lines_like_ast,
 )
@@ -259,3 +261,29 @@ def test_is_fix_errored_false_when_only_marked_rejected() -> None:
     # neither must be conflated with the other.
     violation = ViolationFactory.build(fix_data={"fix_rejected": True})
     assert not is_fix_errored(violation)
+
+
+@pytest.mark.parametrize(
+    "fix_data",
+    [None, {"other_key": 1}],
+    ids=["no-fix-data", "existing-fix-data"],
+)
+def test_mark_fix_failed(fix_data: dict[str, int] | None) -> None:
+    violation = ViolationFactory.build(fix_data=fix_data)
+    assert not is_fix_failed(violation)
+
+    mark_fix_failed(violation)
+
+    assert is_fix_failed(violation)
+    assert violation.fix_data is not None
+    if fix_data is not None:
+        assert violation.fix_data["other_key"] == 1
+
+
+def test_is_fix_failed_false_when_only_marked_errored() -> None:
+    # mark_fix_errored() (fix() itself raised — a bug) and mark_fix_failed()
+    # (fix() caught its own OSError and returned False — an environmental
+    # failure) record distinct outcomes; neither must be conflated with the
+    # other.
+    violation = ViolationFactory.build(fix_data={"fix_errored": True})
+    assert not is_fix_failed(violation)

@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from pre_commit_hooks.ast_checks._base import is_fix_failed
 from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
 
 
@@ -663,10 +664,30 @@ def test_autofix_replaces_name_on_line_with_non_ascii_text() -> None:
     assert "return response" in fixed_content
 
 
-def test_fix_write_failure_returns_false(tmp_path: Path) -> None:
+def test_check_reports_character_offset_not_byte_offset_before_multibyte_text() -> None:
+    # Regression: ast.col_offset is a UTF-8 *byte* offset, not a character
+    # offset -- storing it on Violation.col directly reports a column too
+    # far right on any line with non-ASCII text before the violation
+    # (ch. 7: "MUST report ... column information accurately"; ch. 20:
+    # "MUST handle multibyte Unicode characters correctly"). "café; " is 6
+    # characters but 7 UTF-8 bytes ('é' is 2 bytes), so a byte-offset
+    # column would over-count "data"'s own position by one.
+    source = "café; data = requests.get(url)\n"
+    violations = ForbidVarsCheck().check(Path("module.py"), ast.parse(source), source)
+
+    assert len(violations) == 1
+    assert violations[0].col == 6
+
+
+def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     source = """def process():
     data = requests.get(url)
     return data
+
+
+def other():
+    result = 42
+    return result
 """
     # Point at a path inside a directory that doesn't exist so write_text()
     # raises OSError.
@@ -675,5 +696,23 @@ def test_fix_write_failure_returns_false(tmp_path: Path) -> None:
     tree = ast.parse(source)
     check = ForbidVarsCheck()
     violations = check.check(filepath, tree, source)
+    # "result = 42" has no autofix pattern match, so it's non-fixable —
+    # included specifically so the marking loop below has both a fixable
+    # and a non-fixable violation to distinguish between.
+    assert {v.fixable for v in violations} == {True, False}
 
-    assert check.fix(filepath, violations, source, tree) is False
+    with caplog.at_level("DEBUG"):
+        assert check.fix(filepath, violations, source, tree) is False
+    # Regression: the write failure must be attributed to the violations it
+    # actually affected, not left indistinguishable from "never attempted"
+    # — the orchestrator's own report otherwise misleadingly suggests
+    # re-running --fix, which would just fail identically again. A
+    # non-fixable violation was never part of this attempt at all, so it
+    # must be left alone rather than also marked failed.
+    for v in violations:
+        assert is_fix_failed(v) is v.fixable
+    # mark_fix_failed() above already reports this cleanly; a raw traceback
+    # on stderr by default would just be redundant noise (ch. 7: "MUST NOT
+    # emit uncontrolled human-oriented text into a machine-readable output
+    # stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)

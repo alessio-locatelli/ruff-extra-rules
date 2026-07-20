@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from pre_commit_hooks.ast_checks._base import is_fix_failed
 from pre_commit_hooks.ast_checks.redundant_assignment import RedundantAssignmentCheck
 from pre_commit_hooks.ast_checks.redundant_assignment.autofix import (
     _can_safely_inline,
@@ -93,7 +94,7 @@ def test_fix_chained_assignment_where_use_line_is_another_assign_line(
     assert "return x" in fixed_content
 
 
-def test_fix_write_failure_returns_false(tmp_path: Path) -> None:
+def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     # Regression: apply_fixes() used to let atomic_write_text()'s OSError
     # propagate uncaught instead of returning False like every other check's
     # fix().
@@ -109,7 +110,18 @@ def test_fix_write_failure_returns_false(tmp_path: Path) -> None:
     check = RedundantAssignmentCheck()
     violations = check.check(filepath, tree, source)
 
-    assert check.fix(filepath, violations, source, tree) is False
+    with caplog.at_level("DEBUG"):
+        assert check.fix(filepath, violations, source, tree) is False
+    # Regression: the write failure must be attributed to the violations it
+    # actually affected, not left indistinguishable from "never attempted"
+    # — the orchestrator's own report otherwise misleadingly suggests
+    # re-running --fix, which would just fail identically again.
+    assert all(is_fix_failed(v) for v in violations)
+    # mark_fix_failed() above already reports this cleanly; a raw traceback
+    # on stderr by default would just be redundant noise (ch. 7: "MUST NOT
+    # emit uncontrolled human-oriented text into a machine-readable output
+    # stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
 def test_autofix_skips_violation_without_fix_data(tmp_path: Path) -> None:

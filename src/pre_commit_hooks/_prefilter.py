@@ -106,7 +106,13 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
         FileNotFoundError,
         subprocess.TimeoutExpired,
     ):
-        logger.exception("git grep failed")
+        # Self-healing: falls back to _python_fallback_filter below, which
+        # produces the same candidate set (just slower). Debug-only — an
+        # ERROR-level .exception() call here would leak a raw traceback onto
+        # the user's stderr by default (nothing in this codebase configures
+        # logging, so Python's own lastResort handler prints WARNING+
+        # straight to stderr) for a condition nothing actually failed at.
+        logger.debug("git grep failed", exc_info=True)
         # git not available or timeout, fall back
         return _python_fallback_filter(filepaths, pattern)
 
@@ -120,7 +126,12 @@ def _python_fallback_filter(filepaths: Sequence[str], pattern: str) -> list[str]
                 if pattern in content:
                     matches.append(filepath)
         except OSError, UnicodeDecodeError:
-            logger.exception("File: %s", filepath)
+            # Debug-only: the file is kept in as a candidate below, and the
+            # hook's own downstream read (_read_source) cleanly reports this
+            # same failure to the user — an ERROR-level .exception() call
+            # here would just leak a redundant raw traceback onto stderr by
+            # default (see git_grep_filter's own except block above).
+            logger.debug("File: %s", filepath, exc_info=True)
             # Include file if we can't read it (let hook handle error)
             matches.append(filepath)
     return matches
