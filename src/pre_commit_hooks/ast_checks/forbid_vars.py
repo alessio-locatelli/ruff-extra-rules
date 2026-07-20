@@ -21,6 +21,7 @@ from ._base import (
     fast_get_source_segment,
     find_ignored_lines,
     ignore_pattern_for,
+    mark_fix_failed,
     split_lines_like_ast,
 )
 from ._scope import collect_scope_names, iter_within_scope
@@ -257,7 +258,14 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
             violation: ForbidVarsFixData = {
                 "name": name,
                 "line": lineno,
-                "col": col_offset,
+                # col_offset is a UTF-8 byte offset (from ast.col_offset);
+                # the reported diagnostic column is a character offset
+                # (matching misplaced-comment's own tokenize-derived
+                # column). This is the only place "col" feeds into —
+                # _apply_fixes()/_collect_scope_replacements() below always
+                # re-derive their own edit positions fresh from the tree,
+                # never from this stored value.
+                "col": byte_col_to_char_col(self._ast_lines[lineno - 1], col_offset),
                 "suggestion": None,
             }
             if match:
@@ -570,7 +578,16 @@ class ForbidVarsCheck(BaseCheck):
         try:
             _apply_fixes(filepath, fixable, source, tree, encoding)
         except OSError:
-            logger.exception("Failed to apply fixes to %s", filepath)
+            # Debug-only: mark_fix_failed() below already reports this
+            # cleanly as [FIX FAILED] — an ERROR-level .exception() call
+            # here would just leak a redundant raw traceback onto the
+            # user's stderr by default (nothing in this codebase configures
+            # logging, so Python's own lastResort handler prints WARNING+
+            # straight to stderr).
+            logger.debug("Failed to apply fixes to %s", filepath, exc_info=True)
+            for v in violations:
+                if v.fixable:
+                    mark_fix_failed(v)
             return False
         else:
             return True

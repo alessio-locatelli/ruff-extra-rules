@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from pre_commit_hooks.ast_checks._base import is_fix_failed
 from pre_commit_hooks.ast_checks.misplaced_comment import MisplacedCommentCheck
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "misplaced_comments"
@@ -104,7 +105,7 @@ def test_fix_is_noop_when_nothing_to_fix(source: str, tmp_path: Path) -> None:
     assert test_file.read_text() == source
 
 
-def test_fix_write_failure_returns_false(tmp_path: Path) -> None:
+def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     # Regression: fix() used to let atomic_write_text()'s OSError propagate
     # uncaught instead of returning False like every other check's fix().
     source = "result = func(\n    arg\n)  # Comment here\n"
@@ -117,7 +118,18 @@ def test_fix_write_failure_returns_false(tmp_path: Path) -> None:
     check = MisplacedCommentCheck()
     violations = check.check(filepath, tree, source)
 
-    assert check.fix(filepath, violations, source, tree) is False
+    with caplog.at_level("DEBUG"):
+        assert check.fix(filepath, violations, source, tree) is False
+    # Regression: the write failure must be attributed to the violations it
+    # actually affected, not left indistinguishable from "never attempted"
+    # — the orchestrator's own report otherwise misleadingly suggests
+    # re-running --fix, which would just fail identically again.
+    assert all(is_fix_failed(v) for v in violations)
+    # mark_fix_failed() above already reports this cleanly; a raw traceback
+    # on stderr by default would just be redundant noise (ch. 7: "MUST NOT
+    # emit uncontrolled human-oriented text into a machine-readable output
+    # stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
 @pytest.mark.parametrize(

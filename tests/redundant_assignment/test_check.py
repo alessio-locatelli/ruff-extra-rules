@@ -26,6 +26,21 @@ def test_prefilter_pattern() -> None:
     assert RedundantAssignmentCheck().get_prefilter_pattern() == [" = "]
 
 
+def test_check_reports_character_offset_not_byte_offset_before_multibyte_text() -> None:
+    # Regression: ast.col_offset is a UTF-8 *byte* offset, not a character
+    # offset -- storing it on Violation.col directly reports a column too
+    # far right on any line with non-ASCII text before the violation
+    # (ch. 7: "MUST report ... column information accurately"; ch. 20:
+    # "MUST handle multibyte Unicode characters correctly"). "    café; " is
+    # 10 characters but 11 UTF-8 bytes ('é' is 2 bytes), so a byte-offset
+    # column would over-count "x"'s own position by one.
+    source = 'def f():\n    café; x = "foo"\n    func(x=x)\n'
+    violations = _check(source)
+
+    assert len(violations) == 1
+    assert violations[0].col == 10
+
+
 # ---------------------------------------------------------------------------
 # check(): reports no violations at all
 # ---------------------------------------------------------------------------

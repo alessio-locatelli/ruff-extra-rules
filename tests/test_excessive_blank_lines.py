@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from pre_commit_hooks.ast_checks._base import is_fix_failed
 from pre_commit_hooks.ast_checks.excessive_blank_lines import (
     ExcessiveBlankLinesCheck,
     fix_file_content,
@@ -128,7 +129,7 @@ def test_fix_leading_blank_lines_before_first_code_with_no_header(
     assert test_file.read_text() == "\nimport os\n"
 
 
-def test_fix_write_failure_returns_false(tmp_path: Path) -> None:
+def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     bad_source = (FIXTURES_DIR / "bad" / "header_spacing.py").read_text()
 
     # Point at a path inside a directory that doesn't exist so write_text()
@@ -138,7 +139,18 @@ def test_fix_write_failure_returns_false(tmp_path: Path) -> None:
     tree = ast.parse(bad_source)
     check = ExcessiveBlankLinesCheck()
     violations = check.check(test_file, tree, bad_source)
-    assert check.fix(test_file, violations, bad_source, tree) is False
+    with caplog.at_level("DEBUG"):
+        assert check.fix(test_file, violations, bad_source, tree) is False
+    # Regression: the write failure must be attributed to the violations it
+    # actually affected, not left indistinguishable from "never attempted"
+    # — the orchestrator's own report otherwise misleadingly suggests
+    # re-running --fix, which would just fail identically again.
+    assert all(is_fix_failed(v) for v in violations)
+    # mark_fix_failed() above already reports this cleanly; a raw traceback
+    # on stderr by default would just be redundant noise (ch. 7: "MUST NOT
+    # emit uncontrolled human-oriented text into a machine-readable output
+    # stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
 def test_fix_collapses_header_blank_lines(tmp_path: Path) -> None:

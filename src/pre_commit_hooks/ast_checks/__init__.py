@@ -42,6 +42,7 @@ from ._base import (
     FixValidationError,
     Violation,
     is_fix_errored,
+    is_fix_failed,
     is_fix_rejected,
     is_fixed,
     mark_fix_errored,
@@ -170,7 +171,13 @@ def _list_python_files_in_dir(directory: Path) -> list[str]:
                 if f.endswith(".py") and (candidate := resolved_dir / f).exists()
             )
     except subprocess.SubprocessError, FileNotFoundError, subprocess.TimeoutExpired:
-        logger.exception("git ls-files failed")
+        # Self-healing: falls back to the equivalent rglob scan below.
+        # Debug-only — an ERROR-level .exception() call here would leak a
+        # raw traceback onto the user's stderr by default (nothing in this
+        # codebase configures logging, so Python's own lastResort handler
+        # prints WARNING+ straight to stderr) for a condition nothing
+        # actually failed at from the user's perspective.
+        logger.debug("git ls-files failed", exc_info=True)
 
     return sorted(str(p) for p in resolved_dir.rglob("*.py"))
 
@@ -444,17 +451,26 @@ class CheckOrchestrator:
         Returns:
             (source, encoding) so a fix() can write back in the same
             encoding, or None if the file couldn't be read/decoded
+
+        Debug-only logging: every caller already turns a None return into
+        its own clean, user-facing diagnostic (_check_file's own caller
+        reports it via unprocessable_files; _apply_fixes's own caller
+        reports it via rule_failures) — an ERROR-level .exception() call
+        here would just leak a redundant raw traceback onto the user's
+        stderr by default (nothing in this codebase configures logging, so
+        Python's own lastResort handler prints WARNING+ straight to
+        stderr).
         """
         try:
             return read_source_with_encoding(filepath)
         except OSError:
-            logger.exception("Failed to read %s", filepath)
+            logger.debug("Failed to read %s", filepath, exc_info=True)
             return None
         except SyntaxError:
-            logger.exception("Failed to detect encoding for %s", filepath)
+            logger.debug("Failed to detect encoding for %s", filepath, exc_info=True)
             return None
         except UnicodeDecodeError, LookupError:
-            logger.exception("Failed to decode %s", filepath)
+            logger.debug("Failed to decode %s", filepath, exc_info=True)
             return None
 
     def _check_file(self, filepath: Path) -> list[Violation] | None:
@@ -475,7 +491,10 @@ class CheckOrchestrator:
             # Parse AST once
             tree = ast.parse(source, filename=str(filepath))
         except SyntaxError:
-            logger.exception("Failed to parse %s", filepath)
+            # Debug-only: the caller reports this via unprocessable_files —
+            # see _read_source's own docstring for why ERROR-level
+            # .exception() logging here would just be redundant noise.
+            logger.debug("Failed to parse %s", filepath, exc_info=True)
             return None
 
         # Run all checks on the same tree
@@ -484,8 +503,11 @@ class CheckOrchestrator:
             try:
                 violations = check.check(filepath, tree, source)
                 all_violations.extend(violations)
-            except Exception:
-                logger.exception("Check %s failed on %s", check.check_id, filepath)
+            except Exception:  # noqa: BLE001 -- caught, isolated (ch. 5), and logged below; not swallowed
+                # Debug-only: reported cleanly via rule_failures below — see
+                # _read_source's own docstring for why ERROR-level
+                # .exception() logging here would just be redundant noise.
+                logger.debug("Check %s failed on %s", check.check_id, filepath, exc_info=True)
                 self.rule_failures.append((str(filepath), check.check_id))
 
         # Apply fixes if in fix mode
@@ -519,6 +541,13 @@ class CheckOrchestrator:
         # Which checks reported at least one fixable violation
         fixable_check_ids = {v.check_id for v in violations if v.fixable}
 
+        # Whether any check's fix() actually resolved at least one violation
+        # this call — the only case where a later check's own recompute (or
+        # a non-participating check's stale entries) can possibly be
+        # pointing at shifted line numbers, so the final pass below is worth
+        # its own extra read+parse+recheck.
+        file_changed = False
+
         # Apply fixes for each check
         for check in self.checks:
             if check.check_id not in fixable_check_ids:
@@ -528,6 +557,18 @@ class CheckOrchestrator:
                 # loop already modified the file
                 read_result = self._read_source(filepath)
                 if read_result is None:
+                    # The file was readable moments ago (this run's own
+                    # initial check pass succeeded on it) — a failure here
+                    # means something changed concurrently, or an earlier
+                    # check's own fix in this same loop left it in a bad
+                    # state. Without a rule_failure + marking, this check's
+                    # violations would silently keep their stale pre-fix
+                    # snapshot and be reported as ordinary [FIXABLE], as if
+                    # --fix had never even been attempted for them.
+                    self.rule_failures.append((str(filepath), check.check_id))
+                    for v in violations:
+                        if v.check_id == check.check_id and v.fixable:
+                            mark_fix_errored(v)
                     continue
                 current_source, encoding = read_result
                 current_tree = ast.parse(current_source, filename=str(filepath))
@@ -547,15 +588,20 @@ class CheckOrchestrator:
                     # atomic_write_text() refused to write — the file is
                     # untouched, so every violation this check just tried to
                     # fix is still exactly as it was. This is a bug in the
-                    # check's fix logic, not an expected outcome.
-                    logger.exception(
+                    # check's fix logic, not an expected outcome. Debug-only
+                    # — mark_fix_rejected() below already reports this
+                    # cleanly as [FIX REJECTED]; see _read_source's own
+                    # docstring for why ERROR-level .exception() logging
+                    # here would just be redundant noise.
+                    logger.debug(
                         "Fix for %s produced invalid syntax on %s; the file was left untouched.",
                         check.check_id,
                         filepath,
+                        exc_info=True,
                     )
                     for v in fresh_violations:
                         mark_fix_rejected(v)
-                except Exception:
+                except Exception:  # noqa: BLE001 -- caught, isolated (ch. 5), and logged below; not swallowed
                     # fix() itself raised — a bug in the check's own fix
                     # logic, distinct from FixValidationError (which means
                     # fix() ran to completion but atomic_write_text()
@@ -574,10 +620,15 @@ class CheckOrchestrator:
                     # still broken, the same way the success path below
                     # already must (a bool return isn't precise enough
                     # either).
-                    logger.exception(
+                    # Debug-only — rule_failures/mark_fix_errored() below
+                    # already report this cleanly; see _read_source's own
+                    # docstring for why ERROR-level .exception() logging
+                    # here would just be redundant noise.
+                    logger.debug(
                         "Fix for %s raised an unexpected exception on %s.",
                         check.check_id,
                         filepath,
+                        exc_info=True,
                     )
                     # Always recorded, even if every fresh_violations entry
                     # turns out resolved below (e.g. fix() committed its
@@ -587,6 +638,8 @@ class CheckOrchestrator:
                     # because nothing is left to mark [FIX ERRORED].
                     self.rule_failures.append((str(filepath), check.check_id))
                     still_present = self._mark_resolved_and_get_still_present(filepath, check, fresh_violations)
+                    if len(still_present) < len(fresh_violations):
+                        file_changed = True
                     for v in fresh_violations:
                         if (v.line, v.col, v.message) in still_present:
                             mark_fix_errored(v)
@@ -600,7 +653,9 @@ class CheckOrchestrator:
                     # others in the same call. Re-check against the file's
                     # real post-fix state instead of trusting the return
                     # value.
-                    self._mark_resolved_and_get_still_present(filepath, check, fresh_violations)
+                    still_present = self._mark_resolved_and_get_still_present(filepath, check, fresh_violations)
+                    if len(still_present) < len(fresh_violations):
+                        file_changed = True
                     # else: still present — either rejected (already marked
                     # via mark_fix_rejected() inside a multi-write check's
                     # own per-violation loop) or left alone by a
@@ -612,8 +667,100 @@ class CheckOrchestrator:
                 # first, pre-any-fix snapshot in `violations`.
                 violations[:] = [v for v in violations if v.check_id != check.check_id or not v.fixable]
                 violations.extend(fresh_violations)
-            except Exception:
-                logger.exception("Fix failed for %s on %s", check.check_id, filepath)
+            except Exception:  # noqa: BLE001 -- caught, isolated (ch. 5), and logged below; not swallowed
+                # Anything not already handled above: e.g. the re-parse or
+                # the fresh_violations recompute itself raising. Isolated
+                # per-check like every other failure here (ch. 5), but must
+                # still be surfaced — without a rule_failure + marking, this
+                # check's violations keep their stale pre-fix snapshot and
+                # get reported as ordinary [FIXABLE], as if --fix had never
+                # even been attempted for them. Debug-only — rule_failures/
+                # mark_fix_errored() below already report this cleanly; see
+                # _read_source's own docstring for why ERROR-level
+                # .exception() logging here would just be redundant noise.
+                logger.debug("Fix failed for %s on %s", check.check_id, filepath, exc_info=True)
+                self.rule_failures.append((str(filepath), check.check_id))
+                for v in violations:
+                    if v.check_id == check.check_id and v.fixable:
+                        mark_fix_errored(v)
+
+        if file_changed:
+            self._refresh_stale_positions(filepath, violations)
+
+    def _refresh_stale_positions(
+        self,
+        filepath: Path,
+        violations: list[Violation],
+    ) -> None:
+        """Re-check `filepath`'s final on-disk state and refresh the
+        position of every still-*open* violation (no fixed/rejected/
+        errored/failed outcome yet this call) — covers both a check that
+        never got as far as calling its own `fix()` this run (e.g. a check
+        that's never fixable at all, like redundant-super-init) *and* a
+        check that did run but left some of its own violations open (e.g.
+        `validate-function-name`'s `should_autofix` guard skipping a method
+        while renaming a different, unrelated function in the same `fix()`
+        call — the per-check loop above only recomputes that check's own
+        positions once, immediately before its own `fix()` call, not again
+        afterward). Either way, if some *other* check's fix in the same run
+        removed or inserted lines after that point, the still-open
+        violation's position silently points at the wrong place — ch. 7:
+        "MUST report line and column information accurately when
+        available". Only called when `_apply_fixes` already confirmed the
+        file's content actually changed this call.
+
+        A violation already marked fixed this call is left completely
+        untouched rather than recomputed: it's genuinely gone from the file,
+        so a fresh `check()` call would never find it again (silently
+        losing its `[FIXED]` confirmation). A check_id with any
+        rejected/errored/failed entry is skipped *entirely* this pass,
+        including its own still-open entries (if any): a fresh `check()`
+        call would rediscover the still-present rejected/errored/failed
+        violation too, and there's no reliable way to tell that rediscovery
+        apart from a different, unrelated violation that merely happens to
+        share the same message text (e.g. two identically-named functions
+        in different scopes) without a stable per-violation identity this
+        codebase doesn't have — silently dropping a real, unrelated
+        violation would be worse than leaving its position stale (ch. 34:
+        "MUST prefer a visible failure over a silent incorrect result").
+
+        Args:
+            filepath: Path to file
+            violations: Same list `_apply_fixes` mutates in place
+        """
+        final_read = self._read_source(filepath)
+        if final_read is None:
+            return
+        final_source, _final_encoding = final_read
+        try:
+            final_tree = ast.parse(final_source, filename=str(filepath))
+        except SyntaxError:
+            return
+
+        for check in self.checks:
+            check_entries = [v for v in violations if v.check_id == check.check_id]
+            if not check_entries or any(
+                is_fix_rejected(v) or is_fix_errored(v) or is_fix_failed(v) for v in check_entries
+            ):
+                continue
+
+            stale = [v for v in check_entries if not is_fixed(v)]
+            if not stale:
+                continue
+
+            try:
+                fresh = check.check(filepath, final_tree, final_source)
+            except Exception:  # noqa: BLE001 -- caught, isolated (ch. 5), and logged below; not swallowed
+                # Debug-only: reported cleanly via rule_failures below — see
+                # _read_source's own docstring for why ERROR-level
+                # .exception() logging here would just be redundant noise.
+                logger.debug("Check %s failed on %s", check.check_id, filepath, exc_info=True)
+                self.rule_failures.append((str(filepath), check.check_id))
+                continue
+
+            stale_ids = {id(v) for v in stale}
+            violations[:] = [v for v in violations if id(v) not in stale_ids]
+            violations.extend(fresh)
 
     def _mark_resolved_and_get_still_present(
         self,
@@ -862,12 +1009,15 @@ def main(argv: list[str] | None = None) -> int:
             fixed = is_fixed(v)
             rejected = is_fix_rejected(v)
             errored = is_fix_errored(v)
+            failed = is_fix_failed(v)
             if fixed:
                 tag = "[FIXED] "
             elif rejected:
                 tag = "[FIX REJECTED] "
             elif errored:
                 tag = "[FIX ERRORED] "
+            elif failed:
+                tag = "[FIX FAILED] "
             elif v.fixable:
                 tag = "[FIXABLE] "
             else:
@@ -882,12 +1032,23 @@ def main(argv: list[str] | None = None) -> int:
                     " --fix raised an unexpected internal error and was not applied — this is a bug, "
                     "please report it: https://github.com/alessio-locatelli/ruff-extra-rules/issues"
                 )
+            elif failed:
+                hint = (
+                    " --fix could not write the file — check file permissions and available disk "
+                    "space, then run with --fix again."
+                )
             elif v.fixable and not fixed:
                 hint = " Run with --fix to inline automatically."
             else:
                 hint = ""
+            # Violation.col is a 0-based character offset (matching Python's
+            # own ast.lineno being 1-based but ast.col_offset being
+            # 0-based); +1 here reports the conventional 1-based column
+            # most editors and other diagnostic tools (including ruff
+            # itself) use, so "the first character of the line" reads as
+            # column 1, not 0.
             print(
-                f"{filepath}:{v.line}: {v.error_code}: {tag}{v.message}{hint}",
+                f"{filepath}:{v.line}:{v.col + 1}: {v.error_code}: {tag}{v.message}{hint}",
                 file=sys.stderr,
             )
             exit_code = 1

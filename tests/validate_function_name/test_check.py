@@ -125,7 +125,7 @@ def test_fix_returns_false_when_apply_fix_fails_without_raising(
 
 
 def test_fix_marks_violation_errored_and_continues_when_apply_fix_raises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     # A rename that raises something other than FixValidationError is a bug
     # in apply_fix() itself. Must be marked distinctly (mark_fix_errored)
@@ -147,10 +147,16 @@ def test_fix_marks_violation_errored_and_continues_when_apply_fix_raises(
 
     monkeypatch.setattr(module, "apply_fix", boom)
 
-    assert check.fix(filepath, violations, source, tree) is False
+    with caplog.at_level("DEBUG"):
+        assert check.fix(filepath, violations, source, tree) is False
     assert is_fix_errored(violations[0])
     assert not is_fix_rejected(violations[0])
     assert filepath.read_text() == source
+    # mark_fix_errored() above already reports this cleanly; a raw
+    # traceback on stderr by default would just be redundant noise (ch. 7:
+    # "MUST NOT emit uncontrolled human-oriented text into a
+    # machine-readable output stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
 def test_fix_marks_violation_rejected_when_apply_fix_raises_fix_validation_error(

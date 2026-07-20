@@ -6,7 +6,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, TypedDict, cast
 
-from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, byte_col_to_char_col
+from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, byte_col_to_char_col, mark_fix_failed
 
 from .semantic import exceeds_line_length_when_inlined
 
@@ -79,6 +79,7 @@ def apply_fixes(
     fixable_violations.sort(key=_use_position, reverse=True)
 
     fixed_any = False
+    applied_violations: list[Violation] = []
     removed_lines: set[int] = set()  # Track which lines we removed
 
     for violation in fixable_violations:
@@ -143,6 +144,7 @@ def apply_fixes(
         removed_lines.add(assign_line_idx)
 
         fixed_any = True
+        applied_violations.append(violation)
 
     if fixed_any:
         # Clean up blank lines only around removed assignments
@@ -153,7 +155,15 @@ def apply_fixes(
         try:
             atomic_write_text(filepath, new_source, encoding)
         except OSError:
-            logger.exception("Failed to write %s", filepath)
+            # Debug-only: mark_fix_failed() below already reports this
+            # cleanly as [FIX FAILED] — an ERROR-level .exception() call
+            # here would just leak a redundant raw traceback onto the
+            # user's stderr by default (nothing in this codebase configures
+            # logging, so Python's own lastResort handler prints WARNING+
+            # straight to stderr).
+            logger.debug("Failed to write %s", filepath, exc_info=True)
+            for v in applied_violations:
+                mark_fix_failed(v)
             return False
         return True
 

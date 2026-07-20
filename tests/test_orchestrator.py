@@ -21,10 +21,11 @@ from pre_commit_hooks.ast_checks import (
     load_checks,
     main,
 )
-from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, is_fix_errored, is_fix_rejected
+from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, is_fix_errored, is_fix_rejected, is_fixed
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
+from tests.factories import ViolationFactory
 
 if TYPE_CHECKING:
     import argparse
@@ -125,7 +126,9 @@ def test_expand_directories_skips_tracked_file_deleted_from_working_tree(tmp_pat
         os.chdir(original_dir)
 
 
-def test_expand_directories_falls_back_when_git_ls_files_fails(tmp_path: Path) -> None:
+def test_expand_directories_falls_back_when_git_ls_files_fails(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     # Inside a git repo, but git itself fails (e.g. missing, or the
     # subprocess times out) — falls back to the plain recursive glob
     # instead of propagating the failure.
@@ -133,11 +136,18 @@ def test_expand_directories_falls_back_when_git_ls_files_fails(tmp_path: Path) -
     py_file = tmp_path / "pkg" / "module.py"
     py_file.write_text("x = 1\n")
 
-    with mock.patch("subprocess.run") as mock_run:
+    with mock.patch("subprocess.run") as mock_run, caplog.at_level("DEBUG"):
         mock_run.side_effect = FileNotFoundError("git not found")
         matches = expand_directories([str(tmp_path)])
 
     assert matches == [str(py_file.resolve())]
+    # Regression: this is self-healing (falls back to an equivalent glob
+    # scan), so an ERROR-level .exception() call here used to leak a raw
+    # traceback onto the user's stderr by default (nothing in this codebase
+    # configures logging, so Python's own lastResort handler prints
+    # WARNING+ straight to stderr) for a condition nothing actually failed
+    # at from the user's perspective.
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
 def test_main_directory_with_no_python_files_returns_zero(tmp_path: Path) -> None:
@@ -227,6 +237,185 @@ def test_apply_fixes_recomputes_stale_positions(tmp_path: Path) -> None:
     assert 'x = "foo"' not in file_content
     assert "print(" in file_content
     assert '"foo"' in file_content
+
+
+def test_apply_fixes_refreshes_non_fixable_checks_position_too(tmp_path: Path) -> None:
+    # Regression: only checks that themselves had a fixable violation this
+    # run got their positions recomputed against the file's post-fix state.
+    # redundant-super-init is never fixable (RedundantSuperInitCheck.fix()
+    # always returns False), so it never participated in that loop -- its
+    # reported line stayed frozen at whatever _check_file's original,
+    # pre-fix pass saw. redundant-assignment's own fix deletes a whole
+    # line above it, shifting every subsequent line up by one; the
+    # non-fixable violation's reported line must reflect the file's real,
+    # final line, not the stale pre-fix one (ch. 7: "MUST report line and
+    # column information accurately when available").
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def compute():\n"
+        "    x = 1\n"
+        "    return x\n"
+        "\n\n"
+        "class Base:\n"
+        "    def __init__(self):\n"
+        "        pass\n"
+        "\n\n"
+        "class Child(Base):\n"
+        "    def __init__(self, **kwargs):\n"
+        "        super().__init__(**kwargs)\n"
+    )
+
+    checks = load_checks(select={"redundant-super-init", "redundant-assignment"})
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    final_content = filepath.read_text()
+    actual_super_init_line = next(
+        i for i, line in enumerate(final_content.splitlines(), start=1) if "def __init__(self, **kwargs)" in line
+    )
+
+    super_init_violation = next(v for v in violations[str(filepath)] if v.check_id == "redundant-super-init")
+    assert super_init_violation.line == actual_super_init_line
+
+
+def test_apply_fixes_refreshes_a_participating_checks_own_left_open_violation(tmp_path: Path) -> None:
+    # Regression: a check that *did* participate in the fix loop (it had
+    # some fixable violation this run) only had its own positions
+    # recomputed once, immediately before its own fix() call -- a violation
+    # it left open that call (e.g. validate-function-name's should_autofix
+    # guard refusing to touch a method, while still renaming an unrelated
+    # free function in the same fix() call) never got revisited afterward.
+    # redundant-assignment runs *after* validate-function-name in
+    # ALL_CHECKS order and deletes a line above the still-open method
+    # violation, shifting it down by one -- the final reconciliation pass
+    # must catch this even though validate-function-name itself already
+    # ran its own fix() this call (ch. 7: "MUST report line and column
+    # information accurately when available").
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def get_ready(user: dict) -> bool:\n"
+        '    return user.get("status") == "ready"\n'
+        "\n\n"
+        "def compute():\n"
+        "    x = 1\n"
+        "    return x\n"
+        "\n\n"
+        "class Widget:\n"
+        "    def get_active(self) -> bool:\n"
+        '        return self.status == "active"\n'
+    )
+
+    checks = load_checks(select={"validate-function-name", "redundant-assignment"})
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    final_content = filepath.read_text()
+    # The free function was renamed; the method (never auto-fixed, per
+    # should_autofix's own "methods are never auto-fixed" rule) was left
+    # open, and the redundant assignment above it was inlined away.
+    assert "is_ready" in final_content
+    assert "def get_active(self)" in final_content
+    assert "x = 1" not in final_content
+    actual_method_line = next(
+        i for i, line in enumerate(final_content.splitlines(), start=1) if "def get_active(self)" in line
+    )
+
+    method_violation = next(
+        v for v in violations[str(filepath)] if v.check_id == "validate-function-name" and "get_active" in v.message
+    )
+    assert not is_fixed(method_violation)
+    assert method_violation.line == actual_method_line
+
+
+def test_refresh_stale_positions_never_drops_an_unrelated_open_violation_sharing_a_check_id_with_a_terminal_one(
+    tmp_path: Path,
+) -> None:
+    # Regression: a check_id with a rejected/errored/failed entry must be
+    # skipped entirely by the reconciliation pass, not just have that one
+    # terminal entry protected -- a fresh check() call has no reliable way
+    # to distinguish "this is the same still-present violation as the
+    # terminal one" from "this is a different, unrelated violation that
+    # merely happens to share message text with it" (e.g. two identically
+    # named functions in different scopes) without a stable per-violation
+    # identity this codebase doesn't have (ch. 34: "MUST prefer a visible
+    # failure over a silent incorrect result"). Filtering the fresh result
+    # by message alone would have silently dropped the unrelated one
+    # instead of just leaving its position stale.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = requests.get(url)\n")
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    # Same message on purpose -- e.g. two identically-named functions in
+    # different scopes would produce identical violation text.
+    shared_message = "Forbidden variable name 'data' found. Consider renaming to 'response'."
+    terminal = ViolationFactory.build(
+        check_id="forbid-vars", message=shared_message, fixable=True, fix_data={"fix_failed": True}
+    )
+    open_violation = ViolationFactory.build(check_id="forbid-vars", message=shared_message, fixable=True, fix_data=None)
+    violations = [terminal, open_violation]
+
+    orchestrator._refresh_stale_positions(filepath, violations)
+
+    # Both entries survive untouched -- neither was silently dropped.
+    assert violations == [terminal, open_violation]
+
+
+def test_refresh_stale_positions_returns_when_final_read_fails(tmp_path: Path) -> None:
+    # The file existed a moment ago (this same _apply_fixes call already
+    # read it successfully), so a failure here means something changed
+    # concurrently -- conservatively leave `violations` untouched rather
+    # than guess.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    violations: list[Violation] = []
+
+    filepath.unlink()
+    orchestrator._refresh_stale_positions(filepath, violations)
+
+    assert violations == []
+
+
+def test_refresh_stale_positions_returns_when_final_parse_fails(tmp_path: Path) -> None:
+    # A syntax error in the file's final state (e.g. an external edit
+    # racing with this run) must not crash the reconciliation pass.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("def broken(:\n")
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    violations: list[Violation] = []
+
+    orchestrator._refresh_stale_positions(filepath, violations)
+
+    assert violations == []
+
+
+def test_refresh_stale_positions_records_rule_failure_when_check_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A check crashing during this final reconciliation pass must be
+    # isolated (ch. 5) like every other check failure, not left to crash
+    # the whole run or silently leave the check's own stale entries in
+    # `violations`.
+    def boom(*_args: object, **_kwargs: object) -> list[Violation]:
+        msg = "simulated check failure"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    # A still-open (unmarked) violation for this check_id, so there's
+    # something for the reconciliation pass to actually attempt refreshing.
+    stale_violation = ViolationFactory.build(check_id="forbid-vars", fixable=True, fix_data=None)
+    violations = [stale_violation]
+
+    orchestrator._refresh_stale_positions(filepath, violations)
+
+    assert (str(filepath), "forbid-vars") in orchestrator.rule_failures
+    # Left exactly as it was -- the check crashed before it could report
+    # anything current to replace it with.
+    assert violations == [stale_violation]
 
 
 def test_fix_honors_pep263_encoding_declaration(tmp_path: Path) -> None:
@@ -1068,7 +1257,9 @@ def test_main_no_violations_returns_zero(tmp_path: Path) -> None:
     assert main([str(filepath)]) == 0
 
 
-def test_main_unparseable_file_returns_one(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_unparseable_file_returns_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
     # Regression: an unparseable file used to be silently dropped with exit
     # code 0 — indistinguishable from a clean run with nothing to report.
     # Content includes "data" so the file clears every check's prefilter
@@ -1077,12 +1268,18 @@ def test_main_unparseable_file_returns_one(tmp_path: Path, capsys: pytest.Captur
     filepath = tmp_path / "broken.py"
     filepath.write_text("data = foo(:\n")
 
-    assert main([str(filepath)]) == 1
+    with caplog.at_level("DEBUG"):
+        assert main([str(filepath)]) == 1
     assert f"{filepath}: error: could not be read or parsed; file skipped" in capsys.readouterr().err
+    # The clean diagnostic above already reports this; a raw traceback
+    # alongside it on stderr would just be redundant noise (ch. 7: "MUST NOT
+    # emit uncontrolled human-oriented text into a machine-readable output
+    # stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
 def test_main_permission_denied_file_returns_one_inside_git_repo(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
     # Regression: inside a real git repo, the prefilter's `git grep`
     # subprocess (not the Python-only fallback the other tmp_path-based
@@ -1108,12 +1305,18 @@ def test_main_permission_denied_file_returns_one_inside_git_repo(
         filepath.chmod(0o000)
 
         try:
-            exit_code = main(["module.py", "--select", "forbid-vars"])
+            with caplog.at_level("DEBUG"):
+                exit_code = main(["module.py", "--select", "forbid-vars"])
         finally:
             filepath.chmod(0o644)
 
         assert exit_code == 1
         assert "module.py: error: could not be read or parsed; file skipped" in capsys.readouterr().err
+        # The clean diagnostic above already reports this; a raw traceback
+        # alongside it on stderr would just be redundant noise (ch. 7: "MUST
+        # NOT emit uncontrolled human-oriented text into a machine-readable
+        # output stream").
+        assert all(record.levelname == "DEBUG" for record in caplog.records)
     finally:
         os.chdir(original_dir)
 
@@ -1160,6 +1363,22 @@ def test_main_reports_non_fixable_violation(tmp_path: Path, capsys: pytest.Captu
     assert "Run with --fix" not in err
 
 
+def test_main_reports_column_alongside_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Violation.col is computed accurately (forbid-vars reports the assigned
+    # name's own ast.col_offset, converted to a character offset) but
+    # main()'s printed line used to drop it entirely, reporting only the
+    # line -- ch. 7: "MUST report line and column information accurately
+    # when available". "data" starts at the 0-indexed character offset 4;
+    # main() reports the conventional 1-based column, 5.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("def process():\n    data = requests.get(url)\n    return data\n")
+
+    exit_code = main([str(filepath), "--select", "forbid-vars"])
+    assert exit_code == 1
+
+    assert f"{filepath}:2:5: TRI001:" in capsys.readouterr().err
+
+
 def test_main_reports_fixable_violation_without_fix_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text("data = requests.get(url)\nprint(data)\n")
@@ -1185,7 +1404,10 @@ def test_main_fix_flag_marks_violation_fixed(tmp_path: Path, capsys: pytest.Capt
 
 
 def test_main_fix_flag_reports_rejected_fix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     # A fix rejected for invalid syntax must be reported distinctly from
     # both [FIXED] and the ordinary [FIXABLE]/"Run with --fix" hint, since
@@ -1198,7 +1420,8 @@ def test_main_fix_flag_reports_rejected_fix(
     filepath = tmp_path / "module.py"
     filepath.write_text("data = requests.get(url)\n")
 
-    exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+    with caplog.at_level("DEBUG"):
+        exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
@@ -1208,10 +1431,18 @@ def test_main_fix_flag_reports_rejected_fix(
     assert "[FIXED]" not in err
     assert "Run with --fix" not in err
     assert filepath.read_text() == "data = requests.get(url)\n"
+    # [FIX REJECTED] above already reports this; a raw traceback alongside
+    # it on stderr would just be redundant noise (ch. 7: "MUST NOT emit
+    # uncontrolled human-oriented text into a machine-readable output
+    # stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
 def test_main_fix_flag_reports_errored_fix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     # A fix() that raises something other than FixValidationError must be
     # reported distinctly from [FIXED], [FIX REJECTED], and the ordinary
@@ -1225,7 +1456,8 @@ def test_main_fix_flag_reports_errored_fix(
     filepath = tmp_path / "module.py"
     filepath.write_text("data = requests.get(url)\n")
 
-    exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+    with caplog.at_level("DEBUG"):
+        exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
@@ -1236,10 +1468,154 @@ def test_main_fix_flag_reports_errored_fix(
     assert "[FIX REJECTED]" not in err
     assert "Run with --fix" not in err
     assert filepath.read_text() == "data = requests.get(url)\n"
+    # [FIX ERRORED] above already reports this; a raw traceback alongside it
+    # on stderr would just be redundant noise (ch. 7: "MUST NOT emit
+    # uncontrolled human-oriented text into a machine-readable output
+    # stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
+
+
+def test_main_fix_flag_reports_failed_fix(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    # A fix() that catches its own OSError (disk full, permission denied)
+    # and returns False per ASTCheck.fix()'s own documented contract must
+    # be reported distinctly from [FIXED] and the ordinary [FIXABLE]/"Run
+    # with --fix" hint -- re-running --fix would just fail identically
+    # again, and unlike [FIX ERRORED] this isn't a bug in the check's own
+    # logic, so the hint must not claim it is.
+    subdir = tmp_path / "readonly"
+    subdir.mkdir()
+    filepath = subdir / "module.py"
+    filepath.write_text("data = requests.get(url)\n")
+    subdir.chmod(0o555)
+    try:
+        with caplog.at_level("DEBUG"):
+            exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+    finally:
+        subdir.chmod(0o755)
+
+    assert exit_code == 1
+    err = capsys.readouterr().err
+    assert "[FIX FAILED]" in err
+    assert "bug" not in err
+    assert "[FIXED]" not in err
+    assert "[FIX ERRORED]" not in err
+    assert "[FIX REJECTED]" not in err
+    assert "Run with --fix" not in err
+    assert filepath.read_text() == "data = requests.get(url)\n"
+    # [FIX FAILED] above already reports this; a raw traceback alongside it
+    # on stderr would just be redundant noise (ch. 7: "MUST NOT emit
+    # uncontrolled human-oriented text into a machine-readable output
+    # stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
+
+
+def test_main_reports_rule_failure_when_reread_fails_mid_fix_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: _apply_fixes() re-reads the file before recomputing each
+    # check's fresh violations (a previous check's fix in the same loop may
+    # have already modified it). If that re-read itself fails, the loop used
+    # to just `continue` with zero signal anywhere -- the stale violation
+    # was left unmarked and reported as an ordinary [FIXABLE], as if --fix
+    # had never even been attempted for it.
+    original_read_source = CheckOrchestrator._read_source
+    calls = 0
+
+    def read_source_fails_on_second_call(self: CheckOrchestrator, filepath: Path) -> tuple[str, str] | None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            return None
+        return original_read_source(self, filepath)
+
+    monkeypatch.setattr(CheckOrchestrator, "_read_source", read_source_fails_on_second_call)
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "data = requests.get(url)\n\n\nclass Base:\n    def __init__(self):\n        pass\n\n\n"
+        "class Child(Base):\n    def __init__(self, **kwargs):\n        super().__init__(**kwargs)\n"
+    )
+
+    # A second, never-fixable check alongside forbid-vars: its own
+    # violation must be left alone by the marking loop below (only
+    # forbid-vars' violation matches check.check_id), exercising that the
+    # loop's `if` condition can also be False for a violation from an
+    # unrelated check_id, not just True for a matching, fixable one.
+    checks = load_checks(select={"forbid-vars", "redundant-super-init"})
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    assert (str(filepath), "forbid-vars") in orchestrator.rule_failures
+    forbid_vars_violation = next(v for v in violations[str(filepath)] if v.check_id == "forbid-vars")
+    super_init_violation = next(v for v in violations[str(filepath)] if v.check_id == "redundant-super-init")
+    assert is_fix_errored(forbid_vars_violation)
+    assert not is_fix_errored(super_init_violation)
+    # The re-read failure means nothing was ever written back.
+    assert "data = requests.get(url)" in filepath.read_text()
+
+
+def test_main_reports_rule_failure_when_recompute_raises_mid_fix_loop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Regression: _apply_fixes() recomputes fresh violations via check.check()
+    # against the current file state before calling check.fix(). If that
+    # recompute itself raises, only the broad outer `except Exception` used
+    # to catch it -- logging the exception but never recording a
+    # rule_failure or marking any violation, so the run could look
+    # completely clean depending on what else was reported for the file.
+    original_check = ForbidVarsCheck.check
+    calls = 0
+
+    def check_raises_on_second_call(
+        self: ForbidVarsCheck, filepath: Path, tree: ast.Module, source: str
+    ) -> list[Violation]:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            msg = "simulated recompute failure"
+            raise RuntimeError(msg)
+        return original_check(self, filepath, tree, source)
+
+    monkeypatch.setattr(ForbidVarsCheck, "check", check_raises_on_second_call)
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "data = requests.get(url)\n\n\nclass Base:\n    def __init__(self):\n        pass\n\n\n"
+        "class Child(Base):\n    def __init__(self, **kwargs):\n        super().__init__(**kwargs)\n"
+    )
+
+    # A second, never-fixable check alongside forbid-vars: its own
+    # violation must be left alone by the marking loop below (only
+    # forbid-vars' violation matches check.check_id), exercising that the
+    # loop's `if` condition can also be False for a violation from an
+    # unrelated check_id, not just True for a matching, fixable one.
+    with caplog.at_level("DEBUG"):
+        exit_code = main([str(filepath), "--select", "forbid-vars,redundant-super-init", "--fix"])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert f"{filepath}: error: check 'forbid-vars' raised an unexpected exception" in err
+    assert "[FIX ERRORED]" in err
+    assert "Run with --fix" not in err
+    # Nothing was ever written back -- the recompute failed before fix() could run.
+    assert "data = requests.get(url)" in filepath.read_text()
+    # The error line above already reports this; a raw traceback alongside
+    # it on stderr would just be redundant noise (ch. 7: "MUST NOT emit
+    # uncontrolled human-oriented text into a machine-readable output
+    # stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
 def test_main_reports_rule_failure_when_fix_raises_after_resolving_everything(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     # Regression: fix() can commit every requested edit and then raise
     # afterwards (e.g. during unrelated cleanup) — every violation ends up
@@ -1255,7 +1631,8 @@ def test_main_reports_rule_failure_when_fix_raises_after_resolving_everything(
     filepath = tmp_path / "module.py"
     filepath.write_text("data = requests.get(url)\n")
 
-    exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+    with caplog.at_level("DEBUG"):
+        exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
@@ -1263,6 +1640,11 @@ def test_main_reports_rule_failure_when_fix_raises_after_resolving_everything(
     assert "[FIX ERRORED]" not in err
     assert f"{filepath}: error: check 'forbid-vars' raised an unexpected exception" in err
     assert filepath.read_text() == "response = requests.get(url)\n"
+    # The error line above already reports this; a raw traceback alongside
+    # it on stderr would just be redundant noise (ch. 7: "MUST NOT emit
+    # uncontrolled human-oriented text into a machine-readable output
+    # stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
 def test_main_exclude_pattern_excludes_all_files_returns_zero(

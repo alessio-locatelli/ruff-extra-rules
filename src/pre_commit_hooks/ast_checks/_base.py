@@ -27,8 +27,16 @@ class Violation:
     Attributes:
         check_id: Unique identifier for the check (e.g., "forbid-vars")
         error_code: Error code for the violation (e.g., "TRI001")
-        line: Line number where the violation occurs
-        col: Column offset where the violation occurs
+        line: 1-indexed line number where the violation occurs
+        col: 0-indexed *character* offset where the violation occurs (or 0
+            when a check has no more specific position than "this line") —
+            not a byte offset. `ast.col_offset` is a UTF-8 byte offset, so a
+            check that reports one directly must first convert it via
+            `byte_col_to_char_col()`, the same way `forbid_vars` and
+            `redundant_assignment` already do; `misplaced_comment`'s own
+            `tokenize`-derived column is already a character offset.
+            `main()` reports this as a conventional 1-based column
+            (`col + 1`).
         message: Human-readable description of the violation
         fixable: Whether the violation can be auto-fixed
         fix_data: Check-specific data needed for applying the fix
@@ -443,3 +451,24 @@ def mark_fix_errored(violation: Violation) -> None:
 def is_fix_errored(violation: Violation) -> bool:
     """Whether `mark_fix_errored()` has already been called on `violation`."""
     return bool(violation.fix_data and violation.fix_data.get("fix_errored", False))
+
+
+def mark_fix_failed(violation: Violation) -> None:
+    """Record that `fix()` returned `False` (without raising) for
+    `violation` because it caught an `OSError` while writing the file back —
+    exactly the third outcome `ASTCheck.fix()`'s own docstring documents
+    ("OSError from atomic_write_text() ... every implementation must catch
+    it itself and return False"). Distinct from `mark_fix_errored()`: this
+    is an environmental failure (disk full, permission denied, missing
+    parent directory), not a bug in the check's own fix logic, so it must
+    not carry the same "this is a bug, please report it" hint. Mirrors
+    `mark_fixed()`/`is_fixed()`'s `fix_data["fixed"]` convention.
+    """
+    if violation.fix_data is None:
+        violation.fix_data = {}
+    violation.fix_data["fix_failed"] = True
+
+
+def is_fix_failed(violation: Violation) -> bool:
+    """Whether `mark_fix_failed()` has already been called on `violation`."""
+    return bool(violation.fix_data and violation.fix_data.get("fix_failed", False))

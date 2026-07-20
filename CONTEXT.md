@@ -35,3 +35,7 @@ _Avoid_: failed fix, broken fix — "rejected" is the term the CLI output and `i
 **Fix error**:
 The outcome when a check's own `fix()` raises an exception other than `FixValidationError` — a bug in the check's fix logic itself, distinct from a fix rejection (which means `fix()` ran to completion but its _output_ didn't parse). Reported as `[FIX ERRORED]`, also not something re-running `--fix` will resolve (see `docs/adr/0012-behavioral-contract-audit-internal-errors-exit-codes.md`).
 _Avoid_: fix rejection, crash — "errored" is the term the CLI output and `is_fix_errored()`/`mark_fix_errored()` use; a fix rejection never reaches this path since it's a normal, expected outcome, not an unhandled exception
+
+**Fix failure**:
+The outcome when a check's own `fix()` catches an `OSError` from `atomic_write_text()` itself (disk full, permission denied, missing parent directory) and returns `False` without raising — an environmental failure, distinct from a fix error (which means `fix()` itself raised, a bug in the check's own logic). Reported as `[FIX FAILED]`, with a hint about checking permissions/disk space rather than `[FIX ERRORED]`'s "this is a bug, please report it" (see `docs/adr/0017-behavioral-contract-audit-diagnostics-fix-modes-user-trust.md`).
+_Avoid_: fix error, fix rejection — "failed" is the term the CLI output and `is_fix_failed()`/`mark_fix_failed()` use; unlike a fix error, retrying `--fix` after fixing the underlying environmental issue may actually succeed

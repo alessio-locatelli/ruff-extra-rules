@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 import signal
+import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -113,3 +115,38 @@ def test_real_sigterm_mid_run_stops_gracefully_without_leftover_temp_files(
     for filepath_str in filepaths:
         content = Path(filepath_str).read_text()
         assert content in {"data = requests.get(url)\n", "response = requests.get(url)\n"}
+
+
+def test_real_invocation_does_not_leak_a_traceback_onto_stderr(tmp_path: Path) -> None:
+    """Regression: pytest's own logging-capture plugin attaches a handler to
+    the root logger for the whole test session, so every other test in this
+    suite calling main()/run() in-process never observes what an actual
+    end user does. Nothing in this codebase configures logging itself, so
+    outside of pytest, Python's own `logging.lastResort` handler prints any
+    WARNING+ record straight to stderr with no handler of its own -- several
+    internal `logger.exception()` calls used to leak a full raw traceback
+    onto the user's terminal this way, duplicating and cluttering the clean,
+    documented diagnostic line the hook already prints for the exact same
+    failure (ch. 7: "MUST NOT emit uncontrolled human-oriented text into a
+    machine-readable output stream"; ch. 34: "MUST make errors actionable").
+    Only a real subprocess -- not an in-process call -- can observe this.
+    """
+    filepath = tmp_path / "unreadable.py"
+    filepath.write_text("data = requests.get(url)\n")
+    filepath.chmod(0o000)
+
+    try:
+        completed_process = subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "pre_commit_hooks.ast_checks", "--select", "forbid-vars", str(filepath)],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    finally:
+        filepath.chmod(0o644)
+
+    assert completed_process.returncode == 1
+    assert "Traceback" not in completed_process.stdout
+    assert "Traceback" not in completed_process.stderr
+    assert f"{filepath}: error: could not be read or parsed; file skipped" in completed_process.stderr

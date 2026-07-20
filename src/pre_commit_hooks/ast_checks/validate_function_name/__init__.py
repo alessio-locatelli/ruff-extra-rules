@@ -172,14 +172,23 @@ class ValidateFunctionNameCheck(BaseCheck):
                     # post-fix re-check attribute the rejection to this
                     # specific violation instead of the whole batch).
                     mark_fix_rejected(violation)
-                except Exception:
+                except Exception:  # noqa: BLE001 -- caught, isolated (ch. 5), and logged below; not swallowed
                     # A bug in apply_fix() itself, distinct from
                     # FixValidationError above: mark it so the orchestrator's
                     # post-fix re-check reports this specific violation as
                     # [FIX ERRORED] rather than an ordinary, retryable
                     # [FIXABLE] — re-running --fix would just fail here
                     # identically again.
-                    logger_check.exception("Failed to apply fix for %s in %s", suggestion.func_name, filepath)
+                    # Debug-only: mark_fix_errored() below already reports
+                    # this cleanly as [FIX ERRORED] — an ERROR-level
+                    # .exception() call here would just leak a redundant raw
+                    # traceback onto the user's stderr by default (nothing
+                    # in this codebase configures logging, so Python's own
+                    # lastResort handler prints WARNING+ straight to
+                    # stderr).
+                    logger_check.debug(
+                        "Failed to apply fix for %s in %s", suggestion.func_name, filepath, exc_info=True
+                    )
                     mark_fix_errored(violation)
 
         return applied_any

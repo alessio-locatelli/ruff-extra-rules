@@ -24,6 +24,7 @@ from ._base import (
     atomic_write_text,
     find_ignored_lines,
     ignore_pattern_for,
+    mark_fix_failed,
 )
 
 if TYPE_CHECKING:
@@ -180,7 +181,7 @@ class MisplacedCommentCheck(BaseCheck):
     def fix(
         self,
         filepath: Path,
-        _violations: list[Violation],
+        violations: list[Violation],
         source: str,
         _tree: ast.Module,
         encoding: str = "utf-8",
@@ -227,7 +228,15 @@ class MisplacedCommentCheck(BaseCheck):
             try:
                 atomic_write_text(filepath, "".join(lines), encoding)
             except OSError:
-                logger.exception("Failed to write %s", filepath)
+                # Debug-only: mark_fix_failed() below already reports this
+                # cleanly as [FIX FAILED] — an ERROR-level .exception() call
+                # here would just leak a redundant raw traceback onto the
+                # user's stderr by default (nothing in this codebase
+                # configures logging, so Python's own lastResort handler
+                # prints WARNING+ straight to stderr).
+                logger.debug("Failed to write %s", filepath, exc_info=True)
+                for v in violations:
+                    mark_fix_failed(v)
                 return False
 
         return fixed_any
