@@ -109,7 +109,7 @@ def check_file(filepath: str, forbidden_names: set[str]) -> list[str]:
 The existing optimizations a new check should reuse rather than reimplement:
 
 - **`_cache.py`**: a SHA-1 + mtime disk cache (like mypy/ruff's), keyed per file, so an unchanged file isn't re-analyzed on the next run.
-- **`_prefilter.py`**: a `git grep`-based pass that skips files that can't possibly match before any Python parsing happens.
+- **`_prefilter.py`**: a `git grep`-based pass that skips files that can't possibly match before any Python parsing happens. `git_grep_filter()` always keeps a file it can't confirm is readable (missing, permission-denied) as a candidate regardless of what `git grep` itself reports for it — never trust silence from a prefilter as proof a file doesn't need checking. See `docs/adr/0015-behavioral-contract-audit-file-discovery-path-handling.md`.
 - **`CheckOrchestrator`**: parses each file's AST once per run and hands the same `tree`/`source` to every enabled check.
 
 Guidelines:
@@ -125,3 +125,5 @@ python -c "import pstats; p = pstats.Stats('profile.stats'); p.sort_stats('cumul
 ```
 
 Each check invocation pays Python interpreter startup once per subprocess, which tends to dominate over per-file analysis cost at this repo's current size — don't trust a single run's cold-vs-warm percentage as a stable signal, the sign can flip between runs. Re-run `scripts/benchmark.py` yourself to get current numbers rather than relying on a hardcoded figure in docs. Cache location: `.cache/pre_commit_hooks/` (safe to delete).
+
+**Incremental-analysis limitations**: none. A `check()` implementation must only ever look at the single file it's given (`filepath`/`tree`/`source`) — no check reads another file, imports, or any other cross-file state — so a cache hit for an unchanged file always reproduces exactly what a full re-run of that file would produce. Keep it that way: a check that started inspecting other files would silently break this guarantee, since the cache key (`CheckOrchestrator._generate_cache_key()`) has no way to invalidate one file's cached result because a _different_ file it depended on changed.

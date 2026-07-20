@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 import sys
 import types
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest import mock
 
 import pytest
 
@@ -11,6 +16,7 @@ from pre_commit_hooks import ast_checks
 from pre_commit_hooks.ast_checks import (
     ALL_CHECKS,
     CheckOrchestrator,
+    expand_directories,
     filter_excluded_files,
     load_checks,
     main,
@@ -24,7 +30,6 @@ if TYPE_CHECKING:
     import argparse
     import ast
     from collections.abc import Callable
-    from pathlib import Path
 
     from pre_commit_hooks.ast_checks import ASTCheck
     from pre_commit_hooks.ast_checks.validate_function_name.analysis import Suggestion
@@ -42,6 +47,124 @@ if TYPE_CHECKING:
 )
 def test_filter_excluded_files(files: list[str], patterns: list[str], expected: list[str]) -> None:
     assert filter_excluded_files(files, patterns) == expected
+
+
+def test_expand_directories_leaves_plain_files_untouched(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    assert expand_directories([str(filepath), "also/does/not/exist.py"]) == [
+        str(filepath),
+        "also/does/not/exist.py",
+    ]
+
+
+def test_expand_directories_globs_python_files_outside_a_git_repo(tmp_path: Path) -> None:
+    # No git repo here, so this exercises the rglob fallback rather than
+    # `git ls-files`.
+    (tmp_path / "pkg").mkdir()
+    py_file = tmp_path / "pkg" / "module.py"
+    py_file.write_text("x = 1\n")
+    (tmp_path / "pkg" / "notes.txt").write_text("not python\n")
+
+    assert expand_directories([str(tmp_path)]) == [str(py_file.resolve())]
+
+
+def test_expand_directories_uses_git_ls_files_inside_a_git_repo(tmp_path: Path) -> None:
+    # Regression: a directory argument (e.g. `ruff-extra-rules src/`, the
+    # form this project's own dev docs use — see AGENTS.md) used to reach
+    # CheckOrchestrator.process_files() as a single unexpanded path. Inside
+    # a git repo, git grep's own directory pathspec support made it recurse
+    # and match files *inside* that directory, but those resolved paths
+    # never matched the literal directory path in git_grep_filter's own
+    # input map, so every result was silently discarded as unresolvable —
+    # the run reported zero violations, exit code 0, having checked
+    # nothing. This also proves git-tracked-only, .gitignore-aware
+    # expansion: an untracked file under the directory is excluded.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        tracked = tmp_path / "tracked.py"
+        tracked.write_text("x = 1\n")
+        subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
+
+        (tmp_path / "untracked.py").write_text("y = 1\n")
+
+        assert expand_directories([str(tmp_path)]) == [str(tracked.resolve())]
+    finally:
+        os.chdir(original_dir)
+
+
+def test_expand_directories_skips_tracked_file_deleted_from_working_tree(tmp_path: Path) -> None:
+    # Regression: `git ls-files` reports the *index*, not the working tree
+    # -- a tracked file removed from disk with a plain `rm` (not `git rm`)
+    # still shows up in its output even though it no longer exists. A
+    # directory scan isn't asking about that specific file by name, so a
+    # stale index entry must be dropped silently rather than surfacing a
+    # fake "could not be read" error for a file the user never named.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        deleted = tmp_path / "deleted.py"
+        deleted.write_text("x = 1\n")
+        subprocess.run([git, "add", "deleted.py"], check=True, cwd=tmp_path)  # noqa: S603
+        deleted.unlink()
+
+        assert expand_directories([str(tmp_path)]) == []
+    finally:
+        os.chdir(original_dir)
+
+
+def test_expand_directories_falls_back_when_git_ls_files_fails(tmp_path: Path) -> None:
+    # Inside a git repo, but git itself fails (e.g. missing, or the
+    # subprocess times out) — falls back to the plain recursive glob
+    # instead of propagating the failure.
+    (tmp_path / "pkg").mkdir()
+    py_file = tmp_path / "pkg" / "module.py"
+    py_file.write_text("x = 1\n")
+
+    with mock.patch("subprocess.run") as mock_run:
+        mock_run.side_effect = FileNotFoundError("git not found")
+        matches = expand_directories([str(tmp_path)])
+
+    assert matches == [str(py_file.resolve())]
+
+
+def test_main_directory_with_no_python_files_returns_zero(tmp_path: Path) -> None:
+    (tmp_path / "notes.txt").write_text("not python\n")
+
+    assert main([str(tmp_path)]) == 0
+
+
+def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        filepath = tmp_path / "module.py"
+        filepath.write_text("data = 1\n")
+        subprocess.run([git, "add", "module.py"], check=True, cwd=tmp_path)  # noqa: S603
+
+        exit_code = main([str(tmp_path), "--select", "forbid-vars"])
+
+        assert exit_code == 1
+        assert "TRI001" in capsys.readouterr().err
+    finally:
+        os.chdir(original_dir)
 
 
 def test_process_files_handles_utf8_bom(tmp_path: Path) -> None:
@@ -956,6 +1079,43 @@ def test_main_unparseable_file_returns_one(tmp_path: Path, capsys: pytest.Captur
 
     assert main([str(filepath)]) == 1
     assert f"{filepath}: error: could not be read or parsed; file skipped" in capsys.readouterr().err
+
+
+def test_main_permission_denied_file_returns_one_inside_git_repo(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Regression: inside a real git repo, the prefilter's `git grep`
+    # subprocess (not the Python-only fallback the other tmp_path-based
+    # tests exercise, since they aren't git repos) used to report a
+    # permission-denied file only via a "failed to stat" line on its own
+    # stderr, without changing its exit code for the files it *could*
+    # read. main() never inspected that stderr, so the file was silently
+    # dropped before ever reaching _check_file — the whole run reported
+    # exit code 0, as if the file never existed. ForbidVarsCheck has a
+    # prefilter pattern ("data" is one of its forbidden names), so this
+    # only reproduces via the check that actually calls into git grep.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        filepath = tmp_path / "module.py"
+        filepath.write_text("data = 1\n")
+        subprocess.run([git, "add", "module.py"], check=True, cwd=tmp_path)  # noqa: S603
+        filepath.chmod(0o000)
+
+        try:
+            exit_code = main(["module.py", "--select", "forbid-vars"])
+        finally:
+            filepath.chmod(0o644)
+
+        assert exit_code == 1
+        assert "module.py: error: could not be read or parsed; file skipped" in capsys.readouterr().err
+    finally:
+        os.chdir(original_dir)
 
 
 def test_main_check_crash_returns_one_and_reports_check_and_file(

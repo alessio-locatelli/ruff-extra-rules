@@ -97,6 +97,62 @@ def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None
         os.chdir(original_dir)
 
 
+def test_git_grep_filter_includes_permission_denied_tracked_file(tmp_path: Path) -> None:
+    # Regression: `git grep` reports a permission-denied file only as an
+    # "error: failed to stat" line on stderr -- it still exits 0 (if
+    # another requested file matched) or 1 (if none did), the same exit
+    # codes as an ordinary match/non-match. The old code only ever looked
+    # at stdout, so this file silently vanished from the candidate list:
+    # never checked, never reported, and the whole run could exit 0 as if
+    # it had never existed.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        unreadable = tmp_path / "unreadable.py"
+        unreadable.write_text("data = 1\n")
+        subprocess.run([git, "add", "unreadable.py"], check=True, cwd=tmp_path)  # noqa: S603
+        unreadable.chmod(0o000)
+
+        try:
+            matches = git_grep_filter([str(unreadable)], "data", fixed_string=True)
+        finally:
+            unreadable.chmod(0o644)
+
+        assert str(unreadable) in matches
+    finally:
+        os.chdir(original_dir)
+
+
+def test_git_grep_filter_includes_file_deleted_since_discovery(tmp_path: Path) -> None:
+    # Regression: a file that's vanished between the caller's file list
+    # being built and this call (e.g. deleted after pre-commit computed
+    # the changed-file list but before this hook ran) produces *no*
+    # signal from `git grep` at all -- exit code 1, empty stdout, empty
+    # stderr, indistinguishable from "pattern genuinely absent from an
+    # existing file". The old code trusted that silence as proof of "no
+    # match" and dropped the file with no trace.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        vanished = tmp_path / "vanished.py"
+
+        matches = git_grep_filter([str(vanished)], "data", fixed_string=True)
+
+        assert str(vanished) in matches
+    finally:
+        os.chdir(original_dir)
+
+
 def test_git_grep_filter_skips_unresolvable_git_paths(tmp_path: Path) -> None:
     # Defensive: if git's null-separated output includes a path that
     # doesn't resolve back to one of the requested filepaths, it's skipped

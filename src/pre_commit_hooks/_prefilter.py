@@ -8,6 +8,7 @@ is unavailable.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -36,6 +37,25 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
     if not filepaths:
         return []
 
+    # git grep's own pathspec handling gives no reliable signal that a
+    # specific input file was skipped rather than genuinely not matching: a
+    # file that's vanished since the caller's file list was built (e.g.
+    # deleted between pre-commit computing the changed-file list and this
+    # hook actually running) exits 1 -- git grep's own "no matches" code --
+    # with empty stdout *and* empty stderr, indistinguishable from an
+    # ordinary non-match. A permission-denied file only ever surfaces as an
+    # "error: failed to stat" line on stderr, without necessarily changing
+    # the exit code for the files git *could* read. Trusting "absent from
+    # stdout" as proof of "doesn't match" would silently drop such a file
+    # from every check's candidate list, with zero trace it was ever
+    # skipped. Anything not confirmed-readable up front is therefore always
+    # kept as a candidate regardless of what git grep reports for it,
+    # deferring the actual diagnosis to the hook's own
+    # _check_file/_read_source -- the same "include it, let the hook handle
+    # the error" contract _python_fallback_filter already applies to its own
+    # read failures below.
+    unreadable = [fp for fp in filepaths if not os.access(fp, os.R_OK)]
+
     try:
         # Build git grep command
         cmd = ["git", "grep", "--files-with-matches", "--null"]
@@ -52,7 +72,13 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
             cmd, capture_output=True, text=True, check=False, timeout=30
         )
 
-        if git_grep_result.returncode == 0:
+        # A 0/1 returncode alone doesn't mean every input file was actually
+        # processed cleanly: stderr can carry a per-file error (e.g.
+        # "failed to stat") even though git still exits 0 or 1 for the
+        # files it *could* read. Only trust stdout when stderr is empty too
+        # -- otherwise fall back to the Python path below, which reads each
+        # file itself rather than relying on git's account of what it saw.
+        if git_grep_result.returncode == 0 and not git_grep_result.stderr:
             # Parse null-separated output
             # Git grep returns paths relative to repo root, but we need to preserve
             # the format of input paths (absolute vs relative)
@@ -68,10 +94,10 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
                 if resolved in input_map:
                     matches.append(input_map[resolved])
 
-            return matches
-        if git_grep_result.returncode == 1:
+            return matches + unreadable
+        if git_grep_result.returncode == 1 and not git_grep_result.stderr:
             # No matches found (not an error)
-            return []
+            return unreadable
         # Error occurred, fall back to Python
         return _python_fallback_filter(filepaths, pattern)
 
