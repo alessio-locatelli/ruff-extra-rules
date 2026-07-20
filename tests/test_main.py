@@ -150,3 +150,65 @@ def test_real_invocation_does_not_leak_a_traceback_onto_stderr(tmp_path: Path) -
     assert "Traceback" not in completed_process.stdout
     assert "Traceback" not in completed_process.stderr
     assert f"{filepath}: error: could not be read or parsed; file skipped" in completed_process.stderr
+
+
+def test_verbose_flag_surfaces_the_underlying_exception_on_stderr(tmp_path: Path) -> None:
+    """The clean diagnostic line above ("could not be read or parsed") never
+    says *why* -- that detail only exists in a `logger.debug(...,
+    exc_info=True)` call that's silent by default (see
+    test_real_invocation_does_not_leak_a_traceback_onto_stderr, above, and
+    _orchestrator.py's _read_source docstring). Ch. 27: "MUST provide a
+    debug or verbose mode when normal output is insufficient for
+    troubleshooting" -- --verbose is that mode, raising the root logger to
+    DEBUG so the same failure additionally prints its real traceback.
+    """
+    filepath = tmp_path / "unreadable.py"
+    filepath.write_text("data = requests.get(url)\n")
+    filepath.chmod(0o000)
+
+    try:
+        completed_process = subprocess.run(  # noqa: S603
+            [
+                sys.executable,
+                "-m",
+                "pre_commit_hooks.ast_checks",
+                "--verbose",
+                "--select",
+                "forbid-vars",
+                str(filepath),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    finally:
+        filepath.chmod(0o644)
+
+    assert completed_process.returncode == 1
+    assert f"{filepath}: error: could not be read or parsed; file skipped" in completed_process.stderr
+    assert "Traceback (most recent call last):" in completed_process.stderr
+    assert "PermissionError" in completed_process.stderr
+
+
+def test_verbose_flag_does_not_change_violations_or_exit_code(tmp_path: Path) -> None:
+    """Ch. 27: "MUST ensure that debug logging does not change lint
+    results" / "does not change auto-fix behavior" -- --verbose only
+    reconfigures logging, so an ordinary (non-crashing) violation must be
+    reported identically with or without it.
+    """
+    filepath = tmp_path / "violates.py"
+    filepath.write_text("data = requests.get(url)\n")
+
+    def _run(*extra_args: str) -> subprocess.CompletedProcess[str]:
+        cmd = [sys.executable, "-m", "pre_commit_hooks.ast_checks", "--select", "forbid-vars", *extra_args]
+        return subprocess.run([*cmd, str(filepath)], capture_output=True, text=True, check=False, timeout=30)  # noqa: S603
+
+    quiet = _run()
+    verbose = _run("--verbose")
+
+    assert quiet.returncode == verbose.returncode == 1
+    assert quiet.stdout == verbose.stdout == ""
+    violation_line = f"{filepath}:1:1: TRI001:"
+    assert any(line.startswith(violation_line) for line in quiet.stderr.splitlines())
+    assert any(line.startswith(violation_line) for line in verbose.stderr.splitlines())

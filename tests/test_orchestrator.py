@@ -1268,6 +1268,18 @@ def test_main_no_violations_returns_zero(tmp_path: Path) -> None:
     assert main([str(filepath)]) == 0
 
 
+def test_main_verbose_flag_does_not_change_a_clean_runs_exit_code(tmp_path: Path) -> None:
+    # Exercises the --verbose branch in-process for coverage; the actual
+    # observable stderr/exit-code behavior it enables is proven end-to-end
+    # via a real subprocess in test_main.py (pytest's own logging-capture
+    # handler makes an in-process assertion about default log output
+    # unreliable -- see test_real_invocation_does_not_leak_a_traceback_onto_stderr).
+    filepath = tmp_path / "clean.py"
+    filepath.write_text("x = 1\n")
+
+    assert main(["--verbose", str(filepath)]) == 0
+
+
 def test_main_unparseable_file_returns_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:

@@ -5,6 +5,7 @@ orchestrator, and diagnostics layers together, and the process exit code.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from typing import Any
 
@@ -69,11 +70,29 @@ def main(argv: list[str] | None = None) -> int:
         "--exclude",
         help="Glob pattern(s) to exclude files/directories (comma-separated)",
     )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help=(
+            "Enable debug logging to stderr, e.g. the underlying exception "
+            "behind a reported check/read/cache failure. Never changes "
+            "which violations are reported or how --fix behaves."
+        ),
+    )
 
     for check_class in ALL_CHECKS:
         check_class.add_cli_arguments(parser)
 
     args = parser.parse_args(argv)
+
+    if args.verbose:
+        # Every debug-level logger.debug(..., exc_info=True) call in this
+        # codebase is deliberately silent by default (see e.g.
+        # _orchestrator.py's _read_source docstring) so a self-healing
+        # fallback or a cleanly-reported failure doesn't also dump a raw
+        # traceback onto stderr — this is the opt-in that surfaces them.
+        logging.basicConfig(level=logging.DEBUG, stream=sys.stderr)
 
     if args.list_checks:
         print("Available checks:")
