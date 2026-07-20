@@ -134,8 +134,6 @@ def _scan_misplaced_comments(
 
 
 class MisplacedCommentCheck(BaseCheck):
-    """Move trailing comments off closing-bracket-only lines."""
-
     @property
     def check_id(self) -> str:
         return CHECK_ID

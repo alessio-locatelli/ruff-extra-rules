@@ -57,7 +57,6 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
     unreadable = [fp for fp in filepaths if not os.access(fp, os.R_OK)]
 
     try:
-        # Build git grep command
         cmd = ["git", "grep", "--files-with-matches", "--null"]
         if fixed_string:
             cmd.append("--fixed-strings")
@@ -79,15 +78,12 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
         # -- otherwise fall back to the Python path below, which reads each
         # file itself rather than relying on git's account of what it saw.
         if git_grep_result.returncode == 0 and not git_grep_result.stderr:
-            # Parse null-separated output
-            # Git grep returns paths relative to repo root, but we need to preserve
-            # the format of input paths (absolute vs relative)
+            # git grep returns paths relative to repo root, but the format
+            # of the input paths (absolute vs relative) must be preserved.
             git_matches = {f for f in git_grep_result.stdout.split("\0") if f}
 
-            # Build mapping: resolved path -> original input path
             input_map = {Path(fp).resolve(): fp for fp in filepaths}
 
-            # Map git results back to original input paths
             matches = []
             for git_path in git_matches:
                 resolved = Path(git_path).resolve()
@@ -96,9 +92,8 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
 
             return matches + unreadable
         if git_grep_result.returncode == 1 and not git_grep_result.stderr:
-            # No matches found (not an error)
+            # No matches found (not an error).
             return unreadable
-        # Error occurred, fall back to Python
         return _python_fallback_filter(filepaths, pattern)
 
     except (

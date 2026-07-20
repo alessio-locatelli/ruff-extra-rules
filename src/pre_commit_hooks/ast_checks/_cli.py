@@ -70,13 +70,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Glob pattern(s) to exclude files/directories (comma-separated)",
     )
 
-    # Check-specific arguments: each check registers its own, if any
     for check_class in ALL_CHECKS:
         check_class.add_cli_arguments(parser)
 
     args = parser.parse_args(argv)
 
-    # List checks if requested
     if args.list_checks:
         print("Available checks:")
         instances = sorted((cls() for cls in ALL_CHECKS), key=lambda c: c.check_id)
@@ -84,7 +82,6 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {check.check_id}: {check.error_code}")
         return 0
 
-    # No files to check
     if not args.filenames:
         return 0
 
@@ -95,21 +92,17 @@ def main(argv: list[str] | None = None) -> int:
     if not filenames:
         return 0
 
-    # Filter excluded files
     exclude_patterns = []
     if args.exclude:
         exclude_patterns = [p.strip() for p in args.exclude.split(",") if p.strip()]
 
     filenames = filter_excluded_files(filenames, exclude_patterns)
     if not filenames:
-        # All files were excluded
         return 0
 
-    # Parse select/ignore sets
     select = {c.strip() for c in args.select.split(",")} if args.select else None
     ignore = {c.strip() for c in args.ignore.split(",")} if args.ignore else None
 
-    # Validate check IDs
     all_check_ids = {cls().check_id for cls in ALL_CHECKS}
     if select:
         invalid = select - all_check_ids
@@ -124,22 +117,19 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Error: Unknown checks: {checks_str}", file=sys.stderr)
             return 1
 
-    # Build check-specific arguments: each check translates its own parsed
-    # CLI args into its own __init__ kwargs, if any
+    # Each check translates its own parsed CLI args into its own __init__ kwargs, if any.
     check_args: dict[str, dict[str, Any]] = {}
     for check_class in ALL_CHECKS:
         kwargs = check_class.cli_kwargs_from_args(args)
         if kwargs:
             check_args[check_class().check_id] = kwargs
 
-    # Load checks
     checks = load_checks(select=select, ignore=ignore, check_args=check_args)
 
     if not checks:
         print("Error: No checks enabled", file=sys.stderr)
         return 1
 
-    # Run orchestrator
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=args.fix)
     all_violations = orchestrator.process_files(filenames)
 

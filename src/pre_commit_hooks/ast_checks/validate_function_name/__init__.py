@@ -64,8 +64,6 @@ class ValidateFunctionNameFixData(TypedDict):
 
 
 class ValidateFunctionNameCheck(BaseCheck):
-    """Check for get_* functions and suggest better names."""
-
     @property
     def check_id(self) -> str:
         return "validate-function-name"
@@ -78,22 +76,11 @@ class ValidateFunctionNameCheck(BaseCheck):
         return ["def get_"]
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
-        """Run check and return violations.
-
-        Args:
-            filepath: Path to file
-            tree: Parsed AST tree
-            source: Source code
-
-        Returns:
-            List of violations
-        """
         # Reuse the orchestrator's already-parsed tree/source instead of
         # re-reading and re-parsing the file (see analysis.process_file for
         # the standalone equivalent used by tests).
         suggestions = collect_suggestions(filepath, tree, source)
 
-        # Convert Suggestion objects to Violation objects
         violations = []
         for suggestion in suggestions:
             message = (
@@ -136,15 +123,6 @@ class ValidateFunctionNameCheck(BaseCheck):
         one rename can shift the text a later rename's positions were
         computed against, so each apply_fix() call re-reads the
         just-written file to stay correct against the current file state.
-
-        Args:
-            filepath: Path to file
-            violations: Violations to fix
-            source: Source code
-            tree: Parsed AST tree
-
-        Returns:
-            True if fixes were applied successfully
         """
         if not violations:
             return False
@@ -160,7 +138,6 @@ class ValidateFunctionNameCheck(BaseCheck):
             if not suggestion:
                 continue
 
-            # Check if safe to autofix
             if should_autofix(filepath, suggestion):
                 try:
                     if apply_fix(filepath, suggestion):

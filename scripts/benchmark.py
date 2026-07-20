@@ -18,7 +18,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 # Each entry runs one invocation of the real, currently-registered checks —
 # all six now live behind the single ruff-extra-rules hook. The sub-checks
@@ -71,31 +71,37 @@ CHECKS: dict[str, list[str]] = {
 CACHE_DIR = Path(".cache/pre_commit_hooks")
 
 
+class CheckTimingResult(TypedDict):
+    name: str
+    elapsed_ms: float
+    return_code: int
+    files_checked: int
+
+
+class BenchmarkIterationResult(TypedDict):
+    label: str
+    total_ms: float
+    checks: list[CheckTimingResult]
+
+
 def clear_cache() -> None:
-    """Clear the cache directory."""
     if CACHE_DIR.exists():
         shutil.rmtree(CACHE_DIR)
         print(f"✓ Cleared cache: {CACHE_DIR}")
 
 
-def get_test_files() -> list[str]:
-    """Get all Python test files."""
+def collect_source_and_test_files() -> list[str]:
     test_files = list(Path("tests").rglob("*.py"))
     src_files = list(Path("src").rglob("*.py"))
     return [str(f) for f in test_files + src_files]
 
 
-def run_check(name: str, command: list[str], files: list[str]) -> dict[str, Any]:
-    """Run a single check invocation and measure time.
-
-    Returns:
-        Dict with timing and result info
-    """
+def run_check(name: str, command: list[str], files: list[str]) -> CheckTimingResult:
     start = time.perf_counter()
     # command is one of this module's own hardcoded CHECKS entries and files
-    # comes from local globbing in get_test_files(), never from untrusted
-    # external input, so no shell is involved and no argument here can
-    # inject another command.
+    # comes from local globbing in collect_source_and_test_files(), never
+    # from untrusted external input, so no shell is involved and no argument
+    # here can inject another command.
     result = subprocess.run(  # noqa: S603
         [*command, *files],
         capture_output=True,
@@ -118,13 +124,12 @@ def run_check(name: str, command: list[str], files: list[str]) -> dict[str, Any]
     }
 
 
-def benchmark_iteration(files: list[str], label: str) -> dict[str, Any]:
-    """Run all checks once and collect timing data."""
+def benchmark_iteration(files: list[str], label: str) -> BenchmarkIterationResult:
     print(f"\n{'=' * 60}")
     print(f"{label}")
     print(f"{'=' * 60}")
 
-    results = []
+    results: list[CheckTimingResult] = []
     total_start = time.perf_counter()
 
     for name, command in CHECKS.items():
@@ -145,7 +150,6 @@ def benchmark_iteration(files: list[str], label: str) -> dict[str, Any]:
 
 
 def main() -> None:
-    """Run benchmark suite."""
     parser = argparse.ArgumentParser(description="Benchmark pre-commit hooks")
     parser.add_argument(
         "--iterations",
@@ -163,15 +167,13 @@ def main() -> None:
     print("Pre-commit Hooks Performance Benchmark")
     print("=" * 60)
 
-    # Get test files
-    files = get_test_files()
+    files = collect_source_and_test_files()
     print(f"\nTest files: {len(files)} Python files")
 
-    # Clear cache if requested
     if args.clear_cache:
         clear_cache()
 
-    all_results: list[dict[str, Any]] = []
+    all_results: list[BenchmarkIterationResult] = []
 
     # Run cold cache benchmarks
     print("\n\n📊 COLD CACHE (First Run) Benchmarks")

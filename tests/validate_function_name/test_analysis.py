@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -351,7 +351,9 @@ def get_config(settings):
     ],
 )
 def test_analyze_function_flags(source: str, func_name: str, flags: dict[str, bool]) -> None:
-    analysis = analyze_function(_func(source, func_name))
+    # FunctionBehavior's keys aren't literals here, since `flags` is a
+    # dynamic per-case mapping; TypedDict is a plain dict at runtime.
+    analysis = cast("dict[str, bool]", analyze_function(_func(source, func_name)))
 
     for flag, expected in flags.items():
         assert analysis[flag] is expected, flag

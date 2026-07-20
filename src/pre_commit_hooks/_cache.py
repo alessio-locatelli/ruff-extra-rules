@@ -163,19 +163,12 @@ class CacheManager:
         """Uses mtime fast-path: if mtime unchanged, skip expensive hash computation.
         If mtime changed, verify with content hash.
 
-        Args:
-            filepath: File to look up
-            hook_name: Hook whose cached result to fetch; defaults to the
-                hook name this CacheManager was constructed with
-
-        Returns:
-            Cached result dict or None if cache invalid/missing
+        `hook_name` defaults to the hook name this CacheManager was constructed with.
         """
         hook_name = hook_name or self.hook_name
         if self._cache_dir_unavailable:
             return None
         try:
-            # Get file stats
             stat = filepath.stat()
             cache_file = self._get_cache_path(filepath)
 
@@ -183,23 +176,19 @@ class CacheManager:
                 return None
 
             with self._locked(cache_file):
-                # Load cache metadata
                 with cache_file.open(encoding="utf-8") as f:
                     cache_data = json.load(f)
 
-                # Version check
                 if cache_data.get("version") != self.cache_version:
                     return None
 
                 # Fast path: mtime + size check (no hashing needed)
                 if cache_data.get("mtime") == stat.st_mtime_ns and cache_data.get("size") == stat.st_size:
-                    # mtime unchanged, cache is valid!
                     return cache_data.get("hook_results", {}).get(hook_name)
 
                 # Slow path: mtime changed, verify with content hash
                 file_hash = self.compute_file_hash(filepath)
                 if cache_data.get("file_hash") == file_hash:
-                    # Content unchanged, update mtime in cache
                     cache_data["mtime"] = stat.st_mtime_ns
                     cache_data["size"] = stat.st_size
                     self._write_cache(cache_file, cache_data)
@@ -207,10 +196,10 @@ class CacheManager:
 
         except (OSError, json.JSONDecodeError, KeyError) as error:
             logger.warning("File: %s, hook name: %s, error: %s", filepath, hook_name, repr(error))
-            # Treat any error as cache miss
             return None
         else:
-            # Content changed, cache invalid
+            # Neither the fast nor slow path above returned: the content
+            # hash didn't match, so the cache is genuinely stale.
             return None
 
     def set_cached_result(self, filepath: Path, hook_name: str, hook_result: dict[str, Any]) -> None:
@@ -222,7 +211,6 @@ class CacheManager:
             cache_file = self._get_cache_path(filepath)
 
             with self._locked(cache_file):
-                # Load existing cache or create new
                 cache_data = None
                 if cache_file.exists():
                     with cache_file.open(encoding="utf-8") as f:
@@ -239,14 +227,12 @@ class CacheManager:
                 if cache_data is None:
                     cache_data = {"version": self.cache_version, "hook_results": {}}
 
-                # Update cache
                 cache_data["file_hash"] = file_hash
                 cache_data["mtime"] = stat.st_mtime_ns
                 cache_data["size"] = stat.st_size
                 cache_data["hook_results"][hook_name] = hook_result
                 cache_data["hook_results"][hook_name]["checked_at"] = int(time.time())
 
-                # Atomic write
                 self._write_cache(cache_file, cache_data)
 
         except (OSError, json.JSONDecodeError) as error:

@@ -12,23 +12,13 @@ if TYPE_CHECKING:
 
 
 def _is_test_file(filepath: Path | None) -> bool:
-    """Check if a file is a test file.
-
-    Args:
-        filepath: Path to the file being analyzed
-
-    Returns:
-        True if this is a test file
-    """
     if filepath is None:
         return False
 
-    # Check if file is in a test directory
     parts = filepath.parts
     if "tests" in parts or "test" in parts:
         return True
 
-    # Check if filename follows test naming convention
     filename = filepath.name
     return filename.startswith("test_") or filename.endswith("_test.py")
 
@@ -94,18 +84,10 @@ DESCRIPTIVE_SUFFIXES = {
 
 
 def _count_chained_operations(node: ast.expr) -> int:
-    """Count the number of chained operations (subscripts, attributes, calls).
-
-    Examples:
-        foo.bar.baz -> 2 (two attribute accesses)
-        obj[x][y][z] -> 3 (three subscripts)
-        func()[key].attr -> 2 (subscript + attribute)
-
-    Args:
-        node: AST expression node
-
-    Returns:
-        Number of chained operations
+    """Examples:
+    foo.bar.baz -> 2 (two attribute accesses)
+    obj[x][y][z] -> 3 (three subscripts)
+    func()[key].attr -> 2 (subscript + attribute)
     """
     count = 0
     current = node
@@ -115,36 +97,26 @@ def _count_chained_operations(node: ast.expr) -> int:
             count += 1
             current = current.value
         elif isinstance(current, ast.Call):
-            # Count the call itself if it's part of a chain
-            if count > 0:  # Only count if it's chained with something
+            # Only count the call if it's chained with something else.
+            if count > 0:
                 count += 1
             current = current.func
         else:
-            # Reached the base of the chain
+            # Reached the base of the chain.
             break
 
     return count
 
 
 def _adds_verbosity_or_context(var_name: str, rhs_source: str, rhs_node: ast.expr) -> bool:
-    """Check if variable name adds verbosity or context beyond the RHS.
-
-    This detects cases where the variable name provides more descriptive or
-    domain-specific information than what the RHS expression conveys.
+    """True when the variable name provides more descriptive or domain-specific
+    information than the RHS expression conveys on its own.
 
     Examples that add verbosity/context:
         raw_headers = kwargs.get("headers")  # "raw_" prefix adds meaning
         translations = orjson.loads(f.read())  # describes what data is
         firestore_client = db.client()  # more specific than "client"
         user_email = data["email"]  # more verbose than just "email"
-
-    Args:
-        var_name: Variable name
-        rhs_source: Right-hand side source code
-        rhs_node: Right-hand side AST node
-
-    Returns:
-        True if variable name adds verbosity/context
     """
     var_lower = var_name.lower()
     rhs_lower = rhs_source.lower()
@@ -183,7 +155,6 @@ def _adds_verbosity_or_context(var_name: str, rhs_source: str, rhs_node: ast.exp
     var_parts = var_name.split("_")
     if len(var_parts) >= 2:
         first_part = var_parts[0].lower()
-        # Check if first part is a descriptive prefix not found in RHS
         if first_part in descriptive_word_prefixes and first_part not in rhs_lower:
             return True
 
@@ -193,25 +164,20 @@ def _adds_verbosity_or_context(var_name: str, rhs_source: str, rhs_node: ast.exp
     #   user_email = data["email"]  # adds "user_" prefix  # noqa: ERA001
     #   firestore_client = db.client()  # more specific type name  # noqa: ERA001
     if isinstance(rhs_node, ast.Subscript | ast.Call):
-        # Extract key/method name from RHS
         rhs_key_or_method = None
 
         if isinstance(rhs_node, ast.Subscript):
-            # For subscript: obj["key"] or obj[key]
             if isinstance(rhs_node.slice, ast.Constant):
                 rhs_key_or_method = str(rhs_node.slice.value).lower()
-        # Must be ast.Call — the outer guard ensures Subscript | Call
-        # For calls: obj.method() or obj.method(args)
+        # Must be ast.Call — the outer guard ensures Subscript | Call.
         elif isinstance(rhs_node.func, ast.Attribute):
             rhs_key_or_method = rhs_node.func.attr.lower()
         elif isinstance(rhs_node.func, ast.Name):
             rhs_key_or_method = rhs_node.func.id.lower()
 
-        # Check if variable name contains the RHS key/method but with additional context
         # Example: "raw_headers" contains "headers" but adds "raw_"
         # Example: "firestore_client" contains "client" but adds "firestore_"
         if rhs_key_or_method and rhs_key_or_method in var_lower and var_lower != rhs_key_or_method:
-            # Variable contains the RHS key but is more verbose
             return True
 
     # Pattern 3: Variable name is a .get() call with more context
@@ -223,10 +189,9 @@ def _adds_verbosity_or_context(var_name: str, rhs_source: str, rhs_node: ast.exp
         and rhs_node.args
         and isinstance(rhs_node.args[0], ast.Constant)
     ):
-        # This is a .get() call - likely kwargs.get() or dict.get()
-        # Check if variable adds context beyond the key name
+        # Likely kwargs.get() or dict.get().
         key_name = str(rhs_node.args[0].value).lower()
-        # If var name contains the key but is longer/different, it adds context
+        # If var name contains the key but is longer/different, it adds context.
         if key_name in var_lower and len(var_name) > len(key_name):
             return True
 
@@ -235,7 +200,6 @@ def _adds_verbosity_or_context(var_name: str, rhs_source: str, rhs_node: ast.exp
     # The variable name describes WHAT the data is (domain/semantics)
     # while the RHS just shows HOW it's loaded (generic operation)
     if isinstance(rhs_node, ast.Call):
-        # Check if RHS is a generic parsing/loading function
         generic_parse_functions = {
             "loads",
             "load",
@@ -276,37 +240,20 @@ def calculate_semantic_value(
     is_test_context: bool = False,
     filepath: Path | None = None,
 ) -> int:
-    """Calculate semantic value score for a variable name.
-
-    The score ranges from 0-100:
+    """The score ranges from 0-100:
     - 0-20: No semantic value (redundant assignment, can auto-fix)
     - 21-49: Marginal value (report but don't auto-fix)
     - 50-100: Clear value (skip entirely)
-
-    Args:
-        var_name: Variable name
-        rhs_source: Right-hand side source code
-        rhs_node: Right-hand side AST node
-        has_type_annotation: Whether assignment has type annotation
-        is_test_context: Whether this is in a test file/function
-        filepath: Path to file being analyzed (for test detection)
-
-    Returns:
-        Semantic value score (0-100)
     """
     score = 0
 
-    # In test contexts, apply higher semantic value to descriptive variables
-    # Test code benefits more from named intermediate variables for clarity
+    # Test code benefits more from named intermediate variables for clarity,
+    # so apply a higher semantic value to descriptive variables here.
     if is_test_context or (filepath and _is_test_file(filepath)):
-        # Multi-part names in tests are highly valuable for test readability
-        var_parts = var_name.split("_")
-        if len(var_parts) >= 2:
-            # Variables like "camel_case_sample", "duffel_route", "mock_image"
-            # provide essential context in test code
+        if len(var_name.split("_")) >= 2:
+            # e.g. "camel_case_sample", "duffel_route", "mock_image"
             score += 30
 
-        # Variables that clearly describe test data or results
         test_semantic_words = {
             "mock",
             "fake",
@@ -327,7 +274,7 @@ def calculate_semantic_value(
         if any(word in var_lower for word in test_semantic_words):
             score += 25
 
-        # Variables storing function/method call results before assertions
+        # A common pattern for making assertions clearer.
         # Example: result = landmark.__eq__(None); assert result is NotImplemented  # noqa: ERA001
         if isinstance(rhs_node, ast.Call) and var_lower in {
             "result",
@@ -336,134 +283,95 @@ def calculate_semantic_value(
             "response",
             "landmark",
         }:
-            # If variable is called "result", "output", "value" in test context,
-            # it's a common pattern for making assertions clearer
             score += 30
 
-        # List/dict literals with semantic names in tests
         # Example: some_european_airports = ["AES", "BYJ", "BTS"]  # noqa: ERA001
         if isinstance(rhs_node, ast.List | ast.Dict | ast.Set):
             score += 25
 
-        # Range objects with descriptive names
         # Example: days_with_routes_in_a_row = range(70)  # noqa: ERA001
         if isinstance(rhs_node, ast.Call) and isinstance(rhs_node.func, ast.Name) and rhs_node.func.id == "range":
             score += 25
 
-    # Check if variable adds verbosity or context (+50 points)
-    # This catches cases like "raw_headers = kwargs.get('headers')"
+    # e.g. "raw_headers = kwargs.get('headers')".
     if _adds_verbosity_or_context(var_name, rhs_source, rhs_node):
         score += 50
 
-    # Check for transformative verbs (+60 points - strong signal of semantic value)
     var_lower = var_name.lower()
     if any(verb in var_lower for verb in TRANSFORMATIVE_VERBS):
         score += 60
 
-    # Check for descriptive boolean prefixes (+50 points - strong signal)
     if any(var_lower.startswith(prefix) for prefix in DESCRIPTIVE_PREFIXES):
         score += 50
 
-    # Check for descriptive suffixes (+40 points)
     if any(var_lower.endswith(suffix) for suffix in DESCRIPTIVE_SUFFIXES):
         score += 40
 
-    # Expression complexity scoring
     if isinstance(rhs_node, ast.ListComp | ast.DictComp | ast.SetComp | ast.GeneratorExp):
-        # Comprehensions benefit from naming (+30)
         score += 30
     elif isinstance(rhs_node, ast.BinOp):
-        # Binary operations (+15)
         score += 15
     elif isinstance(rhs_node, ast.UnaryOp):
-        # Unary operations (+10)
         score += 10
     elif isinstance(rhs_node, ast.IfExp):
-        # Ternary expressions (+20)
         score += 20
     elif isinstance(rhs_node, ast.Lambda):
-        # Lambda expressions (+25)
         score += 25
 
-    # Chained operations benefit significantly from naming
-    # Examples: obj[x][y], foo.bar.baz, func()[key].attr
     chain_count = _count_chained_operations(rhs_node)
     if chain_count >= 3:
-        # 3+ chained operations are hard to read inline (+30)
         score += 30
     elif chain_count == 2:
-        # 2 chained operations benefit from naming (+20)
         score += 20
 
-    # Long expressions benefit from naming (progressive scoring)
     if len(rhs_source) > 80:
-        # Very long expressions (80+) strongly benefit from naming
         score += 35
     elif len(rhs_source) > 60:
-        # Long expressions (60-80) benefit from naming
         score += 25
     elif len(rhs_source) > 40:
-        # Medium expressions (40-60) somewhat benefit
         score += 10
 
-    # Multi-part names often represent domain concepts
     name_parts = var_name.split("_")
     if len(name_parts) >= 3:
-        # 3+ parts suggests domain-specific naming
         score += 20
     elif len(name_parts) == 2:
-        # 2 parts is moderate
         score += 10
 
-    # Variable name significantly longer than expression
     if len(var_name) > len(rhs_source) * 1.3:
         score += 15
     elif len(var_name) > len(rhs_source) * 1.1:
         score += 5
 
-    # Type annotations add clarity
     if has_type_annotation:
         score += 15
 
-    # Cap at 100
     return min(score, 100)
 
 
 def _would_exceed_line_length(
     lifecycle: VariableLifecycle,
     *,
+    # RHS length (chars) above which inlining is considered risky regardless
+    # of the variable name's length.
     absolute_threshold: int = 25,
 ) -> bool:
-    """Check if inlining would likely cause usage lines to exceed line length.
-
-    This is a conservative estimate based on RHS length and variable name,
-    used only when the actual usage line isn't available to the caller (see
+    """A conservative estimate based on RHS length and variable name, used
+    only when the actual usage line isn't available to the caller (see
     `exceeds_line_length_when_inlined` for the exact check used when it is).
     Two call sites use different thresholds: reporting a violation is
     lenient (25 chars), while deciding whether to *auto-fix* is stricter (40
     chars) since a wrong autofix is more costly than a missed report.
-
-    Args:
-        lifecycle: Variable lifecycle
-        absolute_threshold: RHS length (chars) above which inlining is
-            considered risky regardless of the variable name's length
-
-    Returns:
-        True if inlining would likely exceed the line length
     """
     assignment = lifecycle.assignment
     var_name = assignment.var_name
     rhs_source = assignment.rhs_source.strip()
 
-    # If the RHS itself is long, inlining it is likely to cause line length
-    # issues, even if the variable name is also long
-    # Example: tuple/list literals, moderately complex expressions
+    # A long RHS (e.g. a tuple/list literal, a moderately complex
+    # expression) risks exceeding the line length even if the variable name
+    # is also long.
     if len(rhs_source) >= absolute_threshold:
         return True
 
-    # If the RHS is significantly longer than the variable name,
-    # it's likely to cause line length issues
-    # Use threshold: if len_diff > 20, assume it might exceed
     len_diff = len(rhs_source) - len(var_name)
     return len_diff > 20
 
@@ -473,24 +381,15 @@ def exceeds_line_length_when_inlined(
     rhs_source: str,
     use_line: str,
     *,
-    max_length: int = 79,
+    max_length: int = 79,  # PEP 8 default
 ) -> bool:
-    """Check if inlining rhs_source in place of var_name on use_line exceeds max_length.
+    """True if replacing `var_name` with `rhs_source` on `use_line` would exceed `max_length`.
 
     This is the exact check (given the real usage line) shared by
     `should_autofix` (deciding whether to report `[FIXABLE]`) and
     `autofix.apply_fixes`'s `_can_safely_inline` (deciding whether to actually
     apply the fix). Both must agree, or a violation can be reported fixable
     and then silently skipped by `--fix`.
-
-    Args:
-        var_name: Variable name being replaced
-        rhs_source: RHS source code that would replace it
-        use_line: The line of source where the variable is used
-        max_length: Maximum allowed line length (79, PEP 8 default)
-
-    Returns:
-        True if the resulting line would exceed max_length
     """
     len_diff = len(rhs_source) - len(var_name)
     new_line_len = len(use_line.rstrip("\n\r")) + len_diff
@@ -498,21 +397,14 @@ def exceeds_line_length_when_inlined(
 
 
 def _would_require_parentheses(rhs_node: ast.expr) -> bool:
-    """Check if inlining the RHS would require parentheses in typical usage contexts.
-
-    This detects cases where the RHS contains operations that would need
-    parentheses when used in subscripts, attribute access, or other contexts.
+    """True when the RHS contains operations that would need parentheses if
+    inlined into a subscript, attribute access, or other typical usage
+    context.
 
     Examples that need parentheses:
         len_prefix = len(x) + 1  # Used in subscript: arr[len(x) + 1]
         result = a or b          # Used in subscript: dict[a or b]
         value = x and y          # Used in call: func(x and y)
-
-    Args:
-        rhs_node: Right-hand side AST node
-
-    Returns:
-        True if inlining would likely require parentheses
     """
     # Binary operations (+, -, *, /, //, %, **, <<, >>, |, ^, &, @)
     # Need parentheses when used in subscripts, attribute access, or calls
@@ -529,17 +421,9 @@ def _would_require_parentheses(rhs_node: ast.expr) -> bool:
 
 
 def _contains_nondeterministic_call(node: ast.expr) -> bool:
-    """Check if an AST node contains calls to non-deterministic functions.
-
-    Non-deterministic functions include time-related, random, UUID, etc.
-    These functions return different values on each call, so inlining them
-    can change program semantics.
-
-    Args:
-        node: AST expression node
-
-    Returns:
-        True if node contains non-deterministic function calls
+    """Non-deterministic functions (time-related, random, UUID, etc.) return
+    different values on each call, so inlining them can change program
+    semantics.
     """
     # Known non-deterministic function/method names
     nondeterministic_names = {
@@ -580,7 +464,6 @@ def _contains_nondeterministic_call(node: ast.expr) -> bool:
             self.has_nondeterministic_call = False
 
         def visit_Call(self, node: ast.Call) -> None:
-            # Check if the function name suggests non-determinism
             func_name = ""
             if isinstance(node.func, ast.Name):
                 func_name = node.func.id
@@ -591,7 +474,6 @@ def _contains_nondeterministic_call(node: ast.expr) -> bool:
                 self.has_nondeterministic_call = True
                 return
 
-            # Continue visiting child nodes
             self.generic_visit(node)
 
     detector = NonDeterministicCallDetector()
@@ -600,39 +482,22 @@ def _contains_nondeterministic_call(node: ast.expr) -> bool:
 
 
 def _is_named_constant_pattern(var_name: str, rhs_node: ast.expr) -> bool:
-    """Check if this is a "named constant" pattern avoiding magic numbers.
-
-    Magic numbers are raw numeric literals that lack context. Using a descriptive
-    variable name gives semantic meaning to the value.
-
-    Examples that should NOT be flagged:
+    """A "named constant" pattern gives semantic meaning to an otherwise-magic
+    numeric literal, and should not be flagged:
         max_search_depth = 10  # explains what 10 means
         line_spacing = 1.2  # explains what 1.2 represents
         user_id = 101749141  # gives meaning to the ID
-
-    Args:
-        var_name: Variable name
-        rhs_node: Right-hand side AST node
-
-    Returns:
-        True if this is a named constant pattern
     """
-    # Only applies to numeric literals (int, float)
     if not isinstance(rhs_node, ast.Constant):
         return False
 
     if not isinstance(rhs_node.value, int | float):
         return False
 
-    # Variable name must provide semantic meaning
-    # Check for multi-part names (with underscore) or sufficiently descriptive names
     var_parts = var_name.split("_")
-
-    # Multi-part names like "max_search_depth", "line_spacing", "user_id"
     if len(var_parts) >= 2:
         return True
 
-    # Single-part names that are descriptive (> 6 chars) and not generic
     generic_names = {
         "value",
         "val",
@@ -650,15 +515,6 @@ def should_report_violation(
     lifecycle: VariableLifecycle,
     filepath: Path | None = None,
 ) -> bool:
-    """Determine if a violation should be reported based on semantic analysis.
-
-    Args:
-        lifecycle: Variable lifecycle
-        filepath: Path to file being analyzed (for test detection)
-
-    Returns:
-        True if violation should be reported
-    """
     assignment = lifecycle.assignment
 
     # Don't report assignments inside loops - they often accumulate/track state
@@ -738,7 +594,6 @@ def should_report_violation(
     if lifecycle.uses and all(use.in_comprehension for use in lifecycle.uses):
         return False
 
-    # Calculate semantic value
     semantic_score = calculate_semantic_value(
         var_name=assignment.var_name,
         rhs_source=assignment.rhs_source,
@@ -747,14 +602,12 @@ def should_report_violation(
         filepath=filepath,
     )
 
-    # Report violations with low semantic value (< 50)
-    # Score 50+ indicates the variable adds meaningful clarity
     return semantic_score < 50
 
 
 def _call_use_is_safe_to_inline(use: UsageInfo) -> bool:
-    """Check whether inlining a Call RHS at `use` preserves its execution
-    count and relative ordering.
+    """True if inlining a Call RHS at `use` won't change how often, when, or
+    relative to what else the call executes.
 
     Two independent risks, both specific to Call RHS (a Name/Attribute/
     Constant RHS gives the same value no matter when or how many times it's
@@ -768,13 +621,6 @@ def _call_use_is_safe_to_inline(use: UsageInfo) -> bool:
     - Reordering: a sibling expression evaluated before `use` within its
       statement (see `is_preceded_by_call`) could run before the inlined
       call, when it used to run after.
-
-    Args:
-        use: The single use being considered for inlining
-
-    Returns:
-        True if inlining won't change how often, when, or relative to what
-        else the call executes
     """
     return not use.in_loop and not use.in_lambda and not is_preceded_by_call(use)
 
@@ -783,11 +629,13 @@ def should_autofix(
     lifecycle: VariableLifecycle,
     pattern: PatternType,
     filepath: Path | None = None,
+    # Source lines of the file being analyzed (no line endings), used to
+    # check the *actual* usage line's length so the `[FIXABLE]` label
+    # matches what `apply_fixes` will really do. When omitted (e.g. direct
+    # unit tests), falls back to the conservative RHS-length estimate.
     source_lines: list[str] | None = None,
 ) -> bool:
-    """Determine if a violation should be auto-fixed.
-
-    Auto-fix criteria:
+    """Auto-fix criteria:
     1. For IMMEDIATE_SINGLE_USE or LITERAL_IDENTITY patterns (conservative):
        - NOT inside loops or control flow
        - Semantic score ≤ 10 (extremely low semantic value)
@@ -806,39 +654,24 @@ def should_autofix(
        - RHS must be reasonably simple: constant, name, attribute, or simple call
        - Inlining must not exceed line length
        - RHS must not be multiline
-
-    Args:
-        lifecycle: Variable lifecycle
-        pattern: Detected pattern type
-        filepath: Path to file being analyzed (for test detection)
-        source_lines: Source lines of the file being analyzed (no line
-            endings), used to check the *actual* usage line's length so the
-            `[FIXABLE]` label matches what `apply_fixes` will really do. When
-            omitted (e.g. direct unit tests), falls back to the conservative
-            RHS-length estimate.
-
-    Returns:
-        True if should auto-fix
     """
     assignment = lifecycle.assignment
 
-    # Never auto-fix inside loops (state accumulation pattern)
+    # A loop body can accumulate/track state across iterations even with a
+    # single textual use; control flow means it's unclear which branch runs.
     if assignment.in_loop:
         return False
-
-    # Never auto-fix inside control flow (conditional logic)
     if assignment.in_control_flow:
         return False
 
-    # Check for multiline RHS (can't auto-fix)
     rhs_source = assignment.rhs_source
     if "\n" in rhs_source or "\r" in rhs_source:
         return False
 
-    # Check if inlining would exceed line length. Prefer the exact check
-    # against the real usage line; fall back to the conservative RHS-length
-    # estimate (stricter threshold than reporting, since a wrong autofix is
-    # more costly than a missed report) when the usage line isn't available.
+    # Prefer the exact check against the real usage line; fall back to the
+    # conservative RHS-length estimate (stricter threshold than reporting,
+    # since a wrong autofix is more costly than a missed report) when the
+    # usage line isn't available.
     use_line_idx = lifecycle.uses[0].line - 1
     if source_lines is not None and 0 <= use_line_idx < len(source_lines):
         if exceeds_line_length_when_inlined(assignment.var_name, rhs_source, source_lines[use_line_idx]):
@@ -846,7 +679,6 @@ def should_autofix(
     elif _would_exceed_line_length(lifecycle, absolute_threshold=40):
         return False
 
-    # Calculate semantic value
     semantic_score = calculate_semantic_value(
         var_name=assignment.var_name,
         rhs_source=assignment.rhs_source,
@@ -857,29 +689,24 @@ def should_autofix(
 
     rhs_node = assignment.rhs_node
 
-    # Conservative auto-fix for immediate use or literal identity
     if pattern in {PatternType.IMMEDIATE_SINGLE_USE, PatternType.LITERAL_IDENTITY}:
-        # Only auto-fix if semantic value is EXTREMELY low (≤ 10)
         if semantic_score > 10:
             return False
 
-        # Variable name must be short (≤ 10 chars)
         if len(assignment.var_name) > 10:
             return False
 
-        # Only auto-fix VERY simple RHS expressions
-        # Allow: constants, simple names
         if isinstance(rhs_node, ast.Constant | ast.Name):
             return True
 
-        # Allow: simple attribute access (obj.attr, not obj.x.y.z)
+        # Only single-level attribute access (obj.attr), not a chain (obj.x.y.z).
         if isinstance(rhs_node, ast.Attribute) and isinstance(rhs_node.value, ast.Name):
             return True
 
-        # Allow: zero-arg calls (e.g. `ForbidVarsCheck()`), but only when the
-        # use runs exactly once, at the same point the call already runs —
-        # not inside a loop/lambda (see _call_use_is_safe_to_inline) or
-        # preceded by another call/effect within its statement (see
+        # Zero-arg calls (e.g. `ForbidVarsCheck()`), but only when the use
+        # runs exactly once, at the same point the call already runs — not
+        # inside a loop/lambda (see _call_use_is_safe_to_inline) or preceded
+        # by another call/effect within its statement (see
         # analysis.is_preceded_by_call), either of which could change how
         # often, or in what order, the call's side effects occur.
         if isinstance(rhs_node, ast.Call) and not rhs_node.args and not rhs_node.keywords:
@@ -887,33 +714,28 @@ def should_autofix(
 
         return False
 
-    # More aggressive auto-fix for single-use variables (used once in entire function).
-    # All other patterns already returned above, so we are always in SINGLE_USE here.
-    # Only auto-fix if semantic value is low (≤ 20)
-    # This allows slightly more meaningful names to be inlined
+    # All other patterns already returned above, so we're always in
+    # SINGLE_USE here — used once in the entire function, not just
+    # immediately after assignment, so it gets a higher score ceiling.
     if semantic_score > 20:
         return False
 
-    # Allow simple expressions
     if isinstance(rhs_node, ast.Constant | ast.Name):
         return True
 
-    # Allow: attribute access (obj.attr or obj.x.y.z)
+    # Any attribute chain is allowed here (obj.attr or obj.x.y.z), unlike
+    # the single-level-only rule above.
     if isinstance(rhs_node, ast.Attribute):
         return True
 
-    # Allow: simple calls with no complex arguments, but only when the use
-    # runs exactly once at the same point the call already runs (see
-    # _call_use_is_safe_to_inline) — otherwise inlining can change how often
-    # the call executes, e.g. moving it from once (at the assignment) into a
-    # loop body that runs N times.
+    # Only when the use runs exactly once at the same point the call
+    # already runs (see _call_use_is_safe_to_inline) — otherwise inlining
+    # can change how often the call executes, e.g. moving it from once (at
+    # the assignment) into a loop body that runs N times.
     # Example: datetime.now(UTC), str(value), len(items)
     if isinstance(rhs_node, ast.Call) and _call_use_is_safe_to_inline(lifecycle.uses[0]):
-        # Only allow calls with simple arguments (no keyword unpacking, etc.)
-        # and no more than 2 positional args
         if len(rhs_node.args) <= 2 and not rhs_node.keywords:
             return True
-        # Also allow calls with only simple keyword arguments
         if len(rhs_node.args) == 0 and len(rhs_node.keywords) <= 2:
             return True
 

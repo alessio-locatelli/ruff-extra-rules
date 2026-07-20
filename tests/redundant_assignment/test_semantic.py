@@ -62,7 +62,7 @@ def _make_single_use_lifecycle(
         line=2,
         col=0,
         stmt_index=1,
-        context="return",
+        context="unknown",
         scope_id=1,
         node=use_node,
         enclosing_stmt=use_stmt,

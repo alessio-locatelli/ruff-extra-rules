@@ -13,15 +13,12 @@ if TYPE_CHECKING:
 
 
 def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Violation]]) -> int:
-    """Print every unprocessable file, rule failure, and violation from a completed run.
+    """Prints every unprocessable file, rule failure, and violation from a
+    completed run. `all_violations` is `orchestrator.process_files()`'s own
+    return value; `orchestrator` itself is also consulted directly for its
+    `unprocessable_files`/`rule_failures` bookkeeping.
 
-    Args:
-        orchestrator: The orchestrator that produced `all_violations`, for
-            its `unprocessable_files`/`rule_failures` bookkeeping
-        all_violations: `orchestrator.process_files()`'s own return value
-
-    Returns:
-        0 if nothing was printed, 1 otherwise.
+    Returns 0 if nothing was printed, 1 otherwise.
     """
     exit_code = 0
 

@@ -91,7 +91,6 @@ def check_file_violations(source: str, tree: ast.Module) -> list[_BlankRunViolat
     violations = []
     header_end = find_module_header_end(lines, tree)
 
-    # Find the last non-blank line in the header region
     last_header_line = 0
     for i in range(header_end - 1, -1, -1):
         if lines[i].strip():
@@ -109,16 +108,13 @@ def check_file_violations(source: str, tree: ast.Module) -> list[_BlankRunViolat
                 start_blank = i
             blank_count += 1
         else:
-            # Non-blank line found
-            # Only report violations before the first code line
+            # Only report violations before the first code line.
             if not found_first_code_line and blank_count >= 2 and start_blank is not None:
                 # anchor_line is this line — the violation's own start_blank
                 # line is blank and can't carry a trailing ignore comment.
                 anchor_line = i + 1
-                # Check if this line is a class or function definition
-                # PEP 8 allows 2 blank lines before top-level class/function definitions
+                # PEP 8 allows 2 blank lines before top-level class/function definitions.
                 if _is_class_or_function_def(line):
-                    # Only report if more than 2 blank lines
                     if blank_count > 2:
                         violations.append(
                             _BlankRunViolation(
@@ -128,7 +124,6 @@ def check_file_violations(source: str, tree: ast.Module) -> list[_BlankRunViolat
                             )
                         )
                 else:
-                    # For non-class/function definitions, report if >= 2 blank lines
                     violations.append(
                         _BlankRunViolation(
                             line=start_blank + 1,
@@ -155,18 +150,17 @@ def fix_file_content(source: str, tree: ast.Module) -> str:
 
     header_end = find_module_header_end(lines, tree)
 
-    # Find the last non-blank line in the header region
     last_header_line = 0
     for i in range(header_end - 1, -1, -1):
         if lines[i].strip():
             last_header_line = i + 1
             break
 
-    # Copy header lines (excluding trailing blank lines)
+    # Excludes the header's own trailing blank lines.
     new_lines = lines[:last_header_line]
 
-    # Only collapse blank lines between header and first code line
-    # After first code line, preserve all blank lines
+    # Blank lines are only collapsed between the header and the first code
+    # line; once the first code line is seen, every blank line is preserved.
     blank_count = 0
     found_first_code_line = False
     blank_line_start_idx = last_header_line
@@ -180,19 +174,13 @@ def fix_file_content(source: str, tree: ast.Module) -> str:
                 blank_line_start_idx = i
             blank_count += 1
             if not found_first_code_line:
-                # Before first code line: will handle after we see what comes next
+                # Handled once we see what comes next (below).
                 pass
             else:
-                # After first code line: preserve all blank lines
                 new_lines.append(line)
         else:
-            # Non-blank line found
             if not found_first_code_line and blank_count > 0:
-                # Check if this line is a class or function definition
-                # PEP 8 requires 2 blank lines before top-level class/function
-                # definitions
-                # Preserve up to 2 blank lines before a class/function def,
-                # else collapse to 1 blank line.
+                # PEP 8 requires 2 blank lines before top-level class/function definitions.
                 target_blank_count = min(2, blank_count) if _is_class_or_function_def(line) else 1
 
                 # Append the appropriate number of blank lines. target_blank_count
@@ -210,8 +198,6 @@ def fix_file_content(source: str, tree: ast.Module) -> str:
 
 
 class ExcessiveBlankLinesCheck(BaseCheck):
-    """Check for excessive blank lines after module headers."""
-
     @property
     def check_id(self) -> str:
         return "excessive-blank-lines"
@@ -221,7 +207,6 @@ class ExcessiveBlankLinesCheck(BaseCheck):
         return "TRI002"
 
     def get_prefilter_pattern(self) -> list[str] | None:
-        """Returns None because all files should be checked."""
         return None
 
     def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
@@ -273,7 +258,6 @@ class ExcessiveBlankLinesCheck(BaseCheck):
         try:
             fixed_content = fix_file_content(source, tree)
 
-            # Write back to file
             atomic_write_text(filepath, fixed_content, encoding)
         except OSError:
             # Debug-only: mark_fix_failed() below already reports this

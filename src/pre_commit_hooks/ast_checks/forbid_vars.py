@@ -31,9 +31,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("forbid_vars")
 
-# Regex pattern for inline ignore comments
 # Format: # pytriage: ignore=TRI001
 IGNORE_PATTERN = ignore_pattern_for("TRI001")
+
+type VariableName = str
 
 
 class ForbidVarsFixData(TypedDict):
@@ -43,16 +44,14 @@ class ForbidVarsFixData(TypedDict):
     instead (see _find_enclosing_function).
     """
 
-    name: str
+    name: VariableName
     line: int
     col: int
-    suggestion: str | None
+    suggestion: VariableName | None
 
 
-# Default forbidden variable names
 DEFAULT_FORBIDDEN_NAMES = {"data", "result"}
 
-# Default autofix patterns
 DEFAULT_AUTOFIX_PATTERNS = {
     "http": [
         {"regex": r"\.get\(.*\)", "name": "response"},
@@ -88,14 +87,7 @@ DEFAULT_AUTOFIX_PATTERNS = {
 def _compile_patterns(
     patterns_dict: dict[str, list[dict[str, str]]],
 ) -> dict[str, list[dict[str, Any]]]:
-    """Pre-compile regex patterns for performance.
-
-    Args:
-        patterns_dict: Dictionary of pattern categories with regex strings
-
-    Returns:
-        Dictionary with compiled regex patterns
-    """
+    """Pre-compiles each pattern's regex once, up front, instead of on every match attempt."""
     compiled: dict[str, list[dict[str, Any]]] = {}
     for category, patterns in patterns_dict.items():
         compiled[category] = []
@@ -103,7 +95,7 @@ def _compile_patterns(
             compiled[category].append(
                 {
                     "regex": pattern["regex"],  # Keep original for reference
-                    "compiled": re.compile(pattern["regex"]),  # Pre-compiled
+                    "compiled": re.compile(pattern["regex"]),
                     "name": pattern["name"],
                 }
             )
@@ -115,32 +107,23 @@ AUTOFIX_PATTERNS = _compile_patterns(DEFAULT_AUTOFIX_PATTERNS)
 
 
 class ForbiddenNameVisitor(ast.NodeVisitor):
-    """AST visitor that detects forbidden variable names in Python code.
-
-    This visitor checks all contexts where variables are defined and
-    tries to find an autofix suggestion.
+    """Detects forbidden variable names in every context where a variable is
+    defined, and tries to find an autofix suggestion.
     """
 
     def __init__(
         self,
-        forbidden_names: set[str],
+        forbidden_names: set[VariableName],
         source: str,
     ) -> None:
-        """Initialize the visitor.
-
-        Args:
-            forbidden_names: Set of variable names that are not allowed.
-            source: The source code of the file being checked.
-        """
         self.forbidden_names = forbidden_names
-        self.source = source  # Store full source (optimization: avoid reconstruction)
+        self.source = source
         self.source_lines = source.splitlines()
         # For fast_get_source_segment only: split on the same line
         # boundaries ast's own lineno/end_lineno use, unlike
         # self.source_lines above (see split_lines_like_ast).
         self._ast_lines = split_lines_like_ast(source)
         self.violations: list[ForbidVarsFixData] = []
-        # Scope tracking for scope-aware name generation and replacement
         self.current_scope: list[ast.AST] = []
         self.tree: ast.Module | None = None
         self.scope_used_suggestions: dict[int | None, set[str]] = {}
@@ -149,72 +132,45 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         # Cache scope names to avoid O(n²) repeated AST walks (performance optimization)
         self.scope_names_cache: dict[int | None, set[str]] = {}
 
-    def _get_scope_names(self, scope_node: ast.AST | None) -> set[str]:
-        """Collect all names defined in a specific scope only.
-
-        Uses caching to avoid repeated AST walks for the same scope
-        (performance optimization).
-
-        Args:
-            scope_node: The AST node representing the scope (function/class/module).
-                       None means module-level scope.
-
-        Returns:
-            Set of all variable names defined in that scope.
-        """
+    def _get_scope_names(self, scope_node: ast.AST | None) -> set[VariableName]:
+        """`scope_node=None` means module-level scope. Cached to avoid repeated AST walks for the same scope."""
         scope_id = id(scope_node) if scope_node else None
 
-        # Check cache first
         if scope_id in self.scope_names_cache:
             return self.scope_names_cache[scope_id]
 
-        # Cache miss - compute scope names
         assert self.tree is not None, "tree must be set by check() before scope lookups"
         names = collect_scope_names(scope_node or self.tree)
 
-        # Cache for future use
         self.scope_names_cache[scope_id] = names
         return names
 
-    def _generate_unique_name(self, suggestion: str, forbidden_var_name: str) -> str:
-        """Generate a unique variable name considering only the current scope.
-
-        This ensures that variables with the same name in different functions
-        don't get unnecessary suffixes (e.g., response_2, response_3).
-
-        Args:
-            suggestion: The suggested replacement name
-            forbidden_var_name: The original forbidden variable name
-
-        Returns:
-            A unique name suitable for this scope
+    def _generate_unique_name(self, suggestion: VariableName, forbidden_var_name: VariableName) -> VariableName:
+        """Considers only the current scope, so variables with the same name in
+        different functions don't get unnecessary suffixes (e.g., response_2,
+        response_3).
         """
         if suggestion in self.forbidden_names:
-            suggestion = "var"  # Fallback
+            suggestion = "var"
 
-        # Get current scope
         scope_node = self.current_scope[-1] if self.current_scope else None
         scope_id = id(scope_node) if scope_node else None
 
-        # Check if we already generated a suggestion for this variable in this scope
         cache_key = (scope_id, forbidden_var_name)
         if cache_key in self.scope_var_suggestions:
             return self.scope_var_suggestions[cache_key]
 
-        # Get names in THIS scope only (not file-wide!)
+        # Names in THIS scope only, not file-wide.
         scope_names = self._get_scope_names(scope_node)
 
-        # Track used suggestions in this scope
         if scope_id not in self.scope_used_suggestions:
             self.scope_used_suggestions[scope_id] = set()
 
-        # Check conflicts - only add suffix if there's a conflict in THIS scope
         if suggestion not in scope_names and suggestion not in self.scope_used_suggestions[scope_id]:
             self.scope_used_suggestions[scope_id].add(suggestion)
             self.scope_var_suggestions[cache_key] = suggestion
             return suggestion
 
-        # Generate with suffix (only if needed in this scope!)
         counter = 2
         while (
             f"{suggestion}_{counter}" in scope_names
@@ -234,7 +190,6 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
 
         for patterns in AUTOFIX_PATTERNS.values():
             for pattern in patterns:
-                # Use pre-compiled regex (performance optimization)
                 if pattern["compiled"].search(rhs_source):
                     specificity = len(pattern["regex"])
                     if specificity > max_specificity:
@@ -244,12 +199,11 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
 
     def _check_name(
         self,
-        name: str,
+        name: VariableName,
         lineno: int,
         col_offset: int,
         match: dict[str, Any] | None = None,
     ) -> None:
-        """Check if a variable name is forbidden and record violation."""
         if name in self.forbidden_names:
             # fix_data (built from this dict) must stay serializable, so it
             # can't carry an AST node — fix() re-resolves the enclosing
@@ -311,9 +265,7 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
 
     @staticmethod
     def _has_decorator_named(node: ast.FunctionDef | ast.AsyncFunctionDef, name: str) -> bool:
-        """Return True if the function has a decorator identified by *name*.
-
-        Handles both bare decorators (``@model_validator``) and called
+        """Handles both bare decorators (``@model_validator``) and called
         decorators (``@model_validator(mode="before")``).
         """
         for dec in node.decorator_list:
@@ -327,20 +279,16 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         """Visit function definition nodes: def foo(data):."""
         if not self._has_decorator_named(node, "model_validator"):
             self._check_function_args(node)
-        # Push scope before visiting function body
         self.current_scope.append(node)
         self.generic_visit(node)
-        # Pop scope after visiting function body
         self.current_scope.pop()
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         """Visit async function definition nodes: async def foo(data):."""
         if not self._has_decorator_named(node, "model_validator"):
             self._check_function_args(node)
-        # Push scope before visiting function body
         self.current_scope.append(node)
         self.generic_visit(node)
-        # Pop scope after visiting function body
         self.current_scope.pop()
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
@@ -348,7 +296,7 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
 
         Class-level attribute assignments (NamedTuple fields, dataclass fields,
         plain class attributes) are excluded because the class name provides
-        sufficient context.  Method bodies ARE analysed — a 'result =' inside
+        sufficient context. Method bodies ARE analysed — a 'result =' inside
         a test method is just as meaningless as one in a standalone function.
         """
         for stmt in node.body:
@@ -356,7 +304,6 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
                 self.visit(stmt)
 
     def _check_function_args(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        """Check all function arguments for forbidden names."""
         for arg in node.args.args:
             self._check_name(arg.arg, arg.lineno, arg.col_offset)
         for arg in node.args.posonlyargs:
@@ -373,7 +320,9 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
             self._check_name(node.args.kwarg.arg, node.args.kwarg.lineno, node.args.kwarg.col_offset)
 
 
-def _collect_scope_replacements(scope: ast.AST, replace_names: dict[str, str]) -> list[tuple[int, int, str, str]]:
+def _collect_scope_replacements(
+    scope: ast.AST, replace_names: dict[VariableName, VariableName]
+) -> list[tuple[int, int, VariableName, VariableName]]:
     """Find (line, col, old_name, new_name) for every `Name` node within
     `scope` (not nested scopes) whose id is being replaced.
 
@@ -414,17 +363,8 @@ def _apply_fixes(
     tree: ast.Module,
     encoding: str = "utf-8",
 ) -> None:
-    """Apply autofixes by replacing forbidden variable assignments and their uses.
-
-    This implementation is scope-aware: it groups violations by scope and replaces
-    ALL uses of a variable within that scope, not just the assignment position.
-
-    Args:
-        filepath: Path to the file being fixed
-        violations: List of violations with suggestions
-        source: Original source code
-        tree: Pre-parsed AST tree (optimization: avoid re-parsing)
-        encoding: Encoding to write the file back with
+    """Scope-aware: groups violations by scope and replaces ALL uses of a
+    variable within that scope, not just the assignment position.
     """
     lines = source.splitlines(keepends=True)
 
@@ -440,15 +380,15 @@ def _apply_fixes(
         scope_nodes[scope_id] = scope_node or tree
 
     # Step 2: Build scope-specific replacement mappings
-    scope_replacements: dict[int | None, dict[str, str]] = {}
+    scope_replacements: dict[int | None, dict[VariableName, VariableName]] = {}
     for scope_id, scope_violations in violations_by_scope.items():
-        replacements: dict[str, str] = {}
+        replacements: dict[VariableName, VariableName] = {}
         for v in scope_violations:
             old_name = v["name"]
             new_name = v["suggestion"]
             # The caller only ever includes violations with a suggestion
-            # (see the module docstring above); this narrows str | None to
-            # str for the dict[str, str] below.
+            # (see the module docstring above); this narrows
+            # VariableName | None to VariableName for the dict below.
             assert new_name is not None
             if old_name not in replacements:
                 # First violation of this name in this scope wins
@@ -456,7 +396,7 @@ def _apply_fixes(
         scope_replacements[scope_id] = replacements
 
     # Step 3: Collect replacements for each scope
-    all_replacements: list[tuple[int, int, str, str]] = []
+    all_replacements: list[tuple[int, int, VariableName, VariableName]] = []
     for scope_id, replacements in scope_replacements.items():
         all_replacements.extend(_collect_scope_replacements(scope_nodes[scope_id], replacements))
 
@@ -482,10 +422,7 @@ def _apply_fixes(
 
 
 class ForbidVarsCheck(BaseCheck):
-    """Check for forbidden meaningless variable names."""
-
     def __init__(self) -> None:
-        """Initialize check."""
         self.forbidden_names = DEFAULT_FORBIDDEN_NAMES
 
     @property
@@ -497,20 +434,9 @@ class ForbidVarsCheck(BaseCheck):
         return "TRI001"
 
     def get_prefilter_pattern(self) -> list[str] | None:
-        """Returns all forbidden names as prefilter patterns."""
         return sorted(self.forbidden_names)
 
     def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
-        """Run check and return violations.
-
-        Args:
-            filepath: Path to file
-            tree: Parsed AST tree
-            source: Source code
-
-        Returns:
-            List of violations
-        """
         visitor = ForbiddenNameVisitor(self.forbidden_names, source)
         visitor.tree = tree  # Store tree for scope-aware name generation
         visitor.visit(tree)
@@ -522,7 +448,6 @@ class ForbidVarsCheck(BaseCheck):
         else:
             raw_violations = []
 
-        # Convert to Violation objects
         violations = []
         for v in raw_violations:
             message = f"Forbidden variable name '{v['name']}' found."
@@ -557,19 +482,6 @@ class ForbidVarsCheck(BaseCheck):
         tree: ast.Module,
         encoding: str = "utf-8",
     ) -> bool:
-        """Apply fixes for forbidden variable names.
-
-        Args:
-            filepath: Path to file
-            violations: Violations to fix
-            source: Source code
-            tree: Parsed AST tree
-            encoding: Encoding to write the file back with
-
-        Returns:
-            True if fixes were applied successfully
-        """
-        # Extract fixable violations with suggestions
         fixable = [cast("ForbidVarsFixData", v.fix_data) for v in violations if v.fixable and v.fix_data]
 
         if not fixable:

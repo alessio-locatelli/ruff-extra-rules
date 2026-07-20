@@ -5,7 +5,7 @@ from __future__ import annotations
 import ast
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from pre_commit_hooks.ast_checks._base import find_ignored_lines, ignore_pattern_for, read_source_with_encoding
 
@@ -21,8 +21,6 @@ GET_PREFIX = "get_"
 
 @dataclass(slots=True)
 class Suggestion:
-    """A naming suggestion for a function."""
-
     path: Path
     func_name: str
     lineno: int
@@ -53,7 +51,6 @@ def _call_name(node: ast.AST) -> str | None:
 
 
 def decorator_name(d: ast.AST) -> str | None:
-    """Extract decorator name from decorator node."""
     if isinstance(d, ast.Name):
         return d.id
     if isinstance(d, ast.Attribute):
@@ -65,7 +62,6 @@ def decorator_name(d: ast.AST) -> str | None:
 def is_decorator_override_or_abstract(
     func_node: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> bool:
-    """Check if function is decorated with @override or @abstractmethod."""
     for d in func_node.decorator_list:
         name = decorator_name(d)
         if not name:
@@ -76,34 +72,34 @@ def is_decorator_override_or_abstract(
     return False
 
 
+class FunctionBehavior(TypedDict):
+    """Detected behavior flags used by `suggest_name_for` to pick a naming pattern."""
+
+    is_property: bool
+    disk_read: bool  # open(), .read_text(), .load(), etc.
+    disk_write: bool  # .write(), .save(), .dump()
+    network_read: bool  # e.g. requests.get
+    network_write: bool  # e.g. requests.post
+    outputs: bool
+    returns_bool: bool  # based on the return annotation, not the return values
+    aggregates: bool  # sum/min/max/mean/etc.
+    creates_object: bool
+    mutates_args: bool
+    yields: bool
+    parses: bool  # json.loads, yaml.safe_load, etc.
+    renders: bool  # json.dumps, yaml.dump, etc.
+    searches: bool
+    validates: bool
+    transforms: bool
+    delegates_get: bool  # calls, and returns, another get_* function's result
+    collects: bool  # builds up a list/dict and returns it
+    returns_class: bool  # returns a class object, not an instance
+
+
 def analyze_function(
     func_node: ast.FunctionDef | ast.AsyncFunctionDef,
-) -> dict[str, bool]:
-    """Analyze function behavior and return detected patterns.
-
-    Returns:
-        Dictionary with boolean flags for detected behaviors:
-        - is_property: Function is decorated with @property
-        - disk_read: Reads from disk (open, read_text, etc.)
-        - disk_write: Writes to disk (write, save, dump, etc.)
-        - network_read: Reads from network (requests.get, etc.)
-        - network_write: Writes to network (requests.post, etc.)
-        - outputs: Prints or logs output
-        - returns_bool: Returns boolean (based on annotation)
-        - aggregates: Performs aggregation (sum, min, max, mean, etc.)
-        - creates_object: Creates new objects (calls constructors)
-        - mutates_args: Mutates arguments or state
-        - yields: Generator function
-        - parses: Parses structured data (JSON, YAML, etc.)
-        - renders: Renders/serializes data to string
-        - searches: Searches or finds items
-        - validates: Validates input and returns errors
-        - transforms: Transforms data
-        - delegates_get: Delegates to another get_* function
-        - collects: Collects data into a list/dict
-        - returns_class: Returns a class object (not instance)
-    """
-    flags: dict[str, bool] = {
+) -> FunctionBehavior:
+    flags: FunctionBehavior = {
         "is_property": False,
         "disk_read": False,
         "disk_write": False,
@@ -138,37 +134,30 @@ def analyze_function(
     if func_node.args.kwarg:
         param_names.add(func_node.args.kwarg.arg)
 
-    # property
     for deco in func_node.decorator_list:
         if (isinstance(deco, ast.Name) and deco.id == "property") or (
             isinstance(deco, ast.Attribute) and deco.attr.endswith("property")
         ):
             flags["is_property"] = True
 
-    # returns_bool: rely only on annotation (do not inspect return values)
+    # Rely only on the annotation, not on inspecting actual return values.
     if func_node.returns is not None:
         ann = func_node.returns
         if isinstance(ann, ast.Name) and ann.id == "bool":
             flags["returns_bool"] = True
 
-    # track variables assigned from get_* calls (delegation detection)
+    # Populated below, consumed by the delegation/collection detection
+    # further down in this function.
     get_assigned_vars: set[str] = set()
-
-    # track local containers that are created and appended to
     created_containers: set[str] = set()
     appended_to: set[str] = set()
-
-    # Quick scan for 'while' loops checking .exists() or using .parent
-    # (heuristic for find_root)
     has_loop_checking_exists_or_parent = False
 
-    # Track classes defined inside the function (for returns_class detection)
     defined_classes: set[str] = set()
     for stmt in func_node.body:
         if isinstance(stmt, ast.ClassDef):
             defined_classes.add(stmt.name)
 
-    # walk nodes
     for node in ast.walk(func_node):
         if isinstance(node, (ast.Yield, ast.YieldFrom)):
             flags["yields"] = True
@@ -177,28 +166,23 @@ def analyze_function(
             if not name:
                 continue
             lname = name.lower()
-            # disk read/write
             if lname == "open" or lname.endswith((".read", ".read_text", ".read_bytes", ".load")):
                 flags["disk_read"] = True
             if lname.endswith((".write", ".save", ".dump")):
                 flags["disk_write"] = True
-            # json/yaml loads/dumps
             if lname.endswith(("json.loads", "yaml.safe_load", "yaml.load")):
                 flags["parses"] = True
             if lname.endswith(("json.dumps", "yaml.dump")):
                 flags["renders"] = True
-            # network
             if any(lib in lname for lib in ("requests", "httpx", "urllib", "aiohttp", "socket", "grpc")):
                 if any(verb in lname for verb in ("get", "fetch", "download", "read", "recv", "request")):
                     flags["network_read"] = True
                 if any(verb in lname for verb in ("post", "put", "send", "upload", "patch")):
                     flags["network_write"] = True
-            # logger / print
             if lname == "print" or (lname.endswith(".write") and ("stdout" in lname or "stderr" in lname)):
                 flags["outputs"] = True
             if lname.endswith((".info", ".debug", ".warning", ".error")):
                 flags["outputs"] = True
-            # aggregate helpers
             if lname in (
                 "sum",
                 "min",
@@ -207,20 +191,16 @@ def analyze_function(
                 "statistics.median",
             ) or lname.endswith(".aggregate"):
                 flags["aggregates"] = True
-            # search/match
             if lname.endswith((".find", ".search", ".index")):
                 flags["searches"] = True
-            # validation
             if lname.endswith((".is_valid", ".validate")):
                 flags["validates"] = True
-            # transform detection
             if lname.endswith((".transform", ".map")):
                 flags["transforms"] = True
-            # object creation: constructor calls heuristic
+            # Capitalized callee is a Python convention for a class/constructor.
             if isinstance(node.func, ast.Name) and node.func.id and node.func.id[0].isupper():
                 flags["creates_object"] = True
 
-            # detect calls to other get_ functions and assignments (delegation)
             if isinstance(node.func, ast.Name) and node.func.id.startswith(GET_PREFIX):
                 parent = getattr(node, "parent", None)
                 if parent and isinstance(parent, ast.Assign):
@@ -229,11 +209,12 @@ def analyze_function(
                             get_assigned_vars.add(t.id)
                 # direct return of call handled later
 
-        # mutation: attribute assignments or calls to .append/.extend/.add
+        # Mutation detection spans this Assign branch, the AugAssign branch
+        # below, and the append/extend/add Call branch further down.
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    # detect list/dict creation: x = [] or x = {} or x = list() / dict()
+                    # x = [] or x = {} or x = list()/dict()
                     if isinstance(node.value, (ast.List, ast.Dict)):
                         created_containers.add(target.id)
                     if (
@@ -246,20 +227,16 @@ def analyze_function(
                 # Only flag mutation if we're modifying a parameter or its attributes
                 # (not module-level caches/globals like _cache[key] = value)
                 if isinstance(target, ast.Attribute):
-                    # Check if we're mutating an argument (handles nested: arg.x.y.z)
                     base_name = _get_base_name(target)
                     if base_name and (base_name in param_names or base_name == "self"):
                         flags["mutates_args"] = True
                 if isinstance(target, ast.Subscript):
-                    # Check if we're mutating an argument (handles nested: arg.x[y])
                     base_name = _get_base_name(target)
                     if base_name and (base_name in param_names or base_name == "self"):
                         flags["mutates_args"] = True
         if isinstance(node, ast.AugAssign):
-            # Similar logic for augmented assignments: x += 1
             target = node.target
             if isinstance(target, (ast.Attribute, ast.Subscript)):
-                # Handle nested attributes/subscripts
                 base_name = _get_base_name(target)
                 if base_name and (base_name in param_names or base_name == "self"):
                     flags["mutates_args"] = True
@@ -267,38 +244,38 @@ def analyze_function(
                 # An augmented assignment target is always a Name,
                 # Attribute, or Subscript.
                 assert isinstance(target, ast.Name)
-                # x += 1 where x is a parameter (modifying mutable default argument)
                 if target.id in param_names:
                     flags["mutates_args"] = True
         if isinstance(node, ast.Call):
             name = _call_name(node.func)
-            if name and any(
-                s in name
-                for s in (
-                    "append",
-                    "extend",
-                    "add",
-                    "insert",
-                    "remove",
-                    "pop",
-                    "clear",
-                    "update",
-                    "setdefault",
+            # 'x.append(...)' -> node.func is Attribute with value Name('x')
+            if (
+                name
+                and any(
+                    s in name
+                    for s in (
+                        "append",
+                        "extend",
+                        "add",
+                        "insert",
+                        "remove",
+                        "pop",
+                        "clear",
+                        "update",
+                        "setdefault",
+                    )
                 )
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
             ):
-                # Try to find which variable is being appended to
-                parent = getattr(node, "parent", None)
-                # 'x.append(...)' -> node.func is Attribute with value Name('x')
-                if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
-                    var_name = node.func.value.id
-                    appended_to.add(var_name)
-                    # Only flag mutation if appending to a parameter
-                    if var_name in param_names or var_name == "self":
-                        flags["mutates_args"] = True
+                var_name = node.func.value.id
+                appended_to.add(var_name)
+                if var_name in param_names or var_name == "self":
+                    flags["mutates_args"] = True
 
-        # detect .exists() / .parent usage inside loops (heuristic for find_root)
+        # Heuristic for a find_root-style function: a while loop polling
+        # .exists()/.parent (e.g. walking up a filesystem tree).
         if isinstance(node, ast.While):
-            # look for Call nodes inside the while that call .exists()
             for sub in ast.walk(node):
                 if isinstance(sub, ast.Call):
                     n = _call_name(sub.func)
@@ -307,8 +284,8 @@ def analyze_function(
                 if isinstance(sub, ast.Attribute) and sub.attr == "parent":
                     has_loop_checking_exists_or_parent = True
 
-    # Delegation: if return returns a variable assigned by get_*
-    # or returns a call to get_*
+    # Delegation: the function returns a variable assigned by get_*, or
+    # returns a call to get_* directly.
     for node in ast.walk(func_node):
         if isinstance(node, ast.Return):
             if isinstance(node.value, ast.Call):
@@ -317,28 +294,22 @@ def analyze_function(
                     flags["delegates_get"] = True
             if isinstance(node.value, ast.Name) and node.value.id in get_assigned_vars:
                 flags["delegates_get"] = True
-            # returning a collected container variable
             if isinstance(node.value, ast.Name) and node.value.id in created_containers:
                 flags["collects"] = True
-            # Check if returning a class defined in the function
             if isinstance(node.value, ast.Name) and node.value.id in defined_classes:
                 flags["returns_class"] = True
-            # Also check for type() or type[...] calls (metaclass operations)
+            # type()/type[...] calls are metaclass operations.
             if isinstance(node.value, ast.Call):
                 call_name = _call_name(node.value.func)
                 if call_name == "type":
                     flags["returns_class"] = True
 
-    # if we saw a variable created as a container and later appended to, mark collects
     if created_containers & appended_to:
         flags["collects"] = True
 
-    # Final heuristic: if we saw a loop checking .exists() or .parent,
-    # treat as search/find
     if has_loop_checking_exists_or_parent:
         flags["searches"] = True
 
-    # heuristics for returns list of errors (unchanged)
     assigns = [n for n in ast.walk(func_node) if isinstance(n, ast.Assign)]
     for a in assigns:
         for t in a.targets:
@@ -390,19 +361,12 @@ def _get_base_name(node: ast.expr) -> str | None:
 
 
 def is_simple_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    """Check if function is a trivial accessor/getter pattern.
-
-    Returns True for:
-    - Single 'return self.attr' or 'return obj[attr]'
-    - Single 'return obj.get(...)'
-    - Simple subscript/attribute/call to .get
-
-    These are idiomatic getters and should not be flagged.
+    """True for a single 'return self.attr'/'return obj[attr]'/'return obj.get(...)'
+    body — these are idiomatic getters and should not be flagged.
     """
     # A function's body is never empty (Python requires at least one
     # statement), so only the post-docstring-strip check below can be.
     body = func_node.body
-    # skip leading docstring expression
     if (
         isinstance(body[0], ast.Expr)
         and isinstance(body[0].value, ast.Constant)
@@ -415,7 +379,6 @@ def is_simple_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
     if len(body) != 1:
         return False
     node = body[0]
-    # allow simple return statements only
     if not isinstance(node, ast.Return) or node.value is None:
         return False
     value = node.value
@@ -441,12 +404,6 @@ def process_file(filepath: Path) -> list[Suggestion]:
     orchestrator-driven check() path must call `collect_suggestions` directly
     with its own shared tree/source instead of this, to avoid re-reading and
     re-parsing a file the orchestrator already parsed once.
-
-    Args:
-        filepath: Path to the Python file to analyze
-
-    Returns:
-        List of Suggestion objects for functions that should be renamed
     """
     try:
         source = read_source(filepath)
@@ -464,17 +421,7 @@ def process_file(filepath: Path) -> list[Suggestion]:
 
 
 def collect_suggestions(filepath: Path, tree: ast.Module, source: str) -> list[Suggestion]:
-    """Walk an already-parsed tree and return naming suggestions.
-
-    Args:
-        filepath: Path to the file (used only to tag returned Suggestions)
-        tree: Parsed AST tree
-        source: Source code matching `tree`
-
-    Returns:
-        List of Suggestion objects for functions that should be renamed
-    """
-    # attach parent links for better analysis
+    """`filepath` is used only to tag returned Suggestions; `tree` must already be parsed from `source`."""
     attach_parents(tree)
 
     ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
@@ -482,12 +429,10 @@ def collect_suggestions(filepath: Path, tree: ast.Module, source: str) -> list[S
 
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(GET_PREFIX):
-            # skip if decorated with override/abstract
             if is_decorator_override_or_abstract(node):
                 continue
             if node.lineno in ignored_lines:
                 continue
-            # skip simple accessors/dict-like getters (idiomatic)
             if is_simple_accessor(node):
                 continue
 
@@ -538,15 +483,12 @@ def extract_first_verb(docstring_line: str) -> str | None:
     if not docstring_line:
         return None
 
-    # Remove common prefixes and split into words
     words = docstring_line.lower().split()
     if not words:
         return None
 
-    # First word is usually the verb (after common articles)
+    # The first word is usually the verb, unless it's a leading article.
     first_word = words[0]
-
-    # Skip articles and common prefixes
     if first_word in {"a", "an", "the"}:
         if len(words) > 1:
             return words[1]
@@ -555,15 +497,8 @@ def extract_first_verb(docstring_line: str) -> str | None:
     return first_word
 
 
-def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis: dict[str, bool]) -> tuple[str, str]:
-    """Suggest a better name for a function based on behavioral analysis.
-
-    Args:
-        func_node: The function AST node
-        analysis: Dictionary of detected behaviors from analyze_function()
-
-    Returns:
-        Tuple of (suggested_name, reason)
+def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis: FunctionBehavior) -> tuple[str, str]:
+    """Returns (suggested_name, reason).
 
     Suggestion priority (first match wins):
     1. Properties → noun
@@ -583,24 +518,18 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
     old = func_node.name
     entity = derive_entity_from_name(old)
 
-    # Tests: if name starts with test_ -> do not touch
     if old.startswith("test_"):
         return old, "function looks like a test"
 
-    # Skip abstract/override decorated functions
     if is_decorator_override_or_abstract(func_node):
         return old, "skip: decorated with @override or @abstractmethod"
 
-    # If function appears to just delegate to another get_* call
-    # and return that result, skip suggestion
     if analysis["delegates_get"]:
         return old, "delegates to another get_ function; skipping suggestion"
 
-    # If function returns a class object, get_ is acceptable
     if analysis["returns_class"]:
         return old, "returns a class object; get_ prefix is acceptable"
 
-    # docstring heuristic: 'Get or create'
     first_line = first_docstring_line(func_node)
     if first_line:
         low = first_line.lower()
@@ -608,13 +537,12 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
             suggested = f"get_or_create_{entity}" if entity else "get_or_create"
             return suggested, "docstring: 'get or create'"
 
-    # Extract first verb from docstring for better suggestions
     docstring_verb = None
     if first_line:
         docstring_verb = extract_first_verb(first_line)
 
-    # Check if docstring verb matches a recognized pattern
-    # Verbs like combine/compose/merge/build should be used directly
+    # These verbs should be used directly, bypassing the analysis-based
+    # heuristics below.
     recognized_verbs = {
         "combine",
         "compose",
@@ -639,8 +567,8 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
         reason = "@property: prefer noun name rather than verb"
         return suggested, reason
 
-    # Detect mock/factory/fixture patterns (test utilities)
-    # Functions that create test objects should use create_ prefix
+    # Functions that create test objects (mock/factory/fixture patterns)
+    # should use the create_ prefix.
     test_patterns = {
         "mock",
         "stub",
@@ -654,14 +582,12 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
     entity_lower = entity.lower() if entity else ""
     old_lower = old.lower()
 
-    # Check if the function name or entity contains test patterns and creates object
     if any(pattern in entity_lower or pattern in old_lower for pattern in test_patterns) and analysis["creates_object"]:
         suggested = f"create_{entity}" if entity else "create"
         return suggested, "creates test object/mock/fixture"
 
-    # collection/parsing/extraction (prefer these before create/update)
+    # Collection/parsing/extraction is checked before create/update below.
     if analysis["collects"]:
-        # if parsing was detected (json.loads etc.), prefer parse_ otherwise extract_
         if analysis["parses"]:
             suggested = f"parse_{entity}" if entity else "parse"
             reason = "parses/collects structured data from a source"
@@ -675,13 +601,12 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
         reason = "parses input (json/yaml/...)"
         return suggested, reason
 
-    # searches/finding patterns (e.g., find_root)
     if analysis["searches"]:
         suggested = f"find_{entity}" if entity else "find"
         reason = "searches or finds an item (filesystem or structure)"
         return suggested, reason
 
-    # disk/network priority
+    # Writes are checked before reads.
     if analysis["disk_write"] or analysis["network_write"]:
         verb = "save_to" if analysis["disk_write"] else "send"
         suggested = f"{verb}_{entity}" if entity else f"{verb}"
@@ -743,5 +668,4 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
         reason = "performs a transformation"
         return suggested, reason
 
-    # fallback: no confident suggestion
     return old, "no confident suggestion"

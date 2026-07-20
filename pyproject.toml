@@ -94,21 +94,42 @@ exclude = ["tests/fixtures"]
 paths = ["src", "tests"]
 # visit_* are ast.NodeVisitor callbacks invoked via .visit() dispatch, not by
 # name; return_value/side_effect are unittest.mock attributes read by the
-# mock machinery. assign_line is a TypedDict field (RedundantAssignmentFixData
-# in redundant_assignment/autofix.py) read only via dict subscript
-# (fix_data["assign_line"]), never as an attribute. _restore_sigterm_handler
-# is an autouse pytest fixture, invoked implicitly for every test in its
-# module rather than referenced by name the way an ordinary fixture is (as a
-# test function's own parameter, which vulture's analysis does see) --
-# vulture's static analysis can't see any of these four kinds of use. (A
-# vulture `ignore_decorators` entry can't target autouse specifically:
-# vulture's decorator matching strips call arguments, so "@pytest.fixture"
-# and "@pytest.fixture(autouse=True)" are indistinguishable to it.)
+# mock machinery. assign_line and the is_property..returns_class fields are
+# TypedDict fields (RedundantAssignmentFixData in redundant_assignment/autofix.py,
+# FunctionBehavior in validate_function_name/analysis.py) read only via dict
+# subscript (e.g. fix_data["assign_line"], analysis["is_property"]), never as
+# an attribute. _restore_sigterm_handler is an autouse pytest fixture, invoked
+# implicitly for every test in its module rather than referenced by name the
+# way an ordinary fixture is (as a test function's own parameter, which
+# vulture's analysis does see) -- vulture's static analysis can't see any of
+# these four kinds of use. (A vulture `ignore_decorators` entry can't target
+# autouse specifically: vulture's decorator matching strips call arguments,
+# so "@pytest.fixture" and "@pytest.fixture(autouse=True)" are
+# indistinguishable to it.)
 ignore_names = [
   "visit_*",
   "return_value",
   "side_effect",
   "assign_line",
+  "is_property",
+  "disk_read",
+  "disk_write",
+  "network_read",
+  "network_write",
+  "outputs",
+  "returns_bool",
+  "aggregates",
+  "creates_object",
+  "mutates_args",
+  "yields",
+  "parses",
+  "renders",
+  "searches",
+  "validates",
+  "transforms",
+  "delegates_get",
+  "collects",
+  "returns_class",
   "_restore_sigterm_handler",
 ]
 

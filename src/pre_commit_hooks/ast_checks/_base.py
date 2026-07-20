@@ -22,29 +22,16 @@ logger = logging.getLogger("ast_checks")
 
 @dataclass
 class Violation:
-    """Represents a single violation found by a check.
-
-    Attributes:
-        check_id: Unique identifier for the check (e.g., "forbid-vars")
-        error_code: Error code for the violation (e.g., "TRI001")
-        line: 1-indexed line number where the violation occurs
-        col: 0-indexed *character* offset where the violation occurs (or 0
-            when a check has no more specific position than "this line") —
-            not a byte offset. `ast.col_offset` is a UTF-8 byte offset, so a
-            check that reports one directly must first convert it via
-            `byte_col_to_char_col()`, the same way `forbid_vars` and
-            `redundant_assignment` already do; `misplaced_comment`'s own
-            `tokenize`-derived column is already a character offset.
-            `main()` reports this as a conventional 1-based column
-            (`col + 1`).
-        message: Human-readable description of the violation
-        fixable: Whether the violation can be auto-fixed
-        fix_data: Check-specific data needed for applying the fix
-    """
-
     check_id: str
     error_code: str
-    line: int
+    line: int  # 1-indexed
+    # 0-indexed *character* offset (or 0 when a check has no more specific
+    # position than "this line") — not a byte offset. `ast.col_offset` is a
+    # UTF-8 byte offset, so a check that reports one directly must first
+    # convert it via `byte_col_to_char_col()`, the same way `forbid_vars` and
+    # `redundant_assignment` already do; `misplaced_comment`'s own
+    # `tokenize`-derived column is already a character offset. `main()`
+    # reports this as a conventional 1-based column (`col + 1`).
     col: int
     message: str
     fixable: bool
@@ -52,45 +39,25 @@ class Violation:
 
 
 class ASTCheck(Protocol):
-    """Protocol that all AST-based checks must implement.
+    """Interface for pluggable AST checks in the grouped linter.
 
-    This protocol defines the interface for pluggable AST checks in the
-    grouped linter. Each check should be independent and stateless with
-    respect to file processing.
+    Each check is independent and stateless across files.
     """
 
     @property
     def check_id(self) -> str:
-        """Unique identifier for this check.
-
-        Examples: "forbid-vars", "redundant-super-init", "validate-function-name"
-
-        Returns:
-            Check identifier string
-        """
+        """Kebab-case identifier for this check, e.g. "forbid-vars"."""
         ...
 
     @property
     def error_code(self) -> str:
-        """Error code prefix for violations from this check.
-
-        Examples: "TRI001", "TRI002", "TRI003"
-
-        Returns:
-            Error code string
-        """
+        """Error code prefix for this check's violations, e.g. "TRI001"."""
         ...
 
     def get_prefilter_pattern(self) -> list[str] | None:
-        """Patterns for git grep pre-filtering.
-
-        Return fixed string patterns that identify files that might
-        contain violations for this check. If None, all files will be
-        checked (no pre-filtering). Multiple patterns are combined with
-        OR logic — a file is a candidate if it contains ANY of the patterns.
-
-        Returns:
-            List of pattern strings for git grep, or None for no filtering
+        """Fixed-string git-grep patterns that identify candidate files for this
+        check, combined with OR logic (a file is a candidate if it contains ANY
+        pattern), or None to check every file with no pre-filtering.
 
         Examples:
             - ["def get_"] for validate-function-name
@@ -100,18 +67,7 @@ class ASTCheck(Protocol):
         """
         ...
 
-    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
-        """Run check on a file and return violations.
-
-        Args:
-            filepath: Path to the file being checked
-            tree: Parsed AST tree of the file
-            source: Original source code as string
-
-        Returns:
-            List of violations found in the file
-        """
-        ...
+    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]: ...
 
     def fix(
         self,
@@ -121,18 +77,8 @@ class ASTCheck(Protocol):
         tree: ast.Module,
         encoding: str = "utf-8",
     ) -> bool:
-        """Apply fixes for the given violations.
-
-        Args:
-            filepath: Path to the file to fix
-            violations: List of violations to fix (all from this check)
-            source: Original source code as string
-            tree: Parsed AST tree of the file
-            encoding: Encoding to write the file back with (matching what it
-                was read as, so a PEP 263 declaration round-trips correctly)
-
-        Returns:
-            True if fixes were successfully applied, False otherwise
+        """`encoding` must match what `filepath` was originally read as, so a
+        PEP 263 declaration round-trips correctly.
 
         A check with a single write per `fix()` call needs no special
         handling: let `FixValidationError` (raised by `atomic_write_text()`
@@ -197,13 +143,6 @@ def byte_col_to_char_col(line: str, byte_col: int) -> int:
     (a `str`, indexed by character) directly with the raw `col_offset`
     lands on the wrong character. Converting first keeps position-based
     fixes correct on such lines.
-
-    Args:
-        line: The source line the offset was recorded against
-        byte_col: A UTF-8 byte offset into `line`
-
-    Returns:
-        The equivalent character offset into `line`
     """
     return len(line.encode("utf-8")[:byte_col].decode("utf-8"))
 
@@ -251,16 +190,8 @@ def fast_get_source_segment(source: str, ast_lines: list[str], node: ast.expr) -
     the assignment/call RHS expressions this is used for that the fast
     path not covering it doesn't matter).
 
-    Args:
-        source: Full source the node was parsed from
-        ast_lines: `split_lines_like_ast(source)` — not `source.splitlines()`,
-            whose broader definition of a line boundary can misalign with
-            AST line numbers (see `split_lines_like_ast`)
-        node: The expression node to extract source for
-
-    Returns:
-        The source segment, or None if `node` is missing end-position info
-        (mirrors `ast.get_source_segment`'s own contract)
+    Returns None if `node` is missing end-position info, mirroring
+    `ast.get_source_segment`'s own contract.
     """
     if node.end_lineno is None or node.end_col_offset is None:
         return None
@@ -279,11 +210,9 @@ def read_source_with_encoding(filepath: Path) -> tuple[str, str]:
     tolerate. tokenize.detect_encoding also handles a leading UTF-8 BOM
     (returning "utf-8-sig").
 
-    Args:
-        filepath: Path to file
-
-    Returns:
-        (source, encoding), so a fix can write back in the same encoding
+    Returns (source, encoding) — the encoding is returned alongside the
+    source so a fix can write the file back in the same encoding it was
+    read in.
 
     Raises:
         OSError: if the file can't be read
@@ -380,13 +309,6 @@ def find_ignored_lines(source: str, pattern: re.Pattern[str]) -> set[int]:
     Uses the tokenize module to accurately detect comments, so a string or
     byte literal that happens to contain matching text (e.g. a dict key)
     is never mistaken for a suppression directive.
-
-    Args:
-        source: Python source code as string
-        pattern: Compiled regex identifying the ignore-comment marker
-
-    Returns:
-        Set of 1-indexed line numbers with a matching ignore comment
     """
     ignored: set[int] = set()
 
