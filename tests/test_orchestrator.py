@@ -1189,6 +1189,22 @@ def test_load_checks_ignore_composes_with_select() -> None:
     assert {c.check_id for c in checks} == {"redundant-super-init"}
 
 
+def test_all_checks_have_unique_check_ids_and_error_codes() -> None:
+    # ALL_CHECKS is a fixed, hand-maintained list with no dynamic/plugin
+    # loading (ch. 18: "MUST NOT silently resolve conflicting rule
+    # identifiers in an ambiguous way") — a collision would only come from
+    # a direct edit to this list, which docs/adding-a-check.md's "next
+    # unused number" convention is meant to prevent. This locks that
+    # invariant in so a future duplicate fails loudly here instead of
+    # silently letting `--select`/`--ignore` and the cache key treat two
+    # different checks as the same one.
+    instances = [cls() for cls in ALL_CHECKS]
+    check_ids = [c.check_id for c in instances]
+    error_codes = [c.error_code for c in instances]
+    assert len(check_ids) == len(set(check_ids))
+    assert len(error_codes) == len(set(error_codes))
+
+
 def test_load_checks_check_specific_args_are_applied(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
