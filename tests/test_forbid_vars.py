@@ -1444,6 +1444,95 @@ def test_autofix_still_follows_annotation_closure_without_deferred_annotations()
     assert inner.__annotations__["x"] == "runtime value"
 
 
+def test_autofix_never_offered_for_module_scope_name_referenced_in_annotation() -> None:
+    # Regression: under PEP 563, every annotation resolves only against the
+    # annotated function's own *module* globals, ignoring any local
+    # shadowing along the way — so unlike a nested-local rename (previous
+    # two tests), a module-scope rename genuinely *should* propagate into
+    # every annotation referencing it, at any nesting depth. Correctly doing
+    # that would require an annotation-specific traversal that ignores
+    # shadowing entirely (unlike ordinary closure-following), which this
+    # codebase doesn't build for such a narrow case — so the violation must
+    # not be offered as fixable at all, rather than leaving a stale
+    # annotation behind once the module-level binding is renamed out from
+    # under it. Two violations (a parameter- and a return-annotation
+    # reference) also exercise `_annotation_referenced_names()`'s cache-hit
+    # branch and the return-annotation branch of its own walk.
+    source = """from __future__ import annotations
+
+class Response:
+    def json(self):
+        return int
+
+response = Response()
+data = response.json()
+result = response.json()
+
+def f(x: data) -> result:
+    return x
+"""
+    tree = ast.parse(source)
+    check = ForbidVarsCheck()
+    violations = check.check(Path("test.py"), tree, source)
+
+    assert len(violations) == 2
+    assert all(
+        violation.message.endswith("Use a more descriptive name. Or add '# pytriage: ignore=TRI001' to suppress.")
+        for violation in violations
+    )
+    assert all(violation.fixable is False for violation in violations)
+
+
+def test_autofix_follows_closure_into_type_parameter_bound_and_default() -> None:
+    # Regression: a PEP 695 type parameter's own `bound`/`default_value`
+    # expression is evaluated lazily, but through a real closure over the
+    # scope enclosing the `def` — confirmed against CPython to respect
+    # ordinary shadowing rules, unlike a deferred annotation (previous
+    # test). None of these were visited by the rename traversal at all, so
+    # a nested type parameter bound/default referencing an outer local was
+    # silently left stale, raising `NameError` the moment it was accessed
+    # (e.g. via `__bound__`/`__default__`). Covers all three type parameter
+    # kinds (`TypeVar`'s own `bound` and `default_value`, `TypeVarTuple`'s
+    # and `ParamSpec`'s own `default_value`) in one fixture; `**Q` (no
+    # default at all — a non-default type parameter must precede every
+    # defaulted one) is branch coverage for a `ParamSpec`/`TypeVarTuple`
+    # with nothing to yield.
+    source = """def outer(response):
+    data = response.json()
+
+    def inner[**Q, T: data = data, *Ts = data, **P = data]():
+        return T, Ts, P, Q
+
+    return inner
+"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.py"
+        filepath.write_text(source)
+
+        tree = ast.parse(source)
+        check = ForbidVarsCheck()
+        violations = check.check(filepath, tree, source)
+        assert check.fix(filepath, violations, source, tree) is True
+
+        fixed_content = filepath.read_text()
+
+    assert "data" not in fixed_content
+    assert "def inner[**Q, T: payload = payload, *Ts = payload, **P = payload]():" in fixed_content
+    module_namespace: dict[str, Any] = {}
+    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+
+    class FakeResponse:
+        def json(self) -> str:
+            return "runtime value"
+
+    inner = module_namespace["outer"](FakeResponse())
+    _, type_var, type_var_tuple, param_spec = inner.__type_params__
+    assert type_var.__bound__ == "runtime value"
+    assert type_var.__default__ == "runtime value"
+    assert type_var_tuple.__default__ == "runtime value"
+    assert param_spec.__default__ == "runtime value"
+
+
 def test_scope_names_ignore_unnamed_except_and_match_captures() -> None:
     # Branch coverage: a bare `except:` or wildcard `case _:` produces an
     # ExceptHandler/MatchAs node with `name=None` — `_get_scope_names()`

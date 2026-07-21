@@ -128,6 +128,8 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         self.violations: list[ForbidVarsFixData] = []
         self.current_scope: list[ast.AST] = []
         self.tree: ast.Module | None = None
+        self.has_future_annotations = False
+        self._annotation_names_cache: set[VariableName] | None = None
         self.scope_used_suggestions: dict[int | None, set[str]] = {}
         # Maps (scope_id, forbidden_var_name) to the generated suggestion
         self.scope_var_suggestions: dict[tuple[int | None, str], str] = {}
@@ -271,6 +273,57 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         scope_node = self.current_scope[-1] if self.current_scope else self.tree
         return name in self._global_or_nonlocal_names(scope_node)
 
+    def _annotation_referenced_names(self) -> set[VariableName]:
+        """Every identifier referenced anywhere in the module within a
+        parameter or return annotation expression, cached once (module-wide,
+        not per-scope: under PEP 563 every annotation resolves the same way
+        regardless of how deeply it's nested — see
+        `_unsafe_module_scope_annotation_reference`).
+        """
+        if self._annotation_names_cache is not None:
+            return self._annotation_names_cache
+
+        assert self.tree is not None, "tree must be set by check() before scope lookups"
+        names: set[VariableName] = set()
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                for annotation in _signature_annotations(node.args):
+                    names.update(child.id for child in ast.walk(annotation) if isinstance(child, ast.Name))
+                if node.returns is not None:
+                    names.update(child.id for child in ast.walk(node.returns) if isinstance(child, ast.Name))
+
+        self._annotation_names_cache = names
+        return names
+
+    def _unsafe_module_scope_annotation_reference(self, name: VariableName) -> bool:
+        """Whether renaming a module-scope `name` is unsafe because some
+        annotation elsewhere in the module also mentions it.
+
+        Under PEP 563 (`from __future__ import annotations`), every
+        annotation is stored as a string and resolved later only against the
+        annotated function's own module globals — *never* against any
+        enclosing scope's locals, and *ignoring* any local shadowing along
+        the way (confirmed against real `typing.get_type_hints()` behavior:
+        a nested function's own local of the same name has no effect on
+        what its annotations resolve to). So a rename of a module-level
+        binding should, in principle, follow into every annotation
+        referencing it, at any nesting depth, regardless of intervening
+        shadowing — a fundamentally different resolution rule than the
+        shadow-respecting closure-following `_collect_replacements()` uses
+        for ordinary references. Building a second, annotation-specific
+        traversal that ignores shadowing (while everything else respects
+        it) is disproportionate for how rarely a fixable violation's RHS
+        pattern (e.g. `.json()`) would plausibly double as a type
+        elsewhere, so this refuses to suggest a fix instead, the same
+        "don't touch what we can't safely follow" treatment already given
+        to `global`/`nonlocal`. Only relevant for a module-scope violation:
+        a nested scope's own local is already never followed into any
+        annotation under deferred annotations regardless (see
+        `_outer_scope_children`), so no annotation there could ever
+        possibly resolve to it in the first place.
+        """
+        return not self.current_scope and self.has_future_annotations and name in self._annotation_referenced_names()
+
     def _ancestor_used_suggestions(self, scope_stack: list[ast.AST]) -> set[VariableName]:
         """Union of every already-used suggestion in the current scope's own
         bucket and every *ancestor* scope's bucket (module scope, then each
@@ -383,7 +436,11 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
                 "col": byte_col_to_char_col(self._ast_lines[lineno - 1], col_offset),
                 "suggestion": None,
             }
-            if match and not self._referenced_via_global_or_nonlocal(name):
+            if (
+                match
+                and not self._referenced_via_global_or_nonlocal(name)
+                and not self._unsafe_module_scope_annotation_reference(name)
+            ):
                 suggested_name = match["name"]
                 # Handle semantic naming where name is from regex group
                 if "\\" in suggested_name:
@@ -650,6 +707,27 @@ def _signature_annotations(args: ast.arguments) -> Iterator[ast.expr]:
             yield arg.annotation
 
 
+def _type_param_defaults_and_bounds(type_params: list[ast.type_param]) -> Iterator[ast.expr]:
+    """A PEP 695 type parameter's own `bound`/`default_value` expressions
+    (`def f[T: bound = default](): ...`) — unlike a parameter/return
+    annotation, these are evaluated lazily through a real closure over the
+    scope enclosing the `def`, regardless of PEP 563 deferred annotations
+    (confirmed against CPython: a nested `def f[T: data]():` still resolves
+    `data` to the nearest enclosing binding, respecting shadowing, exactly
+    like a parameter default would — both with and without `from __future__
+    import annotations` active). So callers always treat these as
+    `_outer_scope_children`, never gated by `has_future_annotations`.
+    """
+    for type_param in type_params:
+        if isinstance(type_param, ast.TypeVar):
+            if type_param.bound is not None:
+                yield type_param.bound
+            if type_param.default_value is not None:
+                yield type_param.default_value
+        elif isinstance(type_param, ast.ParamSpec | ast.TypeVarTuple) and type_param.default_value is not None:
+            yield type_param.default_value
+
+
 def _outer_scope_children(
     scope_node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | _ComprehensionNode,
     *,
@@ -659,7 +737,9 @@ def _outer_scope_children(
     *enclosing* scope rather than its own — so a rename must still visit
     them even when `scope_node`'s own body shadows the name being renamed.
 
-    Decorators and parameter defaults always run once when the `def`/
+    Decorators, parameter defaults, and a PEP 695 type parameter's own
+    `bound`/`default_value` expressions (see
+    `_type_param_defaults_and_bounds`) always run once when the `def`/
     `lambda` statement itself executes, in whatever scope contains it —
     never inside the function's own body scope. Parameter/return
     annotations do too, *except* when the function has PEP 695 type
@@ -687,6 +767,7 @@ def _outer_scope_children(
     if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef):
         yield from scope_node.decorator_list
         yield from _signature_defaults(scope_node.args)
+        yield from _type_param_defaults_and_bounds(scope_node.type_params)
         if not scope_node.type_params and not has_future_annotations:
             yield from _signature_annotations(scope_node.args)
             if scope_node.returns is not None:
@@ -958,6 +1039,7 @@ class ForbidVarsCheck(BaseCheck):
     def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         visitor = ForbiddenNameVisitor(self.forbidden_names, source)
         visitor.tree = tree  # Store tree for scope-aware name generation
+        visitor.has_future_annotations = _has_future_annotations_import(tree)
         visitor.visit(tree)
         visitor.assign_suggestions()
 
