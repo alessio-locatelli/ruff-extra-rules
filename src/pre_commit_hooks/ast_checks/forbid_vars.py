@@ -552,7 +552,7 @@ _CROSSABLE_SCOPE_NODES = (
 )
 
 
-def _binds_name_in_nested_scope(scope_node: ast.AST, name: VariableName, *, has_future_annotations: bool) -> bool:
+def _binds_name_in_nested_scope(scope_node: ast.AST, name: VariableName) -> bool:
     """Whether entering `scope_node` (a nested function, lambda, or
     comprehension) introduces its own binding for `name`, so a reference to
     `name` inside it resolves to that new binding instead of whatever
@@ -614,7 +614,7 @@ def _binds_name_in_nested_scope(scope_node: ast.AST, name: VariableName, *, has_
         ):
             return True
 
-        for child in _iter_own_scope_descendants(scope_node, has_future_annotations=has_future_annotations):
+        for child in _iter_own_scope_descendants(scope_node):
             if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and child.name == name:
                 return True
             if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store | ast.Del) and child.id == name:
@@ -771,9 +771,13 @@ def _outer_scope_children(
     `lambda` statement itself executes, in whatever scope contains it —
     never inside the function's own body scope. Parameter/return
     annotations do too, *except* when the function has PEP 695 type
-    parameters (see `_signature_annotations`), in which case
-    `_own_scope_children` handles them instead — *or* when
-    `has_future_annotations` (PEP 563, `from __future__ import
+    parameters (see `_signature_annotations`), in which case they run in the
+    type parameters' own implicit scope instead — `_collect_replacements`
+    visits them directly, with a mapping filtered for type-parameter peers
+    only, rather than through this function or `_own_scope_children` (see
+    there for why: that implicit scope isn't the function's own body scope
+    either, so neither bucket's shadow rules actually apply to it) — *or*
+    when `has_future_annotations` (PEP 563, `from __future__ import
     annotations`) is active: then no annotation is ever evaluated eagerly
     in any scope at all, only stored as a string and resolved later
     (typically by `typing.get_type_hints()`) against the function's
@@ -782,9 +786,10 @@ def _outer_scope_children(
     rename would silently point it at a name that doesn't exist at module
     scope (`NameError` from `get_type_hints()`) or, worse, an unrelated
     module global that happens to share the new name — so `has_future_annotations`
-    excludes annotations from both `_outer_scope_children` and
-    `_own_scope_children` entirely, the same "don't touch what we can't
-    safely follow" treatment already given to `global`/`nonlocal`. A
+    excludes annotations from `_outer_scope_children`, `_own_scope_children`,
+    and `_collect_replacements`'s own type-parameter-scope handling alike,
+    the same "don't touch what we can't safely follow" treatment already
+    given to `global`/`nonlocal`. A
     comprehension's *first* `for` clause's iterable is the one exception to
     "everything in a comprehension runs in its own scope": Python evaluates
     only that first iterable eagerly, in the enclosing scope (passed as an
@@ -808,17 +813,25 @@ def _outer_scope_children(
 
 def _own_scope_children(
     scope_node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | _ComprehensionNode,
-    *,
-    has_future_annotations: bool,
 ) -> Iterator[ast.AST]:
     """Direct or indirect children of `scope_node` that belong to its own,
     new scope — the counterpart to `_outer_scope_children` above.
+
+    A `FunctionDef`/`AsyncFunctionDef` with PEP 695 type parameters and no
+    deferred annotations does *not* put its own parameter/return annotations
+    here, even though they're evaluated outside `_outer_scope_children`'s
+    bucket too: they run in the type parameters' own implicit scope, which
+    sees the *type parameters* as peers plus (via closure) the enclosing
+    scope — never `scope_node`'s own body-local variables or parameters
+    (confirmed against CPython: `def outer(): data = 1; def inner[T](value:
+    data): data = 2; return value` still binds the annotation to outer's
+    `1`, unaffected by `inner`'s own later `data = 2`). Filtering them by
+    `_binds_name_in_nested_scope` here, alongside the body, would wrongly
+    treat a body-local rebind as shadowing an annotation it can't actually
+    see. `_collect_replacements` visits them directly instead, with a
+    mapping filtered only for type-parameter peers.
     """
     if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef):
-        if scope_node.type_params and not has_future_annotations:
-            yield from _signature_annotations(scope_node.args)
-            if scope_node.returns is not None:
-                yield scope_node.returns
         yield from scope_node.body
     elif isinstance(scope_node, ast.Lambda):
         yield scope_node.body
@@ -841,8 +854,6 @@ def _comprehension_own_scope_generators(generators: list[ast.comprehension]) -> 
 
 def _iter_own_scope_descendants(
     scope_node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | _ComprehensionNode,
-    *,
-    has_future_annotations: bool,
 ) -> Iterator[ast.AST]:
     """Every node belonging to `scope_node`'s own execution scope — its
     `_own_scope_children()` themselves, plus their own descendants, without
@@ -858,9 +869,13 @@ def _iter_own_scope_descendants(
     mistaken for a binding that shadows `scope_node`'s own body, or a
     legitimate closure reference in the body would be wrongly skipped as
     "shadowed" while the default itself still got renamed, splitting one
-    variable into two unrelated ones.
+    variable into two unrelated ones. A `FunctionDef`/`AsyncFunctionDef`'s
+    own parameter/return annotations (when it has PEP 695 type parameters)
+    are excluded from `_own_scope_children()` for the same reason, so
+    they're never reachable from here either — they can't be shadowed by
+    anything `scope_node`'s own body binds in the first place.
     """
-    yield from iter_within_scope_from(_own_scope_children(scope_node, has_future_annotations=has_future_annotations))
+    yield from iter_within_scope_from(_own_scope_children(scope_node))
 
 
 def _collect_replacements(
@@ -907,6 +922,17 @@ def _collect_replacements(
     peer it actually resolves to, the same failure class as any other
     wrong-scope rename.
 
+    When that same `FunctionDef`/`AsyncFunctionDef` also has parameter/
+    return annotations and no deferred annotations active, those get the
+    *same* peer-filtered mapping too, visited separately from both
+    `_outer_scope_children` and `_own_scope_children` (neither is right:
+    the annotations aren't evaluated in the enclosing scope like a default,
+    nor do they see the function's own body/parameters like an ordinary
+    body statement — only the type parameters' own implicit scope, shadowed
+    only by a peer type parameter of the same name — confirmed against
+    CPython: a body-local reassignment of the annotated name has no effect
+    on what the annotation itself resolves to).
+
     A PEP 695 `type` alias statement (`ast.TypeAlias`) gets the same
     peer-filtered treatment, for both its own `type_params`'s bound/default
     expressions *and* its `value` — confirmed against CPython that the
@@ -950,13 +976,23 @@ def _collect_replacements(
                         _collect_replacements(expr, bound_default_names, has_future_annotations=has_future_annotations)
                     )
 
-        nested_names = {
-            name: new
-            for name, new in replace_names.items()
-            if not _binds_name_in_nested_scope(node, name, has_future_annotations=has_future_annotations)
-        }
+            if not has_future_annotations:
+                annotation_names = _peer_filtered_replace_names(node.type_params, replace_names)
+                if annotation_names:
+                    for expr in _signature_annotations(node.args):
+                        results.extend(
+                            _collect_replacements(expr, annotation_names, has_future_annotations=has_future_annotations)
+                        )
+                    if node.returns is not None:
+                        results.extend(
+                            _collect_replacements(
+                                node.returns, annotation_names, has_future_annotations=has_future_annotations
+                            )
+                        )
+
+        nested_names = {name: new for name, new in replace_names.items() if not _binds_name_in_nested_scope(node, name)}
         if nested_names:
-            for own_child in _own_scope_children(node, has_future_annotations=has_future_annotations):
+            for own_child in _own_scope_children(node):
                 results.extend(
                     _collect_replacements(own_child, nested_names, has_future_annotations=has_future_annotations)
                 )
@@ -1018,7 +1054,7 @@ def _collect_scope_replacements(
     the syntax that actually runs inside `scope`.
     """
     if isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
-        children: Iterator[ast.AST] = _own_scope_children(scope, has_future_annotations=has_future_annotations)
+        children: Iterator[ast.AST] = _own_scope_children(scope)
     else:
         children = ast.iter_child_nodes(scope)
     return [

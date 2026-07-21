@@ -1742,6 +1742,130 @@ def test_autofix_follows_closure_into_type_alias_value() -> None:
     assert typing.get_args(alias.__value__) == (type_var_t, "runtime value")
 
 
+def test_autofix_follows_closure_into_generic_functions_own_annotation_despite_body_shadowing() -> None:
+    # Regression: a PEP 695 generic function's parameter/return annotations
+    # run in the type parameters' own implicit scope, not the function's own
+    # body/parameter scope — confirmed against CPython that a body-local
+    # reassignment of the annotated name has no effect on what the
+    # annotation itself resolves to (it's evaluated once, at `def` time,
+    # before the body's own local ever exists). The previous fix lumped
+    # these annotations into `_own_scope_children`, filtered by
+    # `_binds_name_in_nested_scope`'s *body*-shadow check — so `inner`'s own
+    # unrelated `data = 1` reassignment made the annotation look shadowed
+    # and left it completely unrenamed, even though it should have followed
+    # the outer rename like any other enclosing-scope reference.
+    source = """def outer(response):
+    data = response.json()
+
+    def inner[T](value: data):
+        data = 1
+        return T, value, data
+
+    return inner
+"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.py"
+        filepath.write_text(source)
+
+        tree = ast.parse(source)
+        check = ForbidVarsCheck()
+        violations = check.check(filepath, tree, source)
+        assert check.fix(filepath, violations, source, tree) is True
+
+        fixed_content = filepath.read_text()
+
+    assert "def inner[T](value: payload):" in fixed_content
+    assert "data = 1" in fixed_content  # Body's own local reassignment untouched.
+    module_namespace: dict[str, Any] = {}
+    # dont_inherit=True: see test_autofix_still_follows_annotation_closure_without_deferred_annotations
+    # — this test file's own `from __future__ import annotations` would
+    # otherwise leak into the compiled fixture regardless of what
+    # fixed_content itself contains.
+    exec(  # noqa: S102
+        compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec", dont_inherit=True), module_namespace
+    )
+
+    class FakeResponse:
+        def json(self) -> str:
+            return "runtime value"
+
+    inner = module_namespace["outer"](FakeResponse())
+    assert inner.__annotations__ == {"value": "runtime value"}
+
+
+def test_autofix_does_not_rename_generic_functions_own_annotation_referencing_a_peer_type_parameter() -> None:
+    # Companion to the test above: an annotation referencing a *peer* type
+    # parameter (rather than an enclosing-scope name) must still be left
+    # alone, exactly like a type parameter's own bound/default already is —
+    # confirmed against CPython that `def inner[data]() -> data:` binds the
+    # return annotation to the peer `TypeVar`, not an outer local of the
+    # same name.
+    source = """def outer(response):
+    data = response.json()
+
+    def inner[data](value: data) -> data:
+        return value
+
+    return inner
+"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.py"
+        filepath.write_text(source)
+
+        tree = ast.parse(source)
+        check = ForbidVarsCheck()
+        violations = check.check(filepath, tree, source)
+        assert check.fix(filepath, violations, source, tree) is True
+
+        fixed_content = filepath.read_text()
+
+    assert "def inner[data](value: data) -> data:" in fixed_content
+    module_namespace: dict[str, Any] = {}
+    # dont_inherit=True: see test_autofix_still_follows_annotation_closure_without_deferred_annotations.
+    exec(  # noqa: S102
+        compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec", dont_inherit=True), module_namespace
+    )
+
+    class FakeResponse:
+        def json(self) -> str:
+            return "runtime value"
+
+    inner = module_namespace["outer"](FakeResponse())
+    peer_type_var = inner.__type_params__[0]
+    assert inner.__annotations__ == {"value": peer_type_var, "return": peer_type_var}
+
+
+def test_autofix_does_not_follow_generic_functions_own_annotation_under_deferred_annotations() -> None:
+    # Branch coverage: a generic function's annotation must still be
+    # excluded entirely under `from __future__ import annotations`, exactly
+    # like a non-generic function's — deferred annotations turn every
+    # annotation into an unresolved string, regardless of PEP 695 type
+    # parameters, so this must never fall into the peer-filtered
+    # closure-following path added by the two tests above.
+    source = """from __future__ import annotations
+
+def outer(response):
+    data = response.json()
+
+    def inner[T](value: data):
+        return value
+
+    return inner
+"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.py"
+        filepath.write_text(source)
+
+        tree = ast.parse(source)
+        check = ForbidVarsCheck()
+        violations = check.check(filepath, tree, source)
+        assert check.fix(filepath, violations, source, tree) is True
+
+        fixed_content = filepath.read_text()
+
+    assert "def inner[T](value: data):" in fixed_content
+
+
 def test_scope_names_ignore_unnamed_except_and_match_captures() -> None:
     # Branch coverage: a bare `except:` or wildcard `case _:` produces an
     # ExceptHandler/MatchAs node with `name=None` — `_get_scope_names()`
