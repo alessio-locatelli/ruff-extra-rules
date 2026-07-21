@@ -1657,6 +1657,91 @@ def test_autofix_does_not_rename_a_nested_functions_own_type_parameter_bound_via
     assert inner(FakeResponse()) == (type_var, "runtime value")
 
 
+def test_autofix_does_not_rename_type_alias_bound_referencing_a_peer_type_parameter() -> None:
+    # Regression: a PEP 695 `type` alias statement (`ast.TypeAlias`) has its
+    # own implicit type-parameter scope, exactly like a generic function —
+    # confirmed against CPython that a later type parameter's own bound can
+    # reference an earlier peer by name, resolving to that peer object, not
+    # to the enclosing scope. `ast.TypeAlias` isn't in `_CROSSABLE_SCOPE_NODES`
+    # at all, so before this fix it fell through to the generic recursive
+    # case in `_collect_replacements`, which walked into the alias's
+    # `type_params`/`value` with no peer-name filtering whatsoever.
+    source = """def outer(response):
+    data = response.json()
+
+    type Alias[data, T: data] = T
+
+    return Alias
+"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.py"
+        filepath.write_text(source)
+
+        tree = ast.parse(source)
+        check = ForbidVarsCheck()
+        violations = check.check(filepath, tree, source)
+        assert check.fix(filepath, violations, source, tree) is True
+
+        fixed_content = filepath.read_text()
+
+    assert "type Alias[data, T: data] = T" in fixed_content
+    assert "payload = response.json()" in fixed_content
+    module_namespace: dict[str, Any] = {}
+    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+
+    class FakeResponse:
+        def json(self) -> str:
+            return "runtime value"
+
+    alias = module_namespace["outer"](FakeResponse())
+    peer_data, type_var_t = alias.__type_params__
+    assert type_var_t.__bound__ is peer_data
+
+
+def test_autofix_follows_closure_into_type_alias_value() -> None:
+    # A `type` alias's own `value` expression is lazily evaluated but still
+    # closes over its enclosing scope for any name that isn't one of its own
+    # peer type parameters — confirmed against CPython. Covers the other
+    # side of the fix above: peer names must be filtered out of the
+    # replacement mapping, but everything else must still follow the rename
+    # — including a type parameter's own bound that, unlike the previous
+    # test, does *not* reference a peer (branch coverage for
+    # `_type_param_defaults_and_bounds` yielding a non-empty, non-peer expr
+    # alongside a non-empty filtered mapping).
+    source = """def outer(response):
+    data = response.json()
+
+    type Alias[T: int] = tuple[T, data]
+
+    return Alias
+"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.py"
+        filepath.write_text(source)
+
+        tree = ast.parse(source)
+        check = ForbidVarsCheck()
+        violations = check.check(filepath, tree, source)
+        assert check.fix(filepath, violations, source, tree) is True
+
+        fixed_content = filepath.read_text()
+
+    assert "data" not in fixed_content
+    assert "type Alias[T: int] = tuple[T, payload]" in fixed_content
+    module_namespace: dict[str, Any] = {}
+    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+
+    class FakeResponse:
+        def json(self) -> str:
+            return "runtime value"
+
+    alias = module_namespace["outer"](FakeResponse())
+    type_var_t = alias.__type_params__[0]
+    assert type_var_t.__bound__ is int
+    assert typing.get_origin(alias.__value__) is tuple
+    assert typing.get_args(alias.__value__) == (type_var_t, "runtime value")
+
+
 def test_scope_names_ignore_unnamed_except_and_match_captures() -> None:
     # Branch coverage: a bare `except:` or wildcard `case _:` produces an
     # ExceptHandler/MatchAs node with `name=None` — `_get_scope_names()`

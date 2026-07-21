@@ -728,6 +728,26 @@ def _type_param_defaults_and_bounds(type_params: list[ast.type_param]) -> Iterat
             yield type_param.default_value
 
 
+def _peer_filtered_replace_names(
+    type_params: list[ast.type_param], replace_names: dict[VariableName, VariableName]
+) -> dict[VariableName, VariableName]:
+    """`replace_names`, with every one of `type_params`'s own peer names
+    removed. A PEP 695 type parameter's own bound/default, or a `type`
+    alias's own value, can reference an *earlier* peer from the same
+    `type_params` list by name — that resolves to the peer object itself,
+    never to whatever the enclosing scope binds under the same name (see
+    `_type_param_defaults_and_bounds`), so a peer name must never be treated
+    as an enclosing-scope reference to rename. Works unchanged when
+    `type_params` is empty (no peers to filter).
+    """
+    peer_type_param_names = {
+        type_param.name
+        for type_param in type_params
+        if isinstance(type_param, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple)
+    }
+    return {name: new for name, new in replace_names.items() if name not in peer_type_param_names}
+
+
 def _outer_scope_children(
     scope_node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | _ComprehensionNode,
     *,
@@ -887,6 +907,18 @@ def _collect_replacements(
     peer it actually resolves to, the same failure class as any other
     wrong-scope rename.
 
+    A PEP 695 `type` alias statement (`ast.TypeAlias`) gets the same
+    peer-filtered treatment, for both its own `type_params`'s bound/default
+    expressions *and* its `value` — confirmed against CPython that the
+    alias's value expression, like a type parameter's own bound/default, is
+    lazily evaluated but resolves a peer type parameter reference to that
+    peer rather than the enclosing scope, exactly like a nested function's
+    type parameters do. `ast.TypeAlias` isn't a member of
+    `_CROSSABLE_SCOPE_NODES` (it can't itself be shadowed the way a function
+    body can — the alias's own type parameters are confined to the
+    statement, never leaking into whatever scope contains it), so it gets
+    its own dedicated branch here instead.
+
     A class body is never recursed into: `self.x`/`cls.x` access is a
     distinct `ast.Attribute` node, not `ast.Name`, so a bare class-body
     reference to an enclosing scope's variable is a separate, rarer pattern
@@ -911,14 +943,7 @@ def _collect_replacements(
             )
 
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.type_params:
-            peer_type_param_names = {
-                type_param.name
-                for type_param in node.type_params
-                if isinstance(type_param, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple)
-            }
-            bound_default_names = {
-                name: new for name, new in replace_names.items() if name not in peer_type_param_names
-            }
+            bound_default_names = _peer_filtered_replace_names(node.type_params, replace_names)
             if bound_default_names:
                 for expr in _type_param_defaults_and_bounds(node.type_params):
                     results.extend(
@@ -935,6 +960,26 @@ def _collect_replacements(
                 results.extend(
                     _collect_replacements(own_child, nested_names, has_future_annotations=has_future_annotations)
                 )
+        return results
+
+    if isinstance(node, ast.TypeAlias):
+        # `node.name` is bound in the *enclosing* scope (like a function's
+        # own name), so it's visited with the unfiltered mapping. The
+        # implicit type-parameter scope covers both `type_params`' own
+        # bound/default expressions *and* `value` itself (confirmed against
+        # CPython: `type Alias[data, T: data] = (T, data)` resolves both
+        # `data` references to the peer `TypeVar`, not to an enclosing local
+        # of the same name) — both use the same peer-filtered mapping.
+        results = list(_collect_replacements(node.name, replace_names, has_future_annotations=has_future_annotations))
+        filtered_names = _peer_filtered_replace_names(node.type_params, replace_names)
+        if filtered_names:
+            for expr in _type_param_defaults_and_bounds(node.type_params):
+                results.extend(
+                    _collect_replacements(expr, filtered_names, has_future_annotations=has_future_annotations)
+                )
+            results.extend(
+                _collect_replacements(node.value, filtered_names, has_future_annotations=has_future_annotations)
+            )
         return results
 
     if isinstance(node, ast.ClassDef):
