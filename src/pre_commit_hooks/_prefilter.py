@@ -81,9 +81,16 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
         # cmd is built entirely from this function's own hardcoded git-grep
         # flags plus filepaths supplied by this hook's own CLI invocation
         # (never from untrusted external input), so no shell is involved and
-        # no argument here can inject another command.
+        # no argument here can inject another command. errors="surrogateescape":
+        # a matched file's path is just bytes on Linux, never required to be
+        # valid UTF-8 -- the default strict decoding would otherwise raise
+        # UnicodeDecodeError for an oddly-encoded filename and crash this
+        # entire prefilter pass instead of reporting the match. This is the
+        # same handler os.fsdecode() already uses for filesystem paths, so it
+        # never raises and round-trips back to the exact file when resolved
+        # below.
         git_grep_result = subprocess.run(  # noqa: S603
-            cmd, capture_output=True, text=True, check=False, timeout=30
+            cmd, capture_output=True, text=True, errors="surrogateescape", check=False, timeout=30
         )
 
         # A 0/1 returncode alone doesn't mean every input file was actually
