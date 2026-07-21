@@ -477,6 +477,49 @@ def test_process_files_no_candidates_after_prefilter_returns_empty(
     assert violations == {}
 
 
+def test_process_files_none_pattern_check_still_sees_a_file_other_checks_patterns_miss(tmp_path: Path) -> None:
+    # Regression (#46): combining every enabled check's own prefilter
+    # pattern into one OR'd filter before running any check dropped a file
+    # for every check whenever it failed to match ANY enabled check's
+    # pattern -- including excessive-blank-lines, whose own
+    # get_prefilter_pattern() returns None (see
+    # test_process_files_no_prefilter_pattern_checks_all_files) precisely so
+    # it sees every file regardless of what else is enabled. This file has a
+    # real excessive-blank-lines violation but contains none of forbid-vars'
+    # own patterns ("data"/"result"), so the old combined filter dropped it
+    # before it was ever parsed.
+    filepath = tmp_path / "module.py"
+    filepath.write_text('"""Doc."""\n\n\n\nclass Foo:\n    pass\n')
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(), ExcessiveBlankLinesCheck()])
+    violations = orchestrator.process_files([str(filepath)])
+
+    assert violations[str(filepath)][0].error_code == "TRI002"
+
+
+def test_process_files_applies_each_checks_prefilter_independently(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression (#46): a file must only run through a check whose own
+    # prefilter pattern it actually matches -- not through every enabled
+    # check merely because some *other* check's pattern matched. This file
+    # contains forbid-vars' own pattern ("data") but not
+    # redundant-super-init's ("super().__init__"), so redundant-super-init's
+    # check() must never even be called against it.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    redundant_super_init = RedundantSuperInitCheck()
+    spy_check = mock.MagicMock(wraps=redundant_super_init.check)
+    monkeypatch.setattr(redundant_super_init, "check", spy_check)
+
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(), redundant_super_init])
+    violations = orchestrator.process_files([str(filepath)])
+
+    spy_check.assert_not_called()
+    assert violations[str(filepath)][0].error_code == "TRI001"
+
+
 @pytest.mark.parametrize(
     "write_file",
     [

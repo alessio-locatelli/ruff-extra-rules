@@ -15,6 +15,7 @@ from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from pre_commit_hooks.ast_checks import ASTCheck
     from pre_commit_hooks.ast_checks._base import Violation
 
 
@@ -102,10 +103,12 @@ def test_real_sigterm_mid_run_stops_gracefully_without_leftover_temp_files(
     original_check_file = CheckOrchestrator._check_file
     calls = 0
 
-    def _check_file_then_send_sigterm_on_third_call(self: CheckOrchestrator, filepath: Path) -> list[Violation] | None:
+    def _check_file_then_send_sigterm_on_third_call(
+        self: CheckOrchestrator, filepath: Path, checks: list[ASTCheck]
+    ) -> list[Violation] | None:
         nonlocal calls
         calls += 1
-        violations = original_check_file(self, filepath)
+        violations = original_check_file(self, filepath, checks)
         if calls == 3:
             os.kill(os.getpid(), signal.SIGTERM)
         return violations
