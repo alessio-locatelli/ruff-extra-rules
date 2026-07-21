@@ -40,14 +40,26 @@ def test_install_sigterm_handler_registers_handler() -> None:
     assert signal.getsignal(signal.SIGTERM) is _raise_keyboard_interrupt
 
 
-def test_install_sigterm_handler_degrades_when_signal_signal_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_install_sigterm_handler_degrades_when_signal_signal_unavailable(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    original_handler = signal.getsignal(signal.SIGTERM)
+
     def _raise_value_error(*_args: object, **_kwargs: object) -> None:
         msg = "signal only works in main thread of the main interpreter"
         raise ValueError(msg)
 
     monkeypatch.setattr(signal, "signal", _raise_value_error)
 
-    _install_sigterm_handler()  # must not raise
+    with caplog.at_level("DEBUG"):
+        _install_sigterm_handler()  # must not raise
+
+    # ch. 31: "MUST NOT consider a test that merely checks that the process
+    # did not crash sufficient evidence of correctness" -- also verify the
+    # actual degraded behavior: no handler was installed, and the fallback
+    # is logged rather than silent.
+    assert signal.getsignal(signal.SIGTERM) is original_handler
+    assert "Could not install a SIGTERM handler" in caplog.text
 
 
 def test_run_prints_message_and_returns_one_on_keyboard_interrupt(

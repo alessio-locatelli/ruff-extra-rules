@@ -1454,6 +1454,12 @@ def test_main_fix_flag_marks_violation_fixed(tmp_path: Path, capsys: pytest.Capt
     err = capsys.readouterr().err
     assert "[FIXED]" in err
     assert "Run with --fix" not in err
+    # ch. 32: "MUST verify that the reported result matches the actual final
+    # file state" -- the rejected/errored/failed variants of this test
+    # already assert the file stays untouched; only the success path was
+    # never checked against the real on-disk content, just the printed
+    # [FIXED] line.
+    assert filepath.read_text() == "response = requests.get(url)\nprint(response)\n"
 
 
 def test_main_fix_flag_reports_rejected_fix(
@@ -1898,3 +1904,95 @@ def test_fix_converges_after_one_pass_across_all_checks(fixture_path: Path, tmp_
     second_pass = target.read_text(encoding="utf-8")
 
     assert second_pass == first_pass
+
+
+def test_main_handles_path_containing_spaces_and_unicode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # ch. 31: "MUST test paths containing spaces and Unicode." forbid-vars
+    # declares a prefilter pattern, so a normal run first passes this path to
+    # git_grep_filter()'s real `git grep` subprocess call as a plain argument,
+    # never through a shell (0006/0015's file-discovery audit) -- but only
+    # inside a real git repo; a bare tmp_path (outside any repo, as every
+    # other test in this file uses it) makes `git grep` error out and
+    # silently fall back to the Python-only path instead, which has no
+    # subprocess argument-passing to prove safe in the first place, and would
+    # still produce the same passing result -- hiding exactly the regression
+    # this test exists to catch. Spies on the real subprocess.run (still
+    # executed for real, never mocked out) to confirm git grep itself
+    # actually received and matched this path rather than silently falling
+    # back. Only ever verified ad hoc before this (prose in
+    # docs/audits/0006), never as a committed regression test.
+    git = shutil.which("git")
+    assert git is not None
+
+    directory = tmp_path / "my proj café 日本語"
+    directory.mkdir()
+    filepath = directory / "module café.py"
+    filepath.write_text("data = requests.get(url)\n", encoding="utf-8")
+
+    real_run = subprocess.run
+    # Every subprocess.run call made once the spy is installed below is a
+    # git-grep call: forbid-vars' own two prefilter patterns ("data",
+    # "result") are the only thing that invokes git_grep_filter() for this
+    # single-file, single-check run (a lone file argument never triggers
+    # expand_directories()'s own git ls-files call).
+    grep_commands: list[list[str]] = []
+    grep_results: list[subprocess.CompletedProcess[str]] = []
+
+    def _spy_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        completed_process = real_run(*args, **kwargs)  # type: ignore[call-overload]
+        grep_commands.append(args[0])  # type: ignore[arg-type]
+        grep_results.append(completed_process)
+        return completed_process
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        # Args are hardcoded test setup, not untrusted input.
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+        subprocess.run([git, "add", str(filepath)], check=True)  # noqa: S603
+
+        monkeypatch.setattr(subprocess, "run", _spy_run)
+        exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+    finally:
+        os.chdir(original_dir)
+
+    assert grep_results, "git grep was never invoked -- fell back to the Python-only path"
+    assert all(result.stderr == "" for result in grep_results)
+    assert any(result.returncode == 0 for result in grep_results)
+    # Prove the path itself reached the command as a real, intact argument --
+    # a command that dropped the pathspec (searching the whole repo instead
+    # of this one file) would still find the sole match and pass every
+    # assertion above, silently losing path scoping without this check.
+    assert all(str(filepath) in command for command in grep_commands)
+
+    assert exit_code == 1
+    assert "[FIXED]" in capsys.readouterr().err
+    assert filepath.read_text(encoding="utf-8") == "response = requests.get(url)\n"
+
+
+def test_process_files_handles_a_large_file(tmp_path: Path) -> None:
+    # ch. 31: "MUST test large files." The only prior evidence this pipeline
+    # behaves correctly on a large file was an ad hoc manual benchmark
+    # recorded as prose in docs/audits/0004 (a 2000-function/120KB file) --
+    # never committed as a regression test. This is a correctness check, not
+    # a performance benchmark (ch. 24/30's own concern, already covered by
+    # 0004's fix and its unit-level regression tests) -- it only proves every
+    # violation in a large file is still found and fixed correctly, with
+    # nothing dropped, corrupted, or left unprocessed.
+    function_count = 300
+    source = "\n\n".join(
+        f"def func_{i}():\n    data = requests.get(url)\n    return data" for i in range(function_count)
+    )
+    filepath = tmp_path / "large_module.py"
+    filepath.write_text(source + "\n", encoding="utf-8")
+
+    orchestrator = CheckOrchestrator(checks=load_checks(select={"forbid-vars"}), fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    assert orchestrator.unprocessable_files == []
+    assert orchestrator.rule_failures == []
+    fixed = [v for v in violations[str(filepath)] if is_fixed(v)]
+    assert len(fixed) == function_count
+    assert "data = requests.get" not in filepath.read_text(encoding="utf-8")
