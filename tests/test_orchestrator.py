@@ -75,8 +75,7 @@ def test_expand_directories_uses_git_ls_files_inside_a_git_repo(tmp_path: Path) 
     # never matched the literal directory path in git_grep_filter's own
     # input map, so every result was silently discarded as unresolvable —
     # the run reported zero violations, exit code 0, having checked
-    # nothing. This also proves git-tracked-only, .gitignore-aware
-    # expansion: an untracked file under the directory is excluded.
+    # nothing.
     git = shutil.which("git")
     assert git is not None
 
@@ -89,9 +88,196 @@ def test_expand_directories_uses_git_ls_files_inside_a_git_repo(tmp_path: Path) 
         tracked.write_text("x = 1\n")
         subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
 
-        (tmp_path / "untracked.py").write_text("y = 1\n")
-
         assert expand_directories([str(tmp_path)]) == [str(tracked.resolve())]
+    finally:
+        os.chdir(original_dir)
+
+
+def test_expand_directories_includes_untracked_file_inside_a_git_repo(tmp_path: Path) -> None:
+    # Regression (#67): a brand-new file that hasn't been `git add`ed yet
+    # used to be silently dropped from a directory-argument expansion, even
+    # though git_grep_filter already always searches that same file when
+    # it's named explicitly on the CLI instead (ADR 0024's
+    # `--untracked --no-exclude-standard`) — naming the containing
+    # directory must not produce a different, false-clean result for the
+    # identical file.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        tracked = tmp_path / "tracked.py"
+        tracked.write_text("x = 1\n")
+        subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
+
+        untracked = tmp_path / "untracked.py"
+        untracked.write_text("y = 1\n")
+
+        assert expand_directories([str(tmp_path)]) == [str(tracked.resolve()), str(untracked.resolve())]
+    finally:
+        os.chdir(original_dir)
+
+
+def test_expand_directories_excludes_gitignored_file_but_warns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A `.gitignore`d file is still excluded from a directory scan — ADR
+    # 0015's "avoid sweeping in .venv/build artifacts" rationale still
+    # applies — but its exclusion must now be visible (ch. 34/35) rather
+    # than the run silently reporting zero violations for a directory that
+    # actually contains an unexamined `.py` file (#67).
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        (tmp_path / ".gitignore").write_text("ignored.py\n")
+        (tmp_path / "ignored.py").write_text("z = 1\n")
+
+        with caplog.at_level("WARNING"):
+            matches = expand_directories([str(tmp_path)])
+
+        assert matches == []
+        assert "ignored.py" in caplog.text
+    finally:
+        os.chdir(original_dir)
+
+
+def test_expand_directories_warns_about_ignored_file_regardless_of_status_showuntrackedfiles_config(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Regression: `git status`'s own `--ignored` reporting is otherwise
+    # governed by the ambient `status.showUntrackedFiles` config -- "no"
+    # suppresses every `!!` record, silently defeating this warning's whole
+    # purpose for a user who's set that (a real, documented git setting),
+    # so the probe must pin `--untracked-files=normal` explicitly rather
+    # than trust git's own default.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+        subprocess.run([git, "config", "status.showUntrackedFiles", "no"], check=True, cwd=tmp_path)  # noqa: S603
+
+        (tmp_path / ".gitignore").write_text("ignored.py\n")
+        (tmp_path / "ignored.py").write_text("z = 1\n")
+
+        with caplog.at_level("WARNING"):
+            matches = expand_directories([str(tmp_path)])
+
+        assert matches == []
+        assert "ignored.py" in caplog.text
+    finally:
+        os.chdir(original_dir)
+
+
+def test_expand_directories_caps_gitignore_warning_at_a_bounded_number_of_paths(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Regression: a directory that isn't *entirely* ignored (e.g. a
+    # generated/ subtree with one tracked file alongside many individually
+    # -ignored `.py` outputs) can't collapse to a single git-status line --
+    # each ignored path is reported separately. The warning must stay
+    # bounded rather than materializing, sorting, and printing an unbounded
+    # list for a large generated/vendored tree.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        (tmp_path / "README.md").write_text("keep this directory partially tracked\n")
+        subprocess.run([git, "add", "README.md"], check=True, cwd=tmp_path)  # noqa: S603
+
+        num_ignored = 25
+        (tmp_path / ".gitignore").write_text("".join(f"ignored{i}.py\n" for i in range(num_ignored)))
+        for i in range(num_ignored):
+            (tmp_path / f"ignored{i}.py").write_text("z = 1\n")
+
+        with caplog.at_level("WARNING"):
+            expand_directories([str(tmp_path)])
+
+        assert f"{num_ignored} gitignored path(s)" in caplog.text
+        assert "showing first 20" in caplog.text
+    finally:
+        os.chdir(original_dir)
+
+
+def test_expand_directories_ignores_a_git_status_failure_when_checking_for_gitignored_files(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Self-healing: if the extra `git status --ignored` probe used to detect
+    # gitignored exclusions worth warning about itself fails (e.g. git
+    # errors or times out), the directory listing must still succeed --
+    # only the warning is skipped, silently (debug-only, same contract as
+    # git ls-files's own subprocess failure above).
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    real_run = subprocess.run
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        tracked = tmp_path / "tracked.py"
+        tracked.write_text("x = 1\n")
+        subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
+
+        def fake_run(cmd: list[str], *args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            if "status" in cmd:
+                raise FileNotFoundError("git not found")
+            return real_run(cmd, *args, **kwargs)  # type: ignore[call-overload]
+
+        with mock.patch("subprocess.run", side_effect=fake_run), caplog.at_level("DEBUG"):
+            matches = expand_directories([str(tmp_path)])
+
+        assert matches == [str(tracked.resolve())]
+        assert not any(record.levelname == "WARNING" for record in caplog.records)
+    finally:
+        os.chdir(original_dir)
+
+
+def test_expand_directories_skips_gitignore_warning_when_git_status_reports_stderr(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Same "don't trust a result alongside stderr" rule git_grep_filter and
+    # the primary git ls-files call both already follow: a per-path error on
+    # stderr must not produce a (possibly wrong) warning built from
+    # incomplete stdout.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    real_run = subprocess.run
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        tracked = tmp_path / "tracked.py"
+        tracked.write_text("x = 1\n")
+        subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
+
+        def fake_run(cmd: list[str], *args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            if "status" in cmd:
+                return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="error: failed to stat\n")
+            return real_run(cmd, *args, **kwargs)  # type: ignore[call-overload]
+
+        with mock.patch("subprocess.run", side_effect=fake_run), caplog.at_level("WARNING"):
+            matches = expand_directories([str(tmp_path)])
+
+        assert matches == [str(tracked.resolve())]
+        assert not any(record.levelname == "WARNING" for record in caplog.records)
     finally:
         os.chdir(original_dir)
 
@@ -145,6 +331,33 @@ def test_expand_directories_falls_back_when_git_ls_files_fails(
     assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
+def test_expand_directories_includes_a_file_with_a_non_utf8_name(tmp_path: Path) -> None:
+    # Regression: `git ls-files -z`'s stdout is decoded via `text=True`. A
+    # filename that's a valid path on Linux (paths are just bytes, never
+    # required to be valid UTF-8) but isn't decodable as UTF-8 must not
+    # crash a directory scan that contains it -- `errors="surrogateescape"`
+    # (the same handler `os.fsdecode()` already uses for filesystem paths)
+    # round-trips it back to the identical file on disk instead.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        bad_path_bytes = str(tmp_path).encode() + b"/bad-\xff\xfe.py"
+        with Path(os.fsdecode(bad_path_bytes)).open("wb") as f:
+            f.write(b"y = 1\n")
+
+        matches = expand_directories([str(tmp_path)])
+
+        assert len(matches) == 1
+        assert Path(matches[0]).exists()
+    finally:
+        os.chdir(original_dir)
+
+
 def test_main_directory_with_no_python_files_returns_zero(tmp_path: Path) -> None:
     (tmp_path / "notes.txt").write_text("not python\n")
 
@@ -168,6 +381,57 @@ def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: 
 
         assert exit_code == 1
         assert "TRI001" in capsys.readouterr().err
+    finally:
+        os.chdir(original_dir)
+
+
+def test_main_directory_argument_matches_explicit_file_argument_for_untracked_file(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Regression (#67): reproduces the issue's own repro exactly — an
+    # untracked file's violation must be reported the same way whether it's
+    # named explicitly or reached by expanding its containing directory.
+    # Before the fix, only the explicit-file run below caught it.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        untracked = tmp_path / "untracked.py"
+        untracked.write_text("result = 2\n")
+
+        assert main([str(untracked), "--select", "forbid-vars"]) == 1
+        assert "TRI001" in capsys.readouterr().err
+
+        assert main([str(tmp_path), "--select", "forbid-vars"]) == 1
+        assert "TRI001" in capsys.readouterr().err
+    finally:
+        os.chdir(original_dir)
+
+
+def test_main_directory_scan_does_not_crash_on_a_file_with_a_non_utf8_name(tmp_path: Path) -> None:
+    # Regression: expand_directories() safely includes a file whose name
+    # isn't valid UTF-8 (see test_expand_directories_includes_a_file_with_a_
+    # non_utf8_name), but that file still has to survive _prefilter.py's own
+    # git_grep_filter() call once forbid-vars' prefilter pattern runs against
+    # it -- that call decodes git grep's stdout the same way, and would
+    # crash right there instead of reporting the violation.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        bad_path_bytes = str(tmp_path).encode() + b"/bad-\xff\xfe.py"
+        with Path(os.fsdecode(bad_path_bytes)).open("wb") as f:
+            f.write(b"result = 1\n")
+
+        assert main([str(tmp_path), "--select", "forbid-vars"]) == 1
     finally:
         os.chdir(original_dir)
 
