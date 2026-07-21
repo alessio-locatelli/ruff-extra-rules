@@ -1038,6 +1038,144 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
     ast.parse(fixed_content)  # Left untouched, so it's still valid Python.
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        # Regression: `def data(): ...` rebinds the *same* local slot as the
+        # earlier `data = response.json()` — Python resolves a closure (or
+        # any same-scope reference) to whichever binding is current at call
+        # time, not definition time. Confirmed against CPython: calling
+        # `reader()` after `def data()` has executed returns the *function*,
+        # not the json() result, both before and after any rename — so
+        # renaming only the assignment (and the closure reference that
+        # predates the def in the source) would silently repoint both at an
+        # unrelated value instead.
+        """def outer(response):
+    data = response.json()
+
+    def reader():
+        return data
+
+    def data():
+        return "shadowing function"
+
+    return reader, data
+""",
+        # Regression: same failure class via `class data: ...` instead of
+        # `def` — ast.ClassDef.name is also a plain string.
+        """def outer(response):
+    data = response.json()
+
+    def reader():
+        return data
+
+    class data:
+        pass
+
+    return reader, data
+""",
+        # Regression: an `except ... as data:` in the *same* scope as the
+        # assignment (not a nested one) also rebinds the same slot — its
+        # name is only bound for the duration of the handler, but Python
+        # still treats the whole scope as governed by it for compile-time
+        # binding classification purposes, and a reference between the two
+        # bindings has no way to know which one a rename should target.
+        """def outer(response):
+    data = response.json()
+
+    def reader():
+        return data
+
+    try:
+        pass
+    except RuntimeError as data:
+        pass
+
+    return reader
+""",
+        # Regression: a match `case data:` capture in the same scope, also
+        # a plain-string ast.MatchAs.name.
+        """def outer(response, command):
+    data = response.json()
+
+    def reader():
+        return data
+
+    match command:
+        case data:
+            pass
+
+    return reader
+""",
+        # Regression: a match `case {**data}:` mapping-rest capture in the
+        # same scope, also a plain-string ast.MatchMapping.rest.
+        """def outer(response, command):
+    data = response.json()
+
+    def reader():
+        return data
+
+    match command:
+        case {**data}:
+            pass
+
+    return reader
+""",
+        # Regression: a dotted `import data.models` in the same scope binds
+        # the bare name "data" (ast.alias.name is the full dotted path,
+        # never equal to a bare name — this exercises the split-on-dot path).
+        """def outer(response):
+    data = response.json()
+
+    def reader():
+        return data
+
+    import data.models
+
+    return reader
+""",
+        # Regression: a non-dotted `from x import data` in the same scope,
+        # distinct branch from the dotted import above.
+        """def outer(response):
+    data = response.json()
+
+    def reader():
+        return data
+
+    from collections import data
+
+    return reader
+""",
+    ],
+    ids=[
+        "same-scope-def",
+        "same-scope-class",
+        "same-scope-except-handler",
+        "same-scope-match-as",
+        "same-scope-match-mapping-rest",
+        "same-scope-dotted-import",
+        "same-scope-from-import",
+    ],
+)
+def test_autofix_never_offered_when_same_scope_rebinds_via_non_name_construct(source: str) -> None:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.py"
+        filepath.write_text(source)
+
+        tree = ast.parse(source)
+        check = ForbidVarsCheck()
+        violations = check.check(filepath, tree, source)
+        assert violations
+        assert all(not v.fixable for v in violations)
+
+        assert check.fix(filepath, violations, source, tree) is False
+
+        fixed_content = filepath.read_text()
+
+    assert fixed_content == source
+    ast.parse(fixed_content)  # Left untouched, so it's still valid Python.
+
+
 def test_autofix_never_offered_for_module_global_read_in_function() -> None:
     # Regression: a module-level `data` read via `global data` inside a
     # function isn't a *new* binding at all — it's the same variable being

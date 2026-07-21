@@ -24,7 +24,7 @@ from ._base import (
     mark_fix_failed,
     split_lines_like_ast,
 )
-from ._scope import iter_within_scope_from
+from ._scope import iter_within_scope, iter_within_scope_from
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -137,6 +137,8 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         self.scope_names_cache: dict[int | None, set[str]] = {}
         # Cache global/nonlocal-declared names to avoid O(n²) repeated AST walks (performance optimization)
         self.global_nonlocal_names_cache: dict[int | None, set[str]] = {}
+        # Cache non-Name rebinding names (def/class/import/except/match) to avoid O(n²) repeated AST walks
+        self.non_name_rebinding_names_cache: dict[int | None, set[str]] = {}
         # Fixable violations found during visit(), queued here rather than
         # given a suggestion immediately — see assign_suggestions().
         self._pending_suggestions: list[tuple[ForbidVarsFixData, VariableName, VariableName, list[ast.AST]]] = []
@@ -272,6 +274,65 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         """
         scope_node = self.current_scope[-1] if self.current_scope else self.tree
         return name in self._global_or_nonlocal_names(scope_node)
+
+    def _non_name_rebinding_names(self, scope_node: ast.AST | None) -> set[VariableName]:
+        """Every name bound directly within `scope_node`'s own scope (never
+        crossing into a nested function/lambda/comprehension/class — unlike
+        `_global_or_nonlocal_names`, this is about ordinary lexical binding,
+        which respects scope boundaries) via a construct whose own name is a
+        plain string, not an `ast.Name` node: `def`/`async def`/`class`,
+        `except ... as`, a match capture, or an import. Cached per scope like
+        `_get_scope_names`/`_global_or_nonlocal_names`.
+        """
+        scope_id = id(scope_node) if scope_node else None
+
+        if scope_id in self.non_name_rebinding_names_cache:
+            return self.non_name_rebinding_names_cache[scope_id]
+
+        assert self.tree is not None, "tree must be set by check() before scope lookups"
+        names: set[VariableName] = set()
+        for node in iter_within_scope(scope_node or self.tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                names.add(node.name)
+            elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar):
+                if node.name is not None:
+                    names.add(node.name)
+            elif isinstance(node, ast.MatchMapping) and node.rest is not None:
+                names.add(node.rest)
+            elif isinstance(node, ast.Import):
+                names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                names.update(alias.asname or alias.name for alias in node.names)
+
+        self.non_name_rebinding_names_cache[scope_id] = names
+        return names
+
+    def _rebound_via_non_name_construct(self, name: VariableName) -> bool:
+        """Whether `name` is *also* bound, anywhere else in the current
+        scope, by a construct whose own name `fix()`'s purely
+        `ast.Name`-position-based rename has no way to rewrite.
+
+        Python's "one binding governs the whole scope" rule applies
+        uniformly regardless of *which* kind of statement does the binding —
+        a `def`/`class` with the same name, an `except ... as`/match capture,
+        or an import all rebind the same local slot an ordinary assignment
+        would. Since a closure resolves a free variable *lazily*, against
+        whatever that slot currently holds at call time (not at the point
+        the closure was defined), renaming only the assignment — and any
+        closure/same-scope reference that predates such a rebinding in the
+        source — while leaving the rebinding construct's own name untouched
+        would silently change which value every one of those references
+        actually observes at runtime. Confirmed against CPython: `data =
+        response.json()` followed later, in the same scope, by `def data():
+        ...` makes every reference to `data` in that scope — including one
+        textually *before* the `def` — resolve to the function once it's
+        actually called, not the original assignment. Refusing to suggest a
+        fix at all for such a violation, checked here at detection time so
+        `fixable` stays honest, avoids the whole class rather than trying to
+        rewrite a construct whose name isn't a rewritable `ast.Name` node.
+        """
+        scope_node = self.current_scope[-1] if self.current_scope else self.tree
+        return name in self._non_name_rebinding_names(scope_node)
 
     def _annotation_referenced_names(self) -> set[VariableName]:
         """Every identifier referenced anywhere in the module within a
@@ -440,6 +501,7 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
                 match
                 and not self._referenced_via_global_or_nonlocal(name)
                 and not self._unsafe_module_scope_annotation_reference(name)
+                and not self._rebound_via_non_name_construct(name)
             ):
                 suggested_name = match["name"]
                 # Handle semantic naming where name is from regex group
