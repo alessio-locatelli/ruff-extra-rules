@@ -10,7 +10,7 @@ Two further, unrelated defects in other fixers were fixed the same way: `misplac
 
 ## Consequences
 
-- Autofixes are more conservative in ambiguous cases: a violation reachable only via `global`/`nonlocal`, or (under deferred annotations) an annotation that merely shares a name with an outer local — or a module-scope name some other annotation elsewhere in the module also references — is reported but not offered as fixable.
+- Autofixes are more conservative in ambiguous cases: a violation reachable only via `global`/`nonlocal`, rebound a second time in its own scope by a `def`/`class`/`except ... as`/match-capture/import construct, or (under deferred annotations) an annotation that merely shares a name with an outer local — or a module-scope name some other annotation elsewhere in the module also references — is reported but not offered as fixable.
 - A closure reference is renamed only when it demonstrably resolves to the renamed binding; recognized scope-shadowing constructs now include parameters, `except`/`match` captures, PEP 695 type parameters, imports (including dotted), and `del`, not just plain assignment. A type parameter's own `bound`/`default_value` expression is now correctly followed too.
 - Suggested names are chosen with visibility across the whole reachable scope tree (ancestors and descendants), preventing cross-scope collisions that a purely local uniqueness check would miss.
 - Comment/CRLF handling in `misplaced_comment` and `redundant_assignment` now goes through shared, tokenize-based primitives in `_base.py` (`line_terminator()`, `classify_comment_lines()`, `normalize_for_tokenize()`) rather than ad hoc heuristics, reusable by future fixers.
