@@ -40,6 +40,12 @@ See [docs/adding-a-check.md](docs/adding-a-check.md) for the full walkthrough of
   - A need to reference an external resource (e.g., `Related issue <link>.` or `See ADR-0042`).
   - A need to explain **why** a non-obvious action is taken (e.g., "Early exit because all items were processed", "Used a real ID in a test because …").
 
+## ADRs
+
+An ADR records a durable architectural decision, not the history of the investigation that led to it: the problem and context, the decision, the important alternatives/trade-offs, the consequences, and any intentional limitation a future maintainer needs to know. Keep it at that level. Do not fold in: a chronological narrative of review rounds or who/what found which issue; every individual bug reproduction (one or two representative examples is enough — prefer the general rule the examples taught over the examples themselves); regression-test names (say what behavior is covered, not which test covers it); or an inventory of private helper functions (explain why the architecture needs the concept, not which function implements it).
+
+When an audit or investigation produces substantial evidence worth keeping, put the detailed findings in `docs/audits/` and have the ADR link to it rather than duplicating it. Before adding detail to an ADR, ask: would this still be useful if the implementation were rewritten but the decision stayed the same? If not, it belongs in `docs/audits/`, the tests, or the commit/PR history instead.
+
 ## Commands
 
 ### Setup
@@ -63,13 +69,11 @@ uv run python -m pre_commit_hooks.ast_checks --ignore=redundant-assignment --fix
 
 ## Development
 
-Run before committing or after making code changes:
-
 ```bash
 uv run ruff check --fix .
 uv run ruff format .
 uv run mypy src/ tests/
-npx prettier . --write --cache
+npx prettier@latest . --write --cache
 taplo fmt pyproject.toml
 uv run coverage run -m pytest
 uv run coverage report
