@@ -74,9 +74,9 @@ class CheckOrchestrator:
     """Orchestrates running multiple AST checks on Python files.
 
     This class manages the workflow of:
-    1. Pre-filtering files based on aggregated patterns
+    1. Pre-filtering files per-check, against each check's own pattern
     2. Caching check results
-    3. Parsing files once and running all checks
+    3. Parsing files once and running each file's applicable checks
     4. Applying fixes when requested
     5. Reporting violations
     """
@@ -120,17 +120,9 @@ class CheckOrchestrator:
         if not filepaths:
             return {}
 
-        patterns = []
-        for check in self.checks:
-            check_patterns = check.get_prefilter_pattern()
-            if check_patterns:
-                patterns.extend(check_patterns)
+        checks_by_file = self._checks_by_file(filepaths)
 
-        # OR logic: a file is a candidate if it contains ANY pattern. No
-        # patterns means every file needs to be checked.
-        candidate_files = batch_filter_files(filepaths, patterns) if patterns else filepaths
-
-        if not candidate_files:
+        if not checks_by_file:
             return {}
 
         # self.cache's own cache_version (set at construction from
@@ -138,7 +130,7 @@ class CheckOrchestrator:
         # per-file cache_key needed here.
         all_violations: dict[str, list[Violation]] = {}
 
-        for filepath_str in candidate_files:
+        for filepath_str, checks in checks_by_file.items():
             filepath = Path(filepath_str)
 
             # Skip the cache in fix mode, since the file will be modified.
@@ -151,7 +143,7 @@ class CheckOrchestrator:
                 violations = cached_violations
             else:
                 rule_failures_before = len(self.rule_failures)
-                violations = self._check_file(filepath)
+                violations = self._check_file(filepath, checks)
                 had_rule_failure = len(self.rule_failures) > rule_failures_before
 
                 if violations is None:
@@ -170,6 +162,32 @@ class CheckOrchestrator:
                 all_violations[filepath_str] = violations
 
         return all_violations
+
+    def _checks_by_file(self, filepaths: list[str]) -> dict[str, list[ASTCheck]]:
+        """Applies each check's own prefilter pattern independently, rather
+        than combining every enabled check's pattern into one OR'd filter --
+        the combined filter dropped a file for every check whenever it
+        matched none of them, even a check whose own get_prefilter_pattern()
+        returns None specifically to see every file. Preserves `self.checks`
+        order per file, since `_apply_fixes` depends on it.
+        """
+        matches_by_check_id: dict[str, set[str]] = {}
+        for check in self.checks:
+            pattern = check.get_prefilter_pattern()
+            if pattern:
+                matches_by_check_id[check.check_id] = set(batch_filter_files(filepaths, pattern))
+
+        checks_by_file: dict[str, list[ASTCheck]] = {}
+        for filepath_str in filepaths:
+            applicable = [
+                check
+                for check in self.checks
+                if check.check_id not in matches_by_check_id or filepath_str in matches_by_check_id[check.check_id]
+            ]
+            if applicable:
+                checks_by_file[filepath_str] = applicable
+
+        return checks_by_file
 
     def _generate_cache_key(self) -> str:
         """Cache key from the enabled checks, their own config, this
@@ -269,7 +287,7 @@ class CheckOrchestrator:
             logger.debug("Failed to decode %s", filepath, exc_info=True)
             return None
 
-    def _check_file(self, filepath: Path) -> list[Violation] | None:
+    def _check_file(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
         read_result = self._read_source(filepath)
         if read_result is None:
             return None
@@ -285,7 +303,7 @@ class CheckOrchestrator:
             return None
 
         all_violations: list[Violation] = []
-        for check in self.checks:
+        for check in checks:
             try:
                 violations = check.check(filepath, tree, source)
                 all_violations.extend(violations)
