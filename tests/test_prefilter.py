@@ -227,7 +227,7 @@ def test_git_grep_filter_match_order_is_independent_of_hash_seed(tmp_path: Path)
 
     outputs = set()
     for seed in ("0", "1", "2"):
-        result = subprocess.run(  # noqa: S603
+        run_result = subprocess.run(  # noqa: S603
             [sys.executable, "-c", script],
             cwd=tmp_path,
             capture_output=True,
@@ -235,7 +235,7 @@ def test_git_grep_filter_match_order_is_independent_of_hash_seed(tmp_path: Path)
             env={**os.environ, "PYTHONHASHSEED": seed},
             check=True,
         )
-        outputs.add(result.stdout)
+        outputs.add(run_result.stdout)
 
     assert len(outputs) == 1
 
