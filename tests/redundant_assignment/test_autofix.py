@@ -444,18 +444,6 @@ def test_augmented_assignment_use_not_flagged_for_zero_arg_call(
     ("source", "message_filter"),
     [
         (
-            # A use inside a loop body isn't "the same execution point" as
-            # the assignment — `value = make(); for _ in r: sink(value)`
-            # runs make() once, but inlining would make it run once per
-            # iteration.
-            """def f(r):
-    value = make()
-    for _ in r:
-        sink(value)
-""",
-            "'value'",
-        ),
-        (
             # A use inside a lambda body executes later (whenever the
             # lambda is called, if ever) — not once at the assignment
             # point. `x = make(); return lambda: x` must not become
@@ -466,33 +454,6 @@ def test_augmented_assignment_use_not_flagged_for_zero_arg_call(
     return lambda: x
 """,
             "'x'",
-        ),
-        (
-            # An `await` is a suspension point where other code can run
-            # and change state, so a use after one within the same
-            # statement must be treated like a preceding call. `x =
-            # make(); return sink(await future, x)` must not become
-            # `sink(await future, make())`, which runs make() after the
-            # await instead of before it.
-            """async def f(future):
-    x = make()
-    return sink(await future, x)
-""",
-            "'x'",
-        ),
-        (
-            # The pre-existing SINGLE_USE call allowance (args<=2) has the
-            # exact same loop-repetition risk as the zero-arg carve-out.
-            # `value = make(); other(); for _ in r: sink(value)` must not
-            # become `for _ in r: sink(make())`, which runs make() N times
-            # instead of once.
-            """def f(r):
-    value = make()
-    other()
-    for _ in r:
-        sink(value)
-""",
-            "'value'",
         ),
         (
             # A dict literal's own AST field order (all keys, then all
@@ -540,10 +501,7 @@ def test_augmented_assignment_use_not_flagged_for_zero_arg_call(
         ),
     ],
     ids=[
-        "loop-body",
         "lambda-body",
-        "after-await",
-        "single-use-call-in-loop-body",
         "dict-value-after-earlier-pair",
         "after-operator-sibling",
         "ternary-branch",
@@ -566,26 +524,53 @@ def test_zero_arg_call_use_not_fixable(tmp_path: Path, source: str, message_filt
     assert filepath.read_text() == source
 
 
-def test_single_use_call_in_loop_body_not_fixable(tmp_path: Path) -> None:
-    source = """def f(r):
+@pytest.mark.parametrize(
+    "source",
+    [
+        # `value = make(); for _ in r: sink(value)` hoists a call result out
+        # of a loop it isn't part of — inlining would run make() N times
+        # instead of once, so this isn't a redundant assignment at all.
+        """def f(r):
+    value = make()
+    for _ in r:
+        sink(value)
+""",
+        # Same loop-repetition risk with an intervening statement before
+        # the loop.
+        """def f(r):
     value = make()
     other()
     for _ in r:
         sink(value)
+""",
+    ],
+    ids=["immediate-before-loop", "intervening-statement-before-loop"],
+)
+def test_single_use_call_in_loop_body_not_reported(tmp_path: Path, source: str) -> None:
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, ast.parse(source), source)
+
+    assert all("'value'" not in v.message for v in violations)
+
+
+def test_call_rhs_across_await_in_same_statement_not_reported(tmp_path: Path) -> None:
+    # `await future` precedes `x` in evaluation order within this single
+    # statement — inlining would run make() after the await instead of
+    # before it, so this isn't a redundant assignment at all.
+    source = """async def f(future):
+    x = make()
+    return sink(await future, x)
 """
     filepath = tmp_path / "source.py"
     filepath.write_text(source)
 
-    tree = ast.parse(source)
     check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
+    violations = check.check(filepath, ast.parse(source), source)
 
-    value_violations = [v for v in violations if "'value'" in v.message]
-    assert value_violations
-    assert all(not v.fixable for v in value_violations)
-
-    check.fix(filepath, violations, source, tree)
-    assert filepath.read_text() == source
+    assert all("'x'" not in v.message for v in violations)
 
 
 def test_autofix_preserves_blank_lines_across_file(tmp_path: Path) -> None:

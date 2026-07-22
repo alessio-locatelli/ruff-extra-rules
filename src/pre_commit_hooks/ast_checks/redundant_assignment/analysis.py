@@ -212,7 +212,11 @@ def _evaluation_order_children(node: ast.AST) -> Iterator[tuple[ast.AST, bool]]:
         yield child, False
 
 
-def _call_precedes_target(node: ast.AST, target: ast.AST) -> tuple[bool, bool, bool]:
+def _call_precedes_target(
+    node: ast.AST,
+    target: ast.AST,
+    effect_types: tuple[type, ...] = _POTENTIALLY_EFFECTFUL_NODE_TYPES,
+) -> tuple[bool, bool, bool]:
     """Walk `node`'s children in evaluation order looking for `target`.
 
     It's AST-based rather than text/line-based specifically so it stays
@@ -222,22 +226,22 @@ def _call_precedes_target(node: ast.AST, target: ast.AST) -> tuple[bool, bool, b
 
     Returns a (found, effect_before_target, node_is_or_contains_effect) triple:
     - found: whether `target` is `node` itself or within its subtree
-    - effect_before_target: whether a potentially effectful node (see
+    - effect_before_target: whether a node matching `effect_types` (see
       `_POTENTIALLY_EFFECTFUL_NODE_TYPES`) fully evaluated before reaching
       `target`, OR `target` is only conditionally reachable (see
       `_evaluation_order_children`) — only meaningful when `found` is True
-    - node_is_or_contains_effect: whether `node` itself is (or contains) a
-      potentially effectful node that has fully evaluated — only meaningful
-      when `found` is False, since a call containing `target` among its own
-      arguments doesn't fire until after `target` (and everything else in
-      it) is evaluated
+    - node_is_or_contains_effect: whether `node` itself matches (or
+      contains a node matching) `effect_types` that has fully evaluated —
+      only meaningful when `found` is False, since a call containing
+      `target` among its own arguments doesn't fire until after `target`
+      (and everything else in it) is evaluated
     """
     if node is target:
         return True, False, False
 
     seen_effect = False
     for child, is_conditional in _evaluation_order_children(node):
-        found, effect_before, child_has_effect = _call_precedes_target(child, target)
+        found, effect_before, child_has_effect = _call_precedes_target(child, target, effect_types)
         if found:
             return True, seen_effect or effect_before or is_conditional, False
         if child_has_effect:
@@ -246,7 +250,7 @@ def _call_precedes_target(node: ast.AST, target: ast.AST) -> tuple[bool, bool, b
     return (
         False,
         False,
-        seen_effect or isinstance(node, _POTENTIALLY_EFFECTFUL_NODE_TYPES),
+        seen_effect or isinstance(node, effect_types),
     )
 
 
@@ -275,6 +279,22 @@ def is_preceded_by_call(use: UsageInfo) -> bool:
     return effect_before
 
 
+_SUSPENSION_NODE_TYPES = (ast.Yield, ast.YieldFrom, ast.Await)
+
+
+def _suspension_precedes_use(use: UsageInfo) -> bool:
+    """Same evaluation-order walk as `is_preceded_by_call`, filtered to
+    suspension points only — for a same-statement case like `return (await
+    refresh(), value)[1]`, `value`'s own stmt_index ties with the await's,
+    so the coarse per-statement check in `_suspension_point_between` can't
+    tell the two apart; this resolves it by real evaluation order instead.
+    """
+    if use.node is None or use.enclosing_stmt is None:
+        return True
+    _found, effect_before, _ = _call_precedes_target(use.enclosing_stmt, use.node, _SUSPENSION_NODE_TYPES)
+    return effect_before
+
+
 class VariableTracker(ast.NodeVisitor):
     """Builds a map of variable lifecycles: where each variable is assigned and where it's used, across scopes."""
 
@@ -296,6 +316,9 @@ class VariableTracker(ast.NodeVisitor):
         self.stmt_index_stack: list[int] = [0]
         self.assignments: dict[tuple[int, str], list[AssignmentInfo]] = {}
         self.uses: dict[tuple[int, str], list[UsageInfo]] = {}
+        # scope_id -> (line, stmt_index) of each yield/yield from/await,
+        # in visit order — see _suspension_point_between.
+        self.suspension_points: dict[int, list[tuple[int, int]]] = {}
         self.global_vars: set[tuple[int, str]] = set()
         self.nonlocal_vars: set[tuple[int, str]] = set()
 
@@ -411,19 +434,35 @@ class VariableTracker(ast.NodeVisitor):
     visit_AsyncFunctionDef = visit_FunctionDef  # noqa: N815
 
     def visit_For(self, node: ast.For | ast.AsyncFor) -> None:
-        # node.target rebinds on every iteration, same hazard as tuple
-        # unpacking/chained assignment (_record_compound_target_rebindings).
-        self.loop_depth += 1
+        # node.iter runs once, not per-iteration; node.orelse runs only if
+        # the loop completes without `break` — conditional like an if/try
+        # branch, not unconditional like ordinary code after the loop.
         self._record_compound_target_rebindings(node.target, self._get_current_stmt_index())
-        self.generic_visit(node)
+        self.visit(node.iter)
+        self.loop_depth += 1
+        self.visit(node.target)
+        for stmt in node.body:
+            self.visit(stmt)
         self.loop_depth -= 1
+        self.control_flow_depth += 1
+        for stmt in node.orelse:
+            self.visit(stmt)
+        self.control_flow_depth -= 1
 
     visit_AsyncFor = visit_For  # noqa: N815
 
     def visit_While(self, node: ast.While) -> None:
+        # node.test repeats every iteration, unlike node.orelse (see
+        # visit_For above for both).
         self.loop_depth += 1
-        self.generic_visit(node)
+        self.visit(node.test)
+        for stmt in node.body:
+            self.visit(stmt)
         self.loop_depth -= 1
+        self.control_flow_depth += 1
+        for stmt in node.orelse:
+            self.visit(stmt)
+        self.control_flow_depth -= 1
 
     def visit_If(self, node: ast.If) -> None:
         """`node.test` always evaluates unconditionally when the `If`
@@ -486,6 +525,23 @@ class VariableTracker(ast.NodeVisitor):
         self.lambda_depth += 1
         self.generic_visit(node)
         self.lambda_depth -= 1
+
+    def visit_Yield(self, node: ast.Yield) -> None:
+        self._record_suspension_point(node.lineno)
+        self.generic_visit(node)
+
+    def visit_YieldFrom(self, node: ast.YieldFrom) -> None:
+        self._record_suspension_point(node.lineno)
+        self.generic_visit(node)
+
+    def visit_Await(self, node: ast.Await) -> None:
+        self._record_suspension_point(node.lineno)
+        self.generic_visit(node)
+
+    def _record_suspension_point(self, line: int) -> None:
+        scope_id = self._get_current_scope_id()
+        stmt_index = self._get_current_stmt_index()
+        self.suspension_points.setdefault(scope_id, []).append((line, stmt_index))
 
     def _visit_comprehension(
         self,
@@ -922,6 +978,9 @@ class VariableTracker(ast.NodeVisitor):
         rebinding `obj` itself and reassigning any attribute/subscript of
         `obj` are treated as unsafe — the latter conservatively, since this
         tracker doesn't record *which* attribute was reassigned.
+
+        See `_suspension_point_between` for the Call/Attribute suspension
+        hazard and the method-call branch below for the receiver hazard.
         """
         rhs_node = assignment.rhs_node
 
@@ -936,6 +995,11 @@ class VariableTracker(ast.NodeVisitor):
                 include_attribute_mutation=False,
             )
 
+        if isinstance(rhs_node, ast.Attribute | ast.Call) and self._suspension_point_between(
+            scope_id, assignment.line, assignment.stmt_index, use
+        ):
+            return True
+
         if isinstance(rhs_node, ast.Attribute):
             base = _unwind_to_base_name(rhs_node)
             if base is not None:
@@ -949,6 +1013,58 @@ class VariableTracker(ast.NodeVisitor):
                     include_attribute_mutation=True,
                 )
 
+        if isinstance(rhs_node, ast.Call) and isinstance(rhs_node.func, ast.Attribute):
+            base = _unwind_to_base_name(rhs_node.func)
+            if base is not None:
+                # Bisect from the RHS's own end line, not the assignment's
+                # start line, and exclude the use's own statement (see
+                # exclude_enclosing_stmt below) — both can reference `base`
+                # again without that being a mutation.
+                rhs_end_line = rhs_node.end_lineno if rhs_node.end_lineno is not None else assignment.line
+                return self._reference_reassigned_in_range(
+                    base.id,
+                    scope_id,
+                    rhs_end_line,
+                    assignment.stmt_index,
+                    use.stmt_index,
+                    use.line,
+                    include_attribute_mutation=True,
+                    include_any_usage=True,
+                    exclude_enclosing_stmt=use.enclosing_stmt,
+                )
+
+        return False
+
+    def _suspension_point_between(
+        self,
+        scope_id: int,
+        assign_line: int,
+        assign_stmt_index: int,
+        use: UsageInfo,
+    ) -> bool:
+        """True if a yield/yield from/await occurs strictly after the
+        assignment and before the use.
+
+        `stmt_index` alone can't order two entries that tie on it — a
+        suspension point sharing the use's own (coarse) statement could
+        still evaluate before or after the use within that statement (e.g.
+        `return (await refresh(), value)[1]`) — so a tie is resolved by
+        `_suspension_precedes_use`'s real evaluation-order walk instead of
+        assumed safe. A suspension point in a genuinely earlier statement
+        (`stmt_index` strictly less) needs no such walk: unlike a tie, nothing
+        about *that* statement's evaluation order is in question.
+        """
+        points = self.suspension_points.get(scope_id)
+        if not points:
+            return False
+        start = bisect.bisect_right(points, (assign_line, assign_stmt_index))
+        if start >= len(points):
+            return False
+        point_stmt_index = points[start][1]
+        if point_stmt_index < use.stmt_index:
+            return True
+        if point_stmt_index == use.stmt_index:
+            return _suspension_precedes_use(use)
         return False
 
     def _reference_reassigned_in_range(
@@ -961,6 +1077,8 @@ class VariableTracker(ast.NodeVisitor):
         use_line: int,
         *,
         include_attribute_mutation: bool,
+        include_any_usage: bool = False,
+        exclude_enclosing_stmt: ast.stmt | None = None,
     ) -> bool:
         """`self.assignments[key]`/`self.uses[key]` are each built by a
         single top-to-bottom AST walk within one scope, so entries for a
@@ -983,6 +1101,18 @@ class VariableTracker(ast.NodeVisitor):
         top-level statement even in the rare case `line` alone wouldn't.
         This stays a heuristic (may under-report/under-fix, never
         mis-fixes), not full control-flow analysis.
+
+        `include_any_usage` treats *any* in-range use of `name` — not just
+        an augmented-assignment or attribute/subscript-assignment context —
+        as disqualifying. Used for a method-call RHS (`buf.tell()`), where
+        the receiver can be mutated by another method call with no
+        assignment syntax at all.
+
+        `exclude_enclosing_stmt` skips a use belonging to that exact
+        statement — the use's own statement reads `name` again just to
+        reach the use (e.g. `obj` in `obj.consume(value)`, read to look up
+        `.consume`), the same way the assignment's own statement reads it
+        to reach the RHS. Neither is an intervening mutation.
         """
         key = (scope_id, name)
         start_key = (assign_line, assign_stmt_index)
@@ -1014,6 +1144,10 @@ class VariableTracker(ast.NodeVisitor):
             other_use = uses[i]
             if other_use.stmt_index > end_stmt_index or other_use.line > use_line:
                 break
+            if include_any_usage:
+                if other_use.enclosing_stmt is exclude_enclosing_stmt:
+                    continue
+                return True
             if other_use.context == "augmented_assignment":
                 return True
             if include_attribute_mutation and other_use.context == "attribute_or_subscript_assignment":
@@ -1030,6 +1164,20 @@ def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
     for use in lifecycle.uses:
         if use.scope_id != lifecycle.assignment.scope_id:
             return None
+
+    # A Call/Attribute RHS with its single textual use inside a loop the
+    # assignment itself isn't part of is reusing a value hoisted out of
+    # the loop, not merely forwarding it once — inlining would turn one
+    # evaluation into N (or zero). A Constant/Name RHS has no such risk
+    # (re-evaluating either gives the identical value every time), so it's
+    # excluded here the same way should_autofix already treats those two
+    # kinds as unconditionally safe to inline everywhere.
+    if (
+        isinstance(lifecycle.assignment.rhs_node, ast.Attribute | ast.Call)
+        and lifecycle.uses[0].in_loop
+        and not lifecycle.assignment.in_loop
+    ):
+        return None
 
     # Augmented-assignment targets (x += 1) can never be inlined: the "use"
     # IS an assignment target, and replacing it with the RHS expression

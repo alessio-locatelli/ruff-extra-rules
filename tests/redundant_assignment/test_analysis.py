@@ -15,6 +15,7 @@ from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
     detect_redundancy,
     is_preceded_by_call,
 )
+from pre_commit_hooks.ast_checks.redundant_assignment.semantic import AggressivenessLevel
 from tests.redundant_assignment._helpers import _check
 
 
@@ -263,6 +264,79 @@ def func():
     assert all(not use.in_comprehension for use in lifecycle.uses)
 
 
+def test_for_iterator_use_is_not_in_loop() -> None:
+    # `node.iter` evaluates exactly once, before any iteration — unlike a
+    # use inside the loop body, it must not be marked in_loop.
+    source = """
+def func():
+    value = compute()
+    for item in consume(value):
+        pass
+"""
+    lifecycle = _lifecycle_for(source, "value")
+    assert lifecycle.uses[0].in_loop is False
+
+
+def test_for_else_use_is_not_in_loop_but_is_control_flow() -> None:
+    # `node.orelse` doesn't repeat, but it's conditional on the loop
+    # completing without `break` — not the same as ordinary code after the
+    # loop, which always runs.
+    source = """
+def func(items):
+    value = compute()
+    for item in items:
+        pass
+    else:
+        use(value)
+"""
+    lifecycle = _lifecycle_for(source, "value")
+    assert lifecycle.uses[0].in_loop is False
+    assert lifecycle.uses[0].in_control_flow is True
+
+
+def test_while_else_use_is_not_in_loop_but_is_control_flow() -> None:
+    source = """
+def func(cond):
+    value = compute()
+    while cond:
+        pass
+    else:
+        use(value)
+"""
+    lifecycle = _lifecycle_for(source, "value")
+    assert lifecycle.uses[0].in_loop is False
+    assert lifecycle.uses[0].in_control_flow is True
+
+
+def test_for_else_use_after_possible_break_is_not_reported() -> None:
+    # `x = make(); for ...: break ...; else: return x` — inlining would
+    # skip make() entirely on a break, or run it after the loop instead of
+    # before, since the else clause only runs when the loop doesn't break.
+    source = """
+def func(items):
+    x = make()
+    for item in items:
+        if item == x:
+            break
+    else:
+        return x
+"""
+    assert _check(source, level=AggressivenessLevel.PERMISSIVE) == []
+
+
+def test_suspension_precedes_use_fallback_for_use_without_node() -> None:
+    # Branch coverage: an augmented-assignment use doesn't track a node, so
+    # a same-statement await tie can't be resolved by evaluation order —
+    # _suspension_precedes_use falls back to treating it as a hazard.
+    source = """
+async def f(obj):
+    cached = obj.attr
+    cached += await something()
+"""
+    lifecycle = _lifecycle_for(source, "cached")
+    assert lifecycle.rhs_reference_reassigned_before_use is True
+
+
 def test_variable_tracker_scope_isolation() -> None:
     assert (
         _lifecycle_count(
@@ -491,6 +565,177 @@ def func(x):
             "old",
             None,
         ),
+        (
+            # `buf` is never reassigned and `resume_location` is never
+            # touched via an assignment-target — only read again via other
+            # method calls (`buf.seek`/`buf.write`) that mutate its
+            # position with no assignment syntax at all.
+            """
+def func(buf, size_location):
+    resume_location = buf.tell()
+    length = buf.tell()
+    buf.seek(size_location)
+    buf.write(pack(length - size_location))
+    buf.seek(resume_location)
+""",
+            "resume_location",
+            None,
+        ),
+        (
+            # `obj` has no other usage in between, so the method-call
+            # receiver check must not over-fire just because the RHS
+            # happens to be a method call.
+            """
+def func(obj):
+    value = obj.compute()
+    log(other)
+    return value
+""",
+            "value",
+            PatternType.SINGLE_USE,
+        ),
+        (
+            # A multiline call can reference its own receiver again inside
+            # its own argument list — that self-reference must not be
+            # mistaken for an intervening usage of `obj`.
+            """
+def func(obj):
+    value = obj.compute(
+        obj,
+    )
+    return value
+""",
+            "value",
+            PatternType.IMMEDIATE_SINGLE_USE,
+        ),
+        (
+            # The use's own statement (`obj.consume(value)`) reads `obj`
+            # again just to look up `.consume` — that self-reference must
+            # not be mistaken for an intervening usage either, the same
+            # way the assignment's own statement's self-reference isn't.
+            """
+def func(obj):
+    value = obj.compute()
+    obj.consume(value)
+""",
+            "value",
+            PatternType.IMMEDIATE_SINGLE_USE,
+        ),
+        (
+            # A `yield` between the assignment and the use lets arbitrary
+            # external code run, so re-evaluating a Call RHS at the use
+            # site isn't guaranteed to reproduce the value captured before
+            # the yield.
+            """
+def func():
+    start_bytes = get_cache_bytes()
+    yield
+    return get_cache_bytes() - start_bytes
+""",
+            "start_bytes",
+            None,
+        ),
+        (
+            # Same suspension-point hazard via `await` instead of `yield`,
+            # and an Attribute RHS instead of a Call.
+            """
+async def func(obj):
+    cached = obj.attr
+    await other()
+    return cached
+""",
+            "cached",
+            None,
+        ),
+        (
+            # `yield value` reads `value` before suspending, so a yield at
+            # the use's own statement isn't a suspension hazard.
+            """
+def func(obj):
+    value = obj.compute()
+    yield value
+""",
+            "value",
+            PatternType.IMMEDIATE_SINGLE_USE,
+        ),
+        (
+            # `yield from` is the same suspension hazard as a plain `yield`.
+            """
+def func():
+    start_bytes = get_cache_bytes()
+    yield from other()
+    return get_cache_bytes() - start_bytes
+""",
+            "start_bytes",
+            None,
+        ),
+        (
+            # `topology` is hoisted before a loop it isn't part of, then
+            # read once per iteration — inlining would run
+            # `self._get_topology()` N times instead of once.
+            """
+def func(self, items):
+    topology = self._get_topology()
+    for item in items:
+        use(item, topology)
+""",
+            "topology",
+            None,
+        ),
+        (
+            # The assignment and its sole use share the same loop, unlike
+            # the hoisted-before-a-loop case above — not the loop-hoist
+            # hazard (assignment.in_loop is already True), though still
+            # subject to should_report_violation's own separate,
+            # unconditional in-loop exclusion.
+            """
+def func(items):
+    for item in items:
+        value = compute(item)
+        use(value)
+""",
+            "value",
+            PatternType.IMMEDIATE_SINGLE_USE,
+        ),
+        (
+            # A Constant RHS hoisted before a loop is still redundant —
+            # unlike a Call/Attribute RHS, re-evaluating a constant gives
+            # the identical value every time, so the loop-hoist hazard
+            # above doesn't apply to it.
+            """
+def func(items):
+    x = 5
+    for i in items:
+        sink(i, x)
+""",
+            "x",
+            PatternType.IMMEDIATE_SINGLE_USE,
+        ),
+        (
+            # `value`'s only use is in the `for` loop's iterator
+            # expression, not its body — the iterator evaluates exactly
+            # once, so this isn't the loop-hoist hazard above.
+            """
+def func():
+    value = 1
+    for item in consume(value):
+        pass
+""",
+            "value",
+            PatternType.IMMEDIATE_SINGLE_USE,
+        ),
+        (
+            # The scope's only suspension point precedes this assignment,
+            # not the gap between it and its use — no hazard.
+            """
+async def func(obj):
+    await something()
+    cached = obj.attr
+    return cached
+""",
+            "cached",
+            PatternType.IMMEDIATE_SINGLE_USE,
+        ),
     ],
     ids=[
         "immediate-use",
@@ -507,6 +752,19 @@ def func(x):
         "snapshot-before-named-expression-rebinding-is-not-redundant",
         "snapshot-before-attribute-reassignment-sharing-coarse-stmt-index-is-not-redundant",
         "snapshot-before-name-reassignment-sharing-a-physical-line-is-not-redundant",
+        "snapshot-before-method-call-receiver-mutation-is-not-redundant",
+        "method-call-receiver-with-no-other-usage-is-still-redundant",
+        "multiline-call-receiver-self-reference-is-not-a-mutation-hazard",
+        "use-statement-receiver-self-reference-is-not-a-mutation-hazard",
+        "snapshot-before-yield-suspension-point-is-not-redundant",
+        "snapshot-before-await-suspension-point-is-not-redundant",
+        "yield-at-the-use-itself-is-not-a-suspension-hazard",
+        "snapshot-before-yield-from-suspension-point-is-not-redundant",
+        "hoisted-value-used-inside-a-later-loop-is-not-redundant",
+        "assignment-and-use-sharing-the-same-loop-is-not-a-hoist-hazard",
+        "constant-hoisted-before-a-loop-is-still-redundant",
+        "use-in-for-loop-iterator-is-not-a-hoist-hazard",
+        "suspension-point-before-assignment-is-not-a-hazard",
     ],
 )
 def test_detect_redundancy(source: str, var_name: str, pattern: PatternType | None) -> None:
