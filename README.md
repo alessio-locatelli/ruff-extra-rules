@@ -274,14 +274,14 @@ print(msg)
   - Tuple unpacking (skipped)
   - Class attributes (skipped)
 
-**Aggressiveness level:** `--redundant-assignment-level={conservative,permissive}` (default `conservative`) controls what counts as a violation in the first place:
+**Aggressiveness level:** `--redundant-assignment-level={conservative,permissive}` (default `conservative`) controls how eagerly a violation is flagged:
 
-- **`conservative`** (default): reports only what scores as very low semantic value — semantic value score ≤ 10 for immediate-single-use/literal-identity assignments, ≤ 20 for function-scope single-use ones — the same bar the autofixer itself used to gate on before this flag existed. It also declines to report a single-use call assignment at all when the variable's name doesn't look like a generic placeholder (`result`, `value`, `data`, …) or a restatement of the call itself (`check = ForbidVarsCheck()`) — e.g. `warning = conn.recv()` is left alone, since `warning` is presumed to be documenting a non-obvious return value rather than restating it.
-- **`permissive`**: reports the broader set TRI005 used to report by default before this flag existed — semantic value score < 50, regardless of pattern, with no generic-placeholder-name check.
+- **`conservative`** (default): flags only the clearest cases, and leaves alone a variable name that looks like it's documenting a non-obvious value rather than just restating it — e.g. `warning = conn.recv()` is not flagged, since `warning` adds real information `recv()` alone doesn't convey.
+- **`permissive`**: flags a broader range of low-value assignments, at the cost of more false positives on descriptively-named variables.
 
 Defaulting to `conservative` is deliberate: someone confronted with a flood of suggestions on unfamiliar code is more likely to disable the check outright than to go discover a stricter flag, so the out-of-the-box experience undersells rather than oversells what gets flagged.
 
-**Autofix criteria:** once something is reported (at either level), `--fix` applies to it automatically whenever it's mechanically safe to inline — there's no separate, softer score-based ceiling narrowing autofix below what's reported:
+**Autofix criteria:** once something is reported (at either level), `--fix` applies to it automatically whenever it's mechanically safe to inline:
 
 - NOT inside a loop or other control flow
 - RHS is a literal or name (always safe to move), or — only when the use is the very next statement after the assignment — an attribute (any chain depth) or a call with at most 2 simple positional arguments (or any number of keyword arguments up to 2, with no positional ones); the attribute/call case additionally requires that inlining can't change how often or in what order it runs (not inside a loop or lambda, and nothing potentially effectful — a call, attribute/subscript access, `await`/`yield`, an operator, or a conditional branch — evaluates before the use), since either one can run arbitrary code (e.g. a `@property` getter) when evaluated

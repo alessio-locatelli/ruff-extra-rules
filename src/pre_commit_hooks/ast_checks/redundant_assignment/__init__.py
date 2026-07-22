@@ -103,13 +103,11 @@ class RedundantAssignmentCheck(BaseCheck):
             default="conservative",
             help=(
                 "How eagerly redundant-assignment (TRI005) reports a "
-                "violation. 'conservative' (default) only reports what "
-                "used to qualify for --fix under the old default; "
-                "'permissive' reports the broader set TRI005 used to "
-                "report by default before this flag existed. Either way, "
-                "--fix applies to whatever is reported and mechanically "
-                "safe to inline — the level doesn't narrow autofix "
-                "separately."
+                "violation. 'conservative' (default) flags only the "
+                "clearest, safest-to-inline cases; 'permissive' flags a "
+                "broader range. Either way, --fix applies to whatever is "
+                "reported and mechanically safe to inline — the level "
+                "doesn't narrow autofix separately."
             ),
         )
 
