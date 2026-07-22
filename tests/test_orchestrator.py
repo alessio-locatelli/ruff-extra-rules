@@ -149,6 +149,70 @@ def test_expand_directories_excludes_gitignored_file_but_warns(
         os.chdir(original_dir)
 
 
+def test_expand_directories_warns_about_an_ignored_directory_with_an_unrecognized_name(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # `git status --ignored` collapses an entirely-ignored directory to one
+    # `!! path/` line without confirming it holds a `.py` file (ADR 0028) --
+    # an arbitrary directory name (not a known packaging/tooling artifact,
+    # ADR 0029) is still reported on that unconfirmed basis.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        (tmp_path / ".gitignore").write_text("vendored/\n")
+        vendored = tmp_path / "vendored"
+        vendored.mkdir()
+        (vendored / "module.py").write_text("z = 1\n")
+
+        with caplog.at_level("WARNING"):
+            matches = expand_directories([str(tmp_path)])
+
+        assert matches == []
+        assert "vendored" in caplog.text
+    finally:
+        os.chdir(original_dir)
+
+
+def test_expand_directories_does_not_warn_about_known_non_source_directories(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Regression (ADR 0029): __pycache__/ and *.egg-info/ get created by
+    # this project's own routine `pytest`/`build`/`uv sync` commands, so
+    # warning about them unconditionally fired on essentially every
+    # directory-argument run -- neither is ever used for hand-written
+    # source, so both are excluded from this warning.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        (tmp_path / ".gitignore").write_text("__pycache__/\n*.egg-info/\n")
+
+        pycache = tmp_path / "__pycache__"
+        pycache.mkdir()
+        (pycache / "module.cpython-314.pyc").write_bytes(b"")
+
+        egg_info = tmp_path / "pkg.egg-info"
+        egg_info.mkdir()
+        (egg_info / "PKG-INFO").write_text("")
+
+        with caplog.at_level("WARNING"):
+            matches = expand_directories([str(tmp_path)])
+
+        assert matches == []
+        assert not any(record.levelname == "WARNING" for record in caplog.records)
+    finally:
+        os.chdir(original_dir)
+
+
 def test_expand_directories_warns_about_ignored_file_regardless_of_status_showuntrackedfiles_config(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
