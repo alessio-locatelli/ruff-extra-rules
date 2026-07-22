@@ -4,7 +4,7 @@ ADR 0028's `_warn_about_ignored_python_files()` warns about any gitignored direc
 
 ## Decision
 
-Before reporting an ignored directory entry, `_is_known_non_source_directory()` checks its basename against a hardcoded set drawn from this project's own `.gitignore` (`__pycache__`, `.venv`, `build`, `dist`, `.pytest_cache`, etc.) plus the `*.egg-info` pattern, and drops a match from the warning silently. A directly-ignored `.py` file is unaffected — it's still always reported, since that's the case a false-clean result actually matters for. An ignored directory with any other name is still reported, unconfirmed, exactly as ADR 0028 already accepted.
+Before reporting an ignored directory entry, `_is_known_non_source_directory()` checks its basename against a hardcoded set of well-known packaging/tooling directory names (`__pycache__`, `.venv`, `build`, `dist`, `.pytest_cache`, `.ruff_cache`, `.cache`, etc.) plus the `*.egg-info` pattern, and drops a match from the warning silently. Most of these names are also literally in this project's own `.gitignore`, but not all: `.ruff_cache` isn't named there at all — ruff writes its own nested `.ruff_cache/.gitignore` containing `*`, which is what makes `git status --ignored` collapse the whole directory to a single ignored-directory line, the same as a name-matched top-level pattern would. A directly-ignored `.py` file is unaffected — it's still always reported, since that's the case a false-clean result actually matters for. An ignored directory with any other name is still reported, unconfirmed, exactly as ADR 0028 already accepted.
 
 ## Consequences
 

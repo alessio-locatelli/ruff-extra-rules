@@ -136,18 +136,25 @@ def _list_python_files_in_dir(directory: Path) -> list[str]:
 
 _MAX_REPORTED_IGNORED_PATHS = 20
 
-# Directory-shaped patterns from this project's own .gitignore: every one of
-# these gets created by this project's own routine `mypy`/`pytest`/`build`/
-# `uv sync` commands, so warning about them unconditionally fired on
-# essentially every directory-argument run rather than the occasional case
-# ADR 0028 anticipated (ADR 0029). None of these names are ever used for
+# Well-known packaging/tooling directory names, most of which are named in
+# this project's own .gitignore -- every one of these gets created by this
+# project's own routine `mypy`/`pytest`/`ruff`/`build`/`uv sync` commands, so
+# warning about them unconditionally fired on essentially every
+# directory-argument run rather than the occasional case ADR 0028
+# anticipated (ADR 0029). `.ruff_cache` isn't itself named in this
+# repository's top-level .gitignore -- ruff writes its own nested
+# `.ruff_cache/.gitignore` containing `*`, which is what makes `git status`
+# collapse it to a single ignored-directory line the same way a
+# name-matched pattern would. None of these names are ever used for
 # hand-written source, so skipping them costs nothing a directly-ignored
 # `.py` file (still always reported below) wouldn't already catch.
 _NON_SOURCE_DIRECTORY_NAMES = frozenset(
     {
         "__pycache__",
+        ".cache",
         ".mypy_cache",
         ".pytest_cache",
+        ".ruff_cache",
         "build",
         "develop-eggs",
         "dist",

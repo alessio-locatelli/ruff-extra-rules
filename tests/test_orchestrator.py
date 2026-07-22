@@ -181,11 +181,11 @@ def test_expand_directories_warns_about_an_ignored_directory_with_an_unrecognize
 def test_expand_directories_does_not_warn_about_known_non_source_directories(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # Regression (ADR 0029): __pycache__/ and *.egg-info/ get created by
-    # this project's own routine `pytest`/`build`/`uv sync` commands, so
-    # warning about them unconditionally fired on essentially every
-    # directory-argument run -- neither is ever used for hand-written
-    # source, so both are excluded from this warning.
+    # Regression (ADR 0029): __pycache__/, *.egg-info/, and .cache/ get
+    # created by this project's own routine `pytest`/`build`/`uv sync`
+    # commands, so warning about them unconditionally fired on essentially
+    # every directory-argument run -- none of them is ever used for
+    # hand-written source, so all are excluded from this warning.
     git = shutil.which("git")
     assert git is not None
 
@@ -194,7 +194,7 @@ def test_expand_directories_does_not_warn_about_known_non_source_directories(
         os.chdir(tmp_path)
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
-        (tmp_path / ".gitignore").write_text("__pycache__/\n*.egg-info/\n")
+        (tmp_path / ".gitignore").write_text("__pycache__/\n*.egg-info/\n.cache/\n")
 
         pycache = tmp_path / "__pycache__"
         pycache.mkdir()
@@ -203,6 +203,42 @@ def test_expand_directories_does_not_warn_about_known_non_source_directories(
         egg_info = tmp_path / "pkg.egg-info"
         egg_info.mkdir()
         (egg_info / "PKG-INFO").write_text("")
+
+        cache = tmp_path / ".cache"
+        cache.mkdir()
+        (cache / "some_entry.json").write_text("{}")
+
+        with caplog.at_level("WARNING"):
+            matches = expand_directories([str(tmp_path)])
+
+        assert matches == []
+        assert not any(record.levelname == "WARNING" for record in caplog.records)
+    finally:
+        os.chdir(original_dir)
+
+
+def test_expand_directories_does_not_warn_about_ruff_cache_even_though_its_own_gitignore_is_nested(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Regression (ADR 0029): unlike __pycache__/.cache/etc., `.ruff_cache`
+    # isn't named in a top-level .gitignore at all -- ruff writes its own
+    # nested `.ruff_cache/.gitignore` containing `*`, which is what makes
+    # `git status --ignored` collapse the directory to a single ignored-
+    # directory line. The denylist match is by directory name alone, so it
+    # must still apply here even though no top-level .gitignore rule names
+    # ".ruff_cache" directly.
+    git = shutil.which("git")
+    assert git is not None
+
+    original_dir = Path.cwd()
+    try:
+        os.chdir(tmp_path)
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+
+        ruff_cache = tmp_path / ".ruff_cache"
+        ruff_cache.mkdir()
+        (ruff_cache / ".gitignore").write_text("*\n")
+        (ruff_cache / "0" / "content").mkdir(parents=True)
 
         with caplog.at_level("WARNING"):
             matches = expand_directories([str(tmp_path)])
