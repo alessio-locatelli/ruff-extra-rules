@@ -518,6 +518,26 @@ def _is_named_constant_pattern(var_name: str, rhs_node: ast.expr) -> bool:
     return len(var_name) > 6 and var_name.lower() not in generic_names
 
 
+def _is_named_string_constant_pattern(var_name: str, rhs_node: ast.expr) -> bool:
+    """A module-level SCREAMING_SNAKE_CASE name (PEP 8's constant
+    convention, leading underscores stripped first) reads as a deliberate,
+    reusable declaration even for a string RHS. Unlike
+    `_is_named_constant_pattern` above, this can't reuse its
+    "underscore-separated part count" check: every candidate reaching here
+    already has a leading underscore (Rule 1 in `should_report_violation`),
+    which alone satisfies that test regardless of casing. Requiring the
+    stripped name to be all-uppercase is what actually distinguishes a
+    constant from an ordinary private variable.
+    """
+    if not isinstance(rhs_node, ast.Constant):
+        return False
+
+    if not isinstance(rhs_node.value, str):
+        return False
+
+    return var_name.lstrip("_").isupper()
+
+
 def should_report_violation(
     lifecycle: VariableLifecycle,
     pattern: PatternType,
@@ -615,6 +635,21 @@ def should_report_violation(
         level is AggressivenessLevel.CONSERVATIVE
         and isinstance(assignment.rhs_node, ast.Call)
         and not _is_generic_call_result_name(assignment.var_name, assignment.rhs_node)
+    ):
+        return False
+
+    # Rule 12 (conservative level only): a module-level string constant
+    # named with the same convention Rule 7 already exempts for numeric
+    # values (`_GREY = "rgb(201, 203, 207)"`) reads as a deliberate,
+    # reusable declaration even when this file happens to use it only
+    # once — unlike a local `x = "foo"` used once, which is exactly the
+    # redundant pattern this check targets regardless of name shape.
+    # Doesn't apply to the permissive level, which still flags these like
+    # any other single-use string assignment.
+    if (
+        level is AggressivenessLevel.CONSERVATIVE
+        and assignment.in_global_scope
+        and _is_named_string_constant_pattern(assignment.var_name, assignment.rhs_node)
     ):
         return False
 
@@ -753,6 +788,18 @@ def is_safe_to_splice_into_fstring(value: str, encoding: str = "utf-8") -> bool:
     real values, right before a fix is actually applied.
     """
     if any(char in _FSTRING_SPLICE_UNSAFE_CHARS for char in value):
+        return False
+
+    # A control character (e.g. "\x1b", the ANSI escape used in terminal
+    # color codes) is syntactically fine to splice as raw text — none of
+    # them are in the unsafe set above — but writing it as a literal,
+    # unescaped byte turns a readable `\x1b` into an invisible one: the
+    # resulting source line looks like the value vanished (a diff shows
+    # nothing where the field used to be) even though the byte is really
+    # there. str.isprintable() rejects every control character (plus
+    # unassigned/surrogate/other non-printable categories), matching the
+    # newline/NUL exclusions above but generalized instead of enumerated.
+    if not value.isprintable():
         return False
 
     # A str object can legally hold an unpaired surrogate (e.g. from a

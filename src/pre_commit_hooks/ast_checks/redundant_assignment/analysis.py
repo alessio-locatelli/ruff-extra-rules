@@ -38,6 +38,8 @@ class AssignmentInfo:
     has_comment_above: bool = False
     has_inline_comment: bool = False
     rhs_has_await: bool = False
+    # See _record_compound_target_rebindings.
+    is_rebinding_marker: bool = False
 
 
 @dataclass
@@ -408,17 +410,17 @@ class VariableTracker(ast.NodeVisitor):
 
     visit_AsyncFunctionDef = visit_FunctionDef  # noqa: N815
 
-    def visit_For(self, node: ast.For) -> None:
+    def visit_For(self, node: ast.For | ast.AsyncFor) -> None:
+        # node.target rebinds on every iteration, same hazard as tuple
+        # unpacking/chained assignment (_record_compound_target_rebindings).
         self.loop_depth += 1
+        self._record_compound_target_rebindings(node.target, self._get_current_stmt_index())
         self.generic_visit(node)
         self.loop_depth -= 1
+
+    visit_AsyncFor = visit_For  # noqa: N815
 
     def visit_While(self, node: ast.While) -> None:
-        self.loop_depth += 1
-        self.generic_visit(node)
-        self.loop_depth -= 1
-
-    def visit_AsyncFor(self, node: ast.AsyncFor) -> None:
         self.loop_depth += 1
         self.generic_visit(node)
         self.loop_depth -= 1
@@ -446,15 +448,18 @@ class VariableTracker(ast.NodeVisitor):
         self.generic_visit(node)
         self.control_flow_depth -= 1
 
-    def visit_With(self, node: ast.With) -> None:
+    def visit_With(self, node: ast.With | ast.AsyncWith) -> None:
+        # Each item's optional_vars (`as target`) rebinds on entry, same
+        # hazard as a for-loop target above.
         self.control_flow_depth += 1
+        stmt_index = self._get_current_stmt_index()
+        for item in node.items:
+            if item.optional_vars is not None:
+                self._record_compound_target_rebindings(item.optional_vars, stmt_index)
         self.generic_visit(node)
         self.control_flow_depth -= 1
 
-    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
-        self.control_flow_depth += 1
-        self.generic_visit(node)
-        self.control_flow_depth -= 1
+    visit_AsyncWith = visit_With  # noqa: N815
 
     def visit_Match(self, node: ast.Match) -> None:
         """`node.subject` always evaluates unconditionally when the `Match`
@@ -523,9 +528,13 @@ class VariableTracker(ast.NodeVisitor):
         stmt_index = self._get_current_stmt_index()
 
         # Skip multiple assignments on a single line (e.g., a = b = c = value)
-        # These patterns often intentionally assign intermediate variables
-        # and avoid re-reading class attributes
+        # as reportable candidates — these patterns often intentionally
+        # assign intermediate variables and avoid re-reading class
+        # attributes — but each target's Name(s) still rebind, so they're
+        # recorded via _record_compound_target_rebindings below.
         if len(node.targets) > 1:
+            for target in node.targets:
+                self._record_compound_target_rebindings(target, stmt_index)
             self.visit(node.value)
             return
 
@@ -562,11 +571,54 @@ class VariableTracker(ast.NodeVisitor):
                 if key not in self.assignments:
                     self.assignments[key] = []
                 self.assignments[key].append(assignment)
-            elif isinstance(target, ast.Attribute | ast.Subscript):
-                self._track_attribute_or_subscript_base_usage(target, stmt_index)
+            else:
+                # Attribute/Subscript, or a compound target (tuple/list
+                # unpacking, possibly with a Starred element) —
+                # _record_compound_target_rebindings dispatches each shape.
+                self._record_compound_target_rebindings(target, stmt_index)
 
         self.visit(node.value)
         self.currently_assigning.clear()
+
+    def _record_compound_target_rebindings(self, target: ast.expr, stmt_index: int) -> None:
+        """Registers every Name a compound target rebinds — tuple/list
+        unpacking, a chained assignment, a for-loop target, or a with-as
+        target — none of which visit_Assign's simple-name path tracks as a
+        real AssignmentInfo. Each is recorded via a marker
+        (AssignmentInfo.is_rebinding_marker), not a full candidate: its
+        line/col may point at a statement that also binds sibling names,
+        which apply_fixes has no business touching.
+        """
+        scope_id = self._get_current_scope_id()
+
+        if isinstance(target, ast.Name):
+            var_name = target.id
+            if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
+                return
+            marker = AssignmentInfo(
+                var_name=var_name,
+                line=target.lineno,
+                col=target.col_offset,
+                stmt_index=stmt_index,
+                rhs_node=target,
+                rhs_source="",
+                scope_id=scope_id,
+                is_rebinding_marker=True,
+            )
+            key = (scope_id, var_name)
+            if key not in self.assignments:
+                self.assignments[key] = []
+            self.assignments[key].append(marker)
+        elif isinstance(target, ast.Tuple | ast.List):
+            for elt in target.elts:
+                self._record_compound_target_rebindings(elt, stmt_index)
+        elif isinstance(target, ast.Starred):
+            self._record_compound_target_rebindings(target.value, stmt_index)
+        elif isinstance(target, ast.Attribute | ast.Subscript):  # pragma: no branch
+            # Python's grammar limits an assignment target to exactly these
+            # five shapes, so this dispatch is exhaustive — there's no
+            # "else" case to reach.
+            self._track_attribute_or_subscript_base_usage(target, stmt_index)
 
     def _track_attribute_or_subscript_base_usage(self, node: ast.Attribute | ast.Subscript, stmt_index: int) -> None:
         """In `obj.attr = value` or `obj[key] = value`, `obj` is being read, so it counts as a usage."""
@@ -877,6 +929,7 @@ class VariableTracker(ast.NodeVisitor):
             return self._reference_reassigned_in_range(
                 rhs_node.id,
                 scope_id,
+                assignment.line,
                 assignment.stmt_index,
                 use.stmt_index,
                 use.line,
@@ -889,6 +942,7 @@ class VariableTracker(ast.NodeVisitor):
                 return self._reference_reassigned_in_range(
                     base.id,
                     scope_id,
+                    assignment.line,
                     assignment.stmt_index,
                     use.stmt_index,
                     use.line,
@@ -901,7 +955,8 @@ class VariableTracker(ast.NodeVisitor):
         self,
         name: str,
         scope_id: int,
-        start_stmt_index: int,
+        assign_line: int,
+        assign_stmt_index: int,
         end_stmt_index: int,
         use_line: int,
         *,
@@ -916,22 +971,21 @@ class VariableTracker(ast.NodeVisitor):
         `v0 = shared` through `vN = shared`) quadratic in the number of
         aliases.
 
-        `stmt_index` alone is too coarse to rule out a candidate: it's
-        tracked per top-level statement, so every statement nested inside
-        an `if`/`else` (at any depth) shares the *same* index as the
-        enclosing `if`, even though the branches are mutually exclusive —
-        e.g. in `old = x; if cond: return old else: x = new`, `x = new`
-        would otherwise look like it happens "at" `return old`'s index.
-        Requiring the candidate's `line` to be at or before `use_line`
-        catches this specific shape (the `else` branch is textually after
-        the use here) without needing full control-flow analysis. It's a
-        one-directional fix, not a complete one: the symmetric case (`if
-        cond: x = new else: return old`, where the reassignment comes
-        first) still isn't distinguished from a genuine hazard — this
-        method stays conservative (may under-report/under-fix, never
-        mis-fixes) rather than risk the reverse.
+        The bisect start boundary is `(assign_line, assign_stmt_index)`,
+        not either alone — `line` and `stmt_index` can each tie while the
+        other still orders two entries correctly (see test_detect_redundancy's
+        "sharing-coarse-stmt-index" and "sharing-a-physical-line" cases), so
+        only the composite excludes exactly the assignment's own position
+        (and nothing genuinely later) regardless of which one ties.
+
+        `end_stmt_index` is still checked alongside `line` at the end of
+        the range, as before: it excludes a candidate in a later, unrelated
+        top-level statement even in the rare case `line` alone wouldn't.
+        This stays a heuristic (may under-report/under-fix, never
+        mis-fixes), not full control-flow analysis.
         """
         key = (scope_id, name)
+        start_key = (assign_line, assign_stmt_index)
 
         # Indexed iteration, not `some_list[start:]` — a slice eagerly
         # copies the entire remaining tail before the loop even starts,
@@ -941,7 +995,7 @@ class VariableTracker(ast.NodeVisitor):
         # immediately in the common case.
         assignments = self.assignments.get(key)
         if assignments:
-            start = bisect.bisect_right(assignments, start_stmt_index, key=lambda a: a.stmt_index)
+            start = bisect.bisect_right(assignments, start_key, key=lambda a: (a.line, a.stmt_index))
             for i in range(start, len(assignments)):
                 other_assignment = assignments[i]
                 if other_assignment.stmt_index > end_stmt_index or other_assignment.line > use_line:
@@ -952,10 +1006,10 @@ class VariableTracker(ast.NodeVisitor):
         # visiting the RHS expression that got us into this method always
         # records at least a self-referential use of `name` (e.g. `value`
         # in `old = value`, or `obj` in `old = obj.attr`) at the
-        # assignment's own stmt_index — bisected past below, but enough to
-        # guarantee the list itself is non-empty.
+        # assignment's own line/stmt_index — bisected past below, but
+        # enough to guarantee the list itself is non-empty.
         uses = self.uses.get(key, [])
-        start = bisect.bisect_right(uses, start_stmt_index, key=lambda u: u.stmt_index)
+        start = bisect.bisect_right(uses, start_key, key=lambda u: (u.line, u.stmt_index))
         for i in range(start, len(uses)):
             other_use = uses[i]
             if other_use.stmt_index > end_stmt_index or other_use.line > use_line:

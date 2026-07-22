@@ -135,6 +135,47 @@ def func():
     VariableTracker(source).visit(ast.parse(source))
 
 
+def test_tuple_unpacking_rebinding_skipped_for_global_variable() -> None:
+    # Branch coverage: a tuple-unpacking target declared `global` in this
+    # scope must not be recorded as a rebinding marker here either — same
+    # exclusion as the plain-Name assignment path and the walrus case
+    # above.
+    source = """
+def func():
+    global x
+    x, y = compute()
+"""
+    VariableTracker(source).visit(ast.parse(source))
+
+
+def test_starred_tuple_target_recorded_as_rebinding() -> None:
+    # A Starred element inside a tuple-unpacking target (`a, *b = ...`)
+    # rebinds `first` just like a plain Name element would.
+    source = """
+def func():
+    first = None
+    if cond:
+        first, *rest = compute()
+    return first
+"""
+    assert _lifecycle_count(source, "first") == 2
+
+
+def test_attribute_target_nested_in_tuple_tracked_as_usage() -> None:
+    # An Attribute/Subscript element inside a tuple-unpacking target
+    # (`obj.attr, first = ...`) reads `obj`, same as a bare `obj.attr =
+    # value` would.
+    source = """
+def func(obj):
+    obj.attr, first = compute()
+    return first
+"""
+    tracker = VariableTracker(source)
+    tracker.visit(ast.parse(source))
+    obj_uses = tracker.uses[next(key for key in tracker.uses if key[1] == "obj")]
+    assert any(use.context == "attribute_or_subscript_assignment" for use in obj_uses)
+
+
 def test_decorator_use_is_tracked_by_variable_tracker() -> None:
     source = """
 def outer():
@@ -418,6 +459,38 @@ def func(x):
             "v",
             None,
         ),
+        (
+            # Regression: `old`'s assignment, the `self._server_session =
+            # ...` reassignment, and `old`'s own use are all nested inside
+            # the same top-level `if`, so they share one coarse
+            # stmt_index. Bisecting the hazard scan on stmt_index (instead
+            # of line) skipped straight past the reassignment, silently
+            # missing this snapshot-before-reassignment hazard.
+            """
+def func(self):
+    if isinstance(self._server_session, EmptyServerSession):
+        old = self._server_session
+        self._server_session = self._client.get_server_session()
+        if old.started_retryable_write:
+            self._server_session.inc_transaction_id()
+""",
+            "old",
+            None,
+        ),
+        (
+            # Regression: two semicolon-separated statements on one
+            # physical line have the same `line` but distinct
+            # `stmt_index`. Bisecting the hazard scan on line alone (the
+            # fix for the coarse-stmt_index case above) skipped straight
+            # past this same-line reassignment.
+            """
+def func(x):
+    old = x; x = 2
+    return old
+""",
+            "old",
+            None,
+        ),
     ],
     ids=[
         "immediate-use",
@@ -432,6 +505,8 @@ def func(x):
         "later-out-of-range-read-is-not-a-snapshot-hazard",
         "reassignment-in-mutually-exclusive-else-branch-is-not-a-snapshot-hazard",
         "snapshot-before-named-expression-rebinding-is-not-redundant",
+        "snapshot-before-attribute-reassignment-sharing-coarse-stmt-index-is-not-redundant",
+        "snapshot-before-name-reassignment-sharing-a-physical-line-is-not-redundant",
     ],
 )
 def test_detect_redundancy(source: str, var_name: str, pattern: PatternType | None) -> None:
