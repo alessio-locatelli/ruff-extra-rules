@@ -136,10 +136,51 @@ def _list_python_files_in_dir(directory: Path) -> list[str]:
 
 _MAX_REPORTED_IGNORED_PATHS = 20
 
+# Directory-shaped patterns from this project's own .gitignore: every one of
+# these gets created by this project's own routine `mypy`/`pytest`/`build`/
+# `uv sync` commands, so warning about them unconditionally fired on
+# essentially every directory-argument run rather than the occasional case
+# ADR 0028 anticipated (ADR 0029). None of these names are ever used for
+# hand-written source, so skipping them costs nothing a directly-ignored
+# `.py` file (still always reported below) wouldn't already catch.
+_NON_SOURCE_DIRECTORY_NAMES = frozenset(
+    {
+        "__pycache__",
+        ".mypy_cache",
+        ".pytest_cache",
+        "build",
+        "develop-eggs",
+        "dist",
+        "downloads",
+        "eggs",
+        ".eggs",
+        "lib",
+        "lib64",
+        "parts",
+        "sdist",
+        "var",
+        "wheels",
+        ".venv",
+        "venv",
+        "ENV",
+        "env",
+        "htmlcov",
+        ".vscode",
+        ".idea",
+    }
+)
+
+
+def _is_known_non_source_directory(entry: str) -> bool:
+    name = entry.rstrip("/").rpartition("/")[2]
+    return name in _NON_SOURCE_DIRECTORY_NAMES or name.endswith(".egg-info")
+
 
 def _warn_about_ignored_python_files(directory: Path) -> None:
     """Surfaces a directory scan's own `.gitignore`-driven exclusions
-    instead of leaving them silent (issue #67).
+    instead of leaving them silent (issue #67), except for well-known
+    non-source directories (ADR 0029) that this warning would otherwise
+    report on nearly every run.
 
     `git status --porcelain=v1 --ignored` defaults to its "traditional"
     mode, which reports an entirely-ignored directory as a single `!! path/`
@@ -149,7 +190,9 @@ def _warn_about_ignored_python_files(directory: Path) -> None:
     confirm an ignored directory actually contains a `.py` file without
     that same expensive recursion, so an ignored directory is reported
     alongside any directly-ignored `.py` file rather than silently
-    dropped.
+    dropped — unless its name matches `_NON_SOURCE_DIRECTORY_NAMES`, in
+    which case it's dropped from the warning outright rather than reported
+    on the strength of unconfirmed content.
 
     A directory that isn't *entirely* ignored (e.g. a generated/ subtree
     with one tracked README alongside thousands of individually-ignored
@@ -201,9 +244,11 @@ def _warn_about_ignored_python_files(directory: Path) -> None:
         return
 
     ignored = [
-        entry[len("!! ") :]
+        stripped
         for entry in git_status_result.stdout.split("\0")
-        if entry.startswith("!! ") and entry.endswith((".py", "/"))
+        if entry.startswith("!! ")
+        and (stripped := entry[len("!! ") :]).endswith((".py", "/"))
+        and not (stripped.endswith("/") and _is_known_non_source_directory(stripped))
     ]
     if ignored:
         # Sorting only the capped slice, not the full (possibly huge) list,
