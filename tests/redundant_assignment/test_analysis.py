@@ -121,6 +121,20 @@ def example():
     assert len(lifecycle.uses) == 2
 
 
+def test_named_expr_rebinding_skipped_for_global_variable() -> None:
+    # Branch coverage: a walrus target declared `global` in this scope
+    # must not be tracked as a rebinding use here — matching
+    # visit_AugAssign's own global exclusion, since a global rebinding
+    # isn't a local snapshot hazard this tracker resolves.
+    source = """
+def func():
+    global x
+    return (x := 1)
+"""
+    # Must not raise; global walrus targets are silently skipped.
+    VariableTracker(source).visit(ast.parse(source))
+
+
 def test_decorator_use_is_tracked_by_variable_tracker() -> None:
     source = """
 def outer():
@@ -270,8 +284,139 @@ def func():
             "x",
             None,
         ),
+        (
+            # "Snapshot the old value before reassigning it" (issue #74):
+            # `value` is rebound between the tracked assignment and its
+            # use, so `old_value` and a later inlined `value` would read
+            # genuinely different states — this isn't a redundant
+            # assignment at all.
+            """
+def func(value):
+    old_value = value
+    value = compute_new()
+    use(old_value)
+""",
+            "old_value",
+            None,
+        ),
+        (
+            # Same hazard via an augmented assignment, which both mutates
+            # and rebinds `value` — the "reassign or mutate" half of issue
+            # #74's phrasing not covered by the plain-reassignment case
+            # above.
+            """
+def func(value):
+    old_value = value
+    value += 1
+    use(old_value)
+""",
+            "old_value",
+            None,
+        ),
+        (
+            # Same hazard, but the reassignment mutates the exact
+            # attribute reference (`obj.attr`) the RHS read from, rather
+            # than rebinding a plain name. An intervening, unrelated read
+            # of `obj` between the assignment and the mutation must not
+            # itself be mistaken for the hazard.
+            """
+def func(obj):
+    old_attr = obj.attr
+    log(obj)
+    obj.attr = compute_new()
+    use(old_attr)
+""",
+            "old_attr",
+            None,
+        ),
+        (
+            # Same hazard via an augmented assignment to the attribute
+            # reference itself (`obj.attr += 1` both reads and reassigns
+            # `obj.attr`, mirroring the plain-name augmented-assignment
+            # case above).
+            """
+def func(obj):
+    old_attr = obj.attr
+    obj.attr += 1
+    use(old_attr)
+""",
+            "old_attr",
+            None,
+        ),
+        (
+            # An Attribute RHS whose base doesn't unwind to a plain name
+            # (e.g. a call result) has no trackable reference to check for
+            # reassignment, so it isn't disqualified by the issue #74
+            # guard — it's just an ordinary redundant assignment.
+            """
+def func():
+    old = get_obj().attr
+    use(old)
+""",
+            "old",
+            PatternType.IMMEDIATE_SINGLE_USE,
+        ),
+        (
+            # `obj` is read again *after* old_attr's own use, with no
+            # mutation anywhere — not a snapshot hazard. This later,
+            # out-of-range read must stop the range scan rather than being
+            # mistaken for an in-range one.
+            """
+def func(obj):
+    old_attr = obj.attr
+    log(obj)
+    use(old_attr)
+    log(obj)
+""",
+            "old_attr",
+            PatternType.SINGLE_USE,
+        ),
+        (
+            # `x` is reassigned only in the `else` branch, mutually
+            # exclusive with the `if` branch that uses `old` — `x` can
+            # never actually change on the path that reaches `return old`.
+            # Statements nested in different branches of the same
+            # if/else share one coarse stmt_index, so this must rely on
+            # source order (the reassignment is textually after the use)
+            # rather than stmt_index alone to avoid a false hazard.
+            """
+def func(cond, x):
+    old = x
+    if cond:
+        return old
+    else:
+        x = 99
+""",
+            "old",
+            PatternType.IMMEDIATE_SINGLE_USE,
+        ),
+        (
+            # A walrus expression rebinds `x` within the same statement
+            # that uses `v` — inlining `v` as `x` here would read the
+            # just-rebound value (2) instead of the one captured at
+            # assignment time.
+            """
+def func(x):
+    v = x
+    return (x := 2, v)
+""",
+            "v",
+            None,
+        ),
     ],
-    ids=["immediate-use", "single-use-with-intervening-statements", "augmented-assignment-is-not-redundant"],
+    ids=[
+        "immediate-use",
+        "single-use-with-intervening-statements",
+        "augmented-assignment-is-not-redundant",
+        "snapshot-before-name-reassignment-is-not-redundant",
+        "snapshot-before-name-augmented-reassignment-is-not-redundant",
+        "snapshot-before-attribute-reassignment-is-not-redundant",
+        "snapshot-before-attribute-augmented-reassignment-is-not-redundant",
+        "attribute-rhs-with-non-name-base-is-not-a-snapshot-hazard",
+        "later-out-of-range-read-is-not-a-snapshot-hazard",
+        "reassignment-in-mutually-exclusive-else-branch-is-not-a-snapshot-hazard",
+        "snapshot-before-named-expression-rebinding-is-not-redundant",
+    ],
 )
 def test_detect_redundancy(source: str, var_name: str, pattern: PatternType | None) -> None:
     assert detect_redundancy(_lifecycle_for(source, var_name)) == pattern

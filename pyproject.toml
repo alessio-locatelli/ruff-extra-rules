@@ -94,8 +94,9 @@ exclude = ["tests/fixtures"]
 paths = ["src", "tests"]
 # visit_* are ast.NodeVisitor callbacks invoked via .visit() dispatch, not by
 # name; return_value/side_effect are unittest.mock attributes read by the
-# mock machinery. assign_line and the is_property..returns_class fields are
-# TypedDict fields (RedundantAssignmentFixData in redundant_assignment/autofix.py,
+# mock machinery. assign_line, fstring_field_start_col/fstring_field_end_col,
+# and the is_property..returns_class fields are TypedDict fields
+# (RedundantAssignmentFixData in redundant_assignment/autofix.py,
 # FunctionBehavior in validate_function_name/analysis.py) read only via dict
 # subscript (e.g. fix_data["assign_line"], analysis["is_property"]), never as
 # an attribute. _restore_sigterm_handler is an autouse pytest fixture, invoked
@@ -111,6 +112,8 @@ ignore_names = [
   "return_value",
   "side_effect",
   "assign_line",
+  "fstring_field_start_col",
+  "fstring_field_end_col",
   "is_property",
   "disk_read",
   "disk_write",

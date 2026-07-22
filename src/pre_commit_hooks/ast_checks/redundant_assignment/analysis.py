@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import bisect
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Literal
@@ -65,12 +66,31 @@ class UsageInfo:
     # only runs for the rare usages that actually need it (should_autofix's
     # zero-arg-call carve-out) instead of every Name-load in the file.
     enclosing_stmt: ast.stmt | None = None
+    # Whether this use sits anywhere inside an f-string replacement field
+    # (`ast.FormattedValue`) — used to gate the naive text-substitution
+    # autofix, which would otherwise re-quote a string literal inside `{}`
+    # (issue #72).
+    in_fstring_expression: bool = False
+    # Byte-offset (start, end) span of the *entire* enclosing
+    # `ast.FormattedValue` (braces, any conversion/format spec, all of it)
+    # when this use IS that field's whole expression (no conversion, no
+    # format spec, single line) — the one shape where a string literal can
+    # be safely spliced as raw text in place of the field. None otherwise,
+    # including when in_fstring_expression is True but the use is only
+    # part of a larger field expression (e.g. `{x.attr}`).
+    fstring_field_span: tuple[int, int] | None = None
 
 
 @dataclass
 class VariableLifecycle:
     assignment: AssignmentInfo
     uses: list[UsageInfo]
+    # True when the RHS's underlying Name/Attribute reference is itself
+    # reassigned (or mutated via the same exact reference) somewhere
+    # between this assignment and its single use — see detect_redundancy
+    # for why that disqualifies "redundant assignment" entirely, not just
+    # its autofix (issue #74).
+    rhs_reference_reassigned_before_use: bool = False
 
     @property
     def is_single_use(self) -> bool:
@@ -92,6 +112,13 @@ class VariableLifecycle:
             return False
 
         return first_use.stmt_index <= self.assignment.stmt_index + 1
+
+
+def _unwind_to_base_name(node: ast.expr) -> ast.Name | None:
+    base = node
+    while isinstance(base, ast.Attribute | ast.Subscript):
+        base = base.value
+    return base if isinstance(base, ast.Name) else None
 
 
 def _has_await_expression(node: ast.expr) -> bool:
@@ -397,9 +424,22 @@ class VariableTracker(ast.NodeVisitor):
         self.loop_depth -= 1
 
     def visit_If(self, node: ast.If) -> None:
+        """`node.test` always evaluates unconditionally when the `If`
+        statement itself is reached — only `body`/`orelse` run
+        conditionally. Visiting it outside the incremented
+        `control_flow_depth` keeps a later use in the condition itself
+        (e.g. a with-block assignment whose only use is `if that_var:`)
+        from being wrongly treated as "inside control flow" (issue #73).
+        """
+        self.parent_stack.append(node)
+        self.visit(node.test)
         self.control_flow_depth += 1
-        self.generic_visit(node)
+        for stmt in node.body:
+            self.visit(stmt)
+        for stmt in node.orelse:
+            self.visit(stmt)
         self.control_flow_depth -= 1
+        self.parent_stack.pop()
 
     def visit_Try(self, node: ast.Try) -> None:
         self.control_flow_depth += 1
@@ -417,11 +457,20 @@ class VariableTracker(ast.NodeVisitor):
         self.control_flow_depth -= 1
 
     def visit_Match(self, node: ast.Match) -> None:
-        # Each case body only runs conditionally (if its pattern/guard
-        # matches), same as an if/elif branch.
+        """`node.subject` always evaluates unconditionally when the `Match`
+        statement itself is reached — only each case's pattern/guard/body
+        runs conditionally (if its pattern/guard matches), same as an
+        if/elif branch. See visit_If's docstring (issue #73) for why the
+        subject must be visited outside the incremented
+        `control_flow_depth`.
+        """
+        self.parent_stack.append(node)
+        self.visit(node.subject)
         self.control_flow_depth += 1
-        self.generic_visit(node)
+        for case in node.cases:
+            self.visit(case)
         self.control_flow_depth -= 1
+        self.parent_stack.pop()
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
         """A lambda's body doesn't execute where it's defined — it executes
@@ -523,12 +572,9 @@ class VariableTracker(ast.NodeVisitor):
         """In `obj.attr = value` or `obj[key] = value`, `obj` is being read, so it counts as a usage."""
         scope_id = self._get_current_scope_id()
 
-        base: ast.expr = node
-        while isinstance(base, ast.Attribute | ast.Subscript):
-            # Both Attribute and Subscript have .value as the base
-            base = base.value
+        base = _unwind_to_base_name(node)
 
-        if isinstance(base, ast.Name):
+        if base is not None:
             var_name = base.id
 
             if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
@@ -615,21 +661,61 @@ class VariableTracker(ast.NodeVisitor):
                 self.generic_visit(node)
                 return
 
-            usage = UsageInfo(
-                var_name=var_name,
-                line=node.lineno,
-                col=node.col_offset,
-                stmt_index=stmt_index,
-                context="augmented_assignment",
-                scope_id=scope_id,
-                in_control_flow=self.control_flow_depth > 0,
-            )
-            key = (scope_id, var_name)
-            if key not in self.uses:
-                self.uses[key] = []
-            self.uses[key].append(usage)
+            self._track_rebinding_use(var_name, node.lineno, node.col_offset, scope_id, stmt_index)
+        else:
+            # AugAssign.target is Name | Attribute | Subscript; the Name
+            # case is handled above.
+            assert isinstance(node.target, ast.Attribute | ast.Subscript)  # Type narrowing
+            # `obj.attr += 1` both reads and reassigns `obj.attr`, same as
+            # `obj.attr = value` — track it the same way so a snapshot
+            # taken via `old = obj.attr` (see _rhs_reference_reassigned)
+            # sees this as a reassignment of the reference it read from.
+            self._track_attribute_or_subscript_base_usage(node.target, stmt_index)
 
         self.visit(node.value)
+
+    def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
+        """`x := value` (walrus) evaluates `value`, then rebinds `x` to it —
+        the same reassignment hazard `visit_AugAssign` guards against for
+        `_rhs_reference_reassigned`'s snapshot-before-reassignment check
+        (issue #74), just spelled as an expression instead of a statement.
+        `old = x; return (x := 2, old)` must not be inlined into `return
+        (x := 2, x)`, which would read the just-rebound value instead of
+        the one captured at assignment time.
+        """
+        self.parent_stack.append(node)
+        self.visit(node.value)
+        self.parent_stack.pop()
+
+        scope_id = self._get_current_scope_id()
+        stmt_index = self._get_current_stmt_index()
+        var_name = node.target.id
+
+        if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
+            return
+
+        self._track_rebinding_use(var_name, node.target.lineno, node.target.col_offset, scope_id, stmt_index)
+
+    def _track_rebinding_use(self, var_name: str, line: int, col: int, scope_id: int, stmt_index: int) -> None:
+        """Records that `var_name` was rebound (augmented-assignment or
+        walrus) at this point — not a fresh `AssignmentInfo` (neither is a
+        standalone statement TRI005 could itself flag as redundant), but a
+        "use" `_rhs_reference_reassigned` recognizes as disqualifying a
+        snapshot taken from `var_name` earlier in the same scope.
+        """
+        usage = UsageInfo(
+            var_name=var_name,
+            line=line,
+            col=col,
+            stmt_index=stmt_index,
+            context="augmented_assignment",
+            scope_id=scope_id,
+            in_control_flow=self.control_flow_depth > 0,
+        )
+        key = (scope_id, var_name)
+        if key not in self.uses:
+            self.uses[key] = []
+        self.uses[key].append(usage)
 
     def visit(self, node: ast.AST) -> None:
         """Dispatch to the type-specific visit_* method, tracking current_stmt.
@@ -664,6 +750,19 @@ class VariableTracker(ast.NodeVisitor):
         stmt_index = self._get_current_stmt_index()
 
         usage_has_await = any(isinstance(parent, ast.Await) for parent in self.parent_stack)
+        in_fstring_expression = any(isinstance(parent, ast.FormattedValue) for parent in self.parent_stack)
+
+        fstring_field_span: tuple[int, int] | None = None
+        immediate_parent = self.parent_stack[-1] if self.parent_stack else None
+        if (
+            isinstance(immediate_parent, ast.FormattedValue)
+            and immediate_parent.value is node
+            and immediate_parent.conversion == -1
+            and immediate_parent.format_spec is None
+            and immediate_parent.lineno == immediate_parent.end_lineno == node.lineno
+            and immediate_parent.end_col_offset is not None
+        ):
+            fstring_field_span = (immediate_parent.col_offset, immediate_parent.end_col_offset)
 
         # Name-load context isn't resolved to anything more specific than
         # "unknown" — that would need walking parent nodes with a real
@@ -685,6 +784,8 @@ class VariableTracker(ast.NodeVisitor):
             in_comprehension=self.comprehension_depth > 0,
             node=node,
             enclosing_stmt=self.current_stmt,
+            in_fstring_expression=in_fstring_expression,
+            fstring_field_span=fstring_field_span,
         )
 
         key = (scope_id, node.id)
@@ -736,13 +837,135 @@ class VariableTracker(ast.NodeVisitor):
                         if use.stmt_index < next_assignment.stmt_index or use.scope_id in child_scopes
                     ]
 
+                rhs_reference_reassigned_before_use = len(relevant_uses) == 1 and self._rhs_reference_reassigned(
+                    assignment, relevant_uses[0], scope_id
+                )
+
                 lifecycle = VariableLifecycle(
                     assignment=assignment,
                     uses=relevant_uses,
+                    rhs_reference_reassigned_before_use=rhs_reference_reassigned_before_use,
                 )
                 lifecycles.append(lifecycle)
 
         return lifecycles
+
+    def _rhs_reference_reassigned(
+        self,
+        assignment: AssignmentInfo,
+        use: UsageInfo,
+        scope_id: int,
+    ) -> bool:
+        """True when `assignment`'s RHS reads a Name/Attribute reference
+        that is itself reassigned (or augmented-assigned) between
+        `assignment` and `use` — the "snapshot the old value before
+        reassigning it" hazard from issue #74. Inlining the RHS text at
+        `use` in that case would read the reference's new state instead of
+        the one captured at assignment time, silently changing behavior.
+
+        For a Name RHS (`old = x`), only rebinding `x` itself is unsafe —
+        mutating the object `x` refers to (e.g. `x.attr = ...`) doesn't
+        create this hazard, since `old` and `x` still alias the same
+        object either way. For an Attribute RHS (`old = obj.attr`), both
+        rebinding `obj` itself and reassigning any attribute/subscript of
+        `obj` are treated as unsafe — the latter conservatively, since this
+        tracker doesn't record *which* attribute was reassigned.
+        """
+        rhs_node = assignment.rhs_node
+
+        if isinstance(rhs_node, ast.Name):
+            return self._reference_reassigned_in_range(
+                rhs_node.id,
+                scope_id,
+                assignment.stmt_index,
+                use.stmt_index,
+                use.line,
+                include_attribute_mutation=False,
+            )
+
+        if isinstance(rhs_node, ast.Attribute):
+            base = _unwind_to_base_name(rhs_node)
+            if base is not None:
+                return self._reference_reassigned_in_range(
+                    base.id,
+                    scope_id,
+                    assignment.stmt_index,
+                    use.stmt_index,
+                    use.line,
+                    include_attribute_mutation=True,
+                )
+
+        return False
+
+    def _reference_reassigned_in_range(
+        self,
+        name: str,
+        scope_id: int,
+        start_stmt_index: int,
+        end_stmt_index: int,
+        use_line: int,
+        *,
+        include_attribute_mutation: bool,
+    ) -> bool:
+        """`self.assignments[key]`/`self.uses[key]` are each built by a
+        single top-to-bottom AST walk within one scope, so entries for a
+        fixed `key` already arrive in non-decreasing `stmt_index` *and*
+        `line` order — bisecting to the range start avoids rescanning
+        every earlier assignment/use of `name`, which would otherwise make
+        a long chain of single-use aliases to the same shared name (e.g.
+        `v0 = shared` through `vN = shared`) quadratic in the number of
+        aliases.
+
+        `stmt_index` alone is too coarse to rule out a candidate: it's
+        tracked per top-level statement, so every statement nested inside
+        an `if`/`else` (at any depth) shares the *same* index as the
+        enclosing `if`, even though the branches are mutually exclusive —
+        e.g. in `old = x; if cond: return old else: x = new`, `x = new`
+        would otherwise look like it happens "at" `return old`'s index.
+        Requiring the candidate's `line` to be at or before `use_line`
+        catches this specific shape (the `else` branch is textually after
+        the use here) without needing full control-flow analysis. It's a
+        one-directional fix, not a complete one: the symmetric case (`if
+        cond: x = new else: return old`, where the reassignment comes
+        first) still isn't distinguished from a genuine hazard — this
+        method stays conservative (may under-report/under-fix, never
+        mis-fixes) rather than risk the reverse.
+        """
+        key = (scope_id, name)
+
+        # Indexed iteration, not `some_list[start:]` — a slice eagerly
+        # copies the entire remaining tail before the loop even starts,
+        # which would silently reintroduce the O(N) cost per lookup (and
+        # O(N^2) overall across N aliases) that bisecting to `start` was
+        # meant to avoid, even though the loop itself `break`s almost
+        # immediately in the common case.
+        assignments = self.assignments.get(key)
+        if assignments:
+            start = bisect.bisect_right(assignments, start_stmt_index, key=lambda a: a.stmt_index)
+            for i in range(start, len(assignments)):
+                other_assignment = assignments[i]
+                if other_assignment.stmt_index > end_stmt_index or other_assignment.line > use_line:
+                    break
+                return True
+
+        # Unlike `assignments` above, `uses` is never actually empty here:
+        # visiting the RHS expression that got us into this method always
+        # records at least a self-referential use of `name` (e.g. `value`
+        # in `old = value`, or `obj` in `old = obj.attr`) at the
+        # assignment's own stmt_index — bisected past below, but enough to
+        # guarantee the list itself is non-empty.
+        uses = self.uses.get(key, [])
+        start = bisect.bisect_right(uses, start_stmt_index, key=lambda u: u.stmt_index)
+        for i in range(start, len(uses)):
+            other_use = uses[i]
+            if other_use.stmt_index > end_stmt_index or other_use.line > use_line:
+                break
+            if other_use.context == "augmented_assignment":
+                return True
+            if include_attribute_mutation and other_use.context == "attribute_or_subscript_assignment":
+                return True
+
+        return False
 
 
 def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
@@ -762,6 +985,13 @@ def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
     for use in lifecycle.uses:
         if use.context == "augmented_assignment":
             return None
+
+    # "Snapshot the old value before reassigning it" (issue #74): the RHS's
+    # reference is itself reassigned/mutated between the assignment and its
+    # use, so the two accesses observe genuinely different states — this
+    # isn't a redundant assignment forwarding the same value at all.
+    if lifecycle.rhs_reference_reassigned_before_use:
+        return None
 
     # Pattern 3: Literal identity (e.g., foo = "foo")
     if _is_literal_identity(lifecycle):

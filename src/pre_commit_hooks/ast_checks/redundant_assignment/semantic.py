@@ -494,8 +494,7 @@ def _is_named_constant_pattern(var_name: str, rhs_node: ast.expr) -> bool:
     if not isinstance(rhs_node.value, int | float):
         return False
 
-    var_parts = var_name.split("_")
-    if len(var_parts) >= 2:
+    if len(var_name.split("_")) >= 2:
         return True
 
     generic_names = {
@@ -625,6 +624,68 @@ def _call_use_is_safe_to_inline(use: UsageInfo) -> bool:
     return not use.in_loop and not use.in_lambda and not is_preceded_by_call(use)
 
 
+# Characters that make it unsafe to splice a string literal's raw value
+# directly into an f-string's surrounding text: the two quote characters
+# (would prematurely terminate — or ambiguously extend — the string,
+# without knowing the specific quote style the target f-string uses), a
+# backslash (would be reinterpreted as the start of an escape sequence
+# instead of a literal backslash), brace characters (would open/close a new
+# replacement field instead of appearing as literal text), newlines (would
+# break a single-line f-string), and a NUL byte (CPython's tokenizer
+# rejects any source file containing one, even though it's a perfectly
+# valid character *inside* a string literal like `"\x00"` — splicing it as
+# raw text would turn a fixable file into an unparsable one).
+_FSTRING_SPLICE_UNSAFE_CHARS = frozenset({"'", '"', "\\", "{", "}", "\n", "\r", "\x00"})
+
+
+def is_safe_to_splice_into_fstring(value: str, encoding: str = "utf-8") -> bool:
+    """`encoding` defaults to "utf-8" — this codebase's overwhelmingly
+    common case, and the only option available at check() time, which
+    (unlike fix()) never learns a file's real PEP 263 declared encoding.
+    `autofix.apply_fixes` calls this again at fix time with the real
+    encoding, so a file declaring something narrower (e.g. `# -*- coding:
+    ascii -*-`) still gets this validated correctly before anything is
+    written — see exceeds_line_length_when_inlined's docstring for why
+    this module's checks are routinely re-validated a second time, against
+    real values, right before a fix is actually applied.
+    """
+    if any(char in _FSTRING_SPLICE_UNSAFE_CHARS for char in value):
+        return False
+
+    # A str object can legally hold an unpaired surrogate (e.g. from a
+    # "\ud800" escape) even though no real text encoding can represent one
+    # — splicing it as raw source text would make atomic_write_text's
+    # compile()/write() crash with an uncaught UnicodeEncodeError instead
+    # of writing a fixed file, exactly like a NUL byte above but for a
+    # different underlying reason (unencodable rather than unparsable).
+    try:
+        value.encode(encoding)
+    except UnicodeEncodeError:
+        return False
+
+    return True
+
+
+def fstring_splice_is_safe(rhs_node: ast.expr, use: UsageInfo) -> bool | None:
+    """None when this isn't the f-string-splice scenario at all — RHS isn't
+    a string literal, or the use isn't inside an f-string replacement field
+    — so callers should fall through to the ordinary autofix rules
+    unchanged. True/False when it is: whether the literal's raw value can
+    be spliced directly into the surrounding f-string text instead of
+    being naively re-quoted inside `{}` (issue #72).
+    """
+    if not (isinstance(rhs_node, ast.Constant) and isinstance(rhs_node.value, str)):
+        return None
+    if not use.in_fstring_expression:
+        return None
+    if use.fstring_field_span is None:
+        # Inside an f-string field, but not as its whole expression (e.g.
+        # `{x.attr}` or `{x!r}`) — no safe way to remove the braces and
+        # splice raw text without changing what the field expression does.
+        return False
+    return is_safe_to_splice_into_fstring(rhs_node.value)
+
+
 def should_autofix(
     lifecycle: VariableLifecycle,
     pattern: PatternType,
@@ -666,6 +727,9 @@ def should_autofix(
 
     rhs_source = assignment.rhs_source
     if "\n" in rhs_source or "\r" in rhs_source:
+        return False
+
+    if fstring_splice_is_safe(assignment.rhs_node, lifecycle.uses[0]) is False:
         return False
 
     # Prefer the exact check against the real usage line; fall back to the

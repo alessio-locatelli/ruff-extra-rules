@@ -145,6 +145,8 @@ class RedundantAssignmentCheck(BaseCheck):
                 "rhs_source": lifecycle.assignment.rhs_source,
                 "use_line": single_use.line,
                 "use_col": single_use.col,
+                "fstring_field_start_col": single_use.fstring_field_span[0] if single_use.fstring_field_span else None,
+                "fstring_field_end_col": single_use.fstring_field_span[1] if single_use.fstring_field_span else None,
             }
 
             # lifecycle.assignment.col is a UTF-8 byte offset (from

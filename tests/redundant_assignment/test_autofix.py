@@ -730,6 +730,255 @@ def test_check_reports_assignment_after_multiline_string_with_trailing_comment(t
     assert any("'y'" in v.message for v in violations)
 
 
+def test_autofix_splices_string_literal_into_fstring_field(tmp_path: Path) -> None:
+    # Regression (issue #72): inlining a string-literal variable into an
+    # f-string replacement field used to re-quote it inside the braces
+    # (`f"...{"requests-cache"}..."`) instead of splicing the literal's
+    # raw text directly into the surrounding string.
+    source = """def f():
+    org = "requests-cache"
+    return f"https://github.com/{org}/requests-cache"
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert any(v.fixable for v in violations)
+    assert check.fix(filepath, violations, source, tree) is True
+
+    fixed_content = filepath.read_text()
+    assert "org = " not in fixed_content
+    assert 'return f"https://github.com/requests-cache/requests-cache"' in fixed_content
+
+    # The fixed source must still be valid, unquoted-inside-braces Python.
+    ast.parse(fixed_content)
+
+
+def test_autofix_declines_fstring_splice_with_unsafe_characters(tmp_path: Path) -> None:
+    # A literal containing a quote character can't be safely spliced as raw
+    # text without knowing (and re-escaping for) the f-string's own quote
+    # style — declined conservatively rather than risking broken output.
+    source = """def f():
+    name = "O'Brien"
+    return f"Hello {name}!"
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    name_violations = [v for v in violations if "'name'" in v.message]
+    assert name_violations
+    assert all(not v.fixable for v in name_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_autofix_declines_fstring_splice_with_nul_byte(tmp_path: Path) -> None:
+    # Regression: `"\x00"` is a perfectly valid string literal, but Python's
+    # tokenizer rejects any *source file* containing a raw NUL byte —
+    # splicing it as literal text would turn a fixable file into an
+    # unparsable one.
+    source = 'def f():\n    label = "\\x00"\n    return f"<{label}>"\n'
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    label_violations = [v for v in violations if "'label'" in v.message]
+    assert label_violations
+    assert all(not v.fixable for v in label_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_autofix_declines_fstring_splice_with_unpaired_surrogate(tmp_path: Path) -> None:
+    # Regression: a str object can legally hold an unpaired surrogate (e.g.
+    # from a "\ud800" escape) even though no real text encoding can
+    # represent one — splicing it as raw source text would make
+    # atomic_write_text's compile()/write() crash with an uncaught
+    # UnicodeEncodeError instead of declining the fix.
+    source = 'def f():\n    label = "\\ud800"\n    return f"<{label}>"\n'
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    label_violations = [v for v in violations if "'label'" in v.message]
+    assert label_violations
+    assert all(not v.fixable for v in label_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_autofix_declines_fstring_splice_when_value_unencodable_in_declared_encoding(
+    tmp_path: Path,
+) -> None:
+    # Regression: a PEP 263 file can declare a narrower encoding (e.g.
+    # ASCII) than UTF-8. "\xe9" ('é') is a perfectly safe splice target
+    # under UTF-8 (should_autofix's check()-time guess, which never learns
+    # the real declared encoding), but writing it back into an
+    # ASCII-declared file would raise UnicodeEncodeError — apply_fixes must
+    # re-check against the *real* encoding it was actually given and
+    # decline rather than crash.
+    source = 'def f():\n    label = "\\xe9"\n    return f"<{label}>"\n'
+    filepath = tmp_path / "source.py"
+    filepath.write_bytes(source.encode("ascii"))
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    label_violations = [v for v in violations if "'label'" in v.message]
+    assert label_violations
+    # should_autofix's UTF-8 guess still marks it [FIXABLE] — it has no way
+    # to know the real encoding at check() time.
+    assert all(v.fixable for v in label_violations)
+
+    check.fix(filepath, violations, source, tree, encoding="ascii")
+    assert filepath.read_bytes() == source.encode("ascii")
+
+
+def test_autofix_declines_fstring_splice_with_conversion(tmp_path: Path) -> None:
+    # `{org!r}` applies repr() to the inlined literal, which is not the
+    # same as splicing its raw text into the surrounding string — must be
+    # declined rather than naively re-quoted.
+    source = """def f():
+    org = "requests-cache"
+    return f"{org!r}"
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    org_violations = [v for v in violations if "'org'" in v.message]
+    assert org_violations
+    assert all(not v.fixable for v in org_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_autofix_declines_fstring_splice_for_nested_expression(tmp_path: Path) -> None:
+    # `org` isn't the whole replacement field here (`org.upper()` is), so
+    # there's no clean way to remove the braces and splice raw text without
+    # changing what the field expression does.
+    source = """def f():
+    org = "requests-cache"
+    return f"{org.upper()}"
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    org_violations = [v for v in violations if "'org'" in v.message]
+    assert org_violations
+    assert all(not v.fixable for v in org_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
+def test_autofix_fstring_field_unaffected_for_non_string_rhs(tmp_path: Path) -> None:
+    # Regression guard: a non-string RHS (e.g. a number) was never buggy —
+    # `f"{5}"` is fine as-is, no quotes involved — so the new f-string
+    # handling must not change this existing, already-correct behavior.
+    source = """def f():
+    n = 5
+    return f"Total: {n}"
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert any(v.fixable for v in violations)
+    assert check.fix(filepath, violations, source, tree) is True
+
+    fixed_content = filepath.read_text()
+    assert "n = " not in fixed_content
+    assert 'return f"Total: {5}"' in fixed_content
+
+
+def test_autofix_fstring_field_unaffected_for_name_rhs(tmp_path: Path) -> None:
+    # Regression guard: a Name RHS used as a whole f-string field (e.g.
+    # `x = obj; f"{x}"`) was never buggy either — `rhs_source` isn't a
+    # string-literal expression at all here, so the new splice path must
+    # recognize that (via ast.literal_eval raising) and fall through to the
+    # ordinary inlining path unchanged.
+    source = """def f(obj):
+    x = obj
+    return f"value: {x}"
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert any(v.fixable for v in violations)
+    assert check.fix(filepath, violations, source, tree) is True
+
+    fixed_content = filepath.read_text()
+    assert "x = obj" not in fixed_content
+    assert 'return f"value: {obj}"' in fixed_content
+
+
+def test_autofix_fstring_splice_declines_when_earlier_fix_lengthens_line(tmp_path: Path) -> None:
+    # Regression: same-line violations are applied rightmost-first, so a
+    # fix processed before this one can lengthen the line beyond what
+    # should_autofix saw at check() time (see exceeds_line_length_when_inlined's
+    # docstring on why both call sites must independently re-check the
+    # *current* line). The f-string splice must do the same and decline —
+    # leaving both the assignment and the f-string field untouched — rather
+    # than emit an over-long line.
+    source = 'def f():\n    o = "cccc"\n    p = "xxxx"\n    return "' + "a" * 48 + '" + f"{o}" + p\n'
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    o_violations = [v for v in violations if "'o'" in v.message]
+    p_violations = [v for v in violations if "'p'" in v.message]
+    assert o_violations
+    assert all(v.fixable for v in o_violations)
+    assert p_violations
+    assert all(v.fixable for v in p_violations)
+
+    check.fix(filepath, violations, source, tree)
+
+    fixed_content = filepath.read_text()
+    # p's fix (rightmost) is applied first and lengthens the line enough
+    # that o's own splice — safe against the original, unmodified line —
+    # would now exceed the limit, so it's declined.
+    assert '    o = "cccc"' in fixed_content
+    assert "{o}" in fixed_content
+    assert 'p = "xxxx"' not in fixed_content
+
+
 def test_fix_inlines_use_on_line_with_non_ascii_text(tmp_path: Path) -> None:
     # Regression: ast.col_offset is a UTF-8 byte offset, not a character
     # offset. A non-ASCII character earlier on the use's line must not

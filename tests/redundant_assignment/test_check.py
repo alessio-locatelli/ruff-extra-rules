@@ -119,6 +119,24 @@ def example():
         service_name = get_caller_module_name()
     return configure_service(service_name)
 """,
+        # "Snapshot the old value before reassigning it" (issue #74):
+        # inlining `old_value` as `value` after `value` has been rebound
+        # would silently read the new value instead of the one captured at
+        # assignment time.
+        """
+def func(value):
+    old_value = value
+    value = compute_new()
+    use(old_value)
+""",
+        # Same hazard for an Attribute RHS: `obj.attr` is reassigned
+        # between the tracked assignment and its use.
+        """
+def func(obj):
+    old_attr = obj.attr
+    obj.attr = compute_new()
+    use(old_attr)
+""",
         """
 parent_url = "https://example.com"
 print(parent_url)
@@ -331,6 +349,8 @@ def func(depot_data, depots):
         "non-fixable-semantic-value",
         "multiple-exception-assignments",
         "conditional-assignment-logic-change",
+        "snapshot-before-name-reassignment",
+        "snapshot-before-attribute-reassignment",
         "global-scope-without-underscore",
         "global-scope-with-comment-above",
         "await-on-assignment-and-usage",
@@ -735,6 +755,33 @@ def load_config():
             "config",
         ),
         (
+            # A statement's own test always evaluates unconditionally when
+            # the statement is reached — only its body/branches are
+            # conditional. The with-block exception must apply here just
+            # like it does for a plain statement use (issue #73).
+            """
+def load_config():
+    with open("config.toml", "rb") as file:
+        config = tomllib.load(file)
+    if config:
+        do_something()
+""",
+            "test.py",
+            "config",
+        ),
+        (
+            """
+def load_config():
+    with open("config.toml", "rb") as file:
+        config = tomllib.load(file)
+    match config:
+        case "a":
+            do_something()
+""",
+            "test.py",
+            "config",
+        ),
+        (
             """
 def load_paths_to_ignore(project_root, src_dir):
     pyproject_path = project_root / "pyproject.toml"
@@ -923,6 +970,8 @@ def func(c):
         "semantic-test-data-list",
         "range-with-descriptive-name",
         "context-manager-assignment-inside-usage-outside",
+        "with-block-if-condition-pattern",
+        "with-block-match-subject-pattern",
         "context-manager-with-block-pattern",
         "database-connection-pattern",
         "if-block-assignment-inside-usage-outside",

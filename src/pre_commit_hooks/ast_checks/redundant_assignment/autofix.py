@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 import logging
 import re
 from typing import TYPE_CHECKING, TypedDict, cast
 
 from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, byte_col_to_char_col, mark_fix_failed
 
-from .semantic import exceeds_line_length_when_inlined
+from .semantic import exceeds_line_length_when_inlined, is_safe_to_splice_into_fstring
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -29,6 +30,12 @@ class RedundantAssignmentFixData(TypedDict):
     rhs_source: str
     use_line: int
     use_col: int
+    # Byte-offset span of the enclosing f-string replacement field (see
+    # analysis.UsageInfo.fstring_field_span) when the single use is a
+    # string literal spliced directly into an f-string's text (issue #72).
+    # None for every other fix (the overwhelming majority).
+    fstring_field_start_col: int | None
+    fstring_field_end_col: int | None
 
 
 def apply_fixes(
@@ -90,6 +97,37 @@ def apply_fixes(
 
         rhs_source = fix_data["rhs_source"].strip()
         var_name = fix_data["var_name"]
+
+        # A field span is recorded whenever the use is a whole f-string
+        # replacement field, regardless of the RHS's type (see
+        # analysis.UsageInfo.fstring_field_span). Only a string-literal RHS
+        # needs the splice path below — falls through to the ordinary
+        # inlining path for any other RHS type (e.g. a Name or a number),
+        # which needs no requoting and so isn't buggy as-is.
+        fstring_start = fix_data.get("fstring_field_start_col")
+        fstring_end = fix_data.get("fstring_field_end_col")
+        fstring_literal_value = (
+            _try_literal_eval_str(rhs_source) if fstring_start is not None and fstring_end is not None else None
+        )
+        if fstring_literal_value is not None:
+            assert fstring_start is not None
+            assert fstring_end is not None
+            # Once it's confirmed a string literal, the splice is the
+            # *only* correct fix for it — declining here (rather than
+            # falling through to the generic path below) is what avoids
+            # issue #72's original bug: the generic path's plain text
+            # substitution would re-quote this same value inside `{}`.
+            if not is_safe_to_splice_into_fstring(fstring_literal_value, encoding):
+                continue
+            if not _apply_fstring_splice_fix(
+                source_lines, use_line_idx, fstring_start, fstring_end, fstring_literal_value
+            ):
+                continue
+            source_lines[assign_line_idx] = ""
+            removed_lines.add(assign_line_idx)
+            fixed_any = True
+            applied_violations.append(violation)
+            continue
 
         if not _can_safely_inline(var_name, rhs_source, use_line_idx, source_lines):
             continue
@@ -195,3 +233,44 @@ def _can_safely_inline(
 
     # Multiline RHS expressions are complex and shouldn't be auto-fixed.
     return not ("\n" in rhs_source or "\r" in rhs_source)
+
+
+def _try_literal_eval_str(rhs_source: str) -> str | None:
+    """`rhs_source`'s decoded value if it's a string-literal expression,
+    None otherwise (not a literal at all, e.g. a Name/Attribute/Call, or a
+    literal of some other type). Deliberately doesn't check splice safety
+    (see semantic.is_safe_to_splice_into_fstring) — the caller must treat
+    "is a string literal" and "is safe to splice" as separate questions:
+    once RHS is confirmed a string literal, the splice is the *only*
+    correct fix (see apply_fixes), so an unsafe one must be declined
+    outright, not silently swapped for the generic (buggy, re-quoting)
+    path used for non-string RHS types.
+    """
+    try:
+        value = ast.literal_eval(rhs_source)
+    except ValueError, SyntaxError:
+        return None
+    return value if isinstance(value, str) else None
+
+
+def _apply_fstring_splice_fix(
+    source_lines: list[str],
+    use_line_idx: int,
+    fstring_start: int,
+    fstring_end: int,
+    literal_value: str,
+) -> bool:
+    """Replaces an entire f-string replacement field (e.g. `{org}`, braces
+    included) with `literal_value` spliced directly into the surrounding
+    text — mutates `source_lines` in place. Returns False (and leaves
+    `source_lines` untouched) if inlining would exceed the line length.
+    """
+    use_line = source_lines[use_line_idx]
+    start_char = byte_col_to_char_col(use_line, fstring_start)
+    end_char = byte_col_to_char_col(use_line, fstring_end)
+
+    if exceeds_line_length_when_inlined(use_line[start_char:end_char], literal_value, use_line):
+        return False
+
+    source_lines[use_line_idx] = use_line[:start_char] + literal_value + use_line[end_char:]
+    return True
