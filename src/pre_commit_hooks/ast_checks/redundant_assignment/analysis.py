@@ -997,7 +997,7 @@ class VariableTracker(ast.NodeVisitor):
             )
 
         if isinstance(rhs_node, ast.Attribute | ast.Call) and self._suspension_point_between(
-            scope_id, assignment.line, assignment.stmt_index, use
+            scope_id, assignment.line, assignment.stmt_index, assignment.col, use
         ):
             return True
 
@@ -1041,6 +1041,7 @@ class VariableTracker(ast.NodeVisitor):
         scope_id: int,
         assign_line: int,
         assign_stmt_index: int,
+        assign_col: int,
         use: UsageInfo,
     ) -> bool:
         """True if a yield/yield from/await occurs strictly after the
@@ -1077,11 +1078,21 @@ class VariableTracker(ast.NodeVisitor):
         rebound name, not necessarily where the hazard actually occurs), so
         this defers to `_suspension_precedes_use`'s own conservative
         fallback rather than guessing.
+
+        The bisect boundary itself includes `assign_col`, not just
+        `(assign_line, assign_stmt_index)` — semicolon-separated statements
+        nested in the same coarse block (e.g. `cached = obj.attr; await
+        other(); return cached`) can share both line and stmt_index with
+        the assignment, and `bisect_right` would otherwise skip straight
+        past a point that ties on both, the same way `line` alone once hid
+        a same-line reassignment (see `_reference_reassigned_in_range`).
         """
         points = self.suspension_points.get(scope_id)
         if not points:
             return False
-        start = bisect.bisect_right(points, (assign_line, assign_stmt_index), key=lambda p: (p[0], p[1]))
+        start = bisect.bisect_right(
+            points, (assign_line, assign_stmt_index, assign_col), key=lambda p: (p[0], p[1], p[2])
+        )
         if start >= len(points):
             return False
         point_line, point_stmt_index, point_col, point_stmt = points[start]

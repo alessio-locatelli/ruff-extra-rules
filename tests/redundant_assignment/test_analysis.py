@@ -682,6 +682,21 @@ async def func(obj, cond):
             PatternType.IMMEDIATE_SINGLE_USE,
         ),
         (
+            # Same hazard as the two cases above, but semicolon-separated
+            # onto one physical line — assignment, await, and use now tie
+            # on *both* line and stmt_index, which used to make the bisect
+            # boundary skip the await point entirely (it looked identical
+            # to the assignment's own position).
+            """
+async def func(obj, cond):
+    if cond:
+        cached = obj.attr; await other(); return cached
+    return None
+""",
+            "cached",
+            None,
+        ),
+        (
             # `yield value` reads `value` before suspending, so a yield at
             # the use's own statement isn't a suspension hazard.
             """
@@ -794,6 +809,7 @@ async def func(obj):
         "snapshot-before-await-suspension-point-is-not-redundant",
         "snapshot-before-await-in-sibling-statement-sharing-coarse-stmt-index-is-not-redundant",
         "await-in-sibling-statement-after-use-sharing-coarse-stmt-index-is-still-redundant",
+        "semicolon-separated-await-sharing-line-and-stmt-index-is-not-redundant",
         "yield-at-the-use-itself-is-not-a-suspension-hazard",
         "snapshot-before-yield-from-suspension-point-is-not-redundant",
         "hoisted-value-used-inside-a-later-loop-is-not-redundant",
