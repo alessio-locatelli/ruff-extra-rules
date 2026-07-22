@@ -136,6 +136,10 @@ class RedundantAssignmentCheck(BaseCheck):
             if assignment_counts[key] > 1:
                 continue
 
+            # See AssignmentInfo.is_rebinding_marker / _record_compound_target_rebindings.
+            if lifecycle.assignment.is_rebinding_marker:
+                continue
+
             pattern = detect_redundancy(lifecycle)
             if pattern is None:
                 continue

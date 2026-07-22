@@ -15,6 +15,7 @@ from pre_commit_hooks.ast_checks.redundant_assignment.semantic import (
     _contains_nondeterministic_call,
     _is_generic_call_result_name,
     _is_named_constant_pattern,
+    _is_named_string_constant_pattern,
     _is_test_file,
     _would_require_parentheses,
     calculate_semantic_value,
@@ -510,6 +511,35 @@ def test_would_require_parentheses(rhs_source: str, *, expected: bool) -> None:
 def test_is_named_constant_pattern(var_name: str, rhs_source: str, *, expected: bool) -> None:
     node = ast.parse(rhs_source, mode="eval").body
     assert _is_named_constant_pattern(var_name, node) is expected
+
+
+# ---------------------------------------------------------------------------
+# _is_named_string_constant_pattern
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("var_name", "rhs_source", "expected"),
+    [
+        ("_GREY", '"rgb(201, 203, 207)"', True),  # Private SCREAMING_SNAKE_CASE.
+        ("MAX_RETRIES", '"3"', True),  # SCREAMING_SNAKE_CASE, no leading underscore.
+        ("_temp", '"foo"', False),  # Private but not all-uppercase.
+        ("_GREY", "10", False),  # Non-string constant RHS.
+        ("_GREY", "compute()", False),  # Non-constant RHS.
+        ("_", '"foo"', False),  # Nothing left after stripping underscores.
+    ],
+    ids=[
+        "private-screaming-snake-case",
+        "screaming-snake-case",
+        "private-lowercase",
+        "non-string-constant",
+        "non-constant",
+        "bare-underscore",
+    ],
+)
+def test_is_named_string_constant_pattern(var_name: str, rhs_source: str, *, expected: bool) -> None:
+    node = ast.parse(rhs_source, mode="eval").body
+    assert _is_named_string_constant_pattern(var_name, node) is expected
 
 
 # ---------------------------------------------------------------------------

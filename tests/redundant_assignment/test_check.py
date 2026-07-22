@@ -1046,16 +1046,40 @@ def check_warning(conn):
 """,
             "'warning'",
         ),
+        (
+            # Regression: a single "private" (underscore-prefixed),
+            # SCREAMING_SNAKE_CASE module-level string constant used only
+            # once elsewhere in the file reads as a deliberate, reusable
+            # declaration (Rule 12), even though it's genuinely single-use.
+            """
+_GREY = "rgb(201, 203, 207)"
+config = {"colors": [_GREY]}
+""",
+            "'_GREY'",
+        ),
     ],
     ids=[
         "color-constants-list-at-module-scope",
         "single-purpose-accessor-mutated",
         "locally-renamed-constructor-call",
         "descriptive-name-for-non-obvious-return-value",
+        "screaming-snake-case-string-constant-at-module-scope",
     ],
 )
 def test_conservative_level_calibration_cases_not_flagged(source: str, excluded: str) -> None:
     assert all(excluded not in v.message for v in _check(source))
+
+
+def test_screaming_snake_case_string_constant_still_flagged_at_permissive_level() -> None:
+    # Rule 12 (see should_report_violation) is conservative-only, matching
+    # Rule 11's precedent — permissive still reports every single-use
+    # string assignment TRI005 always used to, name shape included.
+    source = """
+_GREY = "rgb(201, 203, 207)"
+config = {"colors": [_GREY]}
+"""
+    violations = _check(source, level=AggressivenessLevel.PERMISSIVE)
+    assert any("'_GREY'" in v.message for v in violations)
 
 
 def test_multiple_assignment_targets_not_tracked() -> None:
@@ -1069,6 +1093,100 @@ def func():
     assert all("'a'" not in v.message for v in violations)
     assert all("'b'" not in v.message for v in violations)
     assert all("'c'" not in v.message for v in violations)
+
+
+@pytest.mark.parametrize(
+    ("source", "excluded_names"),
+    [
+        (
+            # Regression: a tuple-unpacking target (`user, passwd =
+            # parse_userinfo(...)`) wasn't tracked as a reassignment, so
+            # `--fix` blanked `user = None` and inlined `None` at the
+            # return statement, discarding the real value.
+            """
+def parse(host_part):
+    user = None
+
+    if "@" in host_part:
+        userinfo, _, hosts = host_part.rpartition("@")
+        user, passwd = parse_userinfo(userinfo)
+    else:
+        hosts = host_part
+
+    return {"username": user}
+""",
+            ("user",),
+        ),
+        (
+            # Same hazard, via a chained assignment target (`a = b = value`).
+            """
+def func(cond):
+    a = None
+    if cond:
+        a = b = compute()
+    return a
+""",
+            ("a",),
+        ),
+        (
+            # Same hazard, via a simple for-loop target.
+            """
+def func(items):
+    x = None
+    for x in items:
+        pass
+    return x
+""",
+            ("x",),
+        ),
+        (
+            # Same hazard, via a tuple-unpacked for-loop target.
+            """
+def func(pairs):
+    y = None
+    z = None
+    for y, z in pairs:
+        pass
+    return {"y": y, "z": z}
+""",
+            ("y", "z"),
+        ),
+        (
+            # Same hazard, via a simple with-as target.
+            """
+def func(ctx_factory):
+    x = None
+    with ctx_factory() as x:
+        pass
+    return x
+""",
+            ("x",),
+        ),
+        (
+            # Same hazard, via a tuple-unpacked with-as target.
+            """
+def func(ctx_factory):
+    a = None
+    b = None
+    with ctx_factory() as (a, b):
+        pass
+    return {"a": a, "b": b}
+""",
+            ("a", "b"),
+        ),
+    ],
+    ids=[
+        "tuple-unpacking-target",
+        "chained-assignment-target",
+        "simple-for-loop-target",
+        "tuple-unpacked-for-loop-target",
+        "simple-with-as-target",
+        "tuple-unpacked-with-as-target",
+    ],
+)
+def test_untracked_rebinding_not_flagged_as_redundant(source: str, excluded_names: tuple[str, ...]) -> None:
+    violations = _check(source, level=AggressivenessLevel.PERMISSIVE)
+    assert all(f"'{name}'" not in v.message for v in violations for name in excluded_names)
 
 
 def test_ignore_marker_inside_string_literal_does_not_suppress_violation() -> None:

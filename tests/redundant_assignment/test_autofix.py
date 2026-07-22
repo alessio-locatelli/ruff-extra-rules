@@ -777,6 +777,31 @@ def test_autofix_declines_fstring_splice_with_unsafe_characters(tmp_path: Path) 
     assert filepath.read_text() == source
 
 
+def test_autofix_declines_fstring_splice_with_control_character(tmp_path: Path) -> None:
+    # Regression: "\x1b[0m" (an ANSI reset code) is a valid, non-newline,
+    # non-NUL string literal, so it passed every prior unsafe-character
+    # check. Splicing it as a raw byte is syntactically fine but renders
+    # invisibly (the ESC[0m sequence produces no visible glyph), making a
+    # diff look like the value was silently dropped instead of inlined.
+    source = """def f():
+    reset = "\\x1b[0m"
+    return f"{reset}"
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    reset_violations = [v for v in violations if "'reset'" in v.message]
+    assert reset_violations
+    assert all(not v.fixable for v in reset_violations)
+
+    check.fix(filepath, violations, source, tree)
+    assert filepath.read_text() == source
+
+
 def test_autofix_declines_fstring_splice_with_nul_byte(tmp_path: Path) -> None:
     # Regression: `"\x00"` is a perfectly valid string literal, but Python's
     # tokenizer rejects any *source file* containing a raw NUL byte —
