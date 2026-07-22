@@ -32,13 +32,15 @@ See [docs/adding-a-check.md](docs/adding-a-check.md) for the full walkthrough of
 
 ## Docstrings and code comments
 
-- Do **not** add docstrings.
-- Do **not** add code comments.
-- You may add a concise docstring or code comment **only with**:
-  - Business or architecture decisions that cannot be derived from the code (e.g., `"""We use service X instead of Y because of rate limits."""`).
-  - Non‑obvious hacks or pitfalls that may look like a code problem if not explained (e.g., `# Temporarily reduce the batch size to work around the OOM in the cloud.`).
-  - A need to reference an external resource (e.g., `Related issue <link>.` or `See ADR-0042`).
-  - A need to explain **why** a non-obvious action is taken (e.g., "Early exit because all items were processed", "Used a real ID in a test because …").
+- Do not write docstrings.
+- Do not write code comments.
+- **No historical/postmortem framing:** Phrases such as "the old default", "before this flag existed", "used to qualify for X", or "this code replaced database X" belong in postmortems, ADRs, specifications, or git commit message bodies.
+- You may add a concise docstring or code comment only when the information is not already documented elsewhere and:
+  - A business or architecture decision cannot be derived from the code (e.g., `"""We use service X instead of Y because of rate limits."""`).
+  - A non-obvious hack or pitfall exists that may look like a code problem if left unexplained (e.g., `# Temporarily reduce the batch size to work around the OOM in the cloud.`).
+  - There is a need to reference an external resource (e.g., `Related issue <link>.` or `See ADR-0042`).
+  - There is a need to explain **why** a non-obvious action is taken (e.g., "Early exit because all items were processed", "Used a real ID in a test because…").
+- Never duplicate ADRs, specifications, or any other documentation in the code. If the code requires an explanation, add a reference (e.g., `# See ADR-0042`, `# See openspec/path-to-spec/`).
 
 ## ADRs
 
