@@ -648,6 +648,40 @@ async def func(obj):
             None,
         ),
         (
+            # Assignment, await, and use are all nested inside the same
+            # `if` body, so they share one coarse stmt_index — the tie
+            # can't be resolved by walking the use's own statement alone
+            # (that statement is just `return cached`, which contains no
+            # suspension point), since the await is a separate, earlier
+            # statement in the same block.
+            """
+async def func(obj, cond):
+    if cond:
+        cached = obj.attr
+        await other()
+        return cached
+    return None
+""",
+            "cached",
+            None,
+        ),
+        (
+            # `await` is a sibling statement *after* the use, still nested
+            # in the same `if` body (same coarse stmt_index) — the value is
+            # fully consumed before the coroutine can ever suspend, so this
+            # must not be flagged as a hazard just because it's a different
+            # statement from the tie above.
+            """
+async def func(obj, cond):
+    if cond:
+        cached = obj.attr
+        consume(cached)
+        await other()
+""",
+            "cached",
+            PatternType.IMMEDIATE_SINGLE_USE,
+        ),
+        (
             # `yield value` reads `value` before suspending, so a yield at
             # the use's own statement isn't a suspension hazard.
             """
@@ -758,6 +792,8 @@ async def func(obj):
         "use-statement-receiver-self-reference-is-not-a-mutation-hazard",
         "snapshot-before-yield-suspension-point-is-not-redundant",
         "snapshot-before-await-suspension-point-is-not-redundant",
+        "snapshot-before-await-in-sibling-statement-sharing-coarse-stmt-index-is-not-redundant",
+        "await-in-sibling-statement-after-use-sharing-coarse-stmt-index-is-still-redundant",
         "yield-at-the-use-itself-is-not-a-suspension-hazard",
         "snapshot-before-yield-from-suspension-point-is-not-redundant",
         "hoisted-value-used-inside-a-later-loop-is-not-redundant",

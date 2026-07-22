@@ -316,9 +316,10 @@ class VariableTracker(ast.NodeVisitor):
         self.stmt_index_stack: list[int] = [0]
         self.assignments: dict[tuple[int, str], list[AssignmentInfo]] = {}
         self.uses: dict[tuple[int, str], list[UsageInfo]] = {}
-        # scope_id -> (line, stmt_index) of each yield/yield from/await,
-        # in visit order — see _suspension_point_between.
-        self.suspension_points: dict[int, list[tuple[int, int]]] = {}
+        # scope_id -> (line, stmt_index, col, enclosing_stmt) of each
+        # yield/yield from/await, in visit order — see
+        # _suspension_point_between.
+        self.suspension_points: dict[int, list[tuple[int, int, int, ast.stmt | None]]] = {}
         self.global_vars: set[tuple[int, str]] = set()
         self.nonlocal_vars: set[tuple[int, str]] = set()
 
@@ -527,21 +528,21 @@ class VariableTracker(ast.NodeVisitor):
         self.lambda_depth -= 1
 
     def visit_Yield(self, node: ast.Yield) -> None:
-        self._record_suspension_point(node.lineno)
+        self._record_suspension_point(node.lineno, node.col_offset)
         self.generic_visit(node)
 
     def visit_YieldFrom(self, node: ast.YieldFrom) -> None:
-        self._record_suspension_point(node.lineno)
+        self._record_suspension_point(node.lineno, node.col_offset)
         self.generic_visit(node)
 
     def visit_Await(self, node: ast.Await) -> None:
-        self._record_suspension_point(node.lineno)
+        self._record_suspension_point(node.lineno, node.col_offset)
         self.generic_visit(node)
 
-    def _record_suspension_point(self, line: int) -> None:
+    def _record_suspension_point(self, line: int, col: int) -> None:
         scope_id = self._get_current_scope_id()
         stmt_index = self._get_current_stmt_index()
-        self.suspension_points.setdefault(scope_id, []).append((line, stmt_index))
+        self.suspension_points.setdefault(scope_id, []).append((line, stmt_index, col, self.current_stmt))
 
     def _visit_comprehension(
         self,
@@ -1045,25 +1046,50 @@ class VariableTracker(ast.NodeVisitor):
         """True if a yield/yield from/await occurs strictly after the
         assignment and before the use.
 
-        `stmt_index` alone can't order two entries that tie on it — a
-        suspension point sharing the use's own (coarse) statement could
-        still evaluate before or after the use within that statement (e.g.
-        `return (await refresh(), value)[1]`) — so a tie is resolved by
-        `_suspension_precedes_use`'s real evaluation-order walk instead of
-        assumed safe. A suspension point in a genuinely earlier statement
-        (`stmt_index` strictly less) needs no such walk: unlike a tie, nothing
-        about *that* statement's evaluation order is in question.
+        `stmt_index` alone can't order two entries that tie on it, and a tie
+        arises two different ways:
+
+        - The suspension point sits in the use's own statement (e.g.
+          `return (await refresh(), value)[1]`), where it could still
+          evaluate before or after the use within that one statement — that
+          case is resolved by `_suspension_precedes_use`'s real
+          evaluation-order walk instead of assumed safe.
+        - The suspension point sits in a *different*, known statement that's
+          merely nested in the same coarse block as the use (an if/with/try
+          body doesn't get its own stmt_index — see
+          VariableTracker.suspension_points), so `_suspension_precedes_use`
+          can't see it at all: that walk only looks inside the use's own
+          statement. Ordinary top-to-bottom source position (line, then
+          column) settles this instead — the point and the use are two
+          distinct, unconditionally-sequenced statements within the same
+          straight-line block, so whichever comes first textually also runs
+          first (loop bodies that could revisit this point on a later
+          iteration are excluded earlier, via `assignment.in_loop` in
+          `should_report_violation`).
+
+        A suspension point in a genuinely earlier statement (`stmt_index`
+        strictly less) needs neither check: unlike a tie, nothing about
+        *that* statement's evaluation order relative to the use is in
+        question. And when `use.enclosing_stmt` itself is unknown (some
+        UsageInfo variants, e.g. an augmented-assignment rebinding marker,
+        never record it), same-vs-different can't be told apart, nor can
+        source position stand in for it (the marker's own position is the
+        rebound name, not necessarily where the hazard actually occurs), so
+        this defers to `_suspension_precedes_use`'s own conservative
+        fallback rather than guessing.
         """
         points = self.suspension_points.get(scope_id)
         if not points:
             return False
-        start = bisect.bisect_right(points, (assign_line, assign_stmt_index))
+        start = bisect.bisect_right(points, (assign_line, assign_stmt_index), key=lambda p: (p[0], p[1]))
         if start >= len(points):
             return False
-        point_stmt_index = points[start][1]
+        point_line, point_stmt_index, point_col, point_stmt = points[start]
         if point_stmt_index < use.stmt_index:
             return True
         if point_stmt_index == use.stmt_index:
+            if use.enclosing_stmt is not None and point_stmt is not use.enclosing_stmt:
+                return (point_line, point_col) < (use.line, use.col)
             return _suspension_precedes_use(use)
         return False
 
