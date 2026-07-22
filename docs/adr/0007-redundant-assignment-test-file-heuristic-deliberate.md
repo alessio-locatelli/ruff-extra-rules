@@ -6,7 +6,7 @@ This project's own `CLAUDE.md` states it is a personal hobby project not used by
 
 ## Considered Options
 
-- **Make the test-directory convention configurable, e.g. deriving it from `[tool.pytest.ini_options] testpaths` in `pyproject.toml`** (this repo already sets `testpaths = ["tests"]`, and already reads `pyproject.toml` via `tomllib` elsewhere, for `forbid-vars`' autofix config): rejected for now — there is no current consumer whose layout differs from the hardcoded convention, and building configurability for a hypothetical one contradicts this project's own stated scope. Revisit if this project ever gains outside consumers.
+- **Make the test-directory convention configurable, e.g. deriving it from `[tool.pytest.ini_options] testpaths` in `pyproject.toml`** (this repo already sets `testpaths = ["tests"]`): rejected for now — there is no current consumer whose layout differs from the hardcoded convention, and building configurability for a hypothetical one contradicts this project's own stated scope; it would also introduce this project's first config-file-based check configuration, a departure from the CLI-only configuration surface confirmed by `docs/adr/0019-behavioral-contract-audit-configuration-and-discovery.md`. Revisit if this project ever gains outside consumers.
 - **Remove the heuristic entirely, rely on inline `# pytriage: ignore=TRI005`**: rejected — the heuristic exists because test code idiomatically uses single-use, low-semantic-value variables (`result = f(); assert result == x`) far more than production code does; removing it would just push the same suppressions onto every test file individually, which is worse for the maintainer, not better.
 - **Keep the heuristic as-is, record it as deliberate**: adopted.
 
