@@ -11,17 +11,9 @@ Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside 
 - This project is a stopgap until plugin support is implemented in `ruff` ([astral-sh/ruff#283](https://github.com/astral-sh/ruff/issues/283)), and will be archived thereafter.
 - This is a best-effort proof-of-concept implemented using coding agents.
 
-## Registered Hooks
-
-This repository registers a single hook, `ruff-extra-rules`, in `.pre-commit-hooks.yaml`. It runs every AST-based check (TRI001–TRI005, STYLE-001) against each file in a single parse pass, report-only by default. Individual checks are toggled with `--select`/`--ignore`, and `--fix` applies whatever each check's own fix logic considers safe — mirroring `ruff check`'s own `--select`/`--ignore`/`--fix` flags.
-
-A fix that would produce invalid syntax is never written to disk; it's reported as `[FIX REJECTED]` with a link to file a bug, instead of the usual `[FIXABLE]`/`[FIXED]`. See [ADR-0010](docs/adr/0010-fix-validation-before-write.md) for how this is enforced.
-
-There are no other installable hook ids and no console-script entry points (`[project.scripts]` in `pyproject.toml` is intentionally empty) — every check runs via `python -m pre_commit_hooks.ast_checks`.
-
 ## Available Checks
 
-`--select`/`--ignore` narrow which checks run:
+Individual checks are toggled with `--select`/`--ignore`, and `--fix` applies whatever each check's own fix logic considers safe — mirroring `ruff check`'s own `--select`/`--ignore`/`--fix` flags:
 
 - `--select=<id>,<id>` restricts the hook to **only** the listed check(s).
 - `--ignore=<id>,<id>` excludes the listed check(s) — it composes with `--select` rather than replacing it, just like `ruff check --select`/`--ignore`.
@@ -54,6 +46,8 @@ Try the checks directly, with no persistent install:
 ```bash
 uvx --from git+https://github.com/alessio-locatelli/ruff-extra-rules python -m pre_commit_hooks.ast_checks src/
 ```
+
+There are no other installable hook ids and no console-script entry point (`[project.scripts]` in `pyproject.toml` is intentionally empty) — every check runs via `python -m pre_commit_hooks.ast_checks`.
 
 ## Configuration
 
