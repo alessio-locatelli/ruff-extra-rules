@@ -54,5 +54,7 @@ src/process.py:3: TRI001: Forbidden variable name 'result' found. Use a more des
 ## Suppression
 
 ```python
-data = load_from_database()  # pytriage: ignore=TRI001
+def process():
+    data = get_user()  # pytriage: ignore=TRI001
+    return data
 ```

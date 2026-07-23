@@ -57,10 +57,14 @@ Suppress violations on specific lines:
 
 ```python
 # This will trigger a violation:
-data = load_from_database()
+def process():
+    data = get_user()
+    return data
 
 # This will be ignored:
-data = load_from_database()  # pytriage: ignore=TRI001
+def process():
+    data = get_user()  # pytriage: ignore=TRI001
+    return data
 ```
 
 **Note:** The ignore comment must be on the same line as the violation.
