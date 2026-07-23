@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("ast_checks")
 
 
-@dataclass
+@dataclass(slots=True)
 class Violation:
     check_id: str
     error_code: str
@@ -124,6 +124,8 @@ class BaseCheck:
     points, so a check with nothing check-specific doesn't have to repeat
     the override itself.
     """
+
+    __slots__ = ()
 
     @classmethod
     def add_cli_arguments(cls, _parser: argparse.ArgumentParser) -> None:

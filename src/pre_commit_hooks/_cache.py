@@ -72,6 +72,8 @@ class CacheManager:
         ...     )
     """
 
+    __slots__ = ("_cache_dir_unavailable", "_locking_unavailable", "cache_dir", "cache_version", "hook_name")
+
     DEFAULT_CACHE_DIR = Path(".cache/pre_commit_hooks")
 
     def __init__(

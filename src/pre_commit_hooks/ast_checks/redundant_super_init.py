@@ -122,6 +122,8 @@ def _parent_accepts_args(class_node: ast.ClassDef, classes: dict[str, ast.ClassD
 
 
 class RedundantSuperInitCheck(BaseCheck):
+    __slots__ = ()
+
     @property
     def check_id(self) -> str:
         return "redundant-super-init"

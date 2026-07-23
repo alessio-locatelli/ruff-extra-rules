@@ -795,6 +795,8 @@ def _apply_fixes(
 
 
 class ForbidVarsCheck(BaseCheck):
+    __slots__ = ("_level", "forbidden_names")
+
     def __init__(self, level: ForbidVarsLevel = ForbidVarsLevel.CONSERVATIVE) -> None:
         self.forbidden_names = DEFAULT_FORBIDDEN_NAMES
         self._level = level

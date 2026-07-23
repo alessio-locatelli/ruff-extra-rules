@@ -64,6 +64,8 @@ class ValidateFunctionNameFixData(TypedDict):
 
 
 class ValidateFunctionNameCheck(BaseCheck):
+    __slots__ = ()
+
     @property
     def check_id(self) -> str:
         return "validate-function-name"

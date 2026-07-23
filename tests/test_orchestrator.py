@@ -12,6 +12,7 @@ from unittest import mock
 import pytest
 
 import pre_commit_hooks.ast_checks.validate_function_name as vfn_module
+from pre_commit_hooks._cache import CacheManager
 from pre_commit_hooks.ast_checks import ALL_CHECKS, _cli, _orchestrator
 from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, is_fix_errored, is_fix_rejected, is_fixed
 from pre_commit_hooks.ast_checks._cli import main
@@ -879,7 +880,7 @@ def test_process_files_applies_each_checks_prefilter_independently(
 
     redundant_super_init = RedundantSuperInitCheck()
     spy_check = mock.MagicMock(wraps=redundant_super_init.check)
-    monkeypatch.setattr(redundant_super_init, "check", spy_check)
+    monkeypatch.setattr(RedundantSuperInitCheck, "check", spy_check)
 
     orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), redundant_super_init])
     violations = orchestrator.process_files([str(filepath)])
@@ -952,7 +953,7 @@ def test_process_files_second_call_uses_cache(tmp_path: Path, monkeypatch: pytes
     def boom(*_args: object, **_kws: object) -> None:
         raise AssertionError("_check_file should not run on a cache hit")
 
-    monkeypatch.setattr(orchestrator, "_check_file", boom)
+    monkeypatch.setattr(CheckOrchestrator, "_check_file", boom)
     second = orchestrator.process_files([str(filepath)])
     assert second[str(filepath)][0].error_code == "TRI001"
 
@@ -978,7 +979,7 @@ def test_cache_hit_and_cache_miss_report_equivalent_violations(tmp_path: Path, m
         raise AssertionError("_check_file should not run on a cache hit")
 
     cache_hit_orchestrator = CheckOrchestrator(checks=checks)
-    monkeypatch.setattr(cache_hit_orchestrator, "_check_file", boom)
+    monkeypatch.setattr(CheckOrchestrator, "_check_file", boom)
     cache_hit = cache_hit_orchestrator.process_files([str(filepath)])[str(filepath)]
 
     def as_comparable(v: Violation) -> tuple[str, str, int, int, str, bool]:
@@ -1065,7 +1066,7 @@ def test_cache_violations_serialization_error_is_caught(tmp_path: Path, monkeypa
     def boom(*_args: object, **_kws: object) -> None:
         raise TypeError("simulated cache backend failure")
 
-    monkeypatch.setattr(orchestrator.cache, "set_cached_result", boom)
+    monkeypatch.setattr(CacheManager, "set_cached_result", boom)
 
     # Must not raise, just skip caching for this file.
     violations = orchestrator.process_files([str(filepath)])
@@ -1083,7 +1084,7 @@ def test_process_files_check_exception_is_logged_and_skipped(tmp_path: Path, mon
     def boom(*_args: object, **_kws: object) -> None:
         raise ValueError("simulated check failure")
 
-    monkeypatch.setattr(forbid_vars, "check", boom)
+    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
 
     orchestrator = CheckOrchestrator(checks=[forbid_vars, ExcessiveBlankLinesCheck()])
     violations = orchestrator.process_files([str(filepath)])
@@ -1105,7 +1106,7 @@ def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monk
     def boom(*_args: object, **_kwargs: object) -> list[Violation]:
         raise ValueError("simulated check failure")
 
-    monkeypatch.setattr(forbid_vars, "check", boom)
+    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
 
     orchestrator = CheckOrchestrator(checks=[forbid_vars])
     violations = orchestrator.process_files([str(filepath)])
@@ -1126,13 +1127,13 @@ def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: p
     original_check = forbid_vars.check
     calls = {"n": 0}
 
-    def flaky_check(fp: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def flaky_check(_self: ForbidVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
         calls["n"] += 1
         if calls["n"] == 1:
             raise ValueError("simulated check failure")
         return original_check(fp, tree, source)
 
-    monkeypatch.setattr(forbid_vars, "check", flaky_check)
+    monkeypatch.setattr(ForbidVarsCheck, "check", flaky_check)
 
     orchestrator = CheckOrchestrator(checks=[forbid_vars])
     first = orchestrator.process_files([str(filepath)])
@@ -1264,10 +1265,10 @@ def test_apply_fixes_marks_violation_rejected_when_fix_produces_invalid_syntax(
 
     forbid_vars = ForbidVarsCheck()
 
-    def broken_fix(fp: Path, *_args: object, **_kwargs: object) -> None:
+    def broken_fix(_self: ForbidVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
         atomic_write_text(fp, "def broken(:\n", "utf-8")
 
-    monkeypatch.setattr(forbid_vars, "fix", broken_fix)
+    monkeypatch.setattr(ForbidVarsCheck, "fix", broken_fix)
 
     checks: list[ASTCheck] = [forbid_vars, ExcessiveBlankLinesCheck()]
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
@@ -1303,7 +1304,7 @@ def test_apply_fixes_marks_violation_errored_when_fix_raises_unexpectedly(
     def broken_fix(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("simulated fix bug")
 
-    monkeypatch.setattr(forbid_vars, "fix", broken_fix)
+    monkeypatch.setattr(ForbidVarsCheck, "fix", broken_fix)
 
     checks: list[ASTCheck] = [forbid_vars, ExcessiveBlankLinesCheck()]
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
@@ -1344,7 +1345,7 @@ def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
 
     forbid_vars = ForbidVarsCheck()
 
-    def partial_then_raise(fp: Path, *_args: object, **_kwargs: object) -> None:
+    def partial_then_raise(_self: ForbidVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
         # Simulates a multi-write check that already committed the fix for
         # "data" before crashing while attempting "result".
         atomic_write_text(
@@ -1360,7 +1361,7 @@ def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
         )
         raise RuntimeError("simulated fix bug partway through")
 
-    monkeypatch.setattr(forbid_vars, "fix", partial_then_raise)
+    monkeypatch.setattr(ForbidVarsCheck, "fix", partial_then_raise)
 
     orchestrator = CheckOrchestrator(checks=[forbid_vars], fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
@@ -1397,7 +1398,7 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
 
     forbid_vars = ForbidVarsCheck()
 
-    def fix_then_raise(fp: Path, *_args: object, **_kwargs: object) -> None:
+    def fix_then_raise(_self: ForbidVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
         atomic_write_text(
             fp,
             "import requests\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n",
@@ -1405,7 +1406,7 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
         )
         raise RuntimeError("simulated cleanup bug after a successful fix")
 
-    monkeypatch.setattr(forbid_vars, "fix", fix_then_raise)
+    monkeypatch.setattr(ForbidVarsCheck, "fix", fix_then_raise)
 
     orchestrator = CheckOrchestrator(checks=[forbid_vars], fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
@@ -1518,42 +1519,42 @@ def test_apply_fixes_marks_errored_violation_of_a_multi_write_check_when_apply_f
 
 
 def _disappear_before_refetch(
-    orchestrator: CheckOrchestrator, _forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
+    _orchestrator: CheckOrchestrator, _forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # If the file can't be re-read inside _apply_fixes (e.g. deleted by a
     # concurrent process), that check's fix is skipped rather than crashing.
-    original_read = orchestrator._read_source
+    original_read = CheckOrchestrator._read_source
     calls = {"n": 0}
 
-    def flaky_read(fp: Path) -> tuple[str, str] | None:
+    def flaky_read(self: CheckOrchestrator, fp: Path) -> tuple[str, str] | None:
         calls["n"] += 1
         if calls["n"] == 1:
-            return original_read(fp)
+            return original_read(self, fp)
         return None
 
-    monkeypatch.setattr(orchestrator, "_read_source", flaky_read)
+    monkeypatch.setattr(CheckOrchestrator, "_read_source", flaky_read)
 
 
 def _disappear_after_fix(
-    orchestrator: CheckOrchestrator, _forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
+    _orchestrator: CheckOrchestrator, _forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # If the file can't be re-read for the post-fix verification (e.g.
     # deleted right after the fix wrote it), the fix isn't reported as
     # fixed even though it actually happened — this run just can't confirm
     # it, so it stays conservative rather than guessing.
-    original_read = orchestrator._read_source
+    original_read = CheckOrchestrator._read_source
     calls = {"n": 0}
 
-    def flaky_read(fp: Path) -> tuple[str, str] | None:
+    def flaky_read(self: CheckOrchestrator, fp: Path) -> tuple[str, str] | None:
         calls["n"] += 1
         # Call 1 is _check_file's own initial read, call 2 is _apply_fixes'
         # pre-fix read — both must succeed so the real fix actually runs.
         # Call 3 is the new post-fix verification read.
         if calls["n"] <= 2:
-            return original_read(fp)
+            return original_read(self, fp)
         return None
 
-    monkeypatch.setattr(orchestrator, "_read_source", flaky_read)
+    monkeypatch.setattr(CheckOrchestrator, "_read_source", flaky_read)
 
 
 def _recompute_finds_no_fixable_violations(
@@ -1562,13 +1563,13 @@ def _recompute_finds_no_fixable_violations(
     original_check = forbid_vars.check
     calls = {"n": 0}
 
-    def flaky_check(fp: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def flaky_check(_self: ForbidVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
         calls["n"] += 1
         if calls["n"] == 1:
             return original_check(fp, tree, source)
         return []
 
-    monkeypatch.setattr(forbid_vars, "check", flaky_check)
+    monkeypatch.setattr(ForbidVarsCheck, "check", flaky_check)
 
 
 def _recompute_raises(
@@ -1582,28 +1583,28 @@ def _recompute_raises(
     original_check = forbid_vars.check
     calls = {"n": 0}
 
-    def flaky_check(fp: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def flaky_check(_self: ForbidVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
         calls["n"] += 1
         if calls["n"] == 1:
             return original_check(fp, tree, source)
         raise ValueError("simulated recompute failure")
 
-    monkeypatch.setattr(forbid_vars, "check", flaky_check)
+    monkeypatch.setattr(ForbidVarsCheck, "check", flaky_check)
 
 
 def _fix_returns_false(
-    _orchestrator: CheckOrchestrator, forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
+    _orchestrator: CheckOrchestrator, _forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(forbid_vars, "fix", lambda *_a, **_k: False)
+    monkeypatch.setattr(ForbidVarsCheck, "fix", lambda *_a, **_k: False)
 
 
 def _fix_raises(
-    _orchestrator: CheckOrchestrator, forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
+    _orchestrator: CheckOrchestrator, _forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def boom(*_args: object, **_kws: object) -> bool:
         raise RuntimeError("simulated fix failure")
 
-    monkeypatch.setattr(forbid_vars, "fix", boom)
+    monkeypatch.setattr(ForbidVarsCheck, "fix", boom)
 
 
 @pytest.mark.parametrize(
@@ -1686,9 +1687,9 @@ def test_all_checks_have_unique_check_ids_and_error_codes() -> None:
 def test_load_checks_check_specific_args_are_applied(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # No shipped check currently has a configurable `__init__`, so this
-    # exercises the generic re-instantiate-with-kwargs branch in
-    # `load_checks` against a synthetic check rather than a real one.
+    # Exercises the generic re-instantiate-with-kwargs branch in
+    # `load_checks` against a synthetic check with a second, unrelated
+    # configurable `__init__`, rather than forbid-vars' own.
     class ConfigurableCheck:
         check_id = "configurable"
 

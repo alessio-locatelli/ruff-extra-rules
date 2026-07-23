@@ -22,7 +22,7 @@ class PatternType(Enum):
     LITERAL_IDENTITY = auto()  # foo = "foo"
 
 
-@dataclass
+@dataclass(slots=True)
 class AssignmentInfo:
     var_name: str
     line: int
@@ -42,7 +42,7 @@ class AssignmentInfo:
     is_rebinding_marker: bool = False
 
 
-@dataclass
+@dataclass(slots=True)
 class UsageInfo:
     var_name: str
     line: int
@@ -83,7 +83,7 @@ class UsageInfo:
     fstring_field_span: tuple[int, int] | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class VariableLifecycle:
     assignment: AssignmentInfo
     uses: list[UsageInfo]

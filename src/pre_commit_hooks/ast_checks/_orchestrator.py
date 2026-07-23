@@ -43,31 +43,48 @@ type ViolationKey = tuple[int, int, str]  # (line, col, message)
 
 def _fingerprint_default(value: object) -> object:
     """`json.dumps(..., default=...)` handler for the value shapes a check's
-    own `vars()` can contain but that `json` can't natively serialize: a
-    `set`'s iteration order depends on PYTHONHASHSEED (randomized per
-    process by default), so it's sorted first rather than dumped as-is —
-    otherwise the same config would fingerprint differently across process
-    runs, making the cache key (and so the cache itself) useless. Anything
-    else falls back to repr() rather than raising, since vars() can pick up
-    values this generic and unopinionated (e.g. a test's monkeypatched
-    instance attribute) that were never meant to be "config" in the first
-    place — the fingerprint just needs to not crash construction, not be
-    meaningful for every possible value a check instance could ever hold.
+    own instance state (see `_instance_state`) can contain but that `json`
+    can't natively serialize: a `set`'s iteration order depends on
+    PYTHONHASHSEED (randomized per process by default), so it's sorted
+    first rather than dumped as-is — otherwise the same config would
+    fingerprint differently across process runs, making the cache key (and
+    so the cache itself) useless. Anything else falls back to repr() rather
+    than raising, since instance state can pick up values this generic and
+    unopinionated (e.g. a test's monkeypatched instance attribute) that
+    were never meant to be "config" in the first place — the fingerprint
+    just needs to not crash construction, not be meaningful for every
+    possible value a check instance could ever hold.
     """
     if isinstance(value, (set, frozenset)):
         return sorted(value)
     return repr(value)
 
 
-def _fingerprint_check(check: ASTCheck) -> str:
-    """Stable fingerprint of a check instance's own state — effectively its
-    constructor arguments, so two instances of the same check with different
-    configuration wouldn't share a cache entry. Checks with no `__init__`
-    override (most of them) have no instance attributes at all, so this is
-    deliberately a generic `vars()` dump rather than something every check
+def _instance_state(check: ASTCheck) -> dict[str, object]:
+    """Every attribute making up `check`'s own instance state — effectively
+    its constructor arguments, so two instances of the same check with
+    different configuration wouldn't share a cache entry. Checks with no
+    `__init__` override (most of them) have no instance state at all, so
+    this deliberately walks both `__slots__` (across the whole MRO, since a
+    subclass's own `__slots__` doesn't include an ancestor's) and any
+    `__dict__` a check might still have, rather than something every check
     must opt into.
     """
-    return json.dumps(vars(check), default=_fingerprint_default, sort_keys=True)
+    state: dict[str, object] = {}
+    for cls in type(check).__mro__:
+        for slot in cls.__dict__.get("__slots__", ()):
+            state[slot] = getattr(check, slot)
+    instance_dict = getattr(check, "__dict__", None)
+    if instance_dict:
+        state.update(instance_dict)
+    return state
+
+
+def _fingerprint_check(check: ASTCheck) -> str:
+    """Stable fingerprint of a check instance's own state (see
+    `_instance_state`).
+    """
+    return json.dumps(_instance_state(check), default=_fingerprint_default, sort_keys=True)
 
 
 class CheckOrchestrator:
@@ -80,6 +97,8 @@ class CheckOrchestrator:
     4. Applying fixes when requested
     5. Reporting violations
     """
+
+    __slots__ = ("cache", "checks", "fix_mode", "rule_failures", "unprocessable_files")
 
     def __init__(
         self,

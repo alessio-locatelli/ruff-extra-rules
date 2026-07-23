@@ -32,7 +32,7 @@ logger = logging.getLogger("excessive_blank_lines")
 IGNORE_PATTERN = ignore_pattern_for("TRI002")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _BlankRunViolation:
     line: int
     anchor_line: int
@@ -198,6 +198,8 @@ def fix_file_content(source: str, tree: ast.Module) -> str:
 
 
 class ExcessiveBlankLinesCheck(BaseCheck):
+    __slots__ = ()
+
     @property
     def check_id(self) -> str:
         return "excessive-blank-lines"

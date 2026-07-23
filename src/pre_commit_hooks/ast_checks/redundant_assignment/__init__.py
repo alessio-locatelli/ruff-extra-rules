@@ -81,6 +81,8 @@ def format_message(var_name: str, pattern_type: str) -> str:
 
 
 class RedundantAssignmentCheck(BaseCheck):
+    __slots__ = ("_level",)
+
     def __init__(self, level: AggressivenessLevel = AggressivenessLevel.CONSERVATIVE) -> None:
         self._level = level
 

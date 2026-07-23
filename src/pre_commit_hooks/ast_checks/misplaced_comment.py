@@ -84,7 +84,7 @@ def is_bracket_only_line(tokens: tuple[tokenize.TokenInfo, ...], bracket_token_i
     return all(t.type == tokenize.OP and t.string in ")}]" for t in code_tokens)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _MisplacedComment:
     bracket_line: int
     comment_line: int
@@ -136,6 +136,8 @@ def _scan_misplaced_comments(
 
 
 class MisplacedCommentCheck(BaseCheck):
+    __slots__ = ()
+
     @property
     def check_id(self) -> str:
         return CHECK_ID

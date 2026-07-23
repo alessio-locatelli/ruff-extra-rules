@@ -244,7 +244,7 @@ def test_unavailable_cache_dir_short_circuits_without_touching_filesystem(
     def boom(*_args: object, **_kwargs: object) -> Path:
         raise AssertionError("_get_cache_path should not run once the cache dir is known unavailable")
 
-    monkeypatch.setattr(cache, "_get_cache_path", boom)
+    monkeypatch.setattr(CacheManager, "_get_cache_path", boom)
 
     assert cache.get_cached_result(sample_file, "test-hook") is None
     cache.set_cached_result(sample_file, "test-hook", {"violations": []})

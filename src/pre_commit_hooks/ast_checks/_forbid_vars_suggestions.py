@@ -22,14 +22,14 @@ class Confidence(StrEnum):
     SUGGESTION_ONLY = "suggestion_only"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RenameProposal:
     name: str
     confidence: Confidence
     evidence: frozenset[str]
 
 
-@dataclass
+@dataclass(slots=True)
 class ScopeInfo:
     node: ScopeNode
     parent: ScopeInfo | None
@@ -50,7 +50,7 @@ class ScopeInfo:
     class_references: set[str] = field(default_factory=set)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Assignment:
     target: ast.Name
     value: ast.expr
@@ -58,13 +58,15 @@ class Assignment:
     scope: ScopeInfo
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CallArgument:
     call: ast.Call
     position: int | str
 
 
 class _Index:
+    __slots__ = ("root",)
+
     def __init__(self, tree: ast.Module) -> None:
         self.root = ScopeInfo(tree, None)
         self._build_scope(self.root, tree.body)
@@ -290,7 +292,7 @@ def plan_suggestions(
     return plan
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _PlannedProposal:
     assignment: Assignment
     proposal: RenameProposal
