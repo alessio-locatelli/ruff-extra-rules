@@ -82,6 +82,31 @@ def test_ambiguous_or_irregular_annotations_do_not_produce_names(source: str) ->
 
 
 @pytest.mark.parametrize(
+    "source",
+    [
+        "from typing import Dict\ndef f():\n    data: Dict[str, int] = make()\n",
+        "from typing import Tuple\ndef f():\n    data: Tuple[str, ...] = make()\n",
+        "from typing import List\ndef f():\n    data: List[str] = make()\n",
+        "from typing import Set\ndef f():\n    data: Set[str] = make()\n",
+        "from typing import Dict\ndef f():\n    data: Dict = make()\n",
+        "def f(obj):\n    data = obj.type\n    return data\n",
+        "def f():\n    data = get_id()\n    return data\n",
+    ],
+    ids=[
+        "typing-dict-subscripted",
+        "typing-tuple-subscripted",
+        "typing-list-subscripted",
+        "typing-set-subscripted",
+        "typing-dict-bare",
+        "attribute-shadows-type-builtin",
+        "producer-prefix-shadows-id-builtin",
+    ],
+)
+def test_builtin_shadowing_candidates_never_produce_names(source: str) -> None:
+    _assert_plan_for(source, "data", None, None)
+
+
+@pytest.mark.parametrize(
     ("source", "name", "confidence"),
     [
         ("def f():\n    result = get_user()\n", "user", Confidence.SUGGESTION_ONLY),

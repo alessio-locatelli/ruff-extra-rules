@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import keyword
 import re
 from collections import defaultdict
@@ -796,7 +797,12 @@ def _is_public_attribute(name: str) -> bool:
 
 
 def _is_valid_name(name: str, forbidden_names: set[str]) -> bool:
-    return bool(_SNAKE_CASE.fullmatch(name)) and not keyword.iskeyword(name) and name not in forbidden_names
+    return (
+        bool(_SNAKE_CASE.fullmatch(name))
+        and not keyword.iskeyword(name)
+        and name not in forbidden_names
+        and name not in _BUILTIN_NAMES
+    )
 
 
 def _to_snake_case(name: str) -> str:
@@ -875,3 +881,4 @@ _IRREGULAR_WORDS = {
 _CAMEL_ACRONYM_BOUNDARY = re.compile(r"([A-Z]+)([A-Z][a-z])")
 _CAMEL_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")
 _SNAKE_CASE = re.compile(r"[a-z][a-z0-9_]*")
+_BUILTIN_NAMES = frozenset(dir(builtins))
