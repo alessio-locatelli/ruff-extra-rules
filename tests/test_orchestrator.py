@@ -18,7 +18,7 @@ from pre_commit_hooks.ast_checks._cli import main
 from pre_commit_hooks.ast_checks._discovery import expand_directories, filter_excluded_files
 from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, load_checks
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
-from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck
+from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck, ForbidVarsLevel
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
 from tests.factories import ViolationFactory
 
@@ -477,7 +477,7 @@ def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: 
         filepath.write_text("data = 1\n")
         subprocess.run([git, "add", "module.py"], check=True, cwd=tmp_path)  # noqa: S603
 
-        exit_code = main([str(tmp_path), "--select", "forbid-vars"])
+        exit_code = main([str(tmp_path), "--select", "forbid-vars", "--forbid-vars-level", "permissive"])
 
         assert exit_code == 1
         assert "TRI001" in capsys.readouterr().err
@@ -503,10 +503,10 @@ def test_main_directory_argument_matches_explicit_file_argument_for_untracked_fi
         untracked = tmp_path / "untracked.py"
         untracked.write_text("result = 2\n")
 
-        assert main([str(untracked), "--select", "forbid-vars"]) == 1
+        assert main([str(untracked), "--select", "forbid-vars", "--forbid-vars-level", "permissive"]) == 1
         assert "TRI001" in capsys.readouterr().err
 
-        assert main([str(tmp_path), "--select", "forbid-vars"]) == 1
+        assert main([str(tmp_path), "--select", "forbid-vars", "--forbid-vars-level", "permissive"]) == 1
         assert "TRI001" in capsys.readouterr().err
     finally:
         os.chdir(original_dir)
@@ -531,7 +531,7 @@ def test_main_directory_scan_does_not_crash_on_a_file_with_a_non_utf8_name(tmp_p
         with Path(os.fsdecode(bad_path_bytes)).open("wb") as f:
             f.write(b"result = 1\n")
 
-        assert main([str(tmp_path), "--select", "forbid-vars"]) == 1
+        assert main([str(tmp_path), "--select", "forbid-vars", "--forbid-vars-level", "permissive"]) == 1
     finally:
         os.chdir(original_dir)
 
@@ -545,7 +545,7 @@ def test_process_files_handles_utf8_bom(tmp_path: Path) -> None:
     filepath = tmp_path / "with_bom.py"
     filepath.write_bytes(b"\xef\xbb\xbfdata = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
     violations = orchestrator.process_files([str(filepath)])
 
     assert len(violations[str(filepath)]) == 1
@@ -881,7 +881,7 @@ def test_process_files_applies_each_checks_prefilter_independently(
     spy_check = mock.MagicMock(wraps=redundant_super_init.check)
     monkeypatch.setattr(redundant_super_init, "check", spy_check)
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(), redundant_super_init])
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), redundant_super_init])
     violations = orchestrator.process_files([str(filepath)])
 
     spy_check.assert_not_called()
@@ -945,7 +945,7 @@ def test_process_files_second_call_uses_cache(tmp_path: Path, monkeypatch: pytes
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
     first = orchestrator.process_files([str(filepath)])
     assert first[str(filepath)][0].error_code == "TRI001"
 
@@ -968,7 +968,7 @@ def test_cache_hit_and_cache_miss_report_equivalent_violations(tmp_path: Path, m
     # cached one.
     filepath = tmp_path / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
-    checks: list[ASTCheck] = [ForbidVarsCheck(), ExcessiveBlankLinesCheck()]
+    checks: list[ASTCheck] = [ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), ExcessiveBlankLinesCheck()]
 
     cache_miss_orchestrator = CheckOrchestrator(checks=checks)
     cache_miss = cache_miss_orchestrator.process_files([str(filepath)])[str(filepath)]
@@ -993,10 +993,12 @@ def test_process_files_different_check_set_forces_recheck(tmp_path: Path) -> Non
     filepath = tmp_path / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
 
-    forbid_vars_only = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    forbid_vars_only = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
     forbid_vars_only.process_files([str(filepath)])
 
-    both_checks = CheckOrchestrator(checks=[ForbidVarsCheck(), ExcessiveBlankLinesCheck()])
+    both_checks = CheckOrchestrator(
+        checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), ExcessiveBlankLinesCheck()]
+    )
     violations = both_checks.process_files([str(filepath)])
 
     error_codes = {v.error_code for v in violations[str(filepath)]}
@@ -1058,7 +1060,7 @@ def test_cache_violations_serialization_error_is_caught(tmp_path: Path, monkeypa
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
 
     def boom(*_args: object, **_kws: object) -> None:
         raise TypeError("simulated cache backend failure")
@@ -1120,7 +1122,7 @@ def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: p
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    forbid_vars = ForbidVarsCheck()
+    forbid_vars = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
     original_check = forbid_vars.check
     calls = {"n": 0}
 
@@ -1872,7 +1874,7 @@ def test_main_reports_column_alongside_line(tmp_path: Path, capsys: pytest.Captu
     filepath = tmp_path / "module.py"
     filepath.write_text("def process():\n    data = requests.get(url)\n    return data\n")
 
-    exit_code = main([str(filepath), "--select", "forbid-vars"])
+    exit_code = main([str(filepath), "--select", "forbid-vars", "--forbid-vars-level", "permissive"])
     assert exit_code == 1
 
     assert f"{filepath}:2:5: TRI001:" in capsys.readouterr().err
@@ -2294,6 +2296,35 @@ def test_main_redundant_assignment_level_rejects_unknown_value(
     assert "invalid choice" in capsys.readouterr().err
 
 
+def test_main_forbid_vars_level_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # See docs/adr/0031-forbid-vars-conservative-reporting-default.md.
+    # "result = 42" has no suggested rename, so it's a clean way to tell the
+    # two presets apart end-to-end through the real CLI.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("def other():\n    result = 42\n    return result\n")
+
+    default_exit_code = main([str(filepath), "--select", "forbid-vars"])
+    assert default_exit_code == 0
+
+    conservative_exit_code = main([str(filepath), "--select", "forbid-vars", "--forbid-vars-level", "conservative"])
+    assert conservative_exit_code == 0
+
+    permissive_exit_code = main([str(filepath), "--select", "forbid-vars", "--forbid-vars-level", "permissive"])
+    assert permissive_exit_code == 1
+    assert "'result'" in capsys.readouterr().err
+
+
+def test_main_forbid_vars_level_rejects_unknown_value(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    with pytest.raises(SystemExit) as exc_info:
+        main([str(filepath), "--forbid-vars-level", "bogus"])
+
+    assert exc_info.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("flag", ["--select", "--ignore"], ids=["select", "ignore"])
 def test_main_unknown_check_name_returns_one(tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str) -> None:
     filepath = tmp_path / "module.py"
@@ -2336,7 +2367,7 @@ def test_main_trailing_comma_does_not_report_blank_unknown_check(
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    exit_code = main([str(filepath), flag, "forbid-vars,"])
+    exit_code = main([str(filepath), flag, "forbid-vars,", "--forbid-vars-level", "permissive"])
     err = capsys.readouterr().err
 
     assert "Unknown checks" not in err

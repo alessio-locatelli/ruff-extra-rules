@@ -216,7 +216,16 @@ def test_verbose_flag_does_not_change_violations_or_exit_code(tmp_path: Path) ->
     filepath.write_text("data = requests.get(url)\n")
 
     def _run(*extra_args: str) -> subprocess.CompletedProcess[str]:
-        cmd = [sys.executable, "-m", "pre_commit_hooks.ast_checks", "--select", "forbid-vars", *extra_args]
+        cmd = [
+            sys.executable,
+            "-m",
+            "pre_commit_hooks.ast_checks",
+            "--select",
+            "forbid-vars",
+            "--forbid-vars-level",
+            "permissive",
+            *extra_args,
+        ]
         return subprocess.run([*cmd, str(filepath)], capture_output=True, text=True, check=False, timeout=30)  # noqa: S603
 
     quiet = _run()

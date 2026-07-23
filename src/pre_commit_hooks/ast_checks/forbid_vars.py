@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ast
 import logging
+from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from ._base import (
@@ -26,6 +27,7 @@ from ._forbid_vars_suggestions import Confidence, plan_suggestions
 from ._scope import iter_within_scope_from
 
 if TYPE_CHECKING:
+    import argparse
     from collections.abc import Iterator
     from pathlib import Path
 
@@ -54,6 +56,13 @@ class ForbidVarsFixData(TypedDict):
 
 
 DEFAULT_FORBIDDEN_NAMES = {"data", "result"}
+
+
+class ForbidVarsLevel(Enum):
+    """See ForbidVarsCheck.check() and docs/adr/0031-forbid-vars-conservative-reporting-default.md."""
+
+    CONSERVATIVE = auto()
+    PERMISSIVE = auto()
 
 
 def _function_name_describes_parameter(function_name: str, parameter_name: VariableName) -> bool:
@@ -786,8 +795,9 @@ def _apply_fixes(
 
 
 class ForbidVarsCheck(BaseCheck):
-    def __init__(self) -> None:
+    def __init__(self, level: ForbidVarsLevel = ForbidVarsLevel.CONSERVATIVE) -> None:
         self.forbidden_names = DEFAULT_FORBIDDEN_NAMES
+        self._level = level
 
     @property
     def check_id(self) -> str:
@@ -799,6 +809,26 @@ class ForbidVarsCheck(BaseCheck):
 
     def get_prefilter_pattern(self) -> list[str] | None:
         return sorted(self.forbidden_names)
+
+    @classmethod
+    def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
+        parser.add_argument(
+            "--forbid-vars-level",
+            choices=["conservative", "permissive"],
+            default="conservative",
+            help=(
+                "Whether forbid-vars (TRI001) reports a forbidden name "
+                "that has no suggested replacement. 'conservative' "
+                "(default) reports a name only when a rename can be "
+                "suggested; 'permissive' reports every forbidden name "
+                "regardless. --fix only ever applies a high-confidence "
+                "suggestion at either level."
+            ),
+        )
+
+    @classmethod
+    def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
+        return {"level": ForbidVarsLevel[args.forbid_vars_level.upper()]}
 
     def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         visitor = ForbiddenNameVisitor(self.forbidden_names, source)
@@ -818,6 +848,8 @@ class ForbidVarsCheck(BaseCheck):
             if proposal is not None:
                 v["suggestion"] = proposal.name
                 v["auto_fixable"] = proposal.confidence is Confidence.AUTO_FIX
+            if self._level is ForbidVarsLevel.CONSERVATIVE and not v["suggestion"]:
+                continue
             message = f"Forbidden variable name '{v['name']}' found."
             if v.get("suggestion"):
                 if v["auto_fixable"]:
