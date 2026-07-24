@@ -61,6 +61,7 @@ def process():
     data = get_user()
     return data
 
+
 # This will be ignored:
 def process():
     data = get_user()  # pytriage: ignore=TRI001

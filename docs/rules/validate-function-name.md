@@ -14,13 +14,16 @@ def get_users() -> list[User]:
     with open("users.json") as f:
         return json.load(f)
 
+
 def get_active(user: User) -> bool:
     return user.status == "active"
+
 
 # Good - specific naming:
 def load_users() -> list[User]:
     with open("users.json") as f:
         return json.load(f)
+
 
 def is_active(user: User) -> bool:
     return user.status == "active"

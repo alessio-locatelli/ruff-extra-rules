@@ -11,7 +11,7 @@ When auto-formatters move closing brackets to new lines, comments on those lines
 ```python
 # Bad - comment is on bracket line:
 result = func(
-    arg
+    arg,
 )  # Comment about the function call
 
 # Fixed - comment moves to expression line:
