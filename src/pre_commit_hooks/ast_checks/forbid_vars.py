@@ -852,14 +852,10 @@ class ForbidVarsCheck(BaseCheck):
                 v["auto_fixable"] = proposal.confidence is Confidence.AUTO_FIX
             if self._level is ForbidVarsLevel.CONSERVATIVE and not v["suggestion"]:
                 continue
-            message = f"Forbidden variable name '{v['name']}' found."
             if v.get("suggestion"):
-                if v["auto_fixable"]:
-                    message += f" Consider renaming to '{v['suggestion']}'."
-                else:
-                    message += f" Suggestion only: consider renaming to '{v['suggestion']}'."
+                message = f"'{v['name']}' is a meaningless variable name — '{v['suggestion']}' is more descriptive."
             else:
-                message += " Use a more descriptive name."
+                message = f"Forbidden variable name '{v['name']}' found. Use a more descriptive name."
             message += " Or add '# pytriage: ignore=TRI001' to suppress."
 
             violations.append(
