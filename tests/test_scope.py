@@ -61,12 +61,14 @@ def test_iter_within_scope_starts_inside_a_function_scope() -> None:
             {"local_var"},
         ),
         (
-            "def outer():\n"
-            "    class Nested:\n"
-            "        attr = 1\n"
-            "        def method(self):\n"
-            "            method_var = 2\n"
-            "    return Nested\n",
+            (
+                "def outer():\n"
+                "    class Nested:\n"
+                "        attr = 1\n"
+                "        def method(self):\n"
+                "            method_var = 2\n"
+                "    return Nested\n"
+            ),
             False,
             {"Nested"},
         ),

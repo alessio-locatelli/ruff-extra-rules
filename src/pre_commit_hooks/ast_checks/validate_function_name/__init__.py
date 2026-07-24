@@ -151,7 +151,7 @@ class ValidateFunctionNameCheck(BaseCheck):
                     # post-fix re-check attribute the rejection to this
                     # specific violation instead of the whole batch).
                     mark_fix_rejected(violation)
-                except Exception:  # noqa: BLE001 -- caught, isolated (ch. 5), and logged below; not swallowed
+                except Exception:
                     # A bug in apply_fix() itself, distinct from
                     # FixValidationError above: mark it so the orchestrator's
                     # post-fix re-check reports this specific violation as

@@ -326,7 +326,7 @@ class CheckOrchestrator:
             try:
                 violations = check.check(filepath, tree, source)
                 all_violations.extend(violations)
-            except Exception:  # noqa: BLE001 -- caught, isolated (ch. 5), and logged below; not swallowed
+            except Exception:
                 # Debug-only: reported cleanly via rule_failures below — see
                 # _read_source's own docstring for why ERROR-level
                 # .exception() logging here would just be redundant noise.
@@ -416,7 +416,7 @@ class CheckOrchestrator:
                     )
                     for v in fresh_violations:
                         mark_fix_rejected(v)
-                except Exception:  # noqa: BLE001 -- caught, isolated (ch. 5), and logged below; not swallowed
+                except Exception:
                     # fix() itself raised — a bug in the check's own fix
                     # logic, distinct from FixValidationError (which means
                     # fix() ran to completion but atomic_write_text()
@@ -482,7 +482,7 @@ class CheckOrchestrator:
                 # first, pre-any-fix snapshot in `violations`.
                 violations[:] = [v for v in violations if v.check_id != check.check_id or not v.fixable]
                 violations.extend(fresh_violations)
-            except Exception:  # noqa: BLE001 -- caught, isolated (ch. 5), and logged below; not swallowed
+            except Exception:
                 # Anything not already handled above: e.g. the re-parse or
                 # the fresh_violations recompute itself raising. Isolated
                 # per-check like every other failure here (ch. 5), but must
@@ -563,7 +563,7 @@ class CheckOrchestrator:
 
             try:
                 fresh = check.check(filepath, final_tree, final_source)
-            except Exception:  # noqa: BLE001 -- caught, isolated (ch. 5), and logged below; not swallowed
+            except Exception:
                 # Debug-only: reported cleanly via rule_failures below — see
                 # _read_source's own docstring for why ERROR-level
                 # .exception() logging here would just be redundant noise.

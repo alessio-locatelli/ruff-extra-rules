@@ -65,9 +65,11 @@ class SuperInitChecker(ast.NodeVisitor):
                         self.violations.append(
                             (
                                 init_node.lineno,
-                                f"Redundant **kwargs forwarded to {base.id}.__init__() "
-                                "which accepts no arguments. Or add "
-                                "'# pytriage: ignore=TRI003' to suppress.",
+                                (
+                                    f"Redundant **kwargs forwarded to {base.id}.__init__() "
+                                    "which accepts no arguments. Or add "
+                                    "'# pytriage: ignore=TRI003' to suppress."
+                                ),
                             )
                         )
 

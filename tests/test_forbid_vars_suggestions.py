@@ -140,9 +140,11 @@ def test_producer_candidates_are_suggestion_only(source: str, name: str, confide
             "response",
         ),
         (
-            "import subprocess\n\ndef f():\n"
-            '    result = subprocess.run(["git", "status"])\n'
-            "    return result.returncode\n",
+            (
+                "import subprocess\n\ndef f():\n"
+                '    result = subprocess.run(["git", "status"])\n'
+                "    return result.returncode\n"
+            ),
             "result",
             "completed_process",
         ),
@@ -176,9 +178,11 @@ def test_registry_and_access_evidence_produce_autofixes(source: str, target: str
             "response",
         ),
         (
-            "import urllib.request\n\ndef f(url):\n"
-            "    result = urllib.request.urlopen(url)\n"
-            "    return result.read()\n",
+            (
+                "import urllib.request\n\ndef f(url):\n"
+                "    result = urllib.request.urlopen(url)\n"
+                "    return result.read()\n"
+            ),
             "response",
         ),
         (
@@ -222,12 +226,16 @@ def test_deserializer_argument_name_requires_a_plain_name_argument(source: str) 
 @pytest.mark.parametrize(
     "source",
     [
-        "import httpx\n\ndef f(payload):\n"
-        '    data = "".join(payload)\n'
-        '    return httpx.post("http://example.test", content=data)\n',
-        "import requests\n\ndef f(payload):\n"
-        '    data = "".join(payload)\n'
-        '    return requests.put("http://example.test", content=data)\n',
+        (
+            "import httpx\n\ndef f(payload):\n"
+            '    data = "".join(payload)\n'
+            '    return httpx.post("http://example.test", content=data)\n'
+        ),
+        (
+            "import requests\n\ndef f(payload):\n"
+            '    data = "".join(payload)\n'
+            '    return requests.put("http://example.test", content=data)\n'
+        ),
     ],
     ids=["httpx-post-content", "requests-put-content"],
 )
@@ -238,12 +246,16 @@ def test_http_body_keyword_argument_produces_content_suggestion(source: str) -> 
 @pytest.mark.parametrize(
     "source",
     [
-        "import httpx\n\ndef f(payload):\n"
-        '    data = "".join(payload)\n'
-        '    return httpx.get("http://example.test", params=data)\n',
-        "import unknown\n\ndef f(payload):\n"
-        '    data = "".join(payload)\n'
-        '    return unknown.post("http://example.test", content=data)\n',
+        (
+            "import httpx\n\ndef f(payload):\n"
+            '    data = "".join(payload)\n'
+            '    return httpx.get("http://example.test", params=data)\n'
+        ),
+        (
+            "import unknown\n\ndef f(payload):\n"
+            '    data = "".join(payload)\n'
+            '    return unknown.post("http://example.test", content=data)\n'
+        ),
     ],
     ids=["non-body-keyword", "unrecognised-module"],
 )
@@ -428,11 +440,13 @@ def test_unresolved_or_shadowed_apis_do_not_produce_names(source: str) -> None:
             Confidence.SUGGESTION_ONLY,
         ),
         (
-            "def get_user() -> User:\n"
-            "    raise NotImplementedError\n\n"
-            "def f():\n"
-            "    result = get_user()\n"
-            "    return result\n",
+            (
+                "def get_user() -> User:\n"
+                "    raise NotImplementedError\n\n"
+                "def f():\n"
+                "    result = get_user()\n"
+                "    return result\n"
+            ),
             "result",
             "user",
             Confidence.AUTO_FIX,
@@ -456,11 +470,13 @@ def test_unresolved_or_shadowed_apis_do_not_produce_names(source: str) -> None:
             None,
         ),
         (
-            "import requests\n\ndef f(url):\n"
-            "    consume(result)\n"
-            "    print(result.text)\n"
-            "    result = requests.get(url)\n"
-            "    return result\n",
+            (
+                "import requests\n\ndef f(url):\n"
+                "    consume(result)\n"
+                "    print(result.text)\n"
+                "    result = requests.get(url)\n"
+                "    return result\n"
+            ),
             "result",
             "response",
             Confidence.SUGGESTION_ONLY,
