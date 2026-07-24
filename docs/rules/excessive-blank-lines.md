@@ -15,8 +15,7 @@ Excessive blank lines after module headers create visual clutter and violate PEP
 # Licensed under the MIT License
 
 
-
-import os  # Bad - 3 blank lines
+import os  # Bad (>=2 blank lines)
 ```
 
 Fixed:
