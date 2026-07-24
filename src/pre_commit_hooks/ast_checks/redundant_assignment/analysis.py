@@ -1104,7 +1104,7 @@ class VariableTracker(ast.NodeVisitor):
             return _suspension_precedes_use(use)
         return False
 
-    def _reference_reassigned_in_range(
+    def _reference_reassigned_in_range(  # noqa: PLR0917
         self,
         name: str,
         scope_id: int,
