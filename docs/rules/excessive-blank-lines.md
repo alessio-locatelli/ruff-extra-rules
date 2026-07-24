@@ -9,14 +9,22 @@ Excessive blank lines after module headers create visual clutter and violate PEP
 ## Example
 
 ```python
-"""Module docstring."""
+# Copyright (c) 2025 Example Corp
+# All rights reserved.
+#
+# Licensed under the MIT License
 
 
 
 import os  # Bad - 3 blank lines
+```
 
-# Fixed:
-"""Module docstring."""
+Fixed:
+```py
+# Copyright (c) 2025 Example Corp
+# All rights reserved.
+#
+# Licensed under the MIT License
 
 import os  # Good - 1 blank line
 ```
