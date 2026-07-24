@@ -29,7 +29,7 @@ Meaningless variable names reduce code clarity and maintainability. See [Peter H
 ## Suggest mode (default)
 
 ```
-src/process.py:2: TRI001: Forbidden variable name 'data' found. Suggestion only: consider renaming to 'user'. Or add '# pytriage: ignore=TRI001' to suppress.
+src/process.py:2: TRI001: 'data' is a meaningless variable name — 'user' is more descriptive. Or add '# pytriage: ignore=TRI001' to suppress.
 ```
 
 **Permissive mode**, reporting a `result` binding the conservative default left out because no replacement could be suggested for it:
