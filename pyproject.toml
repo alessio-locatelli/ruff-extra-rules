@@ -74,6 +74,8 @@ ignore = [
   "TRY003",
   # print
   "T201",
+  # Missing copyright notice at top of file
+  "CPY001",
 ]
 
 [tool.ruff.lint.per-file-ignores]
