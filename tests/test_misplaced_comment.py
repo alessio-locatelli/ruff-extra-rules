@@ -61,15 +61,19 @@ def test_check_returns_no_violations(source: str) -> None:
             "result = x(\n    arg  # Short comment\n)\n",
         ),
         (
-            "result = some_function_with_very_long_name(\n"
-            "    argument_one,\n"
-            "    argument_two,\n"
-            ")  # This comment is deliberately long enough to force preceding placement\n",
-            "result = some_function_with_very_long_name(\n"
-            "    argument_one,\n"
-            "    # This comment is deliberately long enough to force preceding placement\n"
-            "    argument_two,\n"
-            ")\n",
+            (
+                "result = some_function_with_very_long_name(\n"
+                "    argument_one,\n"
+                "    argument_two,\n"
+                ")  # This comment is deliberately long enough to force preceding placement\n"
+            ),
+            (
+                "result = some_function_with_very_long_name(\n"
+                "    argument_one,\n"
+                "    # This comment is deliberately long enough to force preceding placement\n"
+                "    argument_two,\n"
+                ")\n"
+            ),
         ),
     ],
     ids=["inline-placement", "preceding-placement"],
@@ -113,15 +117,19 @@ def test_fix_is_noop_when_nothing_to_fix(source: str, tmp_path: Path) -> None:
             "foo(\r\n    bar,  # comment\r\n)\r\n",
         ),
         (
-            "result = some_function_with_very_long_name(\r\n"
-            "    argument_one,\r\n"
-            "    argument_two,\r\n"
-            ")  # This comment is deliberately long enough to force preceding placement\r\n",
-            "result = some_function_with_very_long_name(\r\n"
-            "    argument_one,\r\n"
-            "    # This comment is deliberately long enough to force preceding placement\r\n"
-            "    argument_two,\r\n"
-            ")\r\n",
+            (
+                "result = some_function_with_very_long_name(\r\n"
+                "    argument_one,\r\n"
+                "    argument_two,\r\n"
+                ")  # This comment is deliberately long enough to force preceding placement\r\n"
+            ),
+            (
+                "result = some_function_with_very_long_name(\r\n"
+                "    argument_one,\r\n"
+                "    # This comment is deliberately long enough to force preceding placement\r\n"
+                "    argument_two,\r\n"
+                ")\r\n"
+            ),
         ),
     ],
     ids=["inline-placement", "preceding-placement"],

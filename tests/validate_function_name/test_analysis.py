@@ -217,11 +217,13 @@ def get_config(settings):
             {"delegates_get": True},
         ),
         (
-            "def get_items(source):\n"
-            "    items = list()\n"
-            "    for x in source:\n"
-            "        items.append(x)\n"
-            "    return items\n",
+            (
+                "def get_items(source):\n"
+                "    items = list()\n"
+                "    for x in source:\n"
+                "        items.append(x)\n"
+                "    return items\n"
+            ),
             "get_items",
             {"collects": True},
         ),
@@ -296,10 +298,12 @@ def get_config(settings):
             {"mutates_args": False},
         ),
         (
-            "def get_value(counter):\n"
-            "    while counter < 10:\n"
-            "        counter = process(counter)\n"
-            "    return counter\n",
+            (
+                "def get_value(counter):\n"
+                "    while counter < 10:\n"
+                "        counter = process(counter)\n"
+                "    return counter\n"
+            ),
             "get_value",
             {"searches": False},
         ),

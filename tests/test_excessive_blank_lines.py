@@ -73,9 +73,11 @@ def test_leading_blank_lines_before_first_code_with_no_header() -> None:
     # first code line, so the whole leading run is treated as the gap
     # before the first code line.
     assert _check("\n\n\nimport os\n") == [
-        "Excessive blank lines (3) should be collapsed to 1. Add "
-        "'# pytriage: ignore=TRI002' to the line following the blank run "
-        "to suppress."
+        (
+            "Excessive blank lines (3) should be collapsed to 1. Add "
+            "'# pytriage: ignore=TRI002' to the line following the blank run "
+            "to suppress."
+        )
     ]
 
 
