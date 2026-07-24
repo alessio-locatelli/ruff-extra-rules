@@ -16,7 +16,7 @@ result = func(
 
 # Fixed - comment moves to expression line:
 result = func(
-    arg  # Comment about the function call
+    arg,  # Comment about the function call
 )
 ```
 
