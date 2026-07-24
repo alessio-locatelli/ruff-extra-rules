@@ -36,13 +36,15 @@ See [docs/adding-a-check.md](docs/adding-a-check.md) for the full walkthrough of
 - Do not write code comments.
 - **No historical/postmortem framing:** Phrases such as "the old default", "before this flag existed", "used to qualify for X", or "this code replaced database X" belong in postmortems, ADRs, specifications, or git commit message bodies.
 - Do not repeat in prose what is already expressed by tests. Unlike prose, tests are a more reliable contract that stays in sync with the code.
-- You may add a concise docstring or code comment only when the information is not already documented elsewhere and:
+- You may add a concise docstring or code comment only when the information is not already documented elsewhere **and**:
   - A business or architecture decision cannot be derived from the code (e.g., `"""We use service X instead of Y because of rate limits."""`).
   - A non-obvious hack or pitfall exists that may look like a code problem if left unexplained (e.g., `# Temporarily reduce the batch size to work around the OOM in the cloud.`).
   - There is a need to reference an external resource (e.g., `Related issue <link>.` or `See ADR-0042`).
   - There is a need to explain **why** a non-obvious action is taken (e.g., "Early exit because all items were processed", "Used a real ID in a test because…").
 - Never duplicate ADRs, specifications, or any other documentation in the code. If the code requires an explanation, add a reference (e.g., `# See ADR-0042`, `# See openspec/path-to-spec/`).
-- If a file is already bloated with prose that violates these rules, this is not an excuse to bypass them. Instead, signal that the code needs decluttering—keep any indispensable rationale in an ADR reference instead.
+- If you delete something from the file, the "why?" prose belongs in the commit body or documentation (specifications, postmortems, ADRs) — not as inline prose about functionality that no longer exists.
+- If a file is already bloated with prose that violates these rules, that is not an excuse to bypass them. Instead, signal that the code needs decluttering — retain any indispensable rationale as an ADR reference instead.
+- Immediately delete any pre-existing stale comments or prose that violates these rules.
 
 ## README and user-facing docs
 
