@@ -14,9 +14,11 @@ class Base:
     def __init__(self):
         pass
 
+
 class Child(Base):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)  # VIOLATION: Base doesn't accept kwargs
+
 
 # Fixed - matching signatures:
 class Child(Base):
