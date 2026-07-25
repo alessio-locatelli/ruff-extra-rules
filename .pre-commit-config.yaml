@@ -1,6 +1,10 @@
-# Self-dogfooding: use our own hooks + standard quality tools
+ci:
+  # Using `language: python` + `additional_dependencies: - .` will fail on CI with:
+  # /pc/clone/Th2rTdeQQtSpBbUHOU74cQ/py_env-python3.14/bin/python: Error while finding module specification for 'pre_commit_hooks.ast_checks' (ModuleNotFoundError: No module named 'pre_commit_hooks')
+  # Using `uv` requires a custom workflow (not https://pre-commit.ci/).
+  skip: [local-ruff-extra-rules]
+
 repos:
-  # Standard pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
@@ -27,12 +31,9 @@ repos:
         args: [--fix]
       - id: ruff-format
 
-  # Our own hooks, run against src/ and tests/. tests/fixtures/ is excluded:
-  # it deliberately contains "bad" (and otherwise non-representative) example
-  # code for our own test suite (see docs/adr/0009-lint-tests-directory.md).
   - repo: local
     hooks:
-      - id: ruff-extra-rules
+      - id: local-ruff-extra-rules
         name: Extra Python rule checks (self-check)
         description: Run our own AST-based checks against src/ and tests/
         # `uv run` resolves this project's own managed venv regardless of
@@ -40,14 +41,21 @@ repos:
         # outside any pre-commit-managed environment (a plain `git commit`,
         # not wrapped in `uv run`, would otherwise use whatever `python` is
         # on PATH, which won't have this src-layout package installed).
-        entry: python -m pre_commit_hooks.ast_checks
-        language: python
-        additional_dependencies:
-          - .
+        entry: uv run python -m pre_commit_hooks.ast_checks
+        language: system
         types: [python]
         files: ^(src|tests)/
+        # It deliberately contains "bad" (and otherwise non-representative) example
+        # code for our own test suite (see docs/adr/0009-lint-tests-directory.md).
         exclude: ^tests/fixtures/
         args: [--fix]
+
+  - repo: https://github.com/alessio-locatelli/ruff-extra-rules
+    rev: v0.0.36
+    hooks:
+      - id: ruff-extra-rules
+        exclude: ^tests/fixtures/
+        args: [--fix, --forbid-vars-level=permissive, --redundant-assignment-level=permissive]
 
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
