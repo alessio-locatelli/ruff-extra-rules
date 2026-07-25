@@ -18,14 +18,14 @@ Individual checks are toggled with `--select`/`--ignore`, and `--fix` applies wh
 - `--select=<id>,<id>` restricts the hook to **only** the listed check(s).
 - `--ignore=<id>,<id>` excludes the listed check(s) — it composes with `--select` rather than replacing it, just like `ruff check --select`/`--ignore`.
 
-| Rule                                                           | Code      | Description                                                              |
-| -------------------------------------------------------------- | --------- | ------------------------------------------------------------------------ |
-| [forbid-vars](docs/rules/forbid-vars.md)                       | TRI001    | Prevents meaningless variable names like `data` and `result`.            |
-| [excessive-blank-lines](docs/rules/excessive-blank-lines.md)   | TRI002    | Collapses multiple blank lines after a module header to a single one.    |
-| [redundant-super-init](docs/rules/redundant-super-init.md)     | TRI003    | Flags `**kwargs` forwarded to a parent `__init__` that accepts none.     |
-| [validate-function-name](docs/rules/validate-function-name.md) | TRI004    | Flags `get_*` functions and suggests a more specific verb.               |
-| [redundant-assignment](docs/rules/redundant-assignment.md)     | TRI005    | Flags (and optionally inlines) variable assignments that add no clarity. |
-| [misplaced-comment](docs/rules/misplaced-comment.md)           | STYLE-001 | Moves a trailing comment off a closing bracket onto the expression line. |
+| Rule                                                           | Code      | Description                                                                                  |
+| -------------------------------------------------------------- | --------- | -------------------------------------------------------------------------------------------- |
+| [forbid-vars](docs/rules/forbid-vars.md)                       | TRI001    | Prevents meaningless variable names like `data` and `result`.                                |
+| [excessive-blank-lines](docs/rules/excessive-blank-lines.md)   | TRI002    | Collapses multiple blank lines after a module header to a single one.                        |
+| [redundant-super-init](docs/rules/redundant-super-init.md)     | TRI003    | Flags `**kwargs` forwarded to a parent `__init__` that accepts none.                         |
+| [validate-function-name](docs/rules/validate-function-name.md) | TRI004    | Flags functions where `get_*` is misused or inappropriate and suggests a more specific verb. |
+| [redundant-assignment](docs/rules/redundant-assignment.md)     | TRI005    | Flags (and optionally inlines) variable assignments that add no clarity.                     |
+| [misplaced-comment](docs/rules/misplaced-comment.md)           | STYLE-001 | Moves a trailing comment off a closing bracket onto the expression line.                     |
 
 ## Installation
 
