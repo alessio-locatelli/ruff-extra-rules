@@ -1,6 +1,6 @@
 # validate-function-name (TRI004)
 
-Detects functions with `get_` prefix and suggests better names based on their behavior patterns.
+Detects functions where `get_` prefix is misused or inappropriate and suggests a more specific verb based on their behavior patterns.
 
 ## Why?
 
