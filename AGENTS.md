@@ -82,8 +82,8 @@ uv run python -m pre_commit_hooks.ast_checks --ignore=redundant-assignment --fix
 ruff check --fix .
 ruff format .
 uv run mypy src/ tests/
-npx prettier@latest . --write --cache
 taplo fmt pyproject.toml
+npm run format --silent
 uv run -- python -m slotscheck src tests
 ```
 
