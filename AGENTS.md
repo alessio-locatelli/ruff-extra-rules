@@ -4,11 +4,12 @@ Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside 
 
 ## Project Context
 
-- Personal hobby project, maintained solo by Alessio through coding agents — not used by anyone else.
-- Originally built in "vibe-coding" mode: none of the existing architecture or design decisions were deliberate choices. The messiness is inherited, not intentional — don't assume unwritten rationale behind odd patterns.
-- Before assuming a pattern here is deliberate, check whether it's covered by an ADR in `docs/adr/`. If it isn't, treat it as accretion, not intent.
+- You must follow SOLID, DRY principles, and maintain high-quality scalable and extendable architecture.
+- You must not introduce workarounds, hacks, or kludges to accommodate poor or incompatible code.
+- If existing code is flawed, incomplete, or poorly designed, you must refactor or fix it, even if this requires project-wide changes.
+- You must not bypass proper design to "make things work."
+- Don't assume unwritten rationale behind odd patterns. Before assuming a pattern here is deliberate, check whether it's covered by an ADR in `docs/adr/`. If it is not, treat it as an existing issue and report it to a user.
 - Breaking changes are allowed and expected. Don't design backward-compatibility shims, deprecation warnings, or migration paths for this project's own hook ids/CLI surface.
-- No hosted CI exists — this is a single-maintainer local repo, and the full command sequence under [Development](#development) is run locally before every commit instead. Don't add a CI badge or workflow implying automated checks run unless a real CI workflow is actually added.
 
 ## Development Guidelines
 
@@ -51,12 +52,6 @@ See [docs/adding-a-check.md](docs/adding-a-check.md) for the full walkthrough of
 - User-facing prose (README.md, `--help` text, CLI docs) must describe _current_ behavior only, in short, high-level, user-friendly language.
 - **No historical/postmortem framing.** Phrases like "the old default", "before this flag existed", "used to qualify for X" are meaningless to a reader who only has the current codebase — they imply a diff against a history the reader can't see and doesn't care about. Describe what the feature does today, full stop.
 - **No internal implementation details.** Don't expose internal scoring/threshold numbers (e.g. "semantic value score ≤ 10", "score < 50") or other implementation-level mechanics in a README. A README is a short, high-level description for a regular user, not a spec for the internals — use a concrete illustrative example instead of a formula.
-
-## ADRs
-
-An ADR records a durable architectural decision, not the history of the investigation that led to it: the problem and context, the decision, the important alternatives/trade-offs, the consequences, and any intentional limitation a future maintainer needs to know. Keep it at that level. Do not fold in: a chronological narrative of review rounds or who/what found which issue; every individual bug reproduction (one or two representative examples is enough — prefer the general rule the examples taught over the examples themselves); regression-test names (say what behavior is covered, not which test covers it); or an inventory of private helper functions (explain why the architecture needs the concept, not which function implements it).
-
-When an audit or investigation produces substantial evidence worth keeping, put the detailed findings in `docs/audits/` and have the ADR link to it rather than duplicating it. Before adding detail to an ADR, ask: would this still be useful if the implementation were rewritten but the decision stayed the same? If not, it belongs in `docs/audits/`, the tests, or the commit/PR history instead.
 
 ## Commands
 

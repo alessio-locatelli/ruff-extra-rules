@@ -19,6 +19,7 @@ import os  # Bad (>=2 blank lines)
 ```
 
 Fixed:
+
 ```py
 # Copyright (c) 2025 Example Corp
 # All rights reserved.

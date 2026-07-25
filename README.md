@@ -9,7 +9,7 @@ Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside 
 
 - This is not a standalone linter and not a `ruff` competitor. It's a small set of rules/fixups `ruff` doesn't (yet) have, run as an extra pre-commit/prek hook alongside `ruff` — not instead of it.
 - This project is a stopgap until plugin support is implemented in `ruff` ([astral-sh/ruff#283](https://github.com/astral-sh/ruff/issues/283)), and will be archived thereafter.
-- This is a best-effort proof-of-concept implemented using coding agents.
+- This is a best-effort proof-of-concept implemented using coding agents. Quality is enforced through review, manual testing, 100% coverage, and dogfooding (using it in our own projects). Please open an issue if you see anything that can be improved.
 
 ## Available Checks
 
@@ -39,37 +39,12 @@ repos:
       - id: ruff-extra-rules
 ```
 
-### Running without prek/pre-commit
-
-Try the checks directly, with no persistent install:
-
-```bash
-uvx --from git+https://github.com/alessio-locatelli/ruff-extra-rules python -m pre_commit_hooks.ast_checks src/
-```
-
-There are no other installable hook ids and no console-script entry point (`[project.scripts]` in `pyproject.toml` is intentionally empty) — every check runs via `python -m pre_commit_hooks.ast_checks`.
-
 ## Configuration
 
 ### Inline Suppression
 
-Suppress violations on specific lines:
+Use `# pytriage: ignore=<code>` (e.g., `# pytriage: ignore=TRI001`).
 
-```python
-# This will trigger a violation:
-def process():
-    data = get_user()
-    return data
+---
 
-
-# This will be ignored:
-def process():
-    data = get_user()  # pytriage: ignore=TRI001
-    return data
-```
-
-**Note:** The ignore comment must be on the same line as the violation.
-
-### Cache Location
-
-Check results are cached under `.cache/pre_commit_hooks/` relative to the process's current working directory, not a project root discovered independently of it — the same convention `mypy` (`.mypy_cache`) uses. `prek`/`pre-commit` always invoke this hook with the working directory set to the repository root, so the cache location is consistent there; running the CLI directly from elsewhere (see `AGENTS.md`) creates a separate `.cache/pre_commit_hooks/` under that directory instead. The cache itself is safe to delete at any time (see the `CACHEDIR.TAG` file it writes).
+See [FAQ](docs/faq.md) for more information.
