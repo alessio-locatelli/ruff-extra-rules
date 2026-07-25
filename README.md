@@ -9,7 +9,7 @@ Extra Python rule checks and fixups that run as a pre-commit/prek hook alongside
 ## Project Status
 
 - Stopgap until ruff adds plugin support ([astral-sh/ruff#283](https://github.com/astral-sh/ruff/issues/283)); see the [FAQ](docs/faq.md#what-will-happen-to-this-project-when-ruff-has-a-plugin-system) for what happens then.
-- This is a best-effort proof-of-concept implemented using coding agents. Quality is enforced through review, manual testing, 100% coverage, and dogfooding (using it in our own projects). Please open an issue if you see anything that can be improved.
+- This project is in alpha stage, but it is already used in a commercial project. Please open an issue if you see anything that can be improved.
 
 ## Available Checks
 
