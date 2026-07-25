@@ -1079,14 +1079,12 @@ def test_process_files_check_exception_is_logged_and_skipped(tmp_path: Path, mon
     filepath = tmp_path / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
 
-    forbid_vars = ForbidVarsCheck()
-
     def boom(*_args: object, **_kws: object) -> None:
         raise ValueError("simulated check failure")
 
     monkeypatch.setattr(ForbidVarsCheck, "check", boom)
 
-    orchestrator = CheckOrchestrator(checks=[forbid_vars, ExcessiveBlankLinesCheck()])
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(), ExcessiveBlankLinesCheck()])
     violations = orchestrator.process_files([str(filepath)])
 
     error_codes = {v.error_code for v in violations[str(filepath)]}
@@ -1101,14 +1099,12 @@ def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monk
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    forbid_vars = ForbidVarsCheck()
-
     def boom(*_args: object, **_kwargs: object) -> list[Violation]:
         raise ValueError("simulated check failure")
 
     monkeypatch.setattr(ForbidVarsCheck, "check", boom)
 
-    orchestrator = CheckOrchestrator(checks=[forbid_vars])
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations == {}
@@ -1263,14 +1259,12 @@ def test_apply_fixes_marks_violation_rejected_when_fix_produces_invalid_syntax(
         "\n\n\nimport requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    forbid_vars = ForbidVarsCheck()
-
     def broken_fix(_self: ForbidVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
         atomic_write_text(fp, "def broken(:\n", "utf-8")
 
     monkeypatch.setattr(ForbidVarsCheck, "fix", broken_fix)
 
-    checks: list[ASTCheck] = [forbid_vars, ExcessiveBlankLinesCheck()]
+    checks: list[ASTCheck] = [ForbidVarsCheck(), ExcessiveBlankLinesCheck()]
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
@@ -1299,14 +1293,12 @@ def test_apply_fixes_marks_violation_errored_when_fix_raises_unexpectedly(
         "\n\n\nimport requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    forbid_vars = ForbidVarsCheck()
-
     def broken_fix(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("simulated fix bug")
 
     monkeypatch.setattr(ForbidVarsCheck, "fix", broken_fix)
 
-    checks: list[ASTCheck] = [forbid_vars, ExcessiveBlankLinesCheck()]
+    checks: list[ASTCheck] = [ForbidVarsCheck(), ExcessiveBlankLinesCheck()]
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
@@ -1343,8 +1335,6 @@ def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
         "    return result.status_code\n"
     )
 
-    forbid_vars = ForbidVarsCheck()
-
     def partial_then_raise(_self: ForbidVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
         # Simulates a multi-write check that already committed the fix for
         # "data" before crashing while attempting "result".
@@ -1363,7 +1353,7 @@ def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
 
     monkeypatch.setattr(ForbidVarsCheck, "fix", partial_then_raise)
 
-    orchestrator = CheckOrchestrator(checks=[forbid_vars], fix_mode=True)
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()], fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
     by_line = {v.line: v for v in violations[str(filepath)]}
@@ -1396,8 +1386,6 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    forbid_vars = ForbidVarsCheck()
-
     def fix_then_raise(_self: ForbidVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
         atomic_write_text(
             fp,
@@ -1408,7 +1396,7 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
 
     monkeypatch.setattr(ForbidVarsCheck, "fix", fix_then_raise)
 
-    orchestrator = CheckOrchestrator(checks=[forbid_vars], fix_mode=True)
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()], fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
     violation = violations[str(filepath)][0]

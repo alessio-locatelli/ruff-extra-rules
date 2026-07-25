@@ -102,7 +102,7 @@ def run_check(name: str, command: list[str], files: list[str]) -> CheckTimingRes
     # comes from local globbing in collect_source_and_test_files(), never
     # from untrusted external input, so no shell is involved and no argument
     # here can inject another command.
-    result = subprocess.run(  # noqa: S603
+    completed_process = subprocess.run(  # noqa: S603
         [*command, *files],
         capture_output=True,
         text=True,
@@ -110,16 +110,16 @@ def run_check(name: str, command: list[str], files: list[str]) -> CheckTimingRes
     )
     elapsed = time.perf_counter() - start
 
-    if result.returncode not in (0, 1):
+    if completed_process.returncode not in (0, 1):
         print(
-            f"  ⚠ {name} exited {result.returncode}: {result.stderr.strip()[:200]}",
+            f"  ⚠ {name} exited {completed_process.returncode}: {completed_process.stderr.strip()[:200]}",
             file=sys.stderr,
         )
 
     return {
         "name": name,
         "elapsed_ms": elapsed * 1000,
-        "return_code": result.returncode,
+        "return_code": completed_process.returncode,
         "files_checked": len(files),
     }
 
@@ -133,9 +133,11 @@ def benchmark_iteration(files: list[str], label: str) -> BenchmarkIterationResul
     total_start = time.perf_counter()
 
     for name, command in CHECKS.items():
-        result = run_check(name, command, files)
-        results.append(result)
-        print(f"  {name:30s} {result['elapsed_ms']:8.2f} ms ({result['files_checked']} files)")
+        check_timing_result = run_check(name, command, files)
+        results.append(check_timing_result)
+        print(
+            f"  {name:30s} {check_timing_result['elapsed_ms']:8.2f} ms ({check_timing_result['files_checked']} files)"
+        )
 
     total_elapsed = time.perf_counter() - total_start
 
@@ -181,18 +183,18 @@ def main() -> None:
     cold_results = []
     for i in range(args.iterations):
         clear_cache()
-        result = benchmark_iteration(files, f"Cold run {i + 1}/{args.iterations}")
-        cold_results.append(result)
-        all_results.append(result)
+        benchmark_iteration_result = benchmark_iteration(files, f"Cold run {i + 1}/{args.iterations}")
+        cold_results.append(benchmark_iteration_result)
+        all_results.append(benchmark_iteration_result)
 
     # Run warm cache benchmarks
     print("\n\n📊 WARM CACHE (Incremental Run) Benchmarks")
     print("=" * 60)
     warm_results = []
     for i in range(args.iterations):
-        result = benchmark_iteration(files, f"Warm run {i + 1}/{args.iterations}")
-        warm_results.append(result)
-        all_results.append(result)
+        benchmark_iteration_result = benchmark_iteration(files, f"Warm run {i + 1}/{args.iterations}")
+        warm_results.append(benchmark_iteration_result)
+        all_results.append(benchmark_iteration_result)
 
     # Calculate averages
     print("\n\n" + "=" * 60)
