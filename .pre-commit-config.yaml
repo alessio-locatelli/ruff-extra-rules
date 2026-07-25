@@ -40,7 +40,7 @@ repos:
         # outside any pre-commit-managed environment (a plain `git commit`,
         # not wrapped in `uv run`, would otherwise use whatever `python` is
         # on PATH, which won't have this src-layout package installed).
-        entry: uv run python -m pre_commit_hooks.ast_checks
+        entry: python -m pre_commit_hooks.ast_checks
         language: system
         types: [python]
         files: ^(src|tests)/
