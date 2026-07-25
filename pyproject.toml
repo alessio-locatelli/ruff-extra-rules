@@ -36,6 +36,7 @@ dev = [
   "types-pexpect>=4.9.0.20260518",
   "polyfactory>=3.3.0",
   "slotscheck>=0.20.1",
+  "pytest-cov>=7.1.0",
 ]
 
 [tool.setuptools.packages.find]
