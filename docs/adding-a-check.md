@@ -9,7 +9,7 @@ Checks live under `src/pre_commit_hooks/ast_checks/` and plug into the grouped `
 - Error code: `TRI00N` (next unused number), or `STYLE-00N` for a purely stylistic, always-safe-to-autofix check like `misplaced-comment`. `test_all_checks_have_unique_check_ids_and_error_codes` (`tests/test_orchestrator.py`) fails loudly if a new check's id or code collides with an existing one — see `docs/adr/0021-behavioral-contract-audit-rule-isolation-python-compat.md`.
 - Violation message format and whether the check needs an autofix mode.
 
-For the general prefilter-then-parse pipeline shape, see CLAUDE.md's "Suggested Check Architecture". Concretely for this repo: almost nothing qualifies for a grep-only check, because every existing check needs to distinguish syntax context that only an AST gives you — e.g. `forbid-vars` must tell `data = 1` (violation) apart from `obj.data = 1` (attribute, fine) and `"data = 1"` (inside a string, fine), and must catch `def foo(data):` (a parameter, not an assignment) that grep would miss entirely. Use `get_prefilter_pattern()` for a cheap `git grep` pass to skip files that can't possibly match, then do the real detection with `ast`.
+For the general prefilter-then-parse pipeline shape, see AGENTS.md's "Suggested Check Architecture". Concretely for this repo: almost nothing qualifies for a grep-only check, because every existing check needs to distinguish syntax context that only an AST gives you — e.g. `forbid-vars` must tell `data = 1` (violation) apart from `obj.data = 1` (attribute, fine) and `"data = 1"` (inside a string, fine), and must catch `def foo(data):` (a parameter, not an assignment) that grep would miss entirely. Use `get_prefilter_pattern()` for a cheap `git grep` pass to skip files that can't possibly match, then do the real detection with `ast`.
 
 ## 2. Implement
 
@@ -74,35 +74,11 @@ Add `docs/rules/your-check.md` (why it exists, a short example, suppression synt
 
 ## 5. Validate
 
-```bash
-uv run pytest tests/test_your_check.py -v
-uv run python -m pre_commit_hooks.ast_checks --list-checks
-uv run python -m pre_commit_hooks.ast_checks --select=your-check path/to/file.py
-uv run ruff check --fix .
-uv run ruff format .
-uv run mypy src/ tests/
-uv run coverage run -m pytest
-uv run coverage report
-```
+Run linters, tests, coverage.
 
 ## Conventions
 
-**Docstrings**: Google style.
-
-```python
-def check_file(filepath: str, forbidden_names: set[str]) -> list[str]:
-    """Check a Python file for forbidden variable names.
-
-    Args:
-        filepath: Path to the Python file to check
-        forbidden_names: Set of forbidden variable names
-
-    Returns:
-        List of error messages (empty if no violations)
-    """
-```
-
-**Error messages**: `filepath:line: TRI00N: clear message` — e.g. `src/app.py:42: TRI001: Forbidden variable name 'data' found. Use a more descriptive name.` Not `Error in file (line 42)`.
+For the error message format (shown to the user), follow the up-to-date Ruff format. Do not reinvent the wheel.
 
 ## Performance
 
