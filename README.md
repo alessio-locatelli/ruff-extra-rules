@@ -8,7 +8,7 @@ Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside 
 ## Disclaimer
 
 - This is not a standalone linter and not a `ruff` competitor. It's a small set of rules/fixups `ruff` doesn't (yet) have, run as an extra pre-commit/prek hook alongside `ruff` — not instead of it.
-- This project is a stopgap until plugin support is implemented in `ruff` ([astral-sh/ruff#283](https://github.com/astral-sh/ruff/issues/283)), and will be archived thereafter.
+- This project is a stopgap until plugin support is implemented in `ruff` ([astral-sh/ruff#283](https://github.com/astral-sh/ruff/issues/283)), and will be converted to a plugin thereafter.
 - This is a best-effort proof-of-concept implemented using coding agents. Quality is enforced through review, manual testing, 100% coverage, and dogfooding (using it in our own projects). Please open an issue if you see anything that can be improved.
 
 ## Available Checks
