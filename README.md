@@ -4,6 +4,7 @@ Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside 
 
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
+[![codecov](https://codecov.io/github/alessio-locatelli/ruff-extra-rules/graph/badge.svg?token=TMZ7VAVVUL)](https://codecov.io/github/alessio-locatelli/ruff-extra-rules)
 
 ## Disclaimer
 
