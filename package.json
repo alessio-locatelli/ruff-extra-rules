@@ -4,6 +4,7 @@
     "prettier": "3.9.6"
   },
   "scripts": {
-    "format": "prettier --write --cache --log-level warn ."
+    "format": "prettier --write --cache --log-level warn .",
+    "format:check": "prettier --check ."
   }
 }
