@@ -1,15 +1,14 @@
 # Ruff Extra Rules
 
-Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside ruff rather than replace it.
+Extra Python rule checks and fixups that run as a pre-commit/prek hook alongside ruff — not a replacement for it.
 
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
 [![codecov](https://codecov.io/github/alessio-locatelli/ruff-extra-rules/graph/badge.svg?token=TMZ7VAVVUL)](https://codecov.io/github/alessio-locatelli/ruff-extra-rules)
 
-## Disclaimer
+## Project Status
 
-- This is not a standalone linter and not a `ruff` competitor. It's a small set of rules/fixups `ruff` doesn't (yet) have, run as an extra pre-commit/prek hook alongside `ruff` — not instead of it.
-- This project is a stopgap until plugin support is implemented in `ruff` ([astral-sh/ruff#283](https://github.com/astral-sh/ruff/issues/283)), and will be converted to a plugin thereafter.
+- Stopgap until ruff adds plugin support ([astral-sh/ruff#283](https://github.com/astral-sh/ruff/issues/283)); see the [FAQ](docs/faq.md#what-will-happen-to-this-project-when-ruff-has-a-plugin-system) for what happens then.
 - This is a best-effort proof-of-concept implemented using coding agents. Quality is enforced through review, manual testing, 100% coverage, and dogfooding (using it in our own projects). Please open an issue if you see anything that can be improved.
 
 ## Available Checks
