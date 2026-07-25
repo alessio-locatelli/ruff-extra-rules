@@ -87,6 +87,12 @@ npm run format --silent
 uv run -- python -m slotscheck src tests
 ```
 
+If edited CI:
+
+```bash
+ZIZMOR_OFFLINE=true zizmor --fix=all --persona=auditor --collect=all .
+```
+
 ### Test
 
 ```bash
