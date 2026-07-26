@@ -54,6 +54,19 @@ class ASTCheck(Protocol):
         """Error code prefix for this check's violations, e.g. "TRI001"."""
         ...
 
+    @property
+    def cacheable(self) -> bool:
+        """Whether `CheckOrchestrator` may store/reuse this check's own
+        violations in the shared per-file cache. `True` for almost every
+        check (`BaseCheck`'s own default) — only a check whose result for
+        one file can depend on another file's current content (e.g. a type
+        checker resolving a cross-file import) must override this to
+        `False`, since a cache hit keyed on this file's own content hash
+        alone couldn't tell that the *other* file changed. See
+        `docs/adr/0034-cacheable-check-flag-and-always-rerun-orchestrator-split.md`.
+        """
+        ...
+
     def get_prefilter_pattern(self) -> list[str] | None:
         """Fixed-string git-grep patterns that identify candidate files for this
         check, combined with OR logic (a file is a candidate if it contains ANY
@@ -122,10 +135,15 @@ class ASTCheck(Protocol):
 class BaseCheck:
     """No-op defaults for ASTCheck's optional CLI-argument extension
     points, so a check with nothing check-specific doesn't have to repeat
-    the override itself.
+    the override itself, plus the `cacheable=True` default every check
+    except a cross-file one (see `ASTCheck.cacheable`) wants.
     """
 
     __slots__ = ()
+
+    @property
+    def cacheable(self) -> bool:
+        return True
 
     @classmethod
     def add_cli_arguments(cls, _parser: argparse.ArgumentParser) -> None:
@@ -134,6 +152,21 @@ class BaseCheck:
     @classmethod
     def cli_kwargs_from_args(cls, _args: argparse.Namespace) -> dict[str, Any]:
         return {}
+
+
+class CheckUnavailableError(Exception):
+    """Raised by `check()` when the check cannot function at all in the
+    current environment — e.g. a required external tool is missing, or
+    present but failing its own compatibility self-test — as opposed to an
+    ordinary bug in the check's own logic.
+
+    `CheckOrchestrator` deliberately does not swallow this into a per-file
+    `rule_failures` entry the way it does for every other exception a
+    check's `check()` can raise: a missing prerequisite affects every file
+    identically, so reporting it once per file would just spam the same
+    diagnosis N times instead of stating it clearly once. Raising this
+    aborts the whole run immediately with `str(self)` printed to stderr.
+    """
 
 
 def byte_col_to_char_col(line: str, byte_col: int) -> int:
