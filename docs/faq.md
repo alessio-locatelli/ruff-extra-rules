@@ -2,6 +2,10 @@
 
 ## General
 
+### Is this an official Astral project?
+
+No.
+
 ### Why not a Flake8 plugin?
 
 Some rules and opt-in auto-fixing require more functionality.
