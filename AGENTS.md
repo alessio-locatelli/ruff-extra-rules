@@ -31,6 +31,10 @@ Hybrid pipeline:
 
 See [docs/adding-a-check.md](docs/adding-a-check.md) for the full walkthrough of implementing and registering a new check.
 
+### Parametrize Repeated Test Cases
+
+Use `@pytest.mark.parametrize` when the same test logic should be run against multiple input/output cases. Prefer it over duplicating nearly identical test functions.
+
 ## Docstrings and code comments
 
 - Do not write docstrings.
