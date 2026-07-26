@@ -99,7 +99,15 @@ class CheckOrchestrator:
     5. Reporting violations
     """
 
-    __slots__ = ("cache", "checks", "fix_mode", "rule_failures", "unprocessable_files")
+    __slots__ = (
+        "_unavailable_check_ids",
+        "cache",
+        "checks",
+        "fix_mode",
+        "rule_failures",
+        "unavailable_checks",
+        "unprocessable_files",
+    )
 
     def __init__(
         self,
@@ -125,6 +133,17 @@ class CheckOrchestrator:
         # already resolving every violation it was given would otherwise
         # leave no trace at all once every one of them gets marked fixed.
         self.rule_failures: list[tuple[str, str]] = []
+        # (check_id, message) pairs, one per check_id, where a check raised
+        # CheckUnavailableError -- see that exception's own docstring for
+        # why this is recorded once here instead of aborting the whole run.
+        # Reset at the start of each process_files() call, same as the two
+        # above.
+        self.unavailable_checks: list[tuple[str, str]] = []
+        # check_ids already recorded in unavailable_checks this run -- once
+        # a check_id lands here, _check_file skips calling that check
+        # entirely, rather than paying its own failure cost again (and
+        # recording a duplicate entry) on every remaining file.
+        self._unavailable_check_ids: set[str] = set()
 
     def process_files(self, filepaths: list[str]) -> dict[str, list[Violation]]:
         """A file that couldn't be read or parsed has no entry in the
@@ -132,16 +151,15 @@ class CheckOrchestrator:
         violations") — check `self.unprocessable_files` for those. A file
         where one check crashed while others ran fine can still have an
         entry here (the other checks' violations), but its results are
-        incomplete — check `self.rule_failures` for those.
-
-        Raises:
-            CheckUnavailableError: propagated verbatim from a check's
-                `check()` — see that exception's own docstring for why this
-                aborts the whole run rather than being caught per-file like
-                every other exception a check can raise.
+        incomplete — check `self.rule_failures` for those. A check that
+        raised `CheckUnavailableError` contributes no violations for the
+        rest of this run, for any file — check `self.unavailable_checks`
+        for those; every other check's results are unaffected.
         """
         self.unprocessable_files = []
         self.rule_failures = []
+        self.unavailable_checks = []
+        self._unavailable_check_ids = set()
 
         if not filepaths:
             return {}
@@ -375,15 +393,23 @@ class CheckOrchestrator:
 
         all_violations: list[Violation] = []
         for check in checks:
+            if check.check_id in self._unavailable_check_ids:
+                # Already recorded in unavailable_checks for an earlier
+                # file this run -- a missing/misbehaving prerequisite
+                # doesn't get better on the next file, so this check is
+                # never worth retrying (or re-recording) again this run.
+                continue
             try:
                 violations = check.check(filepath, tree, source)
                 all_violations.extend(violations)
-            except CheckUnavailableError:
-                # Deliberately not caught like every other exception below:
-                # see CheckUnavailableError's own docstring for why this
-                # must abort the whole run instead of becoming a per-file
-                # rule_failures entry.
-                raise
+            except CheckUnavailableError as error:
+                # Recorded once here rather than per file: see
+                # CheckUnavailableError's own docstring for why this must
+                # not abort every other check's results for the rest of
+                # this run.
+                logger.debug("Check %s is unavailable: %s", check.check_id, error, exc_info=True)
+                self._unavailable_check_ids.add(check.check_id)
+                self.unavailable_checks.append((check.check_id, str(error)))
             except Exception:
                 # Debug-only: reported cleanly via rule_failures below — see
                 # _read_source's own docstring for why ERROR-level
@@ -609,6 +635,11 @@ class CheckOrchestrator:
             return
 
         for check in self.checks:
+            if check.check_id in self._unavailable_check_ids:
+                # Already recorded in unavailable_checks -- see _check_file's
+                # own matching guard for why this check is never worth
+                # retrying again this run.
+                continue
             check_entries = [v for v in violations if v.check_id == check.check_id]
             if not check_entries or any(
                 is_fix_rejected(v) or is_fix_errored(v) or is_fix_failed(v) for v in check_entries

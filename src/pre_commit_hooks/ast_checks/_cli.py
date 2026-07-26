@@ -10,7 +10,6 @@ import sys
 from typing import Any
 
 from . import ALL_CHECKS
-from ._base import CheckUnavailableError
 from ._diagnostics import report
 from ._discovery import expand_directories, filter_excluded_files
 from ._orchestrator import CheckOrchestrator, load_checks
@@ -35,7 +34,8 @@ def main(argv: list[str] | None = None) -> int:
             (`--list-checks` and `--exclude`d files, so also `orchestrator.
             unprocessable_files`); a check raised while analyzing a file
             (`orchestrator.rule_failures`); a check raised
-            `CheckUnavailableError` (printed once here, not once per file);
+            `CheckUnavailableError` (printed once here, not once per file —
+            every other check's own results are still reported normally);
             or invalid CLI input (unknown `--select`/`--ignore` check id, or
             every check disabled). `--list-checks` and no-files-to-check
             return 0 unconditionally, before any of the above can apply.
@@ -147,13 +147,6 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=args.fix)
-    try:
-        all_violations = orchestrator.process_files(filenames)
-    except CheckUnavailableError as error:
-        # See CheckUnavailableError's own docstring: a missing/misbehaving
-        # prerequisite affects every file identically, so this is reported
-        # once, here, instead of once per file via rule_failures.
-        print(f"error: {error}", file=sys.stderr)
-        return 1
+    all_violations = orchestrator.process_files(filenames)
 
     return report(orchestrator, all_violations)
