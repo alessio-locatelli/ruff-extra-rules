@@ -25,7 +25,8 @@ from typing import TYPE_CHECKING, Any
 from pre_commit_hooks.ast_checks._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
 
 from .analysis import RedundantConversion, decide_candidates
-from .confidence import ConfidenceLevel
+from .candidates import find_candidates
+from .confidence import ConfidenceLevel, eligible_constructors
 from .session import get_session
 
 if TYPE_CHECKING:
@@ -107,6 +108,16 @@ class RedundantTypeConversionCheck(BaseCheck):
         ignored_lines = find_ignored_lines(source, IGNORE_PATTERN) | find_ignored_lines(
             source, THIRD_PARTY_IGNORE_PATTERN
         )
+
+        # Cheap, in-process, no `ty` involved: a prefilter match (e.g.
+        # `print(1)` matching the "int(" pattern) doesn't guarantee a real
+        # candidate, and a real candidate can still be fully suppressed by
+        # `ignored_lines`. Either way, get_session() -- which starts `ty`
+        # on this process's first call -- is never worth paying for when
+        # there's nothing left for the recheck below to even look at.
+        candidates = find_candidates(tree, eligible_constructors(self._level))
+        if not any(candidate.line not in ignored_lines for candidate in candidates):
+            return []
 
         redundant = decide_candidates(
             get_session(), filepath, tree, source, level=self._level, ignored_lines=ignored_lines
