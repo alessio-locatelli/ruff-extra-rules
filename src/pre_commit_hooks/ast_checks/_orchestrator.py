@@ -17,6 +17,7 @@ from pre_commit_hooks._prefilter import batch_filter_files
 from . import ALL_CHECKS
 from ._base import (
     ASTCheck,
+    CheckUnavailableError,
     FixValidationError,
     Violation,
     is_fix_errored,
@@ -132,6 +133,12 @@ class CheckOrchestrator:
         where one check crashed while others ran fine can still have an
         entry here (the other checks' violations), but its results are
         incomplete — check `self.rule_failures` for those.
+
+        Raises:
+            CheckUnavailableError: propagated verbatim from a check's
+                `check()` — see that exception's own docstring for why this
+                aborts the whole run rather than being caught per-file like
+                every other exception a check can raise.
         """
         self.unprocessable_files = []
         self.rule_failures = []
@@ -151,36 +158,72 @@ class CheckOrchestrator:
 
         for filepath_str, checks in checks_by_file.items():
             filepath = Path(filepath_str)
+            violations = self._process_single_file(filepath, checks)
 
-            # Skip the cache in fix mode, since the file will be modified.
-            cached_violations: list[Violation] | None = None
-            if not self.fix_mode:
-                cached_violations = self._get_cached_violations(filepath)
-
-            violations: list[Violation] | None
-            if cached_violations is not None:
-                violations = cached_violations
-            else:
-                rule_failures_before = len(self.rule_failures)
-                violations = self._check_file(filepath, checks)
-                had_rule_failure = len(self.rule_failures) > rule_failures_before
-
-                if violations is None:
-                    # Unreadable, undecodable, or unparseable — _check_file
-                    # already logged the specific cause.
-                    self.unprocessable_files.append(filepath_str)
-                elif not self.fix_mode and not had_rule_failure:
-                    # Cache results (only if not in fix mode). Never cache a
-                    # result collected while one of this file's checks
-                    # crashed — it's known incomplete, and caching it would
-                    # let a future cache-hit run silently keep treating the
-                    # crash as "clean" until the tree hash changes.
-                    self._cache_violations(filepath, violations)
-
-            if violations is not None and violations:
+            if violations is None:
+                # Unreadable, undecodable, or unparseable — _check_file
+                # already logged the specific cause.
+                self.unprocessable_files.append(filepath_str)
+            elif violations:
                 all_violations[filepath_str] = violations
 
         return all_violations
+
+    def _process_single_file(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
+        """Runs `checks` against a single file, honoring each check's own
+        `cacheable` flag: a cacheable check's violations may come from (and
+        be written to) the shared per-file cache; a non-cacheable check
+        (see `ASTCheck.cacheable`) is always re-run fresh, on every call,
+        regardless of what the cache holds for this file.
+
+        Returns `None` if the file couldn't be read/parsed (mirrors
+        `_check_file`'s own contract).
+        """
+        cacheable_checks = [check for check in checks if check.cacheable]
+        always_rerun_checks = [check for check in checks if not check.cacheable]
+
+        # Skip the cache in fix mode, since the file will be modified, and
+        # when nothing here is even cacheable.
+        cached_violations: list[Violation] | None = None
+        if not self.fix_mode and cacheable_checks:
+            cached_violations = self._get_cached_violations(filepath)
+
+        if cached_violations is not None:
+            if not always_rerun_checks:
+                return cached_violations
+            # The cacheable group's cache entry is still valid, but a
+            # non-cacheable check must run fresh against this file's
+            # current, real content every single call — its own result is
+            # never read from or written to the cache.
+            fresh = self._check_file(filepath, always_rerun_checks)
+            if fresh is None:
+                return None
+            return cached_violations + fresh
+
+        rule_failures_before = len(self.rule_failures)
+        violations = self._check_file(filepath, checks)
+        new_failure_ids = {check_id for _fp, check_id in self.rule_failures[rule_failures_before:]}
+
+        if violations is None:
+            return None
+
+        cacheable_ids = {check.check_id for check in cacheable_checks}
+        if not self.fix_mode and cacheable_checks and not (new_failure_ids & cacheable_ids):
+            # Cache only the cacheable group's own violations: a
+            # non-cacheable check's result must never be written to the
+            # cache, whatever it is. Gated on a *cacheable* check having
+            # crashed specifically — an always-rerun check's own crash
+            # doesn't touch the cache either way, so it must not also
+            # block caching a cacheable check's own, otherwise-complete
+            # result for this file (that check ran fine; only the
+            # unrelated always-rerun one didn't). Never cache a result
+            # collected while a cacheable check crashed — it's known
+            # incomplete, and caching it would let a future cache-hit run
+            # silently keep treating the crash as "clean" until the tree
+            # hash changes.
+            self._cache_violations(filepath, [v for v in violations if v.check_id in cacheable_ids])
+
+        return violations
 
     def _checks_by_file(self, filepaths: list[str]) -> dict[str, list[ASTCheck]]:
         """Applies each check's own prefilter pattern independently, rather
@@ -209,14 +252,22 @@ class CheckOrchestrator:
         return checks_by_file
 
     def _generate_cache_key(self) -> str:
-        """Cache key from the enabled checks, their own config, this
-        package's own source, and the running interpreter's own version —
-        replaces a hand-maintained CACHE_VERSION constant that a developer
-        had to remember to bump whenever any check's behavior changed (a
-        real bug, commit 0e3efba, already came from forgetting to). Any of
-        the four changing invalidates every cached result for every check —
-        deliberately coarse-grained in exchange for never missing a real
-        change again.
+        """Cache key from the enabled *cacheable* checks, their own config,
+        this package's own source, and the running interpreter's own
+        version — replaces a hand-maintained CACHE_VERSION constant that a
+        developer had to remember to bump whenever any check's behavior
+        changed (a real bug, commit 0e3efba, already came from forgetting
+        to). Any of the four changing invalidates every cached result for
+        every cacheable check — deliberately coarse-grained in exchange for
+        never missing a real change again.
+
+        A non-cacheable check (see `ASTCheck.cacheable`) is deliberately
+        left out of this key entirely: its own results are never read from
+        or written to the cache (see `_process_single_file`), so enabling
+        it, disabling it, or changing its own config must not force an
+        unrelated cacheable check to recompute every file from scratch —
+        that would defeat the entire point of the cacheable/always-rerun
+        split.
 
         The interpreter version is included because every check's results
         come from `ast.parse()`'s output, and that output isn't guaranteed
@@ -228,8 +279,9 @@ class CheckOrchestrator:
         version (e.g. build metadata) would invalidate the cache on every
         patch release for no behavioral reason.
         """
-        check_ids = sorted(check.check_id for check in self.checks)
-        fingerprints = sorted(f"{check.check_id}={_fingerprint_check(check)}" for check in self.checks)
+        cacheable_checks = [check for check in self.checks if check.cacheable]
+        check_ids = sorted(check.check_id for check in cacheable_checks)
+        fingerprints = sorted(f"{check.check_id}={_fingerprint_check(check)}" for check in cacheable_checks)
         tree_hash = CacheManager.compute_tree_hash(_PACKAGE_ROOT)
         python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
         return "|".join([",".join(check_ids), ",".join(fingerprints), tree_hash, python_version])
@@ -326,6 +378,12 @@ class CheckOrchestrator:
             try:
                 violations = check.check(filepath, tree, source)
                 all_violations.extend(violations)
+            except CheckUnavailableError:
+                # Deliberately not caught like every other exception below:
+                # see CheckUnavailableError's own docstring for why this
+                # must abort the whole run instead of becoming a per-file
+                # rule_failures entry.
+                raise
             except Exception:
                 # Debug-only: reported cleanly via rule_failures below — see
                 # _read_source's own docstring for why ERROR-level

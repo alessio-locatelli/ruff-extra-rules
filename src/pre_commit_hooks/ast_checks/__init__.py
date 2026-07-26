@@ -11,6 +11,7 @@ Error Codes
   - TRI003: Redundant super init (redundant-super-init)
   - TRI004: Function naming violations (validate-function-name)
   - TRI005: Redundant variable assignments (redundant-assignment)
+  - TRI006: Redundant builtin type conversions (redundant-type-conversion)
   - STYLE-001: Comment misplaced on closing bracket line (misplaced-comment)
 
 Inline Ignore Comments
@@ -32,6 +33,7 @@ from .forbid_vars import ForbidVarsCheck
 from .misplaced_comment import MisplacedCommentCheck
 from .redundant_assignment import RedundantAssignmentCheck
 from .redundant_super_init import RedundantSuperInitCheck
+from .redundant_type_conversion import RedundantTypeConversionCheck
 from .validate_function_name import ValidateFunctionNameCheck
 
 if TYPE_CHECKING:
@@ -48,4 +50,5 @@ ALL_CHECKS: list[type[ASTCheck]] = [
     ValidateFunctionNameCheck,
     RedundantAssignmentCheck,
     MisplacedCommentCheck,
+    RedundantTypeConversionCheck,
 ]

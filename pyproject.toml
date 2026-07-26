@@ -109,11 +109,12 @@ paths = ["src", "tests"]
 # (RedundantAssignmentFixData in redundant_assignment/autofix.py,
 # FunctionBehavior in validate_function_name/analysis.py) read only via dict
 # subscript (e.g. fix_data["assign_line"], analysis["is_property"]), never as
-# an attribute. _restore_sigterm_handler is an autouse pytest fixture, invoked
-# implicitly for every test in its module rather than referenced by name the
-# way an ordinary fixture is (as a test function's own parameter, which
-# vulture's analysis does see) -- vulture's static analysis can't see any of
-# these four kinds of use. (A vulture `ignore_decorators` entry can't target
+# an attribute. _restore_sigterm_handler, _isolated_session_singleton, and
+# _use_shared_session are autouse pytest fixtures, invoked implicitly for
+# every test in their module rather than referenced by name the way an
+# ordinary fixture is (as a test function's own parameter, which vulture's
+# analysis does see) -- vulture's static analysis can't see any of these four
+# kinds of use. (A vulture `ignore_decorators` entry can't target
 # autouse specifically: vulture's decorator matching strips call arguments,
 # so "@pytest.fixture" and "@pytest.fixture(autouse=True)" are
 # indistinguishable to it.)
@@ -145,6 +146,8 @@ ignore_names = [
   "returns_class",
   "auto_fixable",
   "_restore_sigterm_handler",
+  "_isolated_session_singleton",
+  "_use_shared_session",
 ]
 
 # Coverage configuration lives in .coveragerc, not here: coverage.py reads

@@ -1,0 +1,310 @@
+from __future__ import annotations
+
+import io
+import sys
+import textwrap
+import time
+from typing import TYPE_CHECKING
+
+import pytest
+
+from pre_commit_hooks._lsp import LSPClient, LSPError, LSPTimeoutError, _read_message, byte_col_to_utf16_col
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+# A minimal, dependency-free JSON-RPC/LSP-framed server used to exercise
+# LSPClient's real subprocess/pipe path without depending on `ty` at all —
+# recorded/replayed `ty` responses (see tests/test_redundant_type_conversion.py)
+# cover this check's own detection logic; this file only ever needs to prove
+# the transport itself (framing, request/response routing, timeouts, clean
+# shutdown) is correct.
+_FAKE_SERVER_SCRIPT = textwrap.dedent(
+    r"""
+    import json
+    import sys
+    import time
+
+
+    def read_message():
+        header = b""
+        while not header.endswith(b"\r\n\r\n"):
+            chunk = sys.stdin.buffer.read(1)
+            if not chunk:
+                return None
+            header += chunk
+        length = None
+        for line in header.split(b"\r\n"):
+            if line.lower().startswith(b"content-length:"):
+                length = int(line.split(b":", 1)[1].strip())
+        body = sys.stdin.buffer.read(length)
+        return json.loads(body)
+
+
+    def write_message(payload):
+        body = json.dumps(payload).encode("utf-8")
+        sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body)
+        sys.stdout.buffer.flush()
+
+
+    while True:
+        message = read_message()
+        if message is None:
+            break
+        method = message.get("method")
+        if method == "echo":
+            write_message({"jsonrpc": "2.0", "id": message["id"], "result": message["params"]})
+        elif method == "boom":
+            write_message(
+                {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32000, "message": "simulated failure"}}
+            )
+        elif method == "never_respond":
+            pass
+        elif method == "delayed_echo":
+            time.sleep(0.3)
+            write_message({"jsonrpc": "2.0", "id": message["id"], "result": message["params"]})
+        elif method == "shutdown":
+            write_message({"jsonrpc": "2.0", "id": message["id"], "result": None})
+        elif method == "hanging_shutdown":
+            pass
+        elif method == "spin_forever":
+            while True:
+                time.sleep(1)
+        elif method == "send_garbage":
+            sys.stdout.buffer.write(b"Not-A-Valid-LSP-Header\r\n\r\n")
+            sys.stdout.buffer.flush()
+        elif method == "die_immediately":
+            break
+        elif method == "exit":
+            break
+    """
+)
+
+
+def _spawn_fake_server(cwd: Path) -> LSPClient:
+    return LSPClient([sys.executable, "-c", _FAKE_SERVER_SCRIPT], cwd=cwd)
+
+
+def test_request_returns_result(tmp_path: Path) -> None:
+    client = _spawn_fake_server(tmp_path)
+    try:
+        response = client.request("echo", {"hello": "world"})
+        assert response == {"hello": "world"}
+    finally:
+        client.close()
+
+
+def test_request_raises_lsp_error_on_error_response(tmp_path: Path) -> None:
+    client = _spawn_fake_server(tmp_path)
+    try:
+        with pytest.raises(LSPError, match="simulated failure"):
+            client.request("boom", {})
+    finally:
+        client.close()
+
+
+def test_request_times_out_when_server_never_responds(tmp_path: Path) -> None:
+    client = _spawn_fake_server(tmp_path)
+    try:
+        with pytest.raises(LSPTimeoutError, match="never_respond"):
+            client.request("never_respond", {}, timeout=0.2)
+    finally:
+        client.close()
+
+
+def test_pending_request_is_cleaned_up_after_timeout(tmp_path: Path) -> None:
+    # A request that already timed out must not leave a stale entry in the
+    # pending-request table -- a later, unrelated request reusing that
+    # table must not be able to collide with it.
+    client = _spawn_fake_server(tmp_path)
+    try:
+        with pytest.raises(LSPTimeoutError):
+            client.request("never_respond", {}, timeout=0.2)
+        assert client._pending == {}
+        assert client.request("echo", {"ok": True}) == {"ok": True}
+    finally:
+        client.close()
+
+
+def test_notify_does_not_wait_for_a_response(tmp_path: Path) -> None:
+    client = _spawn_fake_server(tmp_path)
+    try:
+        client.notify("exit", {})
+        client._process.wait(timeout=5)
+        assert client._process.returncode == 0
+    finally:
+        client.close()
+
+
+def test_close_performs_clean_shutdown_handshake(tmp_path: Path) -> None:
+    client = _spawn_fake_server(tmp_path)
+    client.close()
+    assert client._process.returncode == 0
+    assert client._close_called is True
+
+
+def test_close_kills_the_process_when_shutdown_handshake_hangs(tmp_path: Path) -> None:
+    client = _spawn_fake_server(tmp_path)
+    # Bypass the normal shutdown/exit handshake this fake server would
+    # otherwise answer cleanly, forcing close() down its "the server didn't
+    # answer shutdown in time" fallback path.
+    client._next_id += 1
+    msg_id = client._next_id
+    client._write({"jsonrpc": "2.0", "id": msg_id, "method": "hanging_shutdown", "params": {}})
+
+    client.close(timeout=0.3)
+
+    assert client._close_called is True
+    assert client._process.poll() is not None
+
+
+def test_close_kills_the_process_when_it_never_exits_on_its_own(tmp_path: Path) -> None:
+    # Distinct from test_close_kills_the_process_when_shutdown_handshake_hangs
+    # above: that test's fake server actually processes close()'s own
+    # follow-up shutdown/exit messages and exits cleanly on its own, so
+    # process.wait() never times out there. Here the server stops reading
+    # stdin entirely, so close()'s own process.wait(timeout) genuinely
+    # times out and its kill() fallback is what actually ends the process.
+    client = _spawn_fake_server(tmp_path)
+    client._next_id += 1
+    msg_id = client._next_id
+    client._write({"jsonrpc": "2.0", "id": msg_id, "method": "spin_forever", "params": {}})
+    time.sleep(0.1)  # let the server actually enter its spin loop first
+
+    client.close(timeout=0.3)
+
+    assert client._close_called is True
+    assert client._process.poll() is not None
+
+
+def test_close_is_idempotent(tmp_path: Path) -> None:
+    client = _spawn_fake_server(tmp_path)
+    client.close()
+    client.close()  # must not raise or hang on an already-closed connection
+    assert client._close_called is True
+
+
+def test_close_still_cleans_up_after_the_server_already_exited_on_its_own(tmp_path: Path) -> None:
+    # Regression: close()'s own idempotency guard used to reuse the same
+    # flag the background reader thread sets once it observes the
+    # connection is gone (EOF after the server exits on its own, e.g. after
+    # an "exit" notification) -- so close() silently no-opped without ever
+    # closing stdin, once the server had already exited first.
+    client = _spawn_fake_server(tmp_path)
+    client.notify("exit", {})
+    client._process.wait(timeout=5)
+    # Give the background reader thread a moment to observe the EOF and set
+    # _connection_lost, the exact pre-condition the regression needs.
+    time.sleep(0.2)
+
+    client.close()
+
+    assert client._process.stdin is not None
+    assert client._process.stdin.closed is True
+
+
+def test_request_after_server_exits_raises_instead_of_hanging(tmp_path: Path) -> None:
+    client = _spawn_fake_server(tmp_path)
+    try:
+        client.notify("exit", {})
+        client._process.wait(timeout=5)
+
+        with pytest.raises(LSPError):
+            client.request("echo", {}, timeout=2.0)
+    finally:
+        # The server process is already gone; its stdin pipe is broken.
+        # close() must tolerate that (it swallows LSPError from its own
+        # shutdown handshake) rather than this test leaking an unclosed,
+        # already-broken pipe for the GC to warn about later.
+        client.close()
+
+
+def test_request_raises_lsp_error_when_server_exits_without_responding(tmp_path: Path) -> None:
+    # Covers the reader loop's finally block actually delivering a failure
+    # to a request that's still pending when the connection is lost (as
+    # opposed to LSPTimeoutError, which fires from the requester's own side
+    # without the reader loop's involvement).
+    client = _spawn_fake_server(tmp_path)
+    try:
+        with pytest.raises(LSPError, match="LSP connection closed"):
+            client.request("die_immediately", timeout=5.0)
+    finally:
+        client.close()
+
+
+def test_reader_loop_marks_connection_lost_on_a_malformed_frame(tmp_path: Path) -> None:
+    # A malformed frame from the server (missing Content-Length) makes
+    # _read_message raise inside the reader loop's own try block -- this
+    # must be caught, not crash the thread silently, and still mark the
+    # connection lost so a later request fails fast instead of hanging.
+    client = _spawn_fake_server(tmp_path)
+    try:
+        client.notify("send_garbage")
+        client._reader.join(timeout=5)
+        assert client._reader.is_alive() is False
+        assert client._connection_lost is True
+    finally:
+        client.close()
+
+
+def test_late_response_after_a_timeout_is_silently_dropped(tmp_path: Path) -> None:
+    # A response that arrives for a request the caller already gave up on
+    # (removed from _pending after its own timeout) must not raise or
+    # corrupt a later, unrelated request -- it has nowhere to go, so the
+    # reader loop just drops it.
+    client = _spawn_fake_server(tmp_path)
+    try:
+        with pytest.raises(LSPTimeoutError):
+            client.request("delayed_echo", {"value": 1}, timeout=0.05)
+
+        time.sleep(0.5)  # let the server's delayed response actually arrive
+
+        assert client.request("echo", {"ok": True}) == {"ok": True}
+    finally:
+        client.close()
+
+
+def test_read_message_returns_none_on_clean_eof() -> None:
+    assert _read_message(io.BytesIO(b"")) is None
+
+
+@pytest.mark.parametrize(
+    ("raw", "match"),
+    [
+        (b"Content-Length: 10\r\n", "mid-header"),
+        (b"Content-Length: 10\r\n\r\n{}", "mid-message"),
+        (b"X-Custom: 1\r\n\r\n", "Content-Length"),
+    ],
+    ids=["truncated-header", "truncated-body", "missing-content-length-header"],
+)
+def test_read_message_raises_on_a_malformed_frame(raw: bytes, match: str) -> None:
+    with pytest.raises(LSPError, match=match):
+        _read_message(io.BytesIO(raw))
+
+
+def test_read_message_ignores_unrelated_headers() -> None:
+    body = b'{"jsonrpc": "2.0", "id": 1, "result": null}'
+    raw = f"Content-Type: application/vscode-jsonrpc\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
+    assert _read_message(io.BytesIO(raw)) == {"jsonrpc": "2.0", "id": 1, "result": None}
+
+
+@pytest.mark.parametrize(
+    ("line", "byte_col", "expected"),
+    [
+        ("abc", 0, 0),
+        ("abc", 3, 3),
+        # 'é' is 2 bytes in UTF-8 but a single UTF-16 code unit (within the
+        # Basic Multilingual Plane) -- byte offset and UTF-16 offset diverge
+        # here, unlike the pure-ASCII case above.
+        ("café", len(b"caf"), 3),
+        ("café !", len("café".encode()), 4),
+        # An astral-plane character (outside the BMP, e.g. this emoji) is
+        # one Python `str` character but a UTF-16 *surrogate pair* -- two
+        # code units -- which byte_col_to_char_col (character count) would
+        # not reflect.
+        ("\U0001f600x", len("\U0001f600".encode()), 2),
+    ],
+    ids=["ascii-start", "ascii-end", "bmp-accent-before", "bmp-accent-mid", "astral-surrogate-pair"],
+)
+def test_byte_col_to_utf16_col(line: str, byte_col: int, expected: int) -> None:
+    assert byte_col_to_utf16_col(line, byte_col) == expected

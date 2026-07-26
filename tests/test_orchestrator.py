@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import os
 import shutil
 import subprocess
@@ -14,7 +15,14 @@ import pytest
 import pre_commit_hooks.ast_checks.validate_function_name as vfn_module
 from pre_commit_hooks._cache import CacheManager
 from pre_commit_hooks.ast_checks import ALL_CHECKS, _cli, _orchestrator
-from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, is_fix_errored, is_fix_rejected, is_fixed
+from pre_commit_hooks.ast_checks._base import (
+    CheckUnavailableError,
+    Violation,
+    atomic_write_text,
+    is_fix_errored,
+    is_fix_rejected,
+    is_fixed,
+)
 from pre_commit_hooks.ast_checks._cli import main
 from pre_commit_hooks.ast_checks._discovery import expand_directories, filter_excluded_files
 from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, load_checks
@@ -25,7 +33,6 @@ from tests.factories import ViolationFactory
 
 if TYPE_CHECKING:
     import argparse
-    import ast
     from collections.abc import Callable
 
     from pre_commit_hooks.ast_checks import ASTCheck
@@ -1140,6 +1147,242 @@ def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: p
     assert second[str(filepath)][0].error_code == "TRI001"
 
 
+class _AlwaysRerunProbeCheck:
+    """Minimal `ASTCheck` double with `cacheable = False`, for exercising
+    `CheckOrchestrator`'s always-rerun split independent of any real
+    check's own implementation (e.g. `redundant-type-conversion`, which
+    needs a live `ty` process rather than a plain in-memory fixture).
+    """
+
+    __slots__ = ("call_count", "message")
+
+    check_id = "always-rerun-probe"
+    error_code = "ZZZ001"
+    cacheable = False
+
+    def __init__(self, message: str = "probe") -> None:
+        self.message = message
+        self.call_count = 0
+
+    def get_prefilter_pattern(self) -> list[str] | None:
+        return None
+
+    def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        self.call_count += 1
+        return [
+            Violation(
+                check_id=self.check_id,
+                error_code=self.error_code,
+                line=1,
+                col=0,
+                message=self.message,
+                fixable=False,
+            )
+        ]
+
+    def fix(
+        self, _filepath: Path, _violations: list[Violation], _source: str, _tree: ast.Module, _encoding: str = "utf-8"
+    ) -> bool:
+        return False
+
+    @classmethod
+    def add_cli_arguments(cls, _parser: argparse.ArgumentParser) -> None:
+        return
+
+    @classmethod
+    def cli_kwargs_from_args(cls, _args: argparse.Namespace) -> dict[str, Any]:
+        return {}
+
+
+def test_always_rerun_probe_check_fix_is_a_no_op(tmp_path: Path) -> None:
+    # _AlwaysRerunProbeCheck never marks a violation fixable, so its own
+    # fix() is never reached through CheckOrchestrator's own _apply_fixes
+    # path -- exercised directly here instead, matching this repo's own
+    # convention for a check with no autofix (e.g.
+    # RedundantTypeConversionCheck's own test_fix_never_applies_a_fix).
+    probe = _AlwaysRerunProbeCheck()
+    assert probe.fix(tmp_path / "module.py", [], "x = 1\n", ast.parse("x = 1\n")) is False
+
+
+class _CrashingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
+    __slots__ = ()
+
+    check_id = "crashing-always-rerun-probe"
+
+    def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        raise ValueError("simulated always-rerun check failure")
+
+
+def test_process_files_a_non_cacheable_checks_own_crash_does_not_block_caching_a_cacheable_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Regression: a combined had_rule_failure flag used to gate caching on
+    # whether *any* check in this call crashed, cacheable or not -- so an
+    # always-rerun check's own crash silently disabled caching for an
+    # unrelated, successfully-completed cacheable check sharing the same
+    # file, forcing it to be needlessly recomputed on every future run.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    orchestrator = CheckOrchestrator(
+        checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), _CrashingAlwaysRerunCheck()]
+    )
+    first = orchestrator.process_files([str(filepath)])
+    assert {v.error_code for v in first[str(filepath)]} == {"TRI001"}
+    assert orchestrator.rule_failures == [(str(filepath), "crashing-always-rerun-probe")]
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("forbid-vars must have been cached despite the always-rerun check's own crash")
+
+    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
+
+    second_orchestrator = CheckOrchestrator(
+        checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), _CrashingAlwaysRerunCheck()]
+    )
+    second = second_orchestrator.process_files([str(filepath)])
+    assert {v.error_code for v in second[str(filepath)]} == {"TRI001"}
+
+
+def test_process_files_non_cacheable_check_never_serves_a_stale_result(tmp_path: Path) -> None:
+    # A non-cacheable check's own violations must never come from the
+    # cache: its result can depend on state outside the single file it was
+    # given (e.g. another file's current type), which the cache has no way
+    # to invalidate on.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    probe = _AlwaysRerunProbeCheck(message="first")
+    orchestrator = CheckOrchestrator(checks=[probe])
+    first = orchestrator.process_files([str(filepath)])
+    assert first[str(filepath)][0].message == "first"
+    assert probe.call_count == 1
+
+    probe.message = "second"
+    second = orchestrator.process_files([str(filepath)])
+    assert second[str(filepath)][0].message == "second"
+    assert probe.call_count == 2
+
+
+def test_process_files_non_cacheable_check_results_are_never_written_to_cache(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    orchestrator = CheckOrchestrator(checks=[_AlwaysRerunProbeCheck()])
+    orchestrator.process_files([str(filepath)])
+
+    cached = orchestrator.cache.get_cached_result(filepath, "ruff-extra-rules")
+    assert cached is None
+
+
+def test_process_files_non_cacheable_check_does_not_disturb_a_cacheable_checks_own_caching(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ch. issue #108: adding an always-rerun check alongside an already
+    # cacheable one must not silently disable the cacheable check's own
+    # caching for files they share.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    forbid_vars_only = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
+    forbid_vars_only.process_files([str(filepath)])
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("a cacheable check must not be recomputed once already cached")
+
+    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
+
+    probe = _AlwaysRerunProbeCheck()
+    combined = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), probe])
+    violations = combined.process_files([str(filepath)])
+
+    error_codes = {v.error_code for v in violations[str(filepath)]}
+    assert error_codes == {"TRI001", "ZZZ001"}
+    assert probe.call_count == 1
+
+
+def test_process_single_file_reports_unprocessable_when_always_rerun_group_fails_after_a_cache_hit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A cache hit for the cacheable group must not silently swallow a
+    # read/parse failure in the always-rerun group's own fresh check --
+    # e.g. a race where the file becomes unreadable between the cache
+    # lookup and the always-rerun group's own _check_file() call.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    forbid_vars_only = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
+    forbid_vars_only.process_files([str(filepath)])  # populates the cache
+
+    combined = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), _AlwaysRerunProbeCheck()])
+
+    # ForbidVarsCheck's own result for this file is already cached above, so
+    # _process_single_file only ever calls _check_file for the always-rerun
+    # group (checks == [_AlwaysRerunProbeCheck()]) here -- nothing else calls this stub.
+    def unreadable_always_rerun_group(
+        _self: CheckOrchestrator, _fp: Path, _checks: list[ASTCheck]
+    ) -> list[Violation] | None:
+        return None
+
+    monkeypatch.setattr(CheckOrchestrator, "_check_file", unreadable_always_rerun_group)
+
+    violations = combined.process_files([str(filepath)])
+
+    assert violations == {}
+    assert combined.unprocessable_files == [str(filepath)]
+
+
+def test_process_files_enabling_a_non_cacheable_check_does_not_change_cache_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_root = tmp_path / "pre_commit_hooks"
+    fake_root.mkdir()
+    (fake_root / "module.py").write_text("x = 1\n")
+    monkeypatch.setattr(_orchestrator, "_PACKAGE_ROOT", fake_root)
+
+    without_probe = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    with_probe = CheckOrchestrator(checks=[ForbidVarsCheck(), _AlwaysRerunProbeCheck()])
+    assert without_probe._generate_cache_key() == with_probe._generate_cache_key()
+
+
+def test_check_unavailable_error_propagates_out_of_process_files(tmp_path: Path) -> None:
+    class _UnavailableCheck(_AlwaysRerunProbeCheck):
+        def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+            raise CheckUnavailableError("some prerequisite is missing")
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    orchestrator = CheckOrchestrator(checks=[_UnavailableCheck()])
+    with pytest.raises(CheckUnavailableError, match="some prerequisite is missing"):
+        orchestrator.process_files([str(filepath)])
+    # Deliberately not recorded as an ordinary rule_failures entry — see
+    # CheckUnavailableError's own docstring for why this must abort the run
+    # instead of being downgraded to a per-file failure.
+    assert orchestrator.rule_failures == []
+
+
+def test_main_reports_check_unavailable_error_once_and_exits_nonzero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class _UnavailableCheck(_AlwaysRerunProbeCheck):
+        check_id = "unavailable-probe"
+        error_code = "ZZZ002"
+
+        def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+            raise CheckUnavailableError("some prerequisite is missing; install it and retry")
+
+    monkeypatch.setattr(_cli, "ALL_CHECKS", [*ALL_CHECKS, _UnavailableCheck])
+    monkeypatch.setattr(_orchestrator, "ALL_CHECKS", [*ALL_CHECKS, _UnavailableCheck])
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    exit_code = main([str(filepath), "--select", "unavailable-probe"])
+
+    assert exit_code == 1
+    assert capsys.readouterr().err.count("some prerequisite is missing") == 1
+
+
 def test_apply_fixes_skips_check_with_no_fixable_violations(tmp_path: Path) -> None:
     # redundant-super-init never marks violations fixable; when mixed with
     # a fixable forbid-vars violation in the same file, its check must be
@@ -2194,6 +2437,7 @@ def test_main_check_specific_cli_arg_round_trip(
     class ConfigurableCheck:
         check_id = "configurable"
         error_code = "CFG001"
+        cacheable = True
 
         def __init__(self, marker: str = "default") -> None:
             self.marker = marker
