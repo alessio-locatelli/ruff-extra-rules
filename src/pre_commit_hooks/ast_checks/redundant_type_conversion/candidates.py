@@ -1,6 +1,4 @@
-"""AST-level candidate detection for TRI006: every syntactic call shape
-this check might flag, before any `ty` session is involved at all.
-"""
+"""AST-level candidate detection for TRI006, before any `ty` session is involved. See ADR-0035."""
 
 from __future__ import annotations
 
@@ -14,16 +12,7 @@ if TYPE_CHECKING:
 
 @dataclass(slots=True, frozen=True)
 class Candidate:
-    """One `constructor(argument)` call syntactically eligible to be
-    flagged — whether it actually *is* redundant is decided later, by
-    `ty`'s own synthetic-rewrite-and-recheck (see `session.py`), never by
-    this module.
-
-    `call`/`arg` are kept only for callers that want the original AST
-    nodes (e.g. building a `Violation`'s message from `arg`'s own source);
-    every position field below is already extracted as a plain int so
-    `ty_check()` doesn't have to re-derive them.
-    """
+    """One `constructor(argument)` call eligible to be flagged; redundancy is decided later, in `session.py`."""
 
     constructor: str
     call: ast.Call
@@ -36,32 +25,13 @@ class Candidate:
 
 
 def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidate]:
-    """Every `Call` node anywhere in `tree` (any expression position —
-    assignment RHS, call argument, return value, ... — `ast.walk` reaches
-    all of them uniformly) shaped like `name(single_positional_arg)` where
-    `name` is one of `eligible`'s builtin constructor names.
+    """Every `name(single_positional_arg)` call anywhere in `tree` where `name` is one of `eligible`'s constructors.
 
-    Deliberately excludes:
-    - Any call with keyword arguments, zero, or more than one positional
-      argument (`int(x, base=2)`, `dict(**kwargs)`, `frozenset()`, ...) —
-      none of these are the "wrap a single value" shape this check targets.
-    - A starred single argument (`list(*x)`) — unpacking, not wrapping.
-    - A call whose own `(` and `)` land on different physical lines. The
-      synthetic rewrite this check performs (see `session.py`) splices out
-      the constructor's own call syntax on a single line, preserving every
-      other line's numbering exactly, which is what lets a before/after
-      diagnostic comparison trust that a position match means the same
-      diagnostic. Splicing across a newline could shift later lines'
-      numbering instead, so a multi-line-wrapped call is silently left
-      out of this check's coverage rather than risking a wrong redundancy
-      verdict from a shifted line number.
-    - A call whose own name is shadowed anywhere in the module (a local
-      `def str(...):`, a `class str:`, an import bound to that name, a
-      function/lambda parameter with that name, an `except ... as name`
-      handler, a pattern-match capture, or any other assignment target
-      with that name) — see `_shadowed_names()`.
-    - Every candidate in a module with any `from module import *` anywhere
-      in it — see `_has_wildcard_import()`.
+    Excludes: keyword/zero/multi-argument calls, a starred argument, a
+    call spanning multiple physical lines (see ADR-0035's "Detection
+    method"), a shadowed constructor name (`_shadowed_names()`), and
+    every candidate in a module with a wildcard import
+    (`_has_wildcard_import()`).
     """
     if _has_wildcard_import(tree):
         return []
@@ -69,21 +39,10 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
 
 
 def _has_wildcard_import(tree: ast.Module) -> bool:
-    """True if `tree` contains `from module import *` anywhere.
-
-    A wildcard import can bind any name at all, including a builtin
-    constructor's own name (e.g. a compatibility shim exporting its own
-    `str`), without this module ever naming that binding explicitly the
-    way every other import form does — `_shadowed_names()` has no name to
-    record. Resolving what a wildcard import actually brings into scope
-    would mean importing (or statically resolving the exports of) the
-    target module, which this check has no machinery for and no wish to
-    take on. Treating every constructor as potentially shadowed for the
-    whole module is the same conservative call `_shadowed_names()` itself
-    documents: reporting a shadowed constructor's call as a safe-to-remove
-    builtin conversion would be a behavior-changing false positive, far
-    worse than missing a real one.
-    """
+    # `from module import *` can bind any name, including a constructor's
+    # own name, without _shadowed_names() ever seeing what name that was --
+    # resolving the target module's real exports is out of scope here, so
+    # every constructor is treated as potentially shadowed instead.
     return any(
         isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names) for node in ast.walk(tree)
     )
@@ -94,36 +53,16 @@ _CAPTURE_PATTERN_TYPES = (ast.MatchAs, ast.MatchStar)
 
 
 def _shadowed_names(tree: ast.Module) -> frozenset[str]:
-    """Every name bound anywhere in `tree`, by any means: a function/class
-    definition; an import (respecting `as`); a plain assignment target
-    (covers `for`/`with`/augmented-assignment/comprehension/walrus targets
-    too, since each compiles to a `Name` node with `Store` context); a
-    function or lambda parameter (`ast.arg`, a distinct node type from
-    `ast.Name` — a parameter named `str` in `def f(str): return str(x)`
-    shadows the builtin just as much as a local variable of that name
-    would, and is otherwise invisible to this scan); an `except ... as
-    name:` handler; or a `match`/`case` capture pattern (`case str:` or
-    `case [*str]`/`case {**str}`).
+    """Every name bound anywhere in `tree`: def/class, import (`as`-aware;
+    a bare `import a.b.c` binds only its own top-level `a`), assignment
+    target (also covers for/with/augmented-assign/comprehension/walrus),
+    function/lambda parameter, `except ... as name`, match-case capture.
 
-    A plain `import a.b.c` (no `as`) binds only `a`, its own top-level
-    component, in the current namespace — `import a.b.c` never introduces
-    a name `a.b.c` (that's not even a legal identifier), and a subsequent
-    `a.b.c.whatever` resolves `a` first, then walks attributes from there.
-    `import str.helpers` therefore shadows `str` just as much as `import
-    str` would; only an aliased import (`import a.b.c as x`) binds the
-    whole path under one name instead, exactly as `alias.asname` already
-    records for every other import shape here.
-
-    Deliberately whole-module and scope-blind rather than resolving which
-    binding is actually in scope at a given call site: `int`/`str`/etc.
-    shadowed only in some unrelated function elsewhere in the file makes
-    every same-named candidate in the whole module ineligible, not just
-    the ones actually inside that shadowing scope. This can miss a real
-    violation a precise, scope-aware analysis would still catch, but never
-    the reverse — treating a user-defined `str`/`list`/etc. as if it were
-    the builtin would report removing a call as safe when it actually
-    changes behavior (the exact failure mode this function exists to
-    prevent), which is far worse than an occasional missed detection.
+    Deliberately whole-module and scope-blind, not just the enclosing
+    scope of a given call: false negatives (missing a real violation) are
+    preferred over false positives (treating a user-defined `str`/`list`/
+    etc. as the builtin, and reporting removing a call as safe when it
+    actually changes behavior).
     """
     shadowed: set[str] = set()
     for node in ast.walk(tree):
@@ -140,10 +79,6 @@ def _shadowed_names(tree: ast.Module) -> frozenset[str]:
 
 
 def _bound_name(node: ast.AST) -> str | None:
-    """The single name `node` itself binds, or `None` if it doesn't bind
-    one at all (most AST node types) — see `_shadowed_names()` for why
-    each of these node types counts as a binding.
-    """
     if isinstance(node, _BINDING_DEF_TYPES):
         return node.name
     if isinstance(node, ast.arg):

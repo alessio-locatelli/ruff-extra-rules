@@ -1,20 +1,5 @@
-"""Check for redundant builtin type-conversion calls (TRI006).
-
-TRI006: flags a builtin type/collection constructor call — `str(...)`,
-`list(...)`, and eight others — that's a no-op given the argument's real,
-statically-known type, including across file/import boundaries. Detection
-delegates to Astral's `ty` type checker (see `session.py`) rather than
-approximating type information locally.
-
-Requires `ty` on `PATH` (e.g. `uv tool install ty`, or as your own
-project's dev dependency) — see `docs/rules/redundant-type-conversion.md`.
-
-Inline ignore: `# pytriage: ignore=TRI006`. A line already carrying a
-third-party type-suppression comment (`# type: ignore`, `# pyright:
-ignore`, `# ty: ignore`) is always skipped too — see this package's own
-`docs/rules/redundant-type-conversion.md` for why.
-
-Detect-only: this check ships no autofix in this version.
+"""TRI006: redundant builtin type-conversion calls. See
+`docs/rules/redundant-type-conversion.md` and ADR-0035.
 """
 
 from __future__ import annotations
@@ -37,10 +22,7 @@ if TYPE_CHECKING:
 # Format: # pytriage: ignore=TRI006
 IGNORE_PATTERN = ignore_pattern_for("TRI006")
 
-# A third-party type-suppression comment on a candidate's own line: see
-# decide_candidates()'s own docstring / this check's rule doc for why a
-# suppressed line is always skipped outright rather than trusting `ty`'s
-# own diagnostics to already reflect the suppression.
+# See docs/rules/redundant-type-conversion.md's Suppression section.
 THIRD_PARTY_IGNORE_PATTERN = re.compile(r"#\s*(?:type|pyright|ty)\s*:\s*ignore\b", re.IGNORECASE)
 
 ERROR_CODE = "TRI006"
@@ -73,12 +55,7 @@ class RedundantTypeConversionCheck(BaseCheck):
 
     @property
     def cacheable(self) -> bool:
-        """This check's result for one file can depend on another file's
-        current content (e.g. a parameter type `ty` resolves through a
-        cross-file import) — see ADR-0034 for why that means it must
-        always re-analyze every file it's given, never reading or writing
-        the shared per-file cache.
-        """
+        """See ADR-0034."""
         return False
 
     def get_prefilter_pattern(self) -> list[str] | None:
@@ -109,12 +86,9 @@ class RedundantTypeConversionCheck(BaseCheck):
             source, THIRD_PARTY_IGNORE_PATTERN
         )
 
-        # Cheap, in-process, no `ty` involved: a prefilter match (e.g.
-        # `print(1)` matching the "int(" pattern) doesn't guarantee a real
-        # candidate, and a real candidate can still be fully suppressed by
-        # `ignored_lines`. Either way, get_session() -- which starts `ty`
-        # on this process's first call -- is never worth paying for when
-        # there's nothing left for the recheck below to even look at.
+        # Checked before get_session() (which starts `ty` on this
+        # process's first call): a prefilter match doesn't guarantee a
+        # real candidate, and ignored_lines can suppress every real one.
         candidates = find_candidates(tree, eligible_constructors(self._level))
         if not any(candidate.line not in ignored_lines for candidate in candidates):
             return []
@@ -143,7 +117,4 @@ class RedundantTypeConversionCheck(BaseCheck):
         _tree: ast.Module,
         _encoding: str = "utf-8",
     ) -> bool:
-        """No autofix support in this version — see this package's own
-        module docstring.
-        """
         return False

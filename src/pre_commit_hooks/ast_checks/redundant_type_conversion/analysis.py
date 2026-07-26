@@ -21,12 +21,7 @@ if TYPE_CHECKING:
 
 
 class RedundancySession(Protocol):
-    """The subset of `TySession`'s own interface `decide_candidates()`
-    actually depends on -- a Protocol (structural typing) rather than the
-    concrete class, so a test double (see `tests/redundant_type_conversion/
-    _helpers.py`'s `FakeSession`) can stand in for a real `ty` session
-    without inheriting from it.
-    """
+    """The subset of `TySession` `decide_candidates()` depends on -- lets a fake stand in without inheriting it."""
 
     def open_or_update(self, filepath: Path, content: str) -> frozenset[tuple[object, ...]]: ...
 
@@ -36,10 +31,7 @@ class RedundancySession(Protocol):
 
 
 class RedundantConversion:
-    """One candidate `ty` actually confirmed is redundant, plus everything
-    `__init__.py` needs to build a `Violation` from it without re-deriving
-    anything already computed here.
-    """
+    """One candidate `ty` confirmed is redundant, plus everything `__init__.py` needs to build a `Violation`."""
 
     __slots__ = ("argument_type", "candidate", "col", "line")
 
@@ -59,12 +51,7 @@ def decide_candidates(
     level: ConfidenceLevel,
     ignored_lines: set[int],
 ) -> list[RedundantConversion]:
-    """Every syntactic candidate in `tree` that `ty` confirms is actually
-    redundant at `level` — see `candidates.find_candidates` for what makes
-    a candidate at all, `confidence.hover_passes_gate` for the cheap
-    pre-filter, and this function's own body for the synthetic
-    rewrite-and-recheck that makes the final call.
-    """
+    """Every candidate in `tree` that `ty` confirms is actually redundant at `level`."""
     eligible = eligible_constructors(level)
     candidates = [candidate for candidate in find_candidates(tree, eligible) if candidate.line not in ignored_lines]
     if not candidates:
@@ -74,30 +61,15 @@ def decide_candidates(
 
     redundant: list[RedundantConversion] = []
     for candidate in candidates:
-        # Restore the document to its pristine state before every hover:
-        # a previous candidate's own recheck below leaves the document at
-        # that candidate's rewrite, not the original source, and hovering
-        # against a rewritten document can report a different type for a
-        # later candidate than the file's own real, unmodified state has
-        # (e.g. an earlier removed conversion changing what a later,
-        # unrelated line's flow-narrowed type looks like) -- or, if two
-        # candidates share a line, misalign this candidate's own column
-        # against text a previous rewrite already shifted. Also serves as
-        # this candidate's own recheck baseline, so it's never a wasted
-        # call even on the very first candidate.
+        # Restores the pristine source before every hover: a previous
+        # candidate's own rewrite below would otherwise still be open,
+        # which can change what this candidate's own hover reports. Also
+        # doubles as this candidate's own recheck baseline.
         baseline = session.open_or_update(filepath, source)
         line_text = source_lines[candidate.line - 1]
-        # A position one character before the argument's own end, so
-        # hover lands inside the argument's own text rather than on
-        # whatever follows it (the closing paren, a comma, ...). Computed
-        # in two steps -- byte offset to *character* index first, then
-        # one character back, then character index to UTF-16 -- rather
-        # than subtracting 1 directly in UTF-8 *byte* space: arg_end_col
-        # is always a valid byte boundary (a real ast.col_offset), but
-        # arg_end_col - 1 is not whenever the argument's own last
-        # character is multi-byte in UTF-8 (e.g. `str(é)`), which used to
-        # slice mid-character and raise UnicodeDecodeError on otherwise
-        # ordinary source.
+        # One character before the argument's own end, in char (not byte)
+        # space first -- arg_end_col - 1 in byte space can land mid-
+        # character for a multi-byte final character (e.g. `str(é)`).
         arg_end_char = byte_col_to_char_col(line_text, candidate.arg_end_col)
         hover_char = len(line_text[: arg_end_char - 1].encode("utf-16-le")) // 2
         hover_text = session.hover(filepath, candidate.line - 1, hover_char)
@@ -126,20 +98,11 @@ def decide_candidates(
 
 
 def _build_modified_text(source_lines: list[str], candidate: Candidate) -> str:
-    """`source_lines` with `candidate`'s own wrapping call syntax —
-    `constructor(` ... `)` — spliced out, leaving its argument's own source
-    untouched (`list(bar)` becomes `bar`). Operates on UTF-8 bytes,
-    matching `ast.col_offset`'s own unit (see
-    `ast_checks._base.byte_col_to_char_col`'s docstring), so a non-ASCII
-    character earlier on the line can't shift the splice onto the wrong
-    bytes.
+    """`source_lines` with `candidate`'s own wrapping call spliced out (`list(bar)` becomes `bar`).
 
-    Only ever touches the single physical line `candidate.line`:
-    `candidates.find_candidates` only yields a candidate whose entire call
-    (open paren through close paren) sits on that one line, so every other
-    line's own numbering is left completely intact — required for a
-    before/after diagnostic comparison at an unrelated position elsewhere
-    in the file to mean anything.
+    Operates in UTF-8 byte space, matching `ast.col_offset`. Only touches
+    `candidate.line` -- see ADR-0035's "Detection method" for why every
+    other line's numbering must stay intact.
     """
     line = source_lines[candidate.line - 1]
     line_bytes = line.encode("utf-8")

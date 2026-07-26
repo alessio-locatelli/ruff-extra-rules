@@ -87,33 +87,11 @@ def caller(it: Iterator[int]) -> None:
 
 
 def _diagnostic_key(diagnostic: dict[str, Any]) -> tuple[Any, ...]:
-    """Identity for one `ty` diagnostic, used to diff a "before" and
-    "after" diagnostic set (see `TySession.open_or_update`'s own callers)
-    against each other -- specifically, to answer "did removing this one
-    candidate's conversion introduce any diagnostic that wasn't already
-    there".
-
-    Deliberately excludes:
-    - `data` (`ty` attaches a `redundant-cast`-style quick-fix edit map to
-      some diagnostics, keyed by absolute file URI, which is irrelevant to
-      *identifying* a diagnostic).
-    - Character-column positions. The synthetic rewrite only ever removes
-      text from one line (see `analysis._build_modified_text`), which
-      shifts the column position of every *other*, unrelated diagnostic
-      later on that same line -- confirmed empirically: an untouched
-      `invalid-argument-type` diagnostic about a call's second argument
-      keeps its exact `code`/`message` but its `range` shifts left by
-      however many characters the removed conversion's own syntax spanned.
-      Including columns in this key would make that unrelated, unchanged
-      diagnostic look "new" after the rewrite purely because of the
-      shift, wrongly blocking a genuinely redundant conversion from being
-      reported. Line numbers are kept (a same-line-only rewrite never
-      shifts *those*), which is precise enough in practice: two distinct
-      diagnostics sharing both an identical `code` and an identical
-      `message` on the same line are not a realistic collision, since
-      `ty`'s own diagnostic messages routinely embed the specific
-      types/names involved.
-    """
+    # Excludes character columns: the synthetic rewrite shifts every other
+    # diagnostic's own column on the same line, which would make an
+    # unrelated, unchanged diagnostic look "new" after the rewrite --
+    # confirmed empirically against real ty. Line numbers are kept (a
+    # same-line rewrite never shifts those).
     rng = diagnostic.get("range") or {}
     start = rng.get("start") or {}
     end = rng.get("end") or {}
@@ -126,12 +104,7 @@ def _diagnostic_key(diagnostic: dict[str, Any]) -> tuple[Any, ...]:
 
 
 class TySession:
-    """One `ty server` child process, driven over LSP, kept open for as
-    long as this object lives. Not responsible for deciding *when* a
-    conversion is redundant — that's `analysis.decide_candidates()`'s job;
-    this class only exposes the LSP primitives it needs (open/update a
-    document's content and get back its current diagnostics, plus hover).
-    """
+    """One `ty server` child process over LSP. Exposes only the primitives `analysis.decide_candidates()` needs."""
 
     __slots__ = ("_client", "_open_versions")
 
@@ -140,12 +113,7 @@ class TySession:
         self._open_versions: dict[str, int] = {}
 
     def open_or_update(self, filepath: Path, content: str) -> frozenset[tuple[Any, ...]]:
-        """Opens `filepath` in this session (if not already open) or
-        replaces its entire in-memory content (if it is), then returns its
-        current diagnostics. Never touches `filepath` on disk — `content`
-        is only ever held in the `ty server` process's own in-memory
-        buffer for this document, exactly like an editor's unsaved buffer.
-        """
+        """Opens or updates `filepath`'s in-memory-only content (never touches disk) and returns its diagnostics."""
         uri = filepath.resolve().as_uri()
         if uri in self._open_versions:
             self._open_versions[uri] += 1
@@ -170,13 +138,7 @@ class TySession:
         return frozenset(_diagnostic_key(item) for item in items)
 
     def hover(self, filepath: Path, line0: int, char_utf16: int) -> str | None:
-        """The statically-inferred type at `filepath`'s (0-indexed line,
-        UTF-16 code-unit column) as plain text, or `None` if hovering
-        fails or resolves to nothing -- a soft failure by design (see
-        `confidence.hover_passes_gate`, which treats `None` the same as an
-        unhelpful result), since a hover is only ever this check's own
-        cheap pre-filter, never its final redundancy decision.
-        """
+        """The statically-inferred type at (0-indexed line, UTF-16 column), or `None` on failure by design."""
         uri = filepath.resolve().as_uri()
         try:
             response = self._client.request(
@@ -196,11 +158,7 @@ class TySession:
         return None
 
     def close_file(self, filepath: Path) -> None:
-        """Discards `filepath`'s in-memory document from this session,
-        bounding this session's own memory across a whole-repo run — a
-        long-lived session, by design (see this module's own docstring),
-        must not just accumulate every file it's ever looked at.
-        """
+        """Discards `filepath`'s in-memory document, bounding this long-lived session's own memory use."""
         uri = filepath.resolve().as_uri()
         if uri in self._open_versions:
             self._client.notify("textDocument/didClose", {"textDocument": {"uri": uri}})
@@ -214,13 +172,9 @@ def _spawn(root: Path) -> LSPClient:
     try:
         client = LSPClient(_TY_COMMAND, cwd=root)
     except OSError as error:
-        # Not just FileNotFoundError: `ty` resolving on PATH but failing to
-        # actually launch (no execute permission, a corrupt/wrong-format
-        # binary, ...) raises a different OSError subclass -- all of these
-        # mean the same thing to this check ("ty could not be started"),
-        # so all of them get the same install-hint CheckUnavailableError
-        # rather than only FileNotFoundError being caught here and the
-        # rest surfacing as an ordinary per-file check() crash instead.
+        # Not just FileNotFoundError: ty resolving on PATH but failing to
+        # launch (no execute permission, a corrupt binary, ...) raises a
+        # different OSError subclass, but means the same thing here.
         raise CheckUnavailableError(_INSTALL_HINT) from error
 
     try:
@@ -237,34 +191,17 @@ def _spawn(root: Path) -> LSPClient:
 
 
 def _run_self_test(session: RedundancySession, root: Path) -> None:
-    """One redundant-case and one necessary-case positive/negative control
-    (the exact fixtures issue #108 specifies), run against `session` --
-    the caller (`get_session()`) is responsible for making that a
-    throwaway session scoped to its own scratch directory, isolated from
-    whatever real project this check is actually about to analyze, so a
-    real project's own configuration/imports can't influence the
-    self-test's own verdict. Takes `session` as a `RedundancySession`
-    (structural, not the concrete `TySession`) so a test can substitute a
-    fake one to exercise this function's own pass/fail logic without a
-    real `ty` process.
+    """Positive/negative control pair against `session` -- see ADR-0035's "Failure handling".
 
-    Raises:
-        CheckUnavailableError: if either control doesn't produce the
-            expected before/after diagnostics, or `session` itself raises
-            `LSPError` (e.g. `ty` crashed partway through).
+    `session` is typed as the structural `RedundancySession`, not the
+    concrete `TySession`, so a test can substitute a fake one.
     """
     try:
         redundant_path = root / "redundant_control.py"
         redundant_path.write_text(_REDUNDANT_CONTROL_BEFORE, encoding="utf-8")
         redundant_before = session.open_or_update(redundant_path, _REDUNDANT_CONTROL_BEFORE)
         redundant_after = session.open_or_update(redundant_path, _REDUNDANT_CONTROL_AFTER)
-        # Diffed the same way decide_candidates() itself diffs a real
-        # candidate's before/after diagnostics, rather than requiring the
-        # raw sets be literally empty -- robust to an unrelated diagnostic
-        # (e.g. a future `ty` version adding an advisory lint neither
-        # fixture is designed to avoid) appearing identically in both
-        # snapshots, which would otherwise fail this self-test for a
-        # reason that has nothing to do with what it's actually verifying.
+        # Diffed, not required to be literally empty -- see _diagnostic_key.
         if redundant_after - redundant_before:
             raise CheckUnavailableError(_SELF_TEST_FAILED_HINT)
 
@@ -283,15 +220,7 @@ _session_lock = threading.Lock()
 
 
 def get_session() -> TySession:  # pytriage: ignore=TRI004 -- lazy singleton false positive, see issue #110
-    """The single `TySession` every `RedundantTypeConversionCheck` instance
-    shares within one process — created lazily, on the first file this
-    check actually examines (never at `__init__`/CLI-startup time, so a
-    run with nothing for this check to look at never pays `ty`'s startup
-    cost or risks failing its self-test for no reason). Runs the
-    behavioral self-test exactly once per process, before the real session
-    (scoped to the current working directory — pre-commit/prek always
-    invoke a hook from the repository root) is ever handed out.
-    """
+    """Process-wide `TySession` singleton, created lazily. See ADR-0035's "Invocation"/"Failure handling"."""
     global _session  # noqa: PLW0603 -- the documented, deliberate one-session-per-process singleton this whole module exists for
     with _session_lock:
         if _session is None:
