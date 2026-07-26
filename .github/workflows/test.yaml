@@ -28,9 +28,17 @@ jobs:
           version: "0.11.32"
           enable-cache: true
 
-      - run: uv run pytest --cov --cov-report=xml
+      - name: Run tests
+        run: |
+          if [ "${GITHUB_ACTOR}" = "dependabot[bot]" ]; then
+            uv run pytest
+          else
+            uv run pytest --cov --cov-report=xml
+          fi
 
-      - uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      - name: Upload coverage to Codecov
+        if: github.actor != 'dependabot[bot]'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
