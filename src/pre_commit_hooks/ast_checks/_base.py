@@ -164,8 +164,14 @@ class CheckUnavailableError(Exception):
     `rule_failures` entry the way it does for every other exception a
     check's `check()` can raise: a missing prerequisite affects every file
     identically, so reporting it once per file would just spam the same
-    diagnosis N times instead of stating it clearly once. Raising this
-    aborts the whole run immediately with `str(self)` printed to stderr.
+    diagnosis N times instead of stating it clearly once. Instead, the
+    orchestrator records `str(self)` once (see `unavailable_checks`) and
+    disables that specific check for the rest of the run — every other
+    check, and this check's own already-collected results for files it
+    examined before this was raised, are unaffected. A check being
+    enabled by default (as every check in `ALL_CHECKS` is, absent
+    `--select`) must never let one missing prerequisite take down every
+    unrelated check's results for a consumer who hasn't installed it.
     """
 
 

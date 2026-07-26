@@ -13,14 +13,23 @@ if TYPE_CHECKING:
 
 
 def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Violation]]) -> int:
-    """Prints every unprocessable file, rule failure, and violation from a
-    completed run. `all_violations` is `orchestrator.process_files()`'s own
-    return value; `orchestrator` itself is also consulted directly for its
-    `unprocessable_files`/`rule_failures` bookkeeping.
+    """Prints every unavailable check, unprocessable file, rule failure, and
+    violation from a completed run. `all_violations` is `orchestrator.
+    process_files()`'s own return value; `orchestrator` itself is also
+    consulted directly for its `unavailable_checks`/`unprocessable_files`/
+    `rule_failures` bookkeeping.
 
     Returns 0 if nothing was printed, 1 otherwise.
     """
     exit_code = 0
+
+    # A check that couldn't run at all (missing/misbehaving prerequisite)
+    # is reported once here, not once per file — see CheckUnavailableError's
+    # own docstring. Every other check's own violations are still reported
+    # normally below; this doesn't discard them.
+    for _check_id, message in sorted(orchestrator.unavailable_checks):
+        print(f"error: {message}", file=sys.stderr)
+        exit_code = 1
 
     # A file that couldn't be read or parsed must never look identical to a
     # clean file: report it and fail the run, rather than letting it vanish

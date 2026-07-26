@@ -1344,21 +1344,83 @@ def test_process_files_enabling_a_non_cacheable_check_does_not_change_cache_key(
     assert without_probe._generate_cache_key() == with_probe._generate_cache_key()
 
 
-def test_check_unavailable_error_propagates_out_of_process_files(tmp_path: Path) -> None:
+def test_check_unavailable_error_is_recorded_once_and_disables_that_check(tmp_path: Path) -> None:
+    class _UnavailableCheck(_AlwaysRerunProbeCheck):
+        __slots__ = ("attempts",)
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.attempts = 0
+
+        def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+            self.attempts += 1
+            raise CheckUnavailableError("some prerequisite is missing")
+
+    filepath_1 = tmp_path / "module1.py"
+    filepath_1.write_text("x = 1\n")
+    filepath_2 = tmp_path / "module2.py"
+    filepath_2.write_text("y = 2\n")
+
+    check = _UnavailableCheck()
+    orchestrator = CheckOrchestrator(checks=[check])
+    all_violations = orchestrator.process_files([str(filepath_1), str(filepath_2)])
+
+    # Deliberately not recorded as an ordinary rule_failures entry — see
+    # CheckUnavailableError's own docstring.
+    assert orchestrator.rule_failures == []
+    assert orchestrator.unavailable_checks == [("always-rerun-probe", "some prerequisite is missing")]
+    assert all_violations == {}
+    # Attempted on the first file only -- the second file's own call is
+    # skipped entirely rather than failing (and recording) all over again.
+    assert check.attempts == 1
+
+
+def test_check_unavailable_error_does_not_discard_other_checks_results(tmp_path: Path) -> None:
     class _UnavailableCheck(_AlwaysRerunProbeCheck):
         def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
             raise CheckUnavailableError("some prerequisite is missing")
 
     filepath = tmp_path / "module.py"
-    filepath.write_text("x = 1\n")
+    filepath.write_text("data = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[_UnavailableCheck()])
-    with pytest.raises(CheckUnavailableError, match="some prerequisite is missing"):
-        orchestrator.process_files([str(filepath)])
-    # Deliberately not recorded as an ordinary rule_failures entry — see
-    # CheckUnavailableError's own docstring for why this must abort the run
-    # instead of being downgraded to a per-file failure.
-    assert orchestrator.rule_failures == []
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), _UnavailableCheck()])
+    all_violations = orchestrator.process_files([str(filepath)])
+
+    assert {v.check_id for v in all_violations[str(filepath)]} == {"forbid-vars"}
+    assert orchestrator.unavailable_checks == [("always-rerun-probe", "some prerequisite is missing")]
+
+
+def test_refresh_stale_positions_skips_a_check_already_known_unavailable(tmp_path: Path) -> None:
+    # A check that raised CheckUnavailableError during this same file's own
+    # _check_file pass is already recorded in _unavailable_check_ids by the
+    # time a different check's fix (here, ForbidVarsCheck's own rename)
+    # triggers _refresh_stale_positions for that file -- it must not be
+    # attempted (and fail) all over again there.
+    class _UnavailableCheck(_AlwaysRerunProbeCheck):
+        __slots__ = ("attempts",)
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.attempts = 0
+
+        def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+            self.attempts += 1
+            raise CheckUnavailableError("some prerequisite is missing")
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "import requests\n\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
+    )
+
+    check = _UnavailableCheck()
+    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(), check], fix_mode=True)
+    orchestrator.process_files([str(filepath)])
+
+    assert filepath.read_text() == (
+        "import requests\n\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n"
+    )
+    assert check.attempts == 1
+    assert orchestrator.unavailable_checks == [("always-rerun-probe", "some prerequisite is missing")]
 
 
 def test_main_reports_check_unavailable_error_once_and_exits_nonzero(
