@@ -73,6 +73,10 @@ _FAKE_SERVER_SCRIPT = textwrap.dedent(
         elif method == "send_garbage":
             sys.stdout.buffer.write(b"Not-A-Valid-LSP-Header\r\n\r\n")
             sys.stdout.buffer.flush()
+        elif method == "spam_stderr_then_respond":
+            sys.stderr.write("x" * 200_000)
+            sys.stderr.flush()
+            write_message({"jsonrpc": "2.0", "id": message["id"], "result": message["params"]})
         elif method == "die_immediately":
             break
         elif method == "exit":
@@ -89,6 +93,21 @@ def test_request_returns_result(tmp_path: Path) -> None:
     client = _spawn_fake_server(tmp_path)
     try:
         response = client.request("echo", {"hello": "world"})
+        assert response == {"hello": "world"}
+    finally:
+        client.close()
+
+
+def test_a_large_stderr_write_does_not_deadlock_the_server(tmp_path: Path) -> None:
+    # Regression: an unread stderr PIPE fills once the server writes enough
+    # to it (64KiB is a typical Linux pipe buffer size) -- the server then
+    # blocks on its own next stderr write, stalling its entire
+    # request/response loop. This would otherwise surface as a mysterious
+    # request timeout rather than as the stderr backpressure that actually
+    # caused it.
+    client = _spawn_fake_server(tmp_path)
+    try:
+        response = client.request("spam_stderr_then_respond", {"hello": "world"}, timeout=5.0)
         assert response == {"hello": "world"}
     finally:
         client.close()

@@ -152,6 +152,7 @@ class LSPClient:
         "_pending_lock",
         "_process",
         "_reader",
+        "_stderr_reader",
     )
 
     def __init__(self, command: Sequence[str], *, cwd: Path) -> None:
@@ -176,6 +177,23 @@ class LSPClient:
         self._close_called = False
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
+        self._stderr_reader = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._stderr_reader.start()
+
+    def _drain_stderr(self) -> None:
+        """Continuously reads and discards the server's stderr.
+
+        Without this, verbose server logging or a repeated warning can fill
+        the OS pipe buffer (64KiB is typical on Linux); once full, the
+        server's own next write to stderr blocks, stalling its entire
+        request/response loop and surfacing as a mysterious request timeout
+        on this client's side rather than as the stderr backpressure that
+        actually caused it.
+        """
+        stderr = self._process.stderr
+        assert stderr is not None  # constructed with stderr=PIPE above
+        for line in iter(stderr.readline, b""):
+            logger.debug("ty server stderr: %s", line.decode("utf-8", errors="replace").rstrip())
 
     def _read_loop(self) -> None:
         stdout = self._process.stdout
