@@ -105,6 +105,15 @@ def _shadowed_names(tree: ast.Module) -> frozenset[str]:
     name:` handler; or a `match`/`case` capture pattern (`case str:` or
     `case [*str]`/`case {**str}`).
 
+    A plain `import a.b.c` (no `as`) binds only `a`, its own top-level
+    component, in the current namespace — `import a.b.c` never introduces
+    a name `a.b.c` (that's not even a legal identifier), and a subsequent
+    `a.b.c.whatever` resolves `a` first, then walks attributes from there.
+    `import str.helpers` therefore shadows `str` just as much as `import
+    str` would; only an aliased import (`import a.b.c as x`) binds the
+    whole path under one name instead, exactly as `alias.asname` already
+    records for every other import shape here.
+
     Deliberately whole-module and scope-blind rather than resolving which
     binding is actually in scope at a given call site: `int`/`str`/etc.
     shadowed only in some unrelated function elsewhere in the file makes
@@ -118,7 +127,10 @@ def _shadowed_names(tree: ast.Module) -> frozenset[str]:
     """
     shadowed: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, (ast.Import, ast.ImportFrom)):
+        if isinstance(node, ast.Import):
+            shadowed.update(alias.asname or alias.name.split(".", 1)[0] for alias in node.names)
+            continue
+        if isinstance(node, ast.ImportFrom):
             shadowed.update(alias.asname or alias.name for alias in node.names)
             continue
         name = _bound_name(node)

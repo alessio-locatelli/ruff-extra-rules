@@ -95,6 +95,7 @@ def test_ignores_a_call_missing_its_own_end_position(null_out: Callable[[ast.Cal
         "class str:\n    pass\n\n\n",
         "import re as str\n\n\n",
         "from os import path as str\n\n\n",
+        "import str.helpers\n\n\n",
         # Deliberately scope-blind (see _shadowed_names): a binding inside
         # an unrelated function elsewhere in the module still disables
         # every same-named candidate module-wide.
@@ -114,6 +115,7 @@ def test_ignores_a_call_missing_its_own_end_position(null_out: Callable[[ast.Cal
         "class-def",
         "import-as",
         "import-from-as",
+        "dotted-import-binds-its-top-level-component",
         "assignment-in-an-unrelated-scope",
         "for-loop-target",
         "with-as-target",
@@ -134,6 +136,15 @@ def test_ignores_a_call_whose_constructor_name_is_shadowed(shadowing_statement: 
     # behavior rather than being a safe no-op.
     source = f"{shadowing_statement}func(str(x))\n"
     assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
+
+
+def test_an_aliased_dotted_import_shadows_only_its_alias_not_the_top_level_component() -> None:
+    # `import str.helpers as helper` binds only `helper`, not `str` -- the
+    # dotted path's own top-level component is only implicitly bound when
+    # there's no `as` clause at all (see test above).
+    source = "import str.helpers as helper\n\n\nfunc(str(x))\n"
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.constructor == "str"
 
 
 def test_shadowing_one_constructor_does_not_affect_an_unrelated_one() -> None:
