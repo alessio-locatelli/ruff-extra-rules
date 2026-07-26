@@ -1,0 +1,197 @@
+# Research: external type checker + invocation method for redundant-type-conversion detection
+
+Wayfinder research ticket [#100](https://github.com/alessio-locatelli/ruff-extra-rules/issues/100), child of map issue [#99](https://github.com/alessio-locatelli/ruff-extra-rules/issues/99) ("Redundant Type Conversion Check — Spec"). This is not a `docs/behavioral_contract.md` chapter audit like the other numbered files in this directory, so it deliberately isn't given a `00NN-behavioral-contract-audit-*` name — every other file here is a completed, ADR-linked audit record, and this is neither. It's filed in `docs/audits/` anyway, as a one-off placement, because the repo has no other existing home for investigative write-ups (no `docs/research/` or similar) and no documented convention for one; formalizing an actual research-artifact location, if this repo wants one, is a documentation-governance decision outside this research ticket's scope and outside what it was asked to touch.
+
+This document is a research artifact for a decision that issue [#101](https://github.com/alessio-locatelli/ruff-extra-rules/issues/101) (blocked by #100) will actually make. Nothing here should be read as final.
+
+## Method
+
+All commands were run directly against locally installed tools — `uvx` for `ty`/`pyrefly` (isolated, ephemeral environments, no project context), a `uv tool install` for `pyright`, and `uv run` (this repo's own dev-dependency `.venv`, since `mypy`/`dmypy` is already a dev dependency here — see `pyproject.toml`/`mypy.ini`) for `mypy`/`dmypy` — not blog posts or secondary summaries. Versions used, resolved at test time (2026-07-26):
+
+- `ty` 0.0.63 (`uvx ty --version`)
+- `pyrefly` 1.1.1 (`uvx pyrefly --version`)
+- `pyright` 1.1.411 (`pyright --version`, installed via `uv tool install pyright`)
+- `mypy` 2.3.0 (`uv run mypy --version`; already a dev dependency of this repo, see `pyproject.toml`/`mypy.ini`)
+- `lsp-client` 0.3.9, `multilspy` 0.0.15 — inspected from the local clones named in the ticket, not installed
+- Python 3.14.6, `uv` 0.11.32, `prek` 0.4.11
+
+None of this touched the repo's own `pyproject.toml`/`uv.lock` except running `uv sync` once to materialize the existing dev-dependency `.venv` (gitignored; `uv.lock` hash confirmed unchanged before/after via `sha256sum`). `ty`, `pyrefly`, and the standalone `pyright` binary were run from `uvx`/`uv tool`'s own isolated caches, never added to this project's dependency graph.
+
+"Medium-sized repo" proxy: this repo's own `src/` + `tests/` — 84 tracked `.py` files, 15 837 lines (`git ls-files 'src/**/*.py' 'tests/**/*.py' | wc -l` / `xargs wc -l`), ~373 KB (`src/`) + ~513 KB (`tests/`) apparent size on disk (`du -sb src tests`; an earlier draft of this document cited larger, block-usage-inflated figures captured before a stray build artifact directory was cleaned up mid-session — these are the corrected, re-verified numbers).
+
+Test fixtures (not committed, built under `/tmp/agents/research-100/sandbox/`, outside the repo) isolate the two shapes from issue #99:
+
+```python
+# pkg/callee.py
+from collections.abc import Iterable
+
+
+def takes_list(items: list[int]) -> int: ...
+def takes_iterable(names: Iterable[str]) -> int: ...
+
+# call_site_cross_file.py
+from pkg.callee import takes_iterable, takes_list
+
+def caller() -> None:
+    bar: list[int] = [1, 2, 3]
+    takes_list(list(bar))          # redundant: bar is already list[int]
+
+    names: list[str] = ["a", "b"]
+    takes_iterable(list(names))    # redundant: takes_iterable only needs Iterable[str]
+```
+
+A minimal, stdlib-only (`subprocess` + `json`, no dependencies) LSP probe script was written to send `initialize` → `textDocument/didOpen` → `textDocument/hover` over stdio and time each round trip; this is the same shape a real check would need if it drove an LSP session itself (see "Access-layer libraries" below for why a dependency-based client wasn't used instead).
+
+## Per-tool findings
+
+### `ty` (Astral)
+
+**1. Query primitive — yes, cross-file confirmed.** `ty server` (its language server, `ty server` subcommand) answers plain `textDocument/hover`. Hovering the argument expression at the call site returns its concrete type as plain text; hovering the callee name at the call site returns its full signature, resolved through the `from pkg.callee import takes_list` cross-file import:
+
+```
+$ ty server, hover over `bar` in `takes_list(list(bar))`
+{"contents": {"kind": "plaintext", "value": "list[int]"}, ...}
+
+$ ty server, hover over `takes_list` in the same call
+{"contents": {"kind": "plaintext", "value": "def takes_list(items: list[int]) -> int"}, ...}
+```
+
+Plaintext, directly usable without markdown parsing. No dedicated "does X satisfy annotation Y" request exists in the LSP spec or in `ty`'s server — only "type of this position." Hovering both sides and comparing the two type strings is not sufficient for the protocol/structural case (`list[str]` satisfying `Iterable[str]` is not a string-equality check); see "Hover alone is not enough" below for the validated alternative (synthetic in-memory rewrite + recheck) that this research actually confirmed works, cheaply, over `ty`'s own LSP session.
+
+**2. Built-in diagnostic — none of this shape exists.** `ty explain rule` lists every rule `ty` ships; the only "redundant/unnecessary" entries are `redundant-cast` (`typing.cast()` only — "Detects redundant `cast` calls where the value already has the target type") and `redundant-final-classvar` (an unrelated `ClassVar`/`Final` qualifier check). There is no `list()`/`int()`/`str()`-constructor equivalent at all — confirmed empirically too: `ty check` on both call-site fixture files above reports `All checks passed!`.
+
+**3. Latency (measured).**
+- CLI, fresh process, whole `src/`+`tests/` (84 files/15.8k lines): `uvx ty check src tests` — 3 runs, 0.135s/0.150s/0.142s wall (`time uvx ty check src tests`).
+- LSP, fresh process, small sandbox: cold `initialize` 38ms, first hover 22ms, second hover ~0ms.
+- LSP, fresh process, this repo as workspace root (real file, `_base.py:70`): cold `initialize` 19ms, first hover 57ms, second hover ~0ms.
+
+**4. Daemon requirement — not needed to hit budget.** A fresh `ty` CLI subprocess per hook run (~0.14s measured) is already ~7x under the 1s best-case target and ~20x under the 3s worst-case target on this repo's size, so no persistent daemon is required purely for latency. `ty`'s own LSP mode is available if a future need (e.g. many hover queries per run) calls for one, and it responds to a second query on an already-open file in ~0ms, i.e. it would amortize free if the check process kept one `ty server` child alive across all files in a single hook invocation.
+
+**5. License/stability.** MIT (`LICENSE`, `astral-sh/ty`, confirmed via `gh api repos/astral-sh/ty/contents/LICENSE`). Explicitly **beta**: `ty`'s own README states "ty is currently in [beta]" and its Version Policy section states "ty uses `0.0.x` versioning. ty does not yet have a stable API; breaking changes, including changes to diagnostics, may occur between any two versions." Both the CLI/JSON output shape and the LSP surface are therefore pre-1.0 and can change without notice. [`ty-pre-commit`](https://github.com/astral-sh/ty-pre-commit) is the officially blessed pre-commit wrapper; its README confirms the invocation model matters here too (next section).
+
+### `pyrefly` (Meta)
+
+**1. Query primitive — yes, cross-file confirmed.** `pyrefly lsp` answers `textDocument/hover` with markdown containing the type (`(variable) bar: list[int]`, `(function) takes_list: def takes_list(items: list[int]) -> int: ...`), also cross-file-resolved through the same import. Needs light parsing (strip the ` ```python ... ``` ` fence and read after the last `: `) rather than being plain text like `ty`'s.
+
+Separately, `pyrefly check --output-format json` supports the `reveal_type()` builtin as a `reveal-type` info-severity diagnostic in its JSON output (`{"name": "reveal-type", "description": "revealed type: list[int]", "severity": "info"}`) — a second, CLI-only way to query a type, but (see below) only reliable once a real `pyrefly.toml`/discoverable config exists.
+
+**2. Built-in diagnostic — the one already-known partial match, confirmed and narrowed further.** `pyrefly`'s own docs (<https://pyrefly.org/en/docs/error-kinds/#unnecessary-type-conversion>) describe `unnecessary-type-conversion`: "raised when a builtin type constructor (`str`, `int`, `float`, `bool`, or `bytes`) is called on a value that is already of that type" — **scalar builtins only, `list`/`tuple`/`set`/`dict`/`frozenset` are explicitly out of scope for pyrefly's own rule**, not just "same-scope only" as previously known. It is also **`warn` severity and not enabled under the default `basic` preset** — `uvx pyrefly check doc_example.py` on the exact example from pyrefly's own docs (`def f(x: str) -> None: y = str(x)`) reports `0 errors` until the rule is forced on with `--error unnecessary-type-conversion`, at which point it does fire on that same-scope case. Forcing the same flag against both call-site fixture files (`takes_list(list(bar))`, `takes_iterable(list(names))`) still reports `0 errors` — confirming the call-site gap holds for pyrefly even at maximum severity, not just at default settings.
+
+**3. Latency (measured).**
+- CLI, fresh process, whole `src/`+`tests/`: `uvx pyrefly check src tests` — 3 runs, 0.301s/0.278s/0.306s wall. (This repo's own `mypy.ini` was auto-discovered and used as a "legacy" preset import; see the operational caveat below.)
+- LSP, fresh process, small sandbox: cold `initialize` 19ms, first hover 164ms (cross-file import), second hover ~0ms.
+- LSP, fresh process, this repo as workspace root: cold `initialize` 20ms, first hover 168ms, second hover ~0ms.
+
+**4. Daemon requirement — not needed to hit budget**, same reasoning as `ty`: a fresh CLI subprocess per hook run already lands well under 1s on this repo's size.
+
+**Operational caveat found during testing (not documented anywhere found, empirically confirmed via repeated CLI runs):** `pyrefly check <files>` behaves very differently depending on ambient config discovery. With **zero** `pyrefly.toml`/`pyproject.toml`/`mypy.ini` anywhere above the target files, it falls back to a `basic` preset that silently misses even fundamental diagnostics — `x: int = "not an int"` and `takes_int("definitely not an int")` (a literal passed to an `int`-typed parameter) both produced `0 errors`, while `this_name_does_not_exist_anywhere_12345()` (an unresolvable name) still correctly errored, showing the check genuinely ran but many rule categories were off. The moment a `pyrefly.toml` exists (even the blank one `pyrefly init` generates) or an ambient `mypy.ini` is discovered (this repo's own case, "legacy" preset), the same files immediately produce `bad-argument-type`/`bad-assignment` errors as expected. A hook invocation that runs `pyrefly check <files>` without first guaranteeing a real config file present is silently far weaker than it looks from its own "0 errors" output — this would need to be designed around (e.g. requiring/generating a `pyrefly.toml`) if `pyrefly` were chosen, not just assumed away.
+
+**5. License/stability.** MIT (`facebook/pyrefly`, confirmed via `gh api`). `pyrefly`'s own README states its "current development status is [stable]" (linking its 1.0.0 release) but immediately qualifies: "Pyrefly does *not* follow strict semantic versioning: minor versions contain more significant changes than patch versions, but any version may introduce new type errors and other breaking changes." So: stable as a product, not stable as an API/diagnostic-set contract to build automation on top of without re-verification per upgrade.
+
+### `pyright` (Microsoft)
+
+**1. Query primitive — yes, cross-file confirmed.** `pyright-langserver --stdio` answers `textDocument/hover` with plaintext (`(variable) bar: list[int]`, `(function) def takes_list(items: list[int]) -> int`), cross-file-resolved through the same import, in the same shape as `ty`'s. Like `ty`, hover alone can't decide protocol/structural satisfaction (see "Hover alone is not enough" below) — but `pyright` was also confirmed to support the synthetic-rewrite-and-recheck pattern via `textDocument/didChange` + `textDocument/diagnostic`, at ~10–13ms per cycle once warm.
+
+**2. Built-in diagnostic — none of this shape exists.** Pyright's config reference (`reportUnnecessaryCast`, `reportUnnecessaryIsInstance`, `reportUnnecessaryComparison`, `reportUnnecessaryContains`, `reportUnnecessaryTypeIgnoreComment`) has no rule for a redundant builtin-constructor call; `reportUnnecessaryCast` is `typing.cast()`-only, same pattern as `ty`/`mypy`. Confirmed empirically: `pyright` on both call-site fixture files reports `0 errors, 0 warnings, 0 informations`.
+
+**3. Latency (measured) — the one candidate that misses budget on a plain CLI invocation.**
+- CLI, fresh process, whole `src/`+`tests/`, no project venv on `PATH`: 3 runs, 2.729s/2.769s/2.911s wall.
+- CLI, fresh process, same command with this repo's own `.venv` activated (so imports like `pytest` resolve): 3 runs, **3.116s/2.969s/3.055s wall** — at or over the stated 3s worst-case budget, on this repo's own modest size, before this check's own logic even runs.
+- LSP, fresh process, small sandbox: cold `initialize` 212ms, first hover 260ms.
+- LSP, fresh process, this repo as workspace root: cold `initialize` 219ms, first hover 509ms (≈0.73s combined for one query on a freshly spawned server); second hover on the same file ~0–37ms.
+
+**4. Daemon requirement — needed to hit budget.** Pyright's own startup cost (bundled Node.js runtime + its own project-wide indexing) makes a fresh-subprocess-per-hook-run model unreliable against the 3s ceiling by itself; only a hover query against an already-warm, already-initialized LSP session lands safely under budget. That warm session would have to be a background process kept alive by this repo's own tooling across the whole hook run (open once, serve every file's hover queries, then shut down) — pyright itself doesn't manage that lifecycle for you the way `dmypy`'s status-file/daemon commands do.
+
+**5. License/stability.** MIT (`LICENSE.txt`, confirmed via `gh api`; GitHub's license-detector reports `NOASSERTION`/"Other" for the repo metadata field because of the file's Microsoft-specific preamble text, but the file body is a plain MIT license). Mature/stable in practice — Pylance's backend, versioned `1.1.x` for years — but pyright ships no formal "0.0.x vs 1.0" stability statement the way `ty` does; its own hover/CLI output shape has been consistent for years in practice.
+
+### `mypy` / `dmypy` (reference implementation)
+
+**1. Query primitive — yes, cross-file confirmed, via `dmypy inspect`.** `dmypy inspect --show type <file>:<line>:<col>` returns the type of every expression enclosing that position. Tested against this repo's own `src/pre_commit_hooks/ast_checks/_orchestrator.py:327` (`violations = check.check(filepath, tree, source)`, where `check`'s `ASTCheck` protocol is declared in the separate `_base.py`):
+
+```
+$ uv run dmypy inspect --show type --force-reload src/pre_commit_hooks/ast_checks/_orchestrator.py:327:42
+"Path"
+"list[Violation]"
+```
+
+`Path` is `filepath`'s type, `list[Violation]` is the whole call expression's return type — both correctly resolved from the cross-file `ASTCheck` protocol. Note: a plain (non-`--force-reload`) query at the same position returned `No known type available for "NameExpr"/"CallExpr" (maybe unreachable or try --force-reload)` — `dmypy inspect` needs `--force-reload` to reliably reflect a file's current expression-level types in this setup; mypy's own docs mark this whole command "(experimental)".
+
+**2. Built-in diagnostic — none of this shape exists.** mypy's error-code list (<https://mypy.readthedocs.io/en/stable/error_code_list.html>) has no "redundant/unnecessary conversion" code; the closest, `--warn-redundant-casts` (already enabled in this repo's own `mypy.ini`), is documented as "Warn about casting an expression to its inferred type" — `typing.cast()` only, same pattern as `ty`/`pyright`. Confirmed empirically: `mypy` on both call-site fixture files reports `Success: no issues found in 2 source files`.
+
+**3. Latency (measured).**
+- Daemon cold start + first full check, whole `src/`+`tests/` (`mypy.ini`'s `exclude = tests/fixtures` narrows this to 46 files): `uv run dmypy run -- src tests` — **2.486s wall**, near the 3s ceiling for a cold start alone.
+- Warm recheck, same command, daemon already running: 2 runs, 0.112s/0.103s wall.
+- `dmypy inspect --show type --force-reload` on an already-running, already-checked daemon: 3 runs, 0.110s/0.110s/0.111s wall.
+
+**4. Daemon requirement — required, and it's `dmypy`'s whole purpose.** The ~0.1s numbers only hold once the daemon is already up; a cold `dmypy start`/first `dmypy run` pays ~2.5s on this repo's size, which is workable as a one-time "warm the daemon" cost but not repeatable per hook run. Unlike `ty`/`pyrefly` (fast enough fresh every time) or `pyright` (needs a warm session kept alive *within* one hook invocation), `dmypy` is designed to stay resident *across* many separate invocations via its own status-file/socket (`.dmypy.json`) — i.e., surviving across separate `git commit` runs, not just within one. Nothing in pre-commit/prek's own execution model starts or supervises such a long-lived background process for you; this repo's own hook code would have to take on that lifecycle (start-if-absent, health-check, eventual teardown) itself, which is a materially bigger operational surface than `ty`/`pyrefly`'s "just fork a fresh process, it's fast enough" story or even pyright's "keep one child alive for the duration of this hook run" story.
+
+**5. License/stability.** MIT (`LICENSE`, confirmed via `gh api`). mypy itself is the most mature candidate (reference implementation of PEP 484, in production use for over a decade), but its own daemon docs (<https://mypy.readthedocs.io/en/stable/mypy_daemon.html>) explicitly caveat: "The command-line interface of mypy daemon may change in future mypy releases," and the location-based inspect mode is flagged "(experimental)" in the same page. So: the type-checking engine is rock solid, but the exact interface this check would depend on (`dmypy inspect`) is the one part of mypy that mypy's own docs call out as not yet stable.
+
+## Access-layer libraries: `lsp-client`, `multilspy`, `python-lsp-server`
+
+These were investigated as ticket #100 asked, but none change the picture above, and one of them conflicts with an existing rule in this repo.
+
+- **[`lsp-client`](https://github.com/lsp-client/lsp-client/)** (MIT, v0.3.9): ships ready-made mixin clients for exactly the servers above — `src/lsp_client/clients/ty.py` and `src/lsp_client/clients/pyrefly.py` both declare `WithRequestHover`, `WithRequestSignatureHelp`, `WithRequestTypeDefinition`, confirming (independently of the raw-LSP probe used elsewhere in this document) that these capabilities are expected to work through a real client, not just through hand-rolled JSON-RPC. `src/lsp_client/clients/pyright.py`/`basedpyright.py` exist too. It depends on `attrs`, `anyio`, `loguru` (per its own imports).
+- **[`multilspy`](https://github.com/microsoft/multilspy)** (MIT, v0.0.15): for Python, only wraps `jedi-language-server` (`src/multilspy/language_servers/jedi_language_server/`) — there is no `ty`/`pyrefly`/`pyright`/`mypy` backend in this library at all, and Jedi is a static-inference tool, not a type checker (no PEP 484 assignability/subtyping engine). Using `multilspy` for this check would mean either accepting Jedi's much weaker type inference or writing a new `multilspy` language-server adapter for `ty`/`pyright`/`pyrefly` from scratch — which is strictly more work than `lsp-client`'s existing, ready-made adapters for the same three servers.
+- **`python-lsp-server`** (`pylsp`, MIT): its own README states its base hover/completion/signature-help provider is Jedi ("The base language server requires Jedi to provide Completions, Definitions, Hover, References, Signature Help, and Symbols"), with real type-checking only available through third-party plugins (e.g. `pylsp-mypy`) that shell out to the same tools already evaluated above. It adds an LSP-server layer in front of one of `ty`/`pyrefly`/`pyright`/`mypy` rather than being an independent type-information source — using it would mean talking to (say) `mypy` through an extra `pylsp` hop instead of talking to `mypy`/`dmypy` directly.
+
+**Conflict with this repo's own rules:** `docs/adding-a-check.md` requires every check to be "Standard library only, no external runtime dependencies." `lsp-client` (`attrs`/`anyio`/`loguru`) and `multilspy` would violate that if imported as Python dependencies of a check — regardless of their capability. This doesn't rule out *talking to* `ty`/`pyrefly`/`pyright`/`mypy` over LSP; it rules out using these two libraries to do it. The ~150-line stdlib-only probe script written for this research (`subprocess` + `json`, framing `Content-Length`-prefixed JSON-RPC messages by hand) is proof that a minimal hover/inspect client needs no dependency beyond the standard library — the same pattern `_prefilter.py` already uses to shell out to `git` without adding a `GitPython` dependency.
+
+## Pre-commit/prek invocation model (verified, not assumed)
+
+Ticket #100 asked to verify the assumption that a hook runs once per invocation over a batch of files, not once per file. Confirmed from three independent angles:
+
+1. **This repo's own architecture already assumes it.** `CONTEXT.md`'s glossary entry for "Hook" states the existing `ruff-extra-rules` hook runs "every check runs in one pass" over whatever files pre-commit/prek hands it in a single process — this repo's own orchestrator (`CheckOrchestrator`) is not designed to be re-invoked per file.
+2. **[`ty-pre-commit`'s own README](https://github.com/astral-sh/ty-pre-commit) is explicit about it**: "this hook does not pass filenames to ty; instead, ty checks the full project... Do not try to override this behavior by setting `pass_filenames: true`... `uv check` does not accept positional arguments, so the hook will error." This is Astral's own officially-endorsed integration deliberately avoiding a per-file invocation model.
+3. **pre-commit's own community discussion confirms the default batching behavior**: pre-commit passes a hook's matched files as one batch of arguments per invocation (its own internal `xargs`-style implementation only splits a batch further to respect OS argument-length limits — see pre-commit issues [#394](https://github.com/pre-commit/pre-commit/issues/394) and [#1775](https://github.com/pre-commit/pre-commit/issues/1775), where a request to add a configurable "one file per invocation" mode was treated as a *new*, currently-unsupported feature). `prek`'s own CLI (`prek --help`, tested directly: v0.4.11) advertises itself as "a fast Git hook manager... designed as a drop-in alternative to pre-commit," consistent with preserving this same batching contract rather than inventing a per-file one.
+
+Net effect for this research: whichever tool is chosen, "one invocation, many files" is the real constraint to design against — which matches every latency number measured above (all were run as one process over the whole `src/`+`tests/` tree, not per file).
+
+## Conflict with this repo's existing per-file cache contract — flag, not resolved here
+
+This surfaced during review of an earlier draft and is a genuine pre-existing-architecture conflict, not something specific to any one candidate tool — it needs to reach #101 (or back to #99) rather than be silently designed around.
+
+`docs/adding-a-check.md`'s "Incremental-analysis limitations" section states, as an existing, already-shipped invariant: "A `check()` implementation must only ever look at the single file it's given (`filepath`/`tree`/`source`) — no check reads another file, imports, or any other cross-file state — so a cache hit for an unchanged file always reproduces exactly what a full re-run of that file would produce. Keep it that way: a check that started inspecting other files would silently break this guarantee, since the cache key (`CheckOrchestrator._generate_cache_key()`) has no way to invalidate one file's cached result because a _different_ file it depended on changed."
+
+Issue #99 has already committed to the opposite requirement for this specific check: "real type information, including cross-file/import resolution, is worth the added complexity." Those two decisions are in direct tension, independent of which tool from this document gets picked: a check whose violations for `caller.py` depend on `callee.py`'s current parameter types is exactly the shape `docs/adding-a-check.md` warns against. Concretely, on a normal `git commit` that only touches `callee.py` (widening a parameter from `list[int]` to `Iterable[int]`, say), pre-commit/prek only pass `callee.py` to the hook — `caller.py` is never re-examined, so `CacheManager`'s existing per-file cache (keyed on `caller.py`'s own content hash) keeps serving `caller.py`'s stale redundant-conversion result from before the signature changed, with nothing to invalidate it.
+
+This isn't this research ticket's to resolve (it's an architecture question, not a "which tool" question), but any of the four tools evaluated above inherits it equally, so it shouldn't be allowed to silently fall out of scope either. Candidate directions for whoever picks this up: exempt this one check from the shared per-file cache entirely (accept paying full-repo re-analysis every run, which the latency numbers above suggest may be affordable for `ty`/`pyrefly` but not for `pyright`/cold `dmypy`); extend the cache key with a hash of each file's actual import closure (expensive to compute correctly, and Python's dynamic import machinery makes "the closure" itself non-trivial to pin down exactly); or scope this check's cross-file awareness to something coarser and easier to invalidate correctly. Flagging for #101/#99, not deciding here.
+
+## Comparison summary
+
+| | Cross-file type query | Built-in redundant-conversion rule | Measured latency (this repo's size) | Daemon needed for budget | License | Stability of the interface this check would use |
+|---|---|---|---|---|---|---|
+| **ty** | Yes — LSP hover, plaintext | None (only `redundant-cast`, `typing.cast()`-only) | CLI fresh: ~0.14s. LSP cold-init + first hover: ~60–100ms | No | MIT | Beta, "no stable API," breaking changes possible between any two 0.0.x releases |
+| **pyrefly** | Yes — LSP hover, markdown (needs parsing) | Partial — `unnecessary-type-conversion`, scalar builtins only (`str`/`int`/`float`/`bool`/`bytes`), `warn`, off by default under `basic` preset, same-scope only, call-site case confirmed still missed even forced to `error` | CLI fresh: ~0.29s (with ambient config discovered — see operational caveat re: no-config mode). LSP cold-init + first hover: ~20–190ms | No | MIT | "Stable" product per its own README, but explicitly not semver — "any version may introduce new type errors and other breaking changes" |
+| **pyright** | Yes — LSP hover, plaintext | None (only `reportUnnecessaryCast`, `typing.cast()`-only) | CLI fresh: **~3.0–3.1s — at/over the 3s budget already** | Yes — needs a warm session kept alive across the whole hook run | MIT | Mature/stable in practice, ~1.1.x for years, no formal pre/post-1.0 stability statement found |
+| **mypy/dmypy** | Yes — `dmypy inspect --force-reload`, JSON-ish plaintext | None (only `--warn-redundant-casts`, `typing.cast()`-only) | Daemon cold start: ~2.5s. Warm recheck: ~0.1s. Warm `inspect`: ~0.11s | Yes, and across separate hook invocations, not just within one — no existing lifecycle owner | MIT | Type-checking engine itself is the most mature of the four; `dmypy`'s CLI and the `inspect` command specifically are documented by mypy itself as still subject to change/experimental |
+| **lsp-client** (access layer) | N/A — transport, not a checker | N/A | N/A | N/A | MIT | Pre-1.0 (v0.3.9), actively maintained; would violate this repo's stdlib-only rule for checks if imported directly |
+| **multilspy** (access layer) | N/A — Python support is Jedi-only, no real type checker behind it | N/A | N/A | N/A | MIT | Research-grade (v0.0.15); would need new adapter code for any of the four checkers above, and would also violate the stdlib-only rule |
+| **python-lsp-server** (access layer) | N/A — base hover is Jedi; real typing needs a third-party plugin that itself shells out to mypy/etc. | N/A | N/A | N/A | MIT | Mature as an LSP frontend, but adds an indirection layer rather than new capability |
+
+## Hover alone is not enough for the protocol/structural case — validated
+
+None of the four checkers expose "does expression X satisfy annotation Y" as a single request — only "what is the type at this position." That matters concretely for the harder case from issue #99: hovering `list(names)` gives `list[str]` and hovering `takes_iterable`'s parameter gives `Iterable[str]` — two type *strings*, with nothing in the LSP response asserting that the first satisfies the second. Treating that as solved by hover alone (as an earlier draft of this document did) was wrong; either the strings would need to be compared with hand-rolled subtyping logic (fragile, and exactly the kind of reimplementation the map's own architecture decision — delegate to a real type checker rather than local heuristics — exists to avoid), or a different query is needed.
+
+The alternative flagged in the previous revision — synthetically remove the wrapping conversion and ask the checker whether the call site still type-checks, i.e. drive the tool's own real assignability engine in the opposite direction instead of reimplementing subtyping — was tested, not just proposed. Using the same fixtures as above plus a negative control (`necessary_wrapped.py`/`necessary_unwrapped.py`: `takes_list(list(it))` where `it: Iterator[int]` — a conversion that is *not* redundant, since `takes_list` needs an actual `list[int]`), an LSP session was opened once, and for each case the wrapped file was pulled for diagnostics (baseline), then a `textDocument/didChange` replaced its content with the unwrapped version in-memory (no disk write), then diagnostics were pulled again:
+
+- **`ty server`**, redundant case (`takes_iterable(list(names))` → `takes_iterable(names)`): 0 diagnostics before and after — the conversion is *type*-redundant (removing it still type-checks). **Necessary case** (`takes_list(list(it))` → `takes_list(it)`): 0 diagnostics before, **1 diagnostic after** — `error[invalid-argument-type]: ... Expected list[int], found Iterator[int]` — correctly discriminated by `ty`'s own real assignability check, not a textual comparison.
+- **`pyright-langserver`**, same necessary-case negative control: 0 diagnostics before, 1 diagnostic after — `"Iterator[int]" is not assignable to "list[int]"` — same correct discrimination, via `textDocument/diagnostic` pull requests.
+- **Measured cost of one recheck cycle**, on an already-open document in an already-warm session (`didChange` + diagnostic pull, no new process, no disk write): `ty` ~0–1ms; `pyright` ~10–13ms. Both are negligible next to the per-file hover numbers measured above, so this is not a design compromise against the performance budget — it's close to free once a session is open for the file being checked.
+
+This means the actual query shape a redundant-type-conversion check needs is not "hover the argument, hover the parameter, compare the strings" but "open the file, hover to find the argument's declared/inferred type only to decide *which* conversions are plausible candidates worth testing at all (a cheap prefilter — `int`/`float`/`list`/`tuple`/`set`/etc. calls only), then for each candidate, apply an in-memory `didChange` with that one conversion peeled off and read back whether the checker still reports zero new diagnostics at that call site." Both `ty` and `pyright` support this over LSP (`textDocument/didChange` + `textDocument/diagnostic`); `pyrefly` and `dmypy` were not re-tested against this specific pull-diagnostics pattern here and should be checked in a future ticket if either becomes a live contender, but pyrefly's LSP already showed working push-model diagnostics via `textDocument/publishDiagnostics` in earlier testing (`WithReceivePublishDiagnostics` in `lsp-client`'s `PyreflyClient`), so the same incremental-edit pattern is very likely available there too, just unverified in this pass.
+
+**Two correctness gaps in this method, caught in review of an earlier draft, neither resolved here — both are detection-*scope* questions for #99/#101, not tool-selection questions this document can settle:**
+
+1. **"Zero new diagnostics after unwrapping" proves type-redundancy, not semantic/behavioral redundancy.** `list(names)` produces a distinct shallow copy even when `names` is already `list[str]`; removing the call type-checks cleanly (confirmed above) but is not behavior-preserving if `takes_iterable` retains or mutates the object it's given and the caller also holds/mutates `names` afterward — the two calls are not interchangeable at runtime just because they're interchangeable to the type checker. The synthetic-recheck method as tested here only ever establishes assignability; it says nothing about aliasing or mutation safety. Since issue #99 already scopes this check as detect-only (no autofix), a wrong report costs a human a wasted look rather than corrupting code via a bad fix, but it would still be a real false positive. Whoever designs the actual detection scope needs to either restrict v1 to constructors that can't introduce a meaningfully different object (`str`/`int`/`float`/`bool`, arguably `frozenset`/`tuple`-of-tuple) and treat copy-producing ones (`list`/`dict`/`set`/`bytearray`) as out of scope or lower-confidence, or find an independent way to rule out aliasing/mutation before reporting.
+2. **A pre-existing suppression comment on the call site can hide the synthetic recheck's own signal.** If the original line already carries a `# type: ignore`/`# pyright: ignore`/`# ty: ignore` (or similar) covering a genuine, unrelated type error, and the in-memory rewrite preserves line numbers (the natural implementation choice), that same suppression comment keeps applying after the conversion is stripped — so a *necessary* conversion on a suppressed line would still show "0 new diagnostics" and be misreported as redundant. Any implementation of this method needs to either detect and skip candidates on a suppressed line, or query diagnostics with suppression comments disabled/ignored for the synthetic recheck specifically.
+
+## Recommendation
+
+*Not a final decision — issue #101 (grilling ticket, blocked by this one) makes the actual call.*
+
+Leaning toward **`ty`, driven via its LSP session (`ty server`)** — hover to cheaply narrow candidates, then the validated synthetic-rewrite-and-recheck (`textDocument/didChange` + `textDocument/diagnostic`) to actually decide redundancy — invoked with a hand-rolled stdlib-only JSON-RPC client (no `lsp-client`/`multilspy` dependency, to honor `docs/adding-a-check.md`'s "standard library only" rule): it was the fastest of the four in every measurement taken here (fresh-CLI and fresh-LSP alike, both in the small sandbox and against this repo's own `src/`+`tests/`), its recheck-cycle cost was the lowest measured (~0–1ms vs. `pyright`'s ~10–13ms), and it needs no daemon-lifecycle work to clear the budget.
+
+`ty-pre-commit` (local clone, referenced in the map) is **not** a ready-made integration path for this check, correcting an overstatement in an earlier draft of this document — it's Astral's own separate hook that shells out to `uv check`/`ty check` directly as its entire job, not a library or service this check could call into. It's still useful evidence that `ty` resolves cleanly via `uvx`/`uv tool`, which is the same provisioning path this check would need on an end user's machine (nothing here was added to this repo's own `pyproject.toml`/`uv.lock` — every `ty`/`pyrefly`/`pyright` invocation above ran from `uvx`'s or `uv tool`'s own isolated cache). Issue #99 already committed to the "fail loudly with an install hint if missing, no silent degrade" policy for whichever tool is picked, which covers the "what if it's absent" case; it does not yet cover *how* a normal consumer of this hook is expected to get `ty` onto `PATH` in the first place (a repo-local dev dependency? relying on `uvx ty` resolving on demand, network access permitting? something else?) — that's a real open question for #101, not something this research ticket's tool/method comparison resolves on its own.
+
+The one real caveat is `ty`'s own explicit "beta, no stable API yet" status — a real risk for something the check would depend on long-term, and worth weighing against `pyright`'s much longer track record or `mypy`'s reference-implementation status in the grilling ticket. `pyrefly` is close on capability but was measurably slower to resolve cross-file hovers than `ty` in every run here, and carries the now-confirmed operational trap of needing a real config file present to produce anything beyond a thin slice of diagnostics. `pyright` and `dmypy` both work but each requires taking on genuine daemon/session-lifecycle engineering (within-run for `pyright`, cross-run for `dmypy`) that `ty`/`pyrefly` don't need just to hit the stated budget.
