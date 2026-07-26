@@ -1,17 +1,5 @@
-"""Minimal, standard-library-only JSON-RPC/LSP client over stdio.
-
-Shared transport for driving an external language server (e.g. `ty server`)
-as one long-lived child process across a whole hook invocation — the same
-kind of cross-cutting, dependency-free infrastructure `_cache.py` and
-`_prefilter.py` already are, just for a different external tool. See
-`docs/audits/type-checker-selection-for-redundant-type-conversion.md` for
-why a hand-rolled client, rather than a third-party access-layer library
-(`lsp-client`, `multilspy`), is used: `docs/adding-a-check.md` requires
-every check to stay standard-library only.
-
-This module only speaks generic JSON-RPC/LSP wire protocol (framing,
-request/response/notification plumbing). It has no `ty`-specific
-knowledge — that lives in `ast_checks.redundant_type_conversion`.
+"""Standard-library-only JSON-RPC/LSP client over stdio. See ADR-0035 and
+`docs/audits/type-checker-selection-for-redundant-type-conversion.md`.
 """
 
 from __future__ import annotations
@@ -36,43 +24,26 @@ DEFAULT_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
 class LSPError(Exception):
-    """Raised when the server returns a JSON-RPC error response, or the
-    connection to it is unexpectedly lost (EOF, broken pipe, malformed
-    frame).
-    """
+    """A JSON-RPC error response, or a lost connection (EOF, broken pipe, malformed frame)."""
 
 
 class LSPTimeoutError(LSPError):
-    """Raised when a request gets no response within its own timeout."""
+    """A request got no response within its own timeout."""
 
 
 def byte_col_to_utf16_col(line: str, byte_col: int) -> int:
-    """Convert a UTF-8 byte offset within `line` (as `ast.col_offset`
-    reports) to a UTF-16 code-unit offset — the position encoding LSP's
-    wire format uses by default (`positionEncoding: "utf-16"`; confirmed in
-    `ty server`'s own `initialize` response, since this client declares no
-    `general.positionEncodings` capability to negotiate a different one).
+    """UTF-8 byte offset (`ast.col_offset`) to a UTF-16 code-unit offset (LSP's own wire encoding).
 
-    Distinct from `ast_checks._base.byte_col_to_char_col`: that converts to
-    a Python `str` *character* offset, which only coincides with a UTF-16
-    code-unit offset for text confined to the Basic Multilingual Plane — a
-    character outside it (e.g. most emoji) is one Python `str` character
-    but two UTF-16 code units (a surrogate pair). A conversion column that
-    lands one UTF-16 unit short of where it should be can hover/edit the
-    wrong sub-expression on such a line.
+    Not the same as `ast_checks._base.byte_col_to_char_col`'s character
+    offset -- a character outside the Basic Multilingual Plane is one
+    `str` character but two UTF-16 code units.
     """
     prefix = line.encode("utf-8")[:byte_col].decode("utf-8")
     return len(prefix.encode("utf-16-le")) // 2
 
 
 def _read_message(stream: IO[bytes]) -> dict[str, Any] | None:
-    """Reads one `Content-Length`-framed JSON-RPC message from `stream`.
-
-    Returns `None` on a clean EOF before any header bytes arrive (the
-    server process exited). Header lines beyond `Content-Length` (e.g. an
-    optional `Content-Type`) are read and ignored, matching the LSP spec's
-    own base protocol.
-    """
+    """One `Content-Length`-framed JSON-RPC message, or `None` on a clean EOF before any header bytes arrive."""
     header = b""
     while not header.endswith(b"\r\n\r\n"):
         chunk = stream.read(1)
@@ -103,16 +74,8 @@ def _read_message(stream: IO[bytes]) -> dict[str, Any] | None:
 
 
 def _message(*, method: str, params: dict[str, Any] | None, msg_id: int | None = None) -> dict[str, Any]:
-    """Builds one JSON-RPC message, omitting the `params` key entirely
-    when `params` is `None` rather than sending an empty object.
-
-    Some methods' params are spec'd as taking no arguments at all (e.g.
-    LSP's own `shutdown`) — `ty server` (confirmed empirically) rejects
-    an empty object for one of these with a JSON-RPC parse error
-    ("invalid type: map, expected unit"), so `params={}` is not
-    equivalent to omitting the field for every server, even though both
-    are valid JSON-RPC on the wire.
-    """
+    # Omits "params" entirely when None: ty server rejects an empty object
+    # for a no-argument method like "shutdown" with a JSON-RPC parse error.
     message: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
     if msg_id is not None:
         message["id"] = msg_id
@@ -122,26 +85,12 @@ def _message(*, method: str, params: dict[str, Any] | None, msg_id: int | None =
 
 
 class LSPClient:
-    """Drives one child language-server process over Content-Length-framed
-    JSON-RPC (LSP's own base protocol) via stdio.
+    """One child language-server process over Content-Length-framed JSON-RPC via stdio.
 
-    A background thread reads every incoming message and routes it either
-    to the pending request it answers or to an internal notifications
-    queue (drained only by `close()`'s own shutdown sequence — this client
-    only ever needs to *send* notifications and *pull* responses/
-    diagnostics, never react to a server-pushed notification). A
-    server-to-client *request* (message carrying both `id` and `method`,
-    e.g. `window/workDoneProgress/create`) is treated the same as a
-    notification — left unanswered. `ty server` has not been observed to
-    block waiting for a reply to one (see the research audit linked in
-    this module's own docstring); full bidirectional request handling is
-    unneeded complexity for driving a single, known server this way.
-
-    Not thread-safe for concurrent callers issuing requests at the same
-    time — this codebase's own concurrency model is process-based (prek's
-    parallel hook execution spawns separate processes, not threads within
-    one), so a single foreground caller plus one background reader thread
-    is all this needs.
+    A server-to-client request (carries both `id` and `method`) is
+    silently left unanswered, same as an ordinary notification -- `ty
+    server` has not been observed to block on one. Not thread-safe for
+    concurrent `request()`/`notify()` calls.
     """
 
     __slots__ = (
@@ -166,13 +115,10 @@ class LSPClient:
         self._next_id = 0
         self._pending: dict[int, queue.Queue[dict[str, Any]]] = {}
         self._pending_lock = threading.Lock()
-        # Set by _read_loop() once the connection is observably gone (EOF or
-        # a protocol error) -- distinct from _close_called below, which
-        # guards close()'s own idempotency. Conflating the two used to make
-        # close() a silent no-op whenever the server had already exited on
-        # its own (e.g. after an "exit" notification), skipping the stdin
-        # close/wait/kill cleanup entirely and leaking the process's stdin
-        # pipe until an unpredictable later GC pass.
+        # _connection_lost (set by _read_loop) is distinct from
+        # _close_called (set by close()) -- conflating them made close()
+        # silently skip its own stdin close/wait/kill cleanup whenever the
+        # server had already exited on its own.
         self._connection_lost = False
         self._close_called = False
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
@@ -181,15 +127,9 @@ class LSPClient:
         self._stderr_reader.start()
 
     def _drain_stderr(self) -> None:
-        """Continuously reads and discards the server's stderr.
-
-        Without this, verbose server logging or a repeated warning can fill
-        the OS pipe buffer (64KiB is typical on Linux); once full, the
-        server's own next write to stderr blocks, stalling its entire
-        request/response loop and surfacing as a mysterious request timeout
-        on this client's side rather than as the stderr backpressure that
-        actually caused it.
-        """
+        # An unread stderr PIPE fills once the server writes enough to it,
+        # then blocks the server's own next write, stalling its whole
+        # request/response loop.
         stderr = self._process.stderr
         assert stderr is not None  # constructed with stderr=PIPE above
         for line in iter(stderr.readline, b""):
@@ -268,12 +208,7 @@ class LSPClient:
             raise LSPError(msg) from error
 
     def close(self, *, timeout: float = 2.0) -> None:
-        """Best-effort clean shutdown: the LSP `shutdown`/`exit` handshake,
-        then closing stdin, then waiting for the process to exit on its
-        own before killing it. Never raises — this is cleanup, called from
-        places (e.g. `atexit`) where a failure here has nothing useful left
-        to do but be logged.
-        """
+        """Best-effort shutdown handshake, then stdin close, then wait/kill. Never raises."""
         if self._close_called:
             return
         self._close_called = True
