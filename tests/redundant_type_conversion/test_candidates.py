@@ -142,6 +142,34 @@ def test_shadowing_one_constructor_does_not_affect_an_unrelated_one() -> None:
     assert candidate.constructor == "str"
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from some_module import *\nfunc(str(x))\n",
+        "func(str(x))\nfrom some_module import *\n",
+        "def f():\n    from some_module import *\n\n\nfunc(str(x))\n",
+    ],
+    ids=["before-the-candidate", "after-the-candidate", "nested-in-an-unrelated-function"],
+)
+def test_ignores_every_candidate_when_a_wildcard_import_is_present(source: str) -> None:
+    # Regression: `from module import *` can bind any name at all,
+    # including a builtin constructor's own name (e.g. a compatibility
+    # shim exporting its own `str`), without _shadowed_names() ever seeing
+    # that specific binding -- a wildcard import records only the literal
+    # string "*", not the names it actually introduces. Treating the whole
+    # module as unsafe once any wildcard import is present, regardless of
+    # where it sits relative to a candidate, is the same conservative
+    # trade-off _shadowed_names() itself makes for every other shadowing
+    # shape.
+    assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
+
+
+def test_a_non_wildcard_import_from_does_not_disable_every_candidate() -> None:
+    source = "from some_module import something\nfunc(str(x))\n"
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.constructor == "str"
+
+
 def test_candidate_positions_match_the_real_source_bytes() -> None:
     source = "takes_list(list(bar))\n"
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)

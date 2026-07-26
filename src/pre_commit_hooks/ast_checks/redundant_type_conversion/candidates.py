@@ -60,8 +60,33 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
       function/lambda parameter with that name, an `except ... as name`
       handler, a pattern-match capture, or any other assignment target
       with that name) — see `_shadowed_names()`.
+    - Every candidate in a module with any `from module import *` anywhere
+      in it — see `_has_wildcard_import()`.
     """
+    if _has_wildcard_import(tree):
+        return []
     return list(_iter_candidates(tree, eligible - _shadowed_names(tree)))
+
+
+def _has_wildcard_import(tree: ast.Module) -> bool:
+    """True if `tree` contains `from module import *` anywhere.
+
+    A wildcard import can bind any name at all, including a builtin
+    constructor's own name (e.g. a compatibility shim exporting its own
+    `str`), without this module ever naming that binding explicitly the
+    way every other import form does — `_shadowed_names()` has no name to
+    record. Resolving what a wildcard import actually brings into scope
+    would mean importing (or statically resolving the exports of) the
+    target module, which this check has no machinery for and no wish to
+    take on. Treating every constructor as potentially shadowed for the
+    whole module is the same conservative call `_shadowed_names()` itself
+    documents: reporting a shadowed constructor's call as a safe-to-remove
+    builtin conversion would be a behavior-changing false positive, far
+    worse than missing a real one.
+    """
+    return any(
+        isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names) for node in ast.walk(tree)
+    )
 
 
 _BINDING_DEF_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
