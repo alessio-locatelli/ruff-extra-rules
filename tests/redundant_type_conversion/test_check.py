@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import ast
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -12,6 +13,10 @@ from pre_commit_hooks.ast_checks.redundant_type_conversion import RedundantTypeC
 from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import ConfidenceLevel
 
 from ._helpers import FakeSession
+
+
+def _fail_if_called() -> NoReturn:
+    raise AssertionError("get_session() must not be called")
 
 
 def test_check_id_and_error_code() -> None:
@@ -49,6 +54,29 @@ def test_prefilter_pattern_includes_every_eligible_constructor_call() -> None:
 def test_fix_never_applies_a_fix() -> None:
     check = RedundantTypeConversionCheck()
     assert check.fix(Path("test.py"), [], "x = 1\n", ast.parse("x = 1\n")) is False
+
+
+def test_check_never_calls_get_session_when_the_file_has_no_real_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
+    # "print(1)" matches the "int(" prefilter substring pattern at the file
+    # level, but find_candidates() correctly rejects it at the AST level
+    # (print isn't an eligible constructor) -- get_session(), which starts
+    # `ty` on this process's first call, must never be reached for a file
+    # like this.
+    source = "print(1)\n"
+    monkeypatch.setattr(tri006_module, "get_session", _fail_if_called)
+
+    violations = RedundantTypeConversionCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert violations == []
+
+
+def test_check_never_calls_get_session_when_every_candidate_is_suppressed(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = "y = str(x)  # pytriage: ignore=TRI006\n"
+    monkeypatch.setattr(tri006_module, "get_session", _fail_if_called)
+
+    violations = RedundantTypeConversionCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert violations == []
 
 
 @pytest.mark.parametrize(

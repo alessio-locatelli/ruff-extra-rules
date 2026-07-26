@@ -14,7 +14,7 @@ A builtin type-conversion call — `int(x)`, `list(x)`, and similar — is somet
 
 ### Invocation
 
-One `ty server` LSP session is kept alive for a whole hook invocation (not spawned per file or per query), driven by a hand-rolled, standard-library-only JSON-RPC client (`pre_commit_hooks._lsp`) — no third-party LSP client dependency, matching `docs/adding-a-check.md`'s "standard library only" rule for every check. The session is created lazily, on the first file this check actually examines, not at CLI startup — a run with nothing for this check to look at never pays `ty`'s startup cost.
+One `ty server` LSP session is kept alive for a whole hook invocation (not spawned per file or per query), driven by a hand-rolled, standard-library-only JSON-RPC client (`pre_commit_hooks._lsp`) — no third-party LSP client dependency, matching `docs/adding-a-check.md`'s "standard library only" rule for every check. The session is created lazily, on the first file with at least one real, non-suppressed AST-level candidate (see `candidates.find_candidates`), not at CLI startup and not merely on the first file whose prefilter match happens to be a false positive (e.g. `print(1)` matching the `"int("` prefilter pattern) — a run with nothing for this check to actually flag never pays `ty`'s startup cost.
 
 ### Detection method
 
