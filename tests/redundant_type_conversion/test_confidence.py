@@ -9,6 +9,7 @@ from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import (
     ConfidenceLevel,
     eligible_constructors,
     hover_passes_gate,
+    is_exact_match,
 )
 
 
@@ -173,3 +174,21 @@ def test_permissive_does_not_split_a_union_nested_inside_brackets(hover_text: st
 )
 def test_permissive_accepts_a_union_whose_every_member_matches(hover_text: str, constructor: str) -> None:
     assert hover_passes_gate(hover_text, ConfidenceLevel.PERMISSIVE, constructor) is True
+
+
+@pytest.mark.parametrize(
+    ("hover_text", "constructor"),
+    [("str", "str"), ("frozenset[int]", "frozenset"), ('Literal["hi"]', "str"), ("list[int] | list[str]", "list")],
+    ids=["exact", "generic", "literal", "union"],
+)
+def test_is_exact_match_accepts_a_genuine_match(hover_text: str, constructor: str) -> None:
+    assert is_exact_match(hover_text, constructor) is True
+
+
+@pytest.mark.parametrize(
+    ("hover_text", "constructor"),
+    [("dict[str, list[int]]", "str"), ("Path", "str"), ("int | float", "int")],
+    ids=["unrelated", "structural-only", "union-with-a-non-matching-member"],
+)
+def test_is_exact_match_rejects_a_structural_or_unrelated_type(hover_text: str, constructor: str) -> None:
+    assert is_exact_match(hover_text, constructor) is False

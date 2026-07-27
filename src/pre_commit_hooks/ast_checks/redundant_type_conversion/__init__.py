@@ -11,7 +11,7 @@ from pre_commit_hooks.ast_checks._base import BaseCheck, Violation, find_ignored
 
 from .analysis import RedundantConversion, decide_candidates
 from .candidates import find_candidates
-from .confidence import ConfidenceLevel, eligible_constructors
+from .confidence import ConfidenceLevel, eligible_constructors, is_exact_match
 from .session import get_session
 
 if TYPE_CHECKING:
@@ -33,9 +33,19 @@ _CONSTRUCTOR_NAMES = ("str", "int", "float", "bool", "bytes", "frozenset", "tupl
 
 def _format_message(item: RedundantConversion) -> str:
     constructor = item.candidate.constructor
+    if is_exact_match(item.argument_type, constructor):
+        return (
+            f"Redundant `{constructor}(...)` conversion: the argument is already `{item.argument_type}`, so "
+            f"wrapping it in `{constructor}()` has no effect. Or add '# pytriage: ignore={ERROR_CODE}' to suppress."
+        )
+    # Not a real type match -- `ty` just didn't distinguish the two here
+    # (e.g. either side of a weakly-typed `==`), see ADR-0035's permissive
+    # hover-gate limitation. Saying "the argument is already X" would be
+    # false when X (here `item.argument_type`) isn't actually `constructor`.
     return (
-        f"Redundant `{constructor}(...)` conversion: the argument is already `{item.argument_type}`, so "
-        f"wrapping it in `{constructor}()` has no effect. Or add '# pytriage: ignore={ERROR_CODE}' to suppress."
+        f"Redundant `{constructor}(...)` conversion: `ty` sees no difference with or without this wrap here, "
+        f"though the argument's own type is `{item.argument_type}`, not `{constructor}` -- verify before removing. "
+        f"Or add '# pytriage: ignore={ERROR_CODE}' to suppress."
     )
 
 
