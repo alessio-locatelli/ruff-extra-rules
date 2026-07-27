@@ -1,6 +1,6 @@
 # redundant-type-conversion (TRI006)
 
-Flags a builtin type/collection conversion call — `str(...)`, `list(...)`, and similar — that's a no-op given the real, statically-known type of the value it wraps, including when that value's type is declared in a different file.
+Flags a builtin type/collection conversion call — `str(...)`, `list(...)`, and similar — that `ty` considers redundant given the real, statically-known type of the value it wraps, including when that value's type is declared in a different file.
 
 ## Why?
 
@@ -14,7 +14,7 @@ This check delegates detection to [Astral's `ty`](https://github.com/astral-sh/t
 uv tool install ty
 ```
 
-or as your own project's dev dependency. If `ty` isn't found, or an installed `ty` doesn't behave the way this check expects, the check fails immediately with a message explaining which of the two happened and what to do about it — never a silent, empty result.
+or as your own project's dev dependency. If `ty` isn't found, or an installed `ty` doesn't behave the way this check expects, the check fails as soon as a file actually gives it something to flag, with a message explaining which of the two happened and what to do about it — never a silent, empty result. A run over files with nothing for this check to report never needs `ty` at all.
 
 Run this check with your project's own virtual environment active. `ty` resolves whichever version is first on `PATH` at that moment, and needs your project's own dependencies importable to correctly infer their types — an inactive shell can silently pick up a different, unrelated `ty` install (with different diagnostics, since `ty` is pre-1.0) instead of the one pinned as your project's own dev dependency.
 
@@ -44,7 +44,7 @@ def echo(value: str) -> str:
 
 `--redundant-type-conversion-level={conservative,permissive}` (default `conservative`) controls how broadly a conversion is flagged:
 
-- **`conservative`** (default): flags only the conversions that can never be a behavior change even when removed — `str`, `int`, `float`, `bool`, `bytes`, `frozenset`, and `tuple` — and only when the wrapped value is already exactly that type.
+- **`conservative`** (default): flags only the lowest-risk conversions — `str`, `int`, `float`, `bool`, `bytes`, `frozenset`, and `tuple` — and only when the wrapped value is already exactly that type. These seven can't alias or share mutable state with their argument, but "already exactly that type" is a static/declared type, not a runtime guarantee — a value declared `int` that's actually holding a `bool` (or another subclass) at runtime is a case this level can't distinguish, and removing the conversion there would change the runtime value.
 - **`permissive`**: also flags `list`, `dict`, `set`, and `bytearray` conversions, and a broader class of matches where the wrapped value merely satisfies what the surrounding code expects rather than matching it exactly (e.g. passing an already-`list[str]` value somewhere only an `Iterable[str]` is required). These four constructors normally produce an independent copy of their argument — flagging them by default risks reporting a conversion that's redundant to a type checker but not to code that relies on that copy being distinct from the original (e.g. mutating one without affecting the other, or relying on it to deduplicate). `permissive` also broadens matching enough that it can occasionally flag a conversion whose wrapped value isn't really compatible with the constructor at all, when the surrounding code accepts a very wide range of types (e.g. assigning to something typed `object`) and so doesn't distinguish one from the other either way — review a `permissive`-only report before removing the call.
 
 ```yaml

@@ -77,11 +77,11 @@ class RedundantTypeConversionCheck(BaseCheck):
             default="conservative",
             help=(
                 "How eagerly redundant-type-conversion (TRI006) reports a violation. 'conservative' (default) "
-                "flags only the seven constructors whose result can't alias or share mutable state with their "
-                "argument (str/int/float/bool/bytes/frozenset/tuple), and only an exact type match. "
-                "'permissive' also flags the four copy-producing constructors (list/dict/set/bytearray) and a "
-                "broader, structural/protocol-satisfying match -- an explicit opt-in to the aliasing/mutation "
-                "risk a copy-producing constructor's result can carry."
+                "flags str/int/float/bool/bytes/frozenset/tuple conversions, only when the wrapped value already "
+                "matches that type exactly. 'permissive' also flags copy-producing conversions "
+                "(list/dict/set/bytearray) and a looser match, e.g. an already-list[str] value passed somewhere "
+                "only an Iterable[str] is required -- an explicit opt-in to the aliasing/mutation risk a "
+                "copy-producing constructor's result can carry."
             ),
         )
 
