@@ -743,9 +743,16 @@ def test_iter_own_scope_conditional_tagging(source: str, expected: dict[str, boo
             {"open"},
         ),
         (
-            # A return annotation evaluates at definition time too.
+            # PEP 649 (default in 3.14) defers annotation evaluation until
+            # something reads __annotations__ -- unlike a default value, a
+            # return annotation doesn't run when this def statement does.
             "def get_data():\n    def helper() -> open('f'):\n        pass\n    return 1\n",
-            {"open"},
+            set(),
+        ),
+        (
+            # Same deferral applies to a parameter annotation.
+            "def get_data():\n    def helper(x: open('f')):\n        pass\n    return 1\n",
+            set(),
         ),
     ],
     ids=[
@@ -757,7 +764,8 @@ def test_iter_own_scope_conditional_tagging(source: str, expected: dict[str, boo
         "parameter-default-still-descended",
         "class-base-and-keyword-still-descended",
         "class-body-top-level-statement-still-descended",
-        "return-annotation-still-descended",
+        "return-annotation-not-descended",
+        "parameter-annotation-not-descended",
     ],
 )
 def test_iter_own_scope_scope_boundary(source: str, expected_call_names: set[str]) -> None:

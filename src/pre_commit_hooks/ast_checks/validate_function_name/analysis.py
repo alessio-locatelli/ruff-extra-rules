@@ -119,9 +119,10 @@ def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, boo
 
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             stack.extend((d, conditional) for d in reversed(node.decorator_list))
-            stack.append((node.args, conditional))
-            if node.returns is not None:
-                stack.append((node.returns, conditional))
+            stack.extend((d, conditional) for d in reversed(node.args.defaults))
+            stack.extend((d, conditional) for d in reversed(node.args.kw_defaults) if d is not None)
+            # Annotations (param and return) are deferred under PEP 649 --
+            # not evaluated when this def statement runs, unlike defaults.
         elif isinstance(node, ast.Lambda):
             stack.append((node.args, conditional))
         elif isinstance(node, ast.ClassDef):
