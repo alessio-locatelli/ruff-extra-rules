@@ -50,7 +50,7 @@ A minimal, stdlib-only (`subprocess` + `json`, no dependencies) LSP probe script
 
 **1. Query primitive — yes, cross-file confirmed.** `ty server` (its language server, `ty server` subcommand) answers plain `textDocument/hover`. Hovering the argument expression at the call site returns its concrete type as plain text; hovering the callee name at the call site returns its full signature, resolved through the `from pkg.callee import takes_list` cross-file import:
 
-```
+```text
 $ ty server, hover over `bar` in `takes_list(list(bar))`
 {"contents": {"kind": "plaintext", "value": "list[int]"}, ...}
 
@@ -113,7 +113,7 @@ Separately, `pyrefly check --output-format json` supports the `reveal_type()` bu
 
 **1. Query primitive — yes, cross-file confirmed, via `dmypy inspect`.** `dmypy inspect --show type <file>:<line>:<col>` returns the type of every expression enclosing that position. Tested against this repo's own `src/pre_commit_hooks/ast_checks/_orchestrator.py:327` (`violations = check.check(filepath, tree, source)`, where `check`'s `ASTCheck` protocol is declared in the separate `_base.py`):
 
-```
+```text
 $ uv run dmypy inspect --show type --force-reload src/pre_commit_hooks/ast_checks/_orchestrator.py:327:42
 "Path"
 "list[Violation]"
