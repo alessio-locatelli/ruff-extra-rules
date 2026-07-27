@@ -74,14 +74,7 @@ def is_decorator_override_or_abstract(
 
 
 class FunctionBehavior(TypedDict):
-    """Detected behavior flags used by `suggest_name_for` to pick a naming pattern.
-
-    disk_read/disk_write/network_read/network_write/outputs/aggregates/
-    creates_object/parses/renders/searches/transforms/validates are call-shape
-    evidence: only set when the qualifying call is reached unconditionally
-    (see `_iter_own_scope`), so a fallback-only operation behind an `if`/`try`
-    guard (a cache-or-construct-on-miss accessor, e.g.) doesn't set them.
-    """
+    """Detected behavior flags used by `suggest_name_for` to pick a naming pattern. See ADR-0037."""
 
     is_property: bool
     disk_read: bool  # open(), .read_text(), .load(), etc.
@@ -375,7 +368,9 @@ def analyze_function(
         # the same scope-aware traversal so a nested def/lambda/genexp inside
         # the loop can't leak a match into this function's own evidence.
         if isinstance(node, ast.While) and not conditional:
-            for sub, _sub_conditional in _iter_scope([(node, False)]):
+            for sub, sub_conditional in _iter_scope([(node, False)]):
+                if sub_conditional:
+                    continue
                 if isinstance(sub, ast.Call):
                     n = _call_name(sub.func)
                     if n and n.endswith(".exists"):
