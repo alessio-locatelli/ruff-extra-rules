@@ -2,7 +2,7 @@ ci:
   # Using `language: python` + `additional_dependencies: - .` will fail on CI with:
   # /pc/clone/Th2rTdeQQtSpBbUHOU74cQ/py_env-python3.14/bin/python: Error while finding module specification for 'pre_commit_hooks.ast_checks' (ModuleNotFoundError: No module named 'pre_commit_hooks')
   # Using `uv` requires a custom workflow (not https://pre-commit.ci/).
-  skip: [local-ruff-extra-rules]
+  skip: [local-ruff-extra-rules-default, local-ruff-extra-rules-aggressive]
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
