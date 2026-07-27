@@ -165,10 +165,13 @@ class TySession:
         return value[: match.start()] if match else value
 
     def close_file(self, filepath: Path) -> None:
-        """Discards `filepath`'s in-memory document, bounding this long-lived session's own memory use."""
+        """Discards `filepath`'s in-memory document; never raises since it runs from a `finally` block."""
         uri = filepath.resolve().as_uri()
         if uri in self._open_versions:
-            self._client.notify("textDocument/didClose", {"textDocument": {"uri": uri}})
+            try:
+                self._client.notify("textDocument/didClose", {"textDocument": {"uri": uri}})
+            except LSPError:
+                logger.debug("TRI006 close_file failed for %s", filepath, exc_info=True)
             del self._open_versions[uri]
 
     def close(self) -> None:

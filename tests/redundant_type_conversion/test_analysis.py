@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from pre_commit_hooks._lsp import LSPError
+from pre_commit_hooks.ast_checks._base import CheckUnavailableError
 from pre_commit_hooks.ast_checks.redundant_type_conversion.analysis import _build_modified_text, decide_candidates
 from pre_commit_hooks.ast_checks.redundant_type_conversion.candidates import find_candidates
 from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import ALL_CONSTRUCTORS, ConfidenceLevel
@@ -233,3 +235,73 @@ def test_decide_candidates_permissive_includes_mutable_constructors() -> None:
 
     assert len(redundant) == 1
     assert redundant[0].candidate.constructor == "list"
+
+
+class _SessionRaisingFromOpenOrUpdate(FakeSession):
+    """A `FakeSession` whose `open_or_update()` raises `LSPError` on one call, mimicking a `ty server` that died
+    mid-run -- see `TySession.open_or_update()`'s own contract.
+    """
+
+    __slots__ = ("_call_count", "_raise_on_call")
+
+    def __init__(
+        self,
+        *,
+        diagnostics_by_content: dict[str, frozenset[tuple[object, ...]]],
+        hover_by_position: dict[tuple[int, int], str | None],
+        raise_on_call: int,
+    ) -> None:
+        super().__init__(diagnostics_by_content=diagnostics_by_content, hover_by_position=hover_by_position)
+        self._raise_on_call = raise_on_call
+        self._call_count = 0
+
+    def open_or_update(self, filepath: Path, content: str) -> frozenset[tuple[object, ...]]:
+        self._call_count += 1
+        if self._call_count == self._raise_on_call:
+            raise LSPError("simulated ty crash")
+        return super().open_or_update(filepath, content)
+
+
+@pytest.mark.parametrize("raise_on_call", [1, 2], ids=["baseline-open-fails", "recheck-open-fails"])
+def test_decide_candidates_converts_a_lost_session_to_check_unavailable_error(raise_on_call: int) -> None:
+    # A dead ty session must fail loudly (CheckUnavailableError), not silently look "inconclusive" -- see
+    # analysis._open_or_raise()'s own contract.
+    source = "y = str(x)\n"
+    session = _SessionRaisingFromOpenOrUpdate(
+        diagnostics_by_content={source: frozenset(), "y = x\n": frozenset()},
+        hover_by_position={(0, 8): "str"},
+        raise_on_call=raise_on_call,
+    )
+
+    with pytest.raises(CheckUnavailableError, match="lost its connection to `ty`"):
+        decide_candidates(
+            session, Path("test.py"), ast.parse(source), source, level=ConfidenceLevel.CONSERVATIVE, ignored_lines=set()
+        )
+
+    assert session.closed_files == [Path("test.py")]
+
+
+class _SessionRaisingFromHover(FakeSession):
+    """Simulates an unexpected, non-LSPError failure mid-candidate to test decide_candidates() cleanup."""
+
+    __slots__ = ()
+
+    def hover(self, _filepath: Path, _line0: int, _char_utf16: int) -> str | None:
+        raise RuntimeError("unexpected failure")
+
+
+def test_decide_candidates_still_closes_the_file_when_a_candidate_raises_unexpectedly() -> None:
+    source = "y = str(x)\n"
+    session = _SessionRaisingFromHover(diagnostics_by_content={source: frozenset()}, hover_by_position={})
+
+    with pytest.raises(RuntimeError, match="unexpected failure"):
+        decide_candidates(
+            session,
+            Path("test.py"),
+            ast.parse(source),
+            source,
+            level=ConfidenceLevel.CONSERVATIVE,
+            ignored_lines=set(),
+        )
+
+    assert session.closed_files == [Path("test.py")]

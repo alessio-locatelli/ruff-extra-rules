@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -122,7 +122,7 @@ def test_run_self_test_passes_with_correctly_behaving_diagnostics(tmp_path: Path
     ],
     ids=["redundant-control-gets-a-new-diagnostic", "necessary-control-gets-no-new-diagnostic", "session-raises"],
 )
-def test_run_self_test_raises_when_a_control_misbehaves(tmp_path: Path, scripted_kwargs: dict[str, bool]) -> None:
+def test_run_self_test_raises_when_a_control_misbehaves(tmp_path: Path, scripted_kwargs: dict[str, Any]) -> None:
     session = _ScriptedSelfTestSession(**scripted_kwargs)
     with pytest.raises(CheckUnavailableError, match="self-test"):
         _run_self_test(session, tmp_path)
@@ -201,11 +201,12 @@ class _StubLSPClient:
     `TySession` drives).
     """
 
-    __slots__ = ("hover_raises", "hover_result", "notify_calls")
+    __slots__ = ("hover_raises", "hover_result", "notify_calls", "notify_raises")
 
-    def __init__(self, *, hover_result: object = None, hover_raises: bool = False) -> None:
+    def __init__(self, *, hover_result: object = None, hover_raises: bool = False, notify_raises: bool = False) -> None:
         self.hover_result = hover_result
         self.hover_raises = hover_raises
+        self.notify_raises = notify_raises
         self.notify_calls: list[tuple[str, dict[str, object]]] = []
 
     def request(self, _method: str, _params: dict[str, object], *, timeout: float = 10.0) -> object:  # noqa: ARG002
@@ -215,6 +216,9 @@ class _StubLSPClient:
         return self.hover_result
 
     def notify(self, method: str, params: dict[str, object]) -> None:
+        if self.notify_raises:
+            msg = "simulated notify failure"
+            raise LSPError(msg)
         self.notify_calls.append((method, params))
 
 
@@ -255,6 +259,67 @@ def test_hover_strips_a_docstring_appended_after_tys_own_separator(tmp_path: Pat
     assert session.hover(tmp_path / "f.py", 0, 0) == "<class 'CallsiteParameter'>"
 
 
+def test_open_or_update_opens_a_new_file_and_returns_its_diagnostics(tmp_path: Path) -> None:
+    diagnostic = {
+        "code": "invalid-argument-type",
+        "message": "boom",
+        "range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 3}},
+    }
+    client = _StubLSPClient(hover_result={"items": [diagnostic]})
+    session = _session_with_stub_client(client)
+    filepath = tmp_path / "f.py"
+
+    diagnostics = session.open_or_update(filepath, "y = x\n")
+
+    assert diagnostics == {_diagnostic_key(diagnostic)}
+    assert client.notify_calls == [
+        (
+            "textDocument/didOpen",
+            {
+                "textDocument": {
+                    "uri": filepath.resolve().as_uri(),
+                    "languageId": "python",
+                    "version": 1,
+                    "text": "y = x\n",
+                }
+            },
+        )
+    ]
+
+
+def test_open_or_update_sends_a_didchange_for_an_already_open_file(tmp_path: Path) -> None:
+    client = _StubLSPClient(hover_result={"items": []})
+    session = _session_with_stub_client(client)
+    filepath = tmp_path / "f.py"
+    uri = filepath.resolve().as_uri()
+    session._open_versions[uri] = 1
+
+    diagnostics = session.open_or_update(filepath, "y = x\n")
+
+    assert diagnostics == frozenset()
+    assert client.notify_calls == [
+        (
+            "textDocument/didChange",
+            {"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": "y = x\n"}]},
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "stub_kwargs", [{"hover_raises": True}, {"notify_raises": True}], ids=["diagnostic-pull-fails", "notify-fails"]
+)
+def test_open_or_update_propagates_lsp_error_when_the_server_fails(
+    tmp_path: Path, stub_kwargs: dict[str, bool]
+) -> None:
+    # Left uncaught: analysis.decide_candidates() converts this to CheckUnavailableError, since silently
+    # treating it as "inconclusive" would let a dead ty session masquerade as a clean, empty result.
+    client = _StubLSPClient(**stub_kwargs)
+    session = _session_with_stub_client(client)
+
+    with pytest.raises(LSPError):
+        session.open_or_update(tmp_path / "f.py", "y = x\n")
+
+
 def test_close_file_is_a_no_op_for_a_file_that_was_never_opened(tmp_path: Path) -> None:
     client = _StubLSPClient()
     session = _session_with_stub_client(client)
@@ -274,4 +339,17 @@ def test_close_file_notifies_didclose_and_forgets_an_open_file(tmp_path: Path) -
     session.close_file(filepath)
 
     assert client.notify_calls == [("textDocument/didClose", {"textDocument": {"uri": uri}})]
+    assert uri not in session._open_versions
+
+
+def test_close_file_forgets_the_file_even_when_the_didclose_notification_fails(tmp_path: Path) -> None:
+    # close_file() runs from decide_candidates()'s own `finally` -- it must never raise.
+    client = _StubLSPClient(notify_raises=True)
+    session = _session_with_stub_client(client)
+    filepath = tmp_path / "opened.py"
+    uri = filepath.resolve().as_uri()
+    session._open_versions[uri] = 1
+
+    session.close_file(filepath)  # must not raise
+
     assert uri not in session._open_versions
