@@ -10,6 +10,7 @@ from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import (
     eligible_constructors,
     hover_passes_gate,
     is_exact_match,
+    is_purepath_hover,
 )
 
 
@@ -192,3 +193,26 @@ def test_is_exact_match_accepts_a_genuine_match(hover_text: str, constructor: st
 )
 def test_is_exact_match_rejects_a_structural_or_unrelated_type(hover_text: str, constructor: str) -> None:
     assert is_exact_match(hover_text, constructor) is False
+
+
+@pytest.mark.parametrize(
+    "hover_text",
+    ["Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath", "Path | None"],
+    ids=["path", "purepath", "posixpath", "windowspath", "pureposixpath", "purewindowspath", "union"],
+)
+def test_is_purepath_hover_accepts_every_pathlib_class(hover_text: str) -> None:
+    assert is_purepath_hover(hover_text) is True
+
+
+@pytest.mark.parametrize(
+    "hover_text",
+    ["str", "PathLike", "MyCustomPath", "list[Path]"],
+    ids=[
+        "str",
+        "unrelated-name-containing-path",
+        "custom-subclass-not-recognized-by-name-alone",
+        "path-nested-in-a-generic",
+    ],
+)
+def test_is_purepath_hover_rejects_everything_else(hover_text: str) -> None:
+    assert is_purepath_hover(hover_text) is False

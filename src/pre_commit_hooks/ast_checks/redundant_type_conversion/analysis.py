@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Protocol
 from pre_commit_hooks.ast_checks._base import byte_col_to_char_col, split_lines_like_ast
 
 from .candidates import find_candidates
-from .confidence import eligible_constructors, hover_passes_gate, is_exact_match
+from .confidence import eligible_constructors, hover_passes_gate, is_exact_match, is_purepath_hover
 
 if TYPE_CHECKING:
     import ast
@@ -79,6 +79,10 @@ def decide_candidates(
 
         if candidate.wrapped_in_len and not is_exact_match(hover_text, candidate.constructor):
             # See ADR-0035's `len()` sink exclusion.
+            continue
+
+        if candidate.in_equality_comparison and is_purepath_hover(hover_text):
+            # See ADR-0035's Path-vs-str comparison exclusion.
             continue
 
         modified_text = _build_modified_text(source_lines, candidate)

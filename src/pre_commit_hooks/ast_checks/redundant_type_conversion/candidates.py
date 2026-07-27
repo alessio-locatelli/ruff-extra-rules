@@ -6,6 +6,8 @@ import ast
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .confidence import PUREPATH_HOVER_NAMES
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -23,6 +25,7 @@ class Candidate:
     arg_start_col: int
     arg_end_col: int
     wrapped_in_len: bool  # See ADR-0035's `len()` sink exclusion.
+    in_equality_comparison: bool  # See ADR-0035's Path-vs-str comparison exclusion.
 
 
 def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidate]:
@@ -30,56 +33,118 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
 
     Excludes: keyword/zero/multi-argument calls, a starred argument, a
     call spanning multiple physical lines (see ADR-0035's "Detection
-    method"), a shadowed constructor name (`_shadowed_names()`), every
-    candidate in a module with a wildcard import
-    (`_has_wildcard_import()`), and an argument ending in a nested call
-    (`_ends_in_call()`).
+    method"), a shadowed constructor name, every candidate in a module
+    with a wildcard import, and an argument ending in a nested call
+    (`_ends_in_call()`). All scanned in one `_scan()` pass over `tree`.
     """
-    if _has_wildcard_import(tree):
+    scan = _scan(tree)
+    if scan.has_wildcard_import:
         return []
-    shadowed = _shadowed_names(tree)
-    len_wrapped = frozenset() if "len" in shadowed else _len_wrapped_call_ids(tree)
-    return list(_iter_candidates(tree, eligible - shadowed, len_wrapped))
-
-
-def _has_wildcard_import(tree: ast.Module) -> bool:
-    # `from module import *` can bind any name, including a constructor's
-    # own name, without _shadowed_names() ever seeing what name that was --
-    # resolving the target module's real exports is out of scope here, so
-    # every constructor is treated as potentially shadowed instead.
-    return any(
-        isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names) for node in ast.walk(tree)
-    )
+    return list(_iter_candidates(tree, eligible - scan.shadowed, scan.len_wrapped, scan.equality_compared))
 
 
 _BINDING_DEF_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _CAPTURE_PATTERN_TYPES = (ast.MatchAs, ast.MatchStar)
+_EQUALITY_OPS = (ast.Eq, ast.NotEq, ast.In, ast.NotIn, ast.Is, ast.IsNot)
 
 
-def _shadowed_names(tree: ast.Module) -> frozenset[str]:
-    """Every name bound anywhere in `tree`: def/class, import (`as`-aware;
-    a bare `import a.b.c` binds only its own top-level `a`), assignment
-    target (also covers for/with/augmented-assign/comprehension/walrus),
-    function/lambda parameter, `except ... as name`, match-case capture.
+@dataclass(slots=True, frozen=True)
+class _Scan:
+    has_wildcard_import: bool
+    shadowed: frozenset[str]
+    len_wrapped: frozenset[int]
+    equality_compared: frozenset[int]
 
-    Deliberately whole-module and scope-blind, not just the enclosing
-    scope of a given call: false negatives (missing a real violation) are
-    preferred over false positives (treating a user-defined `str`/`list`/
-    etc. as the builtin, and reporting removing a call as safe when it
-    actually changes behavior).
+
+def _scan(tree: ast.Module) -> _Scan:
+    """One walk over `tree` computing every whole-module signal `find_candidates()` needs.
+
+    `shadowed`: every name bound anywhere in `tree` -- def/class, import
+    (`as`-aware; a bare `import a.b.c` binds only its own top-level `a`),
+    assignment target (also covers for/with/augmented-assign/
+    comprehension/walrus), function/lambda parameter, `except ... as
+    name`, match-case capture. Deliberately whole-module and scope-blind,
+    not just the enclosing scope of a given call: false negatives
+    (missing a real violation) are preferred over false positives
+    (treating a user-defined `str`/`list`/etc. as the builtin, and
+    reporting removing a call as safe when it actually changes behavior).
+    A wildcard import (`from module import *`) can bind any name at all,
+    including a constructor's own, without ever appearing in `shadowed`
+    itself -- `has_wildcard_import` catches that instead.
+
+    `len_wrapped`/`equality_compared`: see ADR-0035's `len()` sink
+    exclusion and Path-vs-str comparison exclusion, respectively. The
+    latter is cleared entirely (not just for the specific name involved)
+    if a `pathlib` path class name is bound to anything other than an
+    ordinary `from pathlib import <Name>` anywhere in `tree`, the same
+    scope-blind bias as `shadowed` itself.
     """
+    has_wildcard_import = False
     shadowed: set[str] = set()
+    purepath_shadowed: set[str] = set()
+    len_wrapped: set[int] = set()
+    equality_compared: set[int] = set()
+
     for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            shadowed.update(alias.asname or alias.name.split(".", 1)[0] for alias in node.names)
-            continue
         if isinstance(node, ast.ImportFrom):
-            shadowed.update(alias.asname or alias.name for alias in node.names)
+            if any(alias.name == "*" for alias in node.names):
+                has_wildcard_import = True
+            bound = {alias.asname or alias.name for alias in node.names}
+            shadowed.update(bound)
+            if node.module == "pathlib" and node.level == 0:
+                purepath_shadowed.update(
+                    alias.asname for alias in node.names if alias.asname and alias.asname != alias.name
+                )
+            else:
+                purepath_shadowed.update(bound)
             continue
+        if isinstance(node, ast.Import):
+            bound = {alias.asname or alias.name.split(".", 1)[0] for alias in node.names}
+            shadowed.update(bound)
+            purepath_shadowed.update(bound)
+            continue
+
         name = _bound_name(node)
         if name is not None:
             shadowed.add(name)
-    return frozenset(shadowed)
+            purepath_shadowed.add(name)
+
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "len"
+            and not node.keywords
+            and len(node.args) == 1
+            and isinstance(node.args[0], ast.Call)
+        ):
+            len_wrapped.add(id(node.args[0]))
+
+        if isinstance(node, ast.Compare):
+            operands = [node.left, *node.comparators]
+            for index, op in enumerate(node.ops):
+                if isinstance(op, _EQUALITY_OPS):
+                    _mark_call_ids(operands[index], equality_compared)
+                    _mark_call_ids(operands[index + 1], equality_compared)
+
+    return _Scan(
+        has_wildcard_import=has_wildcard_import,
+        shadowed=frozenset(shadowed),
+        len_wrapped=frozenset() if "len" in shadowed else frozenset(len_wrapped),
+        equality_compared=(frozenset() if purepath_shadowed & PUREPATH_HOVER_NAMES else frozenset(equality_compared)),
+    )
+
+
+def _mark_call_ids(operand: ast.expr, ids: set[int]) -> None:
+    if isinstance(operand, ast.Call):
+        ids.add(id(operand))
+    elif isinstance(operand, (ast.List, ast.Tuple, ast.Set)):
+        for elt in operand.elts:
+            _mark_call_ids(elt, ids)
+    elif isinstance(operand, ast.Dict):
+        for key, value in zip(operand.keys, operand.values, strict=True):
+            if key is not None:
+                _mark_call_ids(key, ids)
+            _mark_call_ids(value, ids)
 
 
 def _ends_in_call(arg: ast.expr) -> bool:
@@ -87,20 +152,6 @@ def _ends_in_call(arg: ast.expr) -> bool:
     return any(
         isinstance(node, ast.Call) and node.end_lineno == arg.end_lineno and node.end_col_offset == arg.end_col_offset
         for node in ast.walk(arg)
-    )
-
-
-def _len_wrapped_call_ids(tree: ast.Module) -> frozenset[int]:
-    # See ADR-0035's `len()` sink exclusion.
-    return frozenset(
-        id(node.args[0])
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "len"
-        and not node.keywords
-        and len(node.args) == 1
-        and isinstance(node.args[0], ast.Call)
     )
 
 
@@ -120,7 +171,9 @@ def _bound_name(node: ast.AST) -> str | None:
     return None
 
 
-def _iter_candidates(tree: ast.Module, eligible: frozenset[str], len_wrapped: frozenset[int]) -> Iterator[Candidate]:
+def _iter_candidates(
+    tree: ast.Module, eligible: frozenset[str], len_wrapped: frozenset[int], equality_compared: frozenset[int]
+) -> Iterator[Candidate]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -150,4 +203,5 @@ def _iter_candidates(tree: ast.Module, eligible: frozenset[str], len_wrapped: fr
             arg_start_col=arg.col_offset,
             arg_end_col=arg.end_col_offset,
             wrapped_in_len=id(node) in len_wrapped,
+            in_equality_comparison=id(node) in equality_compared,
         )

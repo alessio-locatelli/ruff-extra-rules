@@ -83,6 +83,14 @@ def is_exact_match(hover_text: str, constructor: str) -> bool:
     return len(members) > 1 and all(_exact_match(member, constructor) for member in members)
 
 
+PUREPATH_HOVER_NAMES = frozenset({"Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath"})
+
+
+def is_purepath_hover(hover_text: str) -> bool:
+    # See ADR-0035's Path-vs-str comparison exclusion.
+    return any(member in PUREPATH_HOVER_NAMES for member in _split_top_level_union(hover_text))
+
+
 def hover_passes_gate(hover_text: str | None, level: ConfidenceLevel, constructor: str) -> bool:
     """Cheap pre-filter for whether a candidate is worth the recheck's own cost. See ADR-0035's "Confidence tiering"."""
     if not hover_text or _is_unreliable(hover_text):

@@ -90,7 +90,7 @@ def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None
         subprocess.run([git, "add", "file1.py"], check=True, cwd=tmp_path)  # noqa: S603
 
         matches = git_grep_filter([str(file1)], "def get_", fixed_string=True)
-        assert matches == [str(file1)]  # pytriage: ignore=TRI006
+        assert matches == [str(file1)]
 
         no_matches = git_grep_filter([str(file1)], "totally_absent_pattern", fixed_string=True)
         assert no_matches == []
@@ -124,7 +124,7 @@ def test_git_grep_filter_includes_permission_denied_tracked_file(tmp_path: Path)
         finally:
             unreadable.chmod(0o644)
 
-        assert str(unreadable) in matches  # pytriage: ignore=TRI006
+        assert str(unreadable) in matches
     finally:
         os.chdir(original_dir)
 
@@ -149,7 +149,7 @@ def test_git_grep_filter_includes_file_deleted_since_discovery(tmp_path: Path) -
 
         matches = git_grep_filter([str(vanished)], "data", fixed_string=True)
 
-        assert str(vanished) in matches  # pytriage: ignore=TRI006
+        assert str(vanished) in matches
     finally:
         os.chdir(original_dir)
 
@@ -176,7 +176,7 @@ def test_git_grep_filter_includes_untracked_file(tmp_path: Path) -> None:
 
         matches = git_grep_filter([str(untracked)], "data", fixed_string=True)
 
-        assert matches == [str(untracked)]  # pytriage: ignore=TRI006
+        assert matches == [str(untracked)]
     finally:
         os.chdir(original_dir)
 
@@ -199,7 +199,7 @@ def test_git_grep_filter_includes_gitignored_file(tmp_path: Path) -> None:
 
         matches = git_grep_filter([str(ignored)], "data", fixed_string=True)
 
-        assert matches == [str(ignored)]  # pytriage: ignore=TRI006
+        assert matches == [str(ignored)]
     finally:
         os.chdir(original_dir)
 
@@ -260,7 +260,7 @@ def test_git_grep_filter_skips_unresolvable_git_paths(tmp_path: Path) -> None:
         )
         matches = git_grep_filter([str(file1)], "data", fixed_string=True)
 
-    assert matches == [str(file1)]  # pytriage: ignore=TRI006
+    assert matches == [str(file1)]
 
 
 def _fail_not_a_git_repo(mock_run: mock.MagicMock) -> None:
@@ -308,7 +308,7 @@ def test_python_fallback_includes_unreadable_files(tmp_path: Path, caplog: pytes
             matches = git_grep_filter([str(file1), str(file2)], "data")
 
             # Unreadable files are kept in; the hook itself surfaces the read error.
-            assert str(file2) in matches  # pytriage: ignore=TRI006
+            assert str(file2) in matches
     finally:
         file2.chmod(0o644)
 
