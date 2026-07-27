@@ -58,7 +58,7 @@ def test_expand_directories_leaves_plain_files_untouched(tmp_path: Path) -> None
     filepath.write_text("x = 1\n")
 
     assert expand_directories([str(filepath), "also/does/not/exist.py"]) == [
-        str(filepath),
+        str(filepath),  # pytriage: ignore=TRI006
         "also/does/not/exist.py",
     ]
 
@@ -783,7 +783,7 @@ def test_refresh_stale_positions_records_rule_failure_when_check_raises(
 
     orchestrator._refresh_stale_positions(filepath, violations)
 
-    assert (str(filepath), "forbid-vars") in orchestrator.rule_failures
+    assert (str(filepath), "forbid-vars") in orchestrator.rule_failures  # pytriage: ignore=TRI006
     # Left exactly as it was -- the check crashed before it could report
     # anything current to replace it with.
     assert violations == [stale_violation]
@@ -930,7 +930,7 @@ def test_process_files_records_unprocessable_file(tmp_path: Path) -> None:
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations == {}
-    assert orchestrator.unprocessable_files == [str(filepath)]
+    assert orchestrator.unprocessable_files == [str(filepath)]  # pytriage: ignore=TRI006
 
 
 def test_process_files_resets_unprocessable_files_between_calls(tmp_path: Path) -> None:
@@ -943,7 +943,7 @@ def test_process_files_resets_unprocessable_files_between_calls(tmp_path: Path) 
 
     orchestrator = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()])
     orchestrator.process_files([str(bad_filepath)])
-    assert orchestrator.unprocessable_files == [str(bad_filepath)]
+    assert orchestrator.unprocessable_files == [str(bad_filepath)]  # pytriage: ignore=TRI006
 
     orchestrator.process_files([str(good_filepath)])
     assert orchestrator.unprocessable_files == []
@@ -1115,7 +1115,7 @@ def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monk
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations == {}
-    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]
+    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]  # pytriage: ignore=TRI006
 
 
 def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1141,7 +1141,7 @@ def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: p
     orchestrator = CheckOrchestrator(checks=[forbid_vars])
     first = orchestrator.process_files([str(filepath)])
     assert first == {}
-    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]
+    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]  # pytriage: ignore=TRI006
 
     second = orchestrator.process_files([str(filepath)])
     assert second[str(filepath)][0].error_code == "TRI001"
@@ -1258,7 +1258,7 @@ def test_process_files_a_non_cacheable_checks_own_crash_does_not_block_caching_a
     )
     first = orchestrator.process_files([str(filepath)])
     assert {v.error_code for v in first[str(filepath)]} == {"TRI001"}
-    assert orchestrator.rule_failures == [(str(filepath), "crashing-always-rerun-probe")]
+    assert orchestrator.rule_failures == [(str(filepath), "crashing-always-rerun-probe")]  # pytriage: ignore=TRI006
 
     def boom(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("forbid-vars must have been cached despite the always-rerun check's own crash")
@@ -1357,7 +1357,7 @@ def test_process_single_file_reports_unprocessable_when_always_rerun_group_fails
     violations = combined.process_files([str(filepath)])
 
     assert violations == {}
-    assert combined.unprocessable_files == [str(filepath)]
+    assert combined.unprocessable_files == [str(filepath)]  # pytriage: ignore=TRI006
 
 
 def test_process_files_enabling_a_non_cacheable_check_does_not_change_cache_key(
@@ -1737,7 +1737,7 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
     assert violation.fix_data is not None
     assert violation.fix_data.get("fixed") is True
     assert not is_fix_errored(violation)
-    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]
+    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]  # pytriage: ignore=TRI006
     assert filepath.read_text() == (
         "import requests\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n"
     )
@@ -2002,8 +2002,8 @@ def test_all_checks_have_unique_check_ids_and_error_codes() -> None:
     instances = [cls() for cls in ALL_CHECKS]
     check_ids = [c.check_id for c in instances]
     error_codes = [c.error_code for c in instances]
-    assert len(check_ids) == len(set(check_ids))
-    assert len(error_codes) == len(set(error_codes))
+    assert len(check_ids) == len(set(check_ids))  # pytriage: ignore=TRI006
+    assert len(error_codes) == len(set(error_codes))  # pytriage: ignore=TRI006
 
 
 def test_load_checks_check_specific_args_are_applied(
@@ -2248,7 +2248,7 @@ def test_main_fix_flag_reports_rejected_fix(
     # A fix rejected for invalid syntax must be reported distinctly from
     # both [FIXED] and the ordinary [FIXABLE]/"Run with --fix" hint, since
     # re-running --fix would just fail identically again.
-    def broken_fix(fp: Path, *_args: object, **_kwargs: object) -> None:
+    def broken_fix(_self: object, fp: Path, *_args: object, **_kwargs: object) -> None:
         atomic_write_text(fp, "def broken(:\n", "utf-8")
 
     monkeypatch.setattr(ForbidVarsCheck, "fix", broken_fix)
@@ -2393,7 +2393,7 @@ def test_main_reports_rule_failure_when_reread_fails_mid_fix_loop(
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
-    assert (str(filepath), "forbid-vars") in orchestrator.rule_failures
+    assert (str(filepath), "forbid-vars") in orchestrator.rule_failures  # pytriage: ignore=TRI006
     forbid_vars_violation = next(v for v in violations[str(filepath)] if v.check_id == "forbid-vars")
     super_init_violation = next(v for v in violations[str(filepath)] if v.check_id == "redundant-super-init")
     assert is_fix_errored(forbid_vars_violation)
@@ -2825,7 +2825,7 @@ def test_main_handles_path_containing_spaces_and_unicode(
         os.chdir(tmp_path)
         # Args are hardcoded test setup, not untrusted input.
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
-        subprocess.run([git, "add", str(filepath)], check=True)  # noqa: S603
+        subprocess.run([git, "add", filepath], check=True)  # noqa: S603
 
         monkeypatch.setattr(subprocess, "run", _spy_run)
         exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
@@ -2839,7 +2839,7 @@ def test_main_handles_path_containing_spaces_and_unicode(
     # a command that dropped the pathspec (searching the whole repo instead
     # of this one file) would still find the sole match and pass every
     # assertion above, silently losing path scoping without this check.
-    assert all(str(filepath) in command for command in grep_commands)
+    assert all(str(filepath) in command for command in grep_commands)  # pytriage: ignore=TRI006
 
     assert exit_code == 1
     assert "[FIXED]" in capsys.readouterr().err

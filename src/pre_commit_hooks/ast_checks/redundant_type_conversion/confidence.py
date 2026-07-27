@@ -40,12 +40,51 @@ def _literal_matches_constructor(hover_text: str, constructor: str) -> bool:
     return False
 
 
-def hover_passes_gate(hover_text: str | None, level: ConfidenceLevel, constructor: str) -> bool:
-    """Cheap pre-filter for whether a candidate is worth the recheck's own cost. See ADR-0035's "Confidence tiering"."""
-    if not hover_text or hover_text == "Any":
-        return False
-    if level is ConfidenceLevel.PERMISSIVE:
-        return True
+def _exact_match(hover_text: str, constructor: str) -> bool:
     if hover_text == constructor or hover_text.startswith(f"{constructor}["):
         return True
     return _literal_matches_constructor(hover_text, constructor)
+
+
+def _is_unreliable(hover_text: str) -> bool:
+    # See ADR-0035's "Confidence tiering" -- "Unknown" is as uninformative as "Any" here.
+    head = hover_text.split(" & ", 1)[0]
+    return head in {"Any", "Unknown"}
+
+
+def _split_top_level_union(hover_text: str) -> list[str]:
+    # Only split where bracket depth is zero -- see ADR-0035's "Confidence tiering".
+    members: list[str] = []
+    depth = 0
+    start = 0
+    index = 0
+    length = len(hover_text)
+    while index < length:
+        char = hover_text[index]
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            depth -= 1
+        elif depth == 0 and hover_text.startswith(" | ", index):
+            members.append(hover_text[start:index])
+            index += 3
+            start = index
+            continue
+        index += 1
+    members.append(hover_text[start:])
+    return members
+
+
+def hover_passes_gate(hover_text: str | None, level: ConfidenceLevel, constructor: str) -> bool:
+    """Cheap pre-filter for whether a candidate is worth the recheck's own cost. See ADR-0035's "Confidence tiering"."""
+    if not hover_text or _is_unreliable(hover_text):
+        return False
+    if _exact_match(hover_text, constructor):
+        return True
+    if level is not ConfidenceLevel.PERMISSIVE:
+        return False
+    members = _split_top_level_union(hover_text)
+    # See ADR-0035's "Confidence tiering" -- every member must match, not just one.
+    if len(members) > 1:
+        return all(_exact_match(member, constructor) for member in members)
+    return True

@@ -61,7 +61,6 @@ repos:
             "--fix",
             "--forbid-vars-level=permissive",
             "--redundant-assignment-level=permissive",
-            "--select=redundant-type-conversion",
             "--redundant-type-conversion-level=permissive",
         ]
 

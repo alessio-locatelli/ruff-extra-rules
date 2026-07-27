@@ -147,7 +147,7 @@ def test_spawn_raises_check_unavailable_error_when_ty_exists_but_is_not_executab
     not_executable = tmp_path / "not-really-ty"
     not_executable.write_text("#!/bin/sh\necho fake ty\n")
     not_executable.chmod(0o644)
-    monkeypatch.setattr(session_module, "_TY_COMMAND", (str(not_executable),))
+    monkeypatch.setattr(session_module, "_TY_COMMAND", (str(not_executable),))  # pytriage: ignore=TRI006
     with pytest.raises(CheckUnavailableError, match="requires Astral's `ty`"):
         _spawn(tmp_path)
 

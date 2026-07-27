@@ -352,7 +352,7 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
     # Positions come from real ast.Name/Attribute nodes resolved against
     # this same tree/source, so line/col are always in range and the text
     # at each position always equals old_name.
-    for line_num, col in sorted(set(positions), reverse=True):
+    for line_num, col in sorted(set(positions), reverse=True):  # pytriage: ignore=TRI006 -- dedupes, not redundant
         line_idx = line_num - 1
         line = lines[line_idx]
         lines[line_idx] = line[:col] + new_name + line[col + old_len :]

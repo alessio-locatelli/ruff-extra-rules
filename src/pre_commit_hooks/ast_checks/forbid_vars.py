@@ -649,7 +649,7 @@ def _collect_replacements(
         # CPython: `type Alias[data, T: data] = (T, data)` resolves both
         # `data` references to the peer `TypeVar`, not to an enclosing local
         # of the same name) — both use the same peer-filtered mapping.
-        results = list(_collect_replacements(node.name, replace_names, has_future_annotations=has_future_annotations))
+        results = _collect_replacements(node.name, replace_names, has_future_annotations=has_future_annotations)
         filtered_names = _peer_filtered_replace_names(node.type_params, replace_names)
         if filtered_names:
             for expr in _type_param_defaults_and_bounds(node.type_params):

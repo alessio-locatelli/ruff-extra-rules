@@ -379,7 +379,7 @@ class CheckOrchestrator:
         source, _encoding = read_result
 
         try:
-            tree = ast.parse(source, filename=str(filepath))
+            tree = ast.parse(source, filename=filepath)
         except SyntaxError:
             # Debug-only: the caller reports this via unprocessable_files —
             # see _read_source's own docstring for why ERROR-level
@@ -466,7 +466,7 @@ class CheckOrchestrator:
                             mark_fix_errored(v)
                     continue
                 current_source, encoding = read_result
-                current_tree = ast.parse(current_source, filename=str(filepath))
+                current_tree = ast.parse(current_source, filename=filepath)
 
                 # Recompute violations against the current file state rather
                 # than reusing the stale ones collected before any fixes ran:
@@ -626,7 +626,7 @@ class CheckOrchestrator:
             return
         final_source, _final_encoding = final_read
         try:
-            final_tree = ast.parse(final_source, filename=str(filepath))
+            final_tree = ast.parse(final_source, filename=filepath)
         except SyntaxError:
             return
 
@@ -689,7 +689,7 @@ class CheckOrchestrator:
             return {(v.line, v.col, v.message) for v in fresh_violations}
 
         post_source, _post_encoding = post_read_result
-        post_tree = ast.parse(post_source, filename=str(filepath))
+        post_tree = ast.parse(post_source, filename=filepath)
         still_present: set[ViolationKey] = {
             (v.line, v.col, v.message) for v in check.check(filepath, post_tree, post_source) if v.fixable
         }

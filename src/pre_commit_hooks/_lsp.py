@@ -106,7 +106,7 @@ class LSPClient:
 
     def __init__(self, command: Sequence[str], *, cwd: Path) -> None:
         self._process = subprocess.Popen(  # noqa: S603
-            list(command),
+            command,
             cwd=cwd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -160,7 +160,7 @@ class LSPClient:
             # Unblock every request still waiting on a response, rather than
             # leaving each to discover the connection is gone only once its
             # own timeout separately elapses.
-            failure = {"error": {"message": str(error) if error else "LSP connection closed"}}
+            failure = {"error": {"message": f"{error}" if error else "LSP connection closed"}}
             with self._pending_lock:
                 boxes = list(self._pending.values())
             for box in boxes:
