@@ -144,7 +144,9 @@ def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, boo
             stack.extend((n, True) for n in reversed(node.orelse))
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             stack.append((node.iter, conditional))
-            stack.append((node.target, conditional))
+            # The target is only assigned once the iterator yields an item,
+            # same as the body -- unlike `iter`, which always evaluates.
+            stack.append((node.target, True))
             stack.extend((n, True) for n in reversed(node.body))
             stack.extend((n, True) for n in reversed(node.orelse))
         elif isinstance(node, (ast.Try, ast.TryStar)):
