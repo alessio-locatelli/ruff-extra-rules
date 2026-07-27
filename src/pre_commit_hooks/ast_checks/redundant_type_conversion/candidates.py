@@ -32,10 +32,11 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
     """Every `name(single_positional_arg)` call anywhere in `tree` where `name` is one of `eligible`'s constructors.
 
     Excludes: keyword/zero/multi-argument calls, a starred argument, a
-    call spanning multiple physical lines (see ADR-0035's "Detection
-    method"), a shadowed constructor name, every candidate in a module
-    with a wildcard import, and an argument ending in a nested call
-    (`_ends_in_call()`). All scanned in one `_scan()` pass over `tree`.
+    generator-expression argument, a call spanning multiple physical
+    lines (see ADR-0035's "Detection method"), a shadowed constructor
+    name, every candidate in a module with a wildcard import, and an
+    argument ending in a nested call (`_ends_in_call()`). All scanned in
+    one `_scan()` pass over `tree`.
     """
     scan = _scan(tree)
     if scan.has_wildcard_import:
@@ -182,7 +183,7 @@ def _iter_candidates(
         if node.keywords or len(node.args) != 1:
             continue
         (arg,) = node.args
-        if isinstance(arg, ast.Starred):
+        if isinstance(arg, (ast.Starred, ast.GeneratorExp)):
             continue
         if node.end_lineno is None or node.end_col_offset is None:
             continue
