@@ -35,7 +35,7 @@ BAD_ROOT = FIXTURES_ROOT / "bad"
 
 @pytest.fixture(scope="module")
 def ty_session() -> Iterator[TySession]:
-    session = TySession(root=BAD_ROOT)
+    session = TySession(root=FIXTURES_ROOT)
     yield session
     session.close()
 
