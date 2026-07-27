@@ -62,6 +62,7 @@ Applies equally to `async def get_*` functions.
   - Simple accessors: `return self.attr`, `return obj[key]`
   - Functions that only call other `get_*` functions
   - Test functions: `test_get_*`
+  - Lazy singleton and cache accessors: a `get_` function that only builds or loads its result on a guarded fallback path (e.g. `if _cache is None: _cache = build(); return _cache`) keeps its `get_` prefix, since the guarded work isn't what happens on every call
 
 ```yaml
 - id: ruff-extra-rules
