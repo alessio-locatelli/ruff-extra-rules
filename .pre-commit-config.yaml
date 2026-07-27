@@ -33,8 +33,8 @@ repos:
 
   - repo: local
     hooks:
-      - id: local-ruff-extra-rules
-        name: Extra Python rule checks (self-check)
+      - id: local-ruff-extra-rules-default
+        name: Extra Python rule checks (self-check with default values + auto-fix)
         description: Run our own AST-based checks against src/ and tests/
         # `uv run` resolves this project's own managed venv regardless of
         # the ambient shell's PATH, since `language: system` hooks run
@@ -49,6 +49,21 @@ repos:
         # code for our own test suite (see docs/adr/0009-lint-tests-directory.md).
         exclude: ^tests/fixtures/
         args: [--fix]
+      - id: local-ruff-extra-rules-aggressive
+        name: Extra Python rule checks (self-check with the strictest config)
+        description: Run our own AST-based checks against src/ and tests/
+        entry: uv run python -m pre_commit_hooks.ast_checks
+        language: system
+        types: [python]
+        files: ^(src|tests)/
+        exclude: ^tests/fixtures/
+        args: [
+            "--fix",
+            "--forbid-vars-level=permissive",
+            "--redundant-assignment-level=permissive",
+            "--select=redundant-type-conversion",
+            "--redundant-type-conversion-level=permissive",
+        ]
 
   - repo: https://github.com/alessio-locatelli/ruff-extra-rules
     rev: v0.0.36
