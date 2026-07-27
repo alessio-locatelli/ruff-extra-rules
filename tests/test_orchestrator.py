@@ -1147,6 +1147,35 @@ def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: p
     assert second[str(filepath)][0].error_code == "TRI001"
 
 
+def test_process_files_unavailable_checks_result_is_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A result collected while a cacheable check was unavailable must never
+    # be cached either -- otherwise a later run, after the prerequisite
+    # recovers, would keep serving the stale "clean" cached result instead
+    # of actually retrying the now-available check.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    forbid_vars = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+    original_check = forbid_vars.check
+    calls = {"n": 0}
+
+    def flaky_check(_self: ForbidVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise CheckUnavailableError("some prerequisite is missing")
+        return original_check(fp, tree, source)
+
+    monkeypatch.setattr(ForbidVarsCheck, "check", flaky_check)
+
+    orchestrator = CheckOrchestrator(checks=[forbid_vars])
+    first = orchestrator.process_files([str(filepath)])
+    assert first == {}
+    assert orchestrator.unavailable_checks == [("forbid-vars", "some prerequisite is missing")]
+
+    second = orchestrator.process_files([str(filepath)])
+    assert second[str(filepath)][0].error_code == "TRI001"
+
+
 class _AlwaysRerunProbeCheck:
     """Minimal `ASTCheck` double with `cacheable = False`, for exercising
     `CheckOrchestrator`'s always-rerun split independent of any real
