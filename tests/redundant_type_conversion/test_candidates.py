@@ -96,7 +96,7 @@ def test_ignores_a_call_missing_its_own_end_position(null_out: Callable[[ast.Cal
         "import re as str\n\n\n",
         "from os import path as str\n\n\n",
         "import str.helpers\n\n\n",
-        # Deliberately scope-blind (see _shadowed_names): a binding inside
+        # Deliberately scope-blind (see _scan): a binding inside
         # an unrelated function elsewhere in the module still disables
         # every same-named candidate module-wide.
         "def other():\n    str = 5\n\n\n",
@@ -165,13 +165,13 @@ def test_shadowing_one_constructor_does_not_affect_an_unrelated_one() -> None:
 def test_ignores_every_candidate_when_a_wildcard_import_is_present(source: str) -> None:
     # Regression: `from module import *` can bind any name at all,
     # including a builtin constructor's own name (e.g. a compatibility
-    # shim exporting its own `str`), without _shadowed_names() ever seeing
-    # that specific binding -- a wildcard import records only the literal
-    # string "*", not the names it actually introduces. Treating the whole
-    # module as unsafe once any wildcard import is present, regardless of
-    # where it sits relative to a candidate, is the same conservative
-    # trade-off _shadowed_names() itself makes for every other shadowing
-    # shape.
+    # shim exporting its own `str`), without _scan()'s shadowed-name
+    # tracking ever seeing that specific binding -- a wildcard import
+    # records only the literal string "*", not the names it actually
+    # introduces. Treating the whole module as unsafe once any wildcard
+    # import is present, regardless of where it sits relative to a
+    # candidate, is the same conservative trade-off applied to every
+    # other shadowing shape.
     assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
 
 
@@ -246,9 +246,113 @@ def test_a_candidate_is_not_marked_wrapped_in_len_otherwise(source: str) -> None
 
 
 def test_len_shadowed_anywhere_in_the_module_disables_the_len_wrap_marker() -> None:
-    # Deliberately scope-blind, mirroring _shadowed_names()'s own
-    # conservative, whole-module bias: if some other `len` isn't the
-    # builtin, this candidate's own `len(...)` might not be either.
+    # Deliberately scope-blind, mirroring _scan()'s own conservative,
+    # whole-module bias: if some other `len` isn't the builtin, this
+    # candidate's own `len(...)` might not be either.
     source = "def other():\n    len = 5\n\n\nlen(set(op_ids))\n"
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
     assert candidate.wrapped_in_len is False
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "y = matches == str(x)\n",  # bare right-hand operand
+        "y = str(x) == matches\n",  # bare left-hand operand
+        "y = matches != str(x)\n",  # !=
+        "y = str(x) in matches\n",  # in
+        "y = str(x) not in matches\n",  # not in
+        "y = matches == [str(x)]\n",  # list literal
+        "y = matches == (str(x),)\n",  # tuple literal
+        "y = matches == {str(x)}\n",  # set literal
+        "y = matches == [str(x), other]\n",  # one of several list elements
+        "y = a < matches == str(x)\n",  # chained comparison, still an Eq pair
+        "y = {str(x): 1} == other\n",  # dict key
+        "y = {1: str(x)} == other\n",  # dict value
+        "y = {**other, str(x): 1} == thing\n",  # dict key alongside a `**` unpack (a None key)
+        "y = matches == [(str(x),)]\n",  # tuple nested inside a list
+        "y = matches == {'paths': [str(x)]}\n",  # list nested inside a dict value
+        "y = matches == [[str(x)]]\n",  # list nested inside a list
+        "y = str(x) is matches\n",  # is
+        "y = str(x) is not matches\n",  # is not
+    ],
+    ids=[
+        "eq-rhs",
+        "eq-lhs",
+        "ne",
+        "in",
+        "not-in",
+        "list-literal",
+        "tuple-literal",
+        "set-literal",
+        "one-of-several-list-elements",
+        "chained",
+        "dict-key",
+        "dict-value",
+        "dict-key-alongside-an-unpack",
+        "tuple-nested-in-list",
+        "list-nested-in-dict-value",
+        "list-nested-in-list",
+        "is",
+        "is-not",
+    ],
+)
+def test_a_candidate_used_as_an_equality_operand_is_marked(source: str) -> None:
+    # See ADR-0035's Path-vs-str comparison exclusion.
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.in_equality_comparison is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "y = str(x)\n",  # no comparison at all
+        "y = a < str(x)\n",  # not an Eq/NotEq/In/NotIn operator
+        "y = [str(x), other]\n",  # list literal, but not itself a comparison operand
+    ],
+    ids=["no-comparison", "ordering-operator", "list-not-compared"],
+)
+def test_a_candidate_is_not_marked_as_an_equality_operand_otherwise(source: str) -> None:
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.in_equality_comparison is False
+
+
+@pytest.mark.parametrize(
+    "shadowing_statement",
+    [
+        "class Path:\n    pass\n\n\n",
+        "Path = get_some_unrelated_class()\n\n\n",
+        "from some_other_module import Path\n\n\n",
+        "from pathlib import PosixPath as Path\n\n\n",
+    ],
+    ids=["class-def", "reassignment", "imported-from-elsewhere", "a-different-pathlib-class-aliased-to-the-name"],
+)
+def test_a_locally_shadowed_purepath_name_disables_the_equality_marker(shadowing_statement: str) -> None:
+    # `ty`'s hover shows a bare class name with no module info, so a
+    # locally defined/rebound "Path" is indistinguishable from
+    # `pathlib.Path` by hover text alone -- deliberately scope-blind and
+    # conservative, since this marker only ever *suppresses* a report,
+    # never adds one.
+    source = f"{shadowing_statement}y = matches == [str(x)]\n"
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.in_equality_comparison is False
+
+
+def test_shadowing_an_unrelated_name_does_not_disable_the_equality_marker() -> None:
+    source = "some_other_name = 5\n\n\ny = matches == [str(x)]\n"
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.in_equality_comparison is True
+
+
+@pytest.mark.parametrize(
+    "import_statement",
+    ["from pathlib import Path\n\n\n", "from pathlib import Path, PurePath\n\n\n"],
+    ids=["single-import", "multiple-purepath-imports"],
+)
+def test_importing_path_from_pathlib_itself_does_not_disable_the_equality_marker(import_statement: str) -> None:
+    # Regression: an ordinary, correct `from pathlib import Path` must not
+    # be treated as shadowing pathlib's own class -- that's the overwhelmingly
+    # common case this whole exclusion exists for.
+    source = f"{import_statement}y = matches == [str(x)]\n"
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.in_equality_comparison is True

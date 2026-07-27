@@ -2002,8 +2002,8 @@ def test_all_checks_have_unique_check_ids_and_error_codes() -> None:
     instances = [cls() for cls in ALL_CHECKS]
     check_ids = [c.check_id for c in instances]
     error_codes = [c.error_code for c in instances]
-    assert len(check_ids) == len(set(check_ids))  # pytriage: ignore=TRI006
-    assert len(error_codes) == len(set(error_codes))  # pytriage: ignore=TRI006
+    assert len(check_ids) == len(set(check_ids))
+    assert len(error_codes) == len(set(error_codes))
 
 
 def test_load_checks_check_specific_args_are_applied(
