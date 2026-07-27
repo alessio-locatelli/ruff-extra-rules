@@ -222,3 +222,33 @@ def test_a_candidate_whose_argument_is_an_attribute_is_still_found() -> None:
 def test_a_candidate_whose_argument_is_a_subscript_is_still_found() -> None:
     (candidate,) = find_candidates(ast.parse("a = list(items[0])\n"), ALL_CONSTRUCTORS)
     assert candidate.constructor == "list"
+
+
+def test_a_candidate_that_is_lens_sole_argument_is_marked_wrapped_in_len() -> None:
+    # See ADR-0035's `len()` sink exclusion.
+    (candidate,) = find_candidates(ast.parse("len(set(op_ids))\n"), ALL_CONSTRUCTORS)
+    assert candidate.wrapped_in_len is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "set(op_ids)\n",  # not wrapped in len() at all
+        "len(set(op_ids), 1)\n",  # len() itself takes more than one argument
+        "len(op_ids, base=set(x))\n",  # not len()'s positional argument
+        "other_len(set(op_ids))\n",  # a different callable, not the builtin len
+    ],
+    ids=["no-len-wrap", "len-with-extra-args", "not-lens-positional-arg", "shadowing-lookalike-name"],
+)
+def test_a_candidate_is_not_marked_wrapped_in_len_otherwise(source: str) -> None:
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.wrapped_in_len is False
+
+
+def test_len_shadowed_anywhere_in_the_module_disables_the_len_wrap_marker() -> None:
+    # Deliberately scope-blind, mirroring _shadowed_names()'s own
+    # conservative, whole-module bias: if some other `len` isn't the
+    # builtin, this candidate's own `len(...)` might not be either.
+    source = "def other():\n    len = 5\n\n\nlen(set(op_ids))\n"
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.wrapped_in_len is False

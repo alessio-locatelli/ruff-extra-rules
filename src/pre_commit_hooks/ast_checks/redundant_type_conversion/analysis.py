@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Protocol
 from pre_commit_hooks.ast_checks._base import byte_col_to_char_col, split_lines_like_ast
 
 from .candidates import find_candidates
-from .confidence import eligible_constructors, hover_passes_gate
+from .confidence import eligible_constructors, hover_passes_gate, is_exact_match
 
 if TYPE_CHECKING:
     import ast
@@ -75,6 +75,11 @@ def decide_candidates(
         hover_text = session.hover(filepath, candidate.line - 1, hover_char)
         if not hover_passes_gate(hover_text, level, candidate.constructor):
             continue
+        assert hover_text is not None  # hover_passes_gate() already rejected None/empty above
+
+        if candidate.wrapped_in_len and not is_exact_match(hover_text, candidate.constructor):
+            # See ADR-0035's `len()` sink exclusion.
+            continue
 
         modified_text = _build_modified_text(source_lines, candidate)
         after = session.open_or_update(filepath, modified_text)
@@ -83,7 +88,6 @@ def decide_candidates(
             # there before -- it's still doing real, type-relevant work.
             continue
 
-        assert hover_text is not None  # hover_passes_gate() already rejected None/empty above
         redundant.append(
             RedundantConversion(
                 candidate=candidate,
