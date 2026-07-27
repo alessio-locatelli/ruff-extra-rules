@@ -260,15 +260,11 @@ def get_config(settings):
             {"searches": True},
         ),
         (
-            # A .parent access reached unconditionally through the loop's
-            # own test position (not just the loop body) also counts.
             "def get_root(path):\n    while path.parent != path:\n        path = path.parent\n    return path\n",
             "get_root",
             {"searches": True},
         ),
         (
-            # The while loop itself only runs when guarded -- not trusted
-            # as unconditional evidence of a search/find pattern.
             (
                 "def get_data(flag, path):\n"
                 "    if flag:\n"
@@ -280,8 +276,6 @@ def get_config(settings):
             {"searches": False},
         ),
         (
-            # A nested helper def inside the while loop is a separate,
-            # deferred scope -- its own .exists() call isn't this loop's.
             (
                 "def get_data(path):\n"
                 "    while True:\n"
@@ -294,10 +288,6 @@ def get_config(settings):
             {"searches": False},
         ),
         (
-            # An unconditional while loop whose only .exists()/.parent
-            # matches sit behind a nested if/else inside the loop body isn't
-            # trusted -- both branches are skippable per iteration, just like
-            # any other guarded call.
             (
                 "def get_root(path):\n"
                 "    while True:\n"
@@ -366,9 +356,7 @@ def get_config(settings):
             {"returns_class": True},
         ),
         (
-            # Mirrors CacheManager.get_cached_result (issue #110): the disk
-            # read only happens on the try's happy path, with an except
-            # branch that skips it entirely -- not unconditional evidence.
+            # Mirrors CacheManager.get_cached_result (issue #110).
             (
                 "def get_config():\n"
                 "    if refresh:\n"
@@ -380,8 +368,7 @@ def get_config(settings):
             {"disk_read": False, "parses": False},
         ),
         (
-            # Mirrors get_session (issue #110): construction only happens on
-            # a cache-miss fallback inside a try/except, not on every call.
+            # Mirrors get_session (issue #110).
             (
                 "def get_value(key):\n"
                 "    try:\n"
@@ -395,17 +382,11 @@ def get_config(settings):
             {"creates_object": False},
         ),
         (
-            # The lazy-singleton guard clause, written as an early return
-            # with no `else` instead of nested if/else: construction is
-            # only reached on a cache miss, same as the if/else form.
             "def get_session():\n    if _session is not None:\n        return _session\n    return Session()\n",
             "get_session",
             {"creates_object": False},
         ),
         (
-            # Same guard-clause shape via try/except instead of if/else:
-            # the fallback after the try only runs when the try's own
-            # return didn't happen (a KeyError was raised instead).
             (
                 "def get_value(key):\n"
                 "    try:\n"
@@ -418,9 +399,6 @@ def get_config(settings):
             {"creates_object": False},
         ),
         (
-            # A guarded body that doesn't diverge (no return/raise) is an
-            # unrelated guard, not a guard clause -- the following call
-            # stays real, unconditional evidence.
             "def get_data(should_log):\n    if should_log:\n        log()\n    return Session()\n",
             "get_data",
             {"creates_object": True},
@@ -436,22 +414,16 @@ def get_config(settings):
             {"network_read": False},
         ),
         (
-            # Only the print() inside the unrelated if-guard is suppressed;
-            # the unconditional disk read after it is still real evidence --
-            # a guard doesn't blanket-disable the rest of the function.
             "def get_data(should_log):\n    if should_log:\n        print('x')\n    return open('f').read()\n",
             "get_data",
             {"disk_read": True, "outputs": False},
         ),
         (
-            # A `with` block doesn't skip its body, so it isn't a guard.
             "def get_data(path):\n    with open(path) as f:\n        return f.read()\n",
             "get_data",
             {"disk_read": True},
         ),
         (
-            # A call in an If's test position always evaluates -- it's what
-            # decides the branch -- so it isn't conditional.
             "def get_data(path):\n    if open(path).read():\n        return True\n    return False\n",
             "get_data",
             {"disk_read": True},
@@ -537,8 +509,6 @@ def get_config(settings):
             {"creates_object": False},
         ),
         (
-            # A finally block always runs, so this must stay flagged just
-            # like an ordinary unconditional read would be.
             (
                 "def get_config():\n"
                 "    try:\n"
@@ -551,8 +521,6 @@ def get_config(settings):
             {"disk_read": True},
         ),
         (
-            # A parameter default value on a nested helper evaluates at
-            # get_thing's own call time, not the helper's -- real evidence.
             'def get_thing():\n    def helper(x=open("f").read()):\n        pass\n    return helper\n',
             "get_thing",
             {"disk_read": True},
@@ -660,9 +628,6 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
             {"open": True, "close": True},
         ),
         (
-            # Unlike body/handlers/orelse, a finally block always runs once
-            # the try is reached -- it inherits the try's own conditional
-            # level (here, unconditional) rather than being forced True.
             "def get_data():\n    try:\n        pass\n    finally:\n        open('f')\n    return 1\n",
             {"open": False},
         ),
@@ -691,10 +656,18 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
             {"open": True, "close": True},
         ),
         (
-            # `with` doesn't skip its body, so both the context expression
-            # and the body statement stay unconditional.
             "def get_data():\n    with open('f') as fh:\n        read(fh)\n    return 1\n",
             {"open": False, "read": False},
+        ),
+        (
+            (
+                "def get_data():\n"
+                "    with lock:\n"
+                "        if cached is not None:\n"
+                "            return cached\n"
+                "        return Session()\n"
+            ),
+            {"Session": True},
         ),
         # `.read()`'s own func is an Attribute rooted at a Call (`open('f')`),
         # not a Name, so `_call_name` can't resolve it to "read" -- only
@@ -704,9 +677,6 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
         ("def get_data():\n    while open('f').read():\n        pass\n    return 1\n", {"open": False}),
         ("def get_data():\n    for x in open('f'):\n        pass\n    return 1\n", {"open": False}),
         (
-            # A for-target subscript/attribute expression is evaluated once
-            # per item the iterator yields, same as the body -- unlike
-            # `iter`, which always evaluates when the statement is reached.
             "def get_data():\n    for container[open('f')] in items:\n        pass\n    return 1\n",
             {"open": True},
         ),
@@ -724,9 +694,6 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
             {"open": True},
         ),
         (
-            # A nested try whose `finally` always diverges makes the whole
-            # try diverge, regardless of handlers -- so the enclosing if's
-            # body diverges too, narrowing scope for what follows it.
             (
                 "def get_data():\n"
                 "    if flag:\n"
@@ -739,9 +706,6 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
             {"fallback": True},
         ),
         (
-            # A nested try with no finally still diverges when every
-            # handler diverges and its `else` clause (the try's own
-            # non-exception fallthrough) diverges too.
             (
                 "def get_data():\n"
                 "    if flag:\n"
@@ -768,6 +732,7 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
         "match-case-guard-conditional",
         "ifexp-both-branches-conditional",
         "with-body-not-conditional",
+        "guard-clause-inside-with-narrows-scope",
         "if-test-not-conditional",
         "while-test-not-conditional",
         "for-iter-not-conditional",
@@ -795,20 +760,14 @@ def test_iter_own_scope_conditional_tagging(source: str, expected: dict[str, boo
         ),
         ("def get_data():\n    return [open(p) for p in paths]\n", {"open"}),
         (
-            # A decorator argument evaluates at definition time, in
-            # get_data's own execution -- unlike helper's deferred body.
             "def get_data():\n    @deco(open('f'))\n    def helper():\n        pass\n    return 1\n",
             {"deco", "open"},
         ),
         (
-            # A parameter default value likewise evaluates once, at
-            # definition time, not each time helper is later called.
             "def get_data():\n    def helper(x=open('f')):\n        pass\n    return 1\n",
             {"open"},
         ),
         (
-            # A base class / keyword argument (e.g. metaclass=) evaluates at
-            # class-creation time, in get_data's own execution.
             "def get_data():\n    class Helper(Base(open('f'))):\n        pass\n    return 1\n",
             {"Base", "open"},
         ),
@@ -826,7 +785,6 @@ def test_iter_own_scope_conditional_tagging(source: str, expected: dict[str, boo
             set(),
         ),
         (
-            # Same deferral applies to a parameter annotation.
             "def get_data():\n    def helper(x: open('f')):\n        pass\n    return 1\n",
             set(),
         ),
@@ -1196,9 +1154,6 @@ def test_extract_first_verb(docstring_line: str, verb: str | None) -> None:
             "performs a transformation",
         ),
         (
-            # A generator's calling contract dominates an internal call
-            # shape: this must suggest iter_, not load_, even though the
-            # body also reads a file.
             (
                 "def get_lines(filename):\n"
                 "    with open(filename) as f:\n"
