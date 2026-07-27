@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, TypedDict
 from pre_commit_hooks.ast_checks._base import find_ignored_lines, ignore_pattern_for, read_source_with_encoding
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
 logger = logging.getLogger("validate_function_name")
@@ -73,7 +74,14 @@ def is_decorator_override_or_abstract(
 
 
 class FunctionBehavior(TypedDict):
-    """Detected behavior flags used by `suggest_name_for` to pick a naming pattern."""
+    """Detected behavior flags used by `suggest_name_for` to pick a naming pattern.
+
+    disk_read/disk_write/network_read/network_write/outputs/aggregates/
+    creates_object/parses/renders/searches/transforms/validates are call-shape
+    evidence: only set when the qualifying call is reached unconditionally
+    (see `_iter_own_scope`), so a fallback-only operation behind an `if`/`try`
+    guard (a cache-or-construct-on-miss accessor, e.g.) doesn't set them.
+    """
 
     is_property: bool
     disk_read: bool  # open(), .read_text(), .load(), etc.
@@ -94,6 +102,88 @@ class FunctionBehavior(TypedDict):
     delegates_get: bool  # calls, and returns, another get_* function's result
     collects: bool  # builds up a list/dict and returns it
     returns_class: bool  # returns a class object, not an instance
+
+
+def _iter_own_scope(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[tuple[ast.AST, bool]]:
+    """Yields (node, conditional) for every node in func_node's own execution scope. See ADR-0037."""
+    yield from _iter_scope([(stmt, False) for stmt in reversed(func_node.body)])
+
+
+def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, bool]]:
+    """Core traversal behind `_iter_own_scope`, seeded from an arbitrary
+    (node, conditional) stack instead of always a function's own body --
+    reused by the while-loop search heuristic below to scan a single loop's
+    subtree with the same scope/conditional rules, relative to that loop.
+
+    Iterative (explicit stack), not recursive: see attach_parents for why.
+    Mutates `seed` in place as the stack; both call sites below pass a fresh
+    list literal, never one the caller reuses afterward.
+    """
+    stack = seed
+    while stack:
+        node, conditional = stack.pop()
+        yield node, conditional
+
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            stack.extend((d, conditional) for d in reversed(node.decorator_list))
+            stack.append((node.args, conditional))
+            if node.returns is not None:
+                stack.append((node.returns, conditional))
+        elif isinstance(node, ast.Lambda):
+            stack.append((node.args, conditional))
+        elif isinstance(node, ast.ClassDef):
+            stack.extend((d, conditional) for d in reversed(node.decorator_list))
+            stack.extend((b, conditional) for b in reversed(node.bases))
+            stack.extend((kw, conditional) for kw in reversed(node.keywords))
+            stack.extend((stmt, conditional) for stmt in reversed(node.body))
+        elif isinstance(node, ast.If):
+            stack.append((node.test, conditional))
+            stack.extend((n, True) for n in reversed(node.body))
+            stack.extend((n, True) for n in reversed(node.orelse))
+        elif isinstance(node, ast.IfExp):
+            stack.append((node.test, conditional))
+            stack.append((node.body, True))
+            stack.append((node.orelse, True))
+        elif isinstance(node, ast.While):
+            stack.append((node.test, conditional))
+            stack.extend((n, True) for n in reversed(node.body))
+            stack.extend((n, True) for n in reversed(node.orelse))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            stack.append((node.iter, conditional))
+            stack.append((node.target, conditional))
+            stack.extend((n, True) for n in reversed(node.body))
+            stack.extend((n, True) for n in reversed(node.orelse))
+        elif isinstance(node, (ast.Try, ast.TryStar)):
+            stack.extend((n, True) for n in reversed(node.body))
+            for handler in reversed(node.handlers):
+                stack.extend((n, True) for n in reversed(handler.body))
+            stack.extend((n, True) for n in reversed(node.orelse))
+            # A finally block always runs once the try is reached, whether
+            # the body succeeded, raised, or returned -- unlike the branches
+            # above, it isn't skippable, so it inherits conditional as-is.
+            stack.extend((n, conditional) for n in reversed(node.finalbody))
+        elif isinstance(node, ast.Match):
+            stack.append((node.subject, conditional))
+            for case in reversed(node.cases):
+                if case.guard is not None:
+                    stack.append((case.guard, True))
+                stack.extend((n, True) for n in reversed(case.body))
+        elif isinstance(node, ast.GeneratorExp):
+            stack.extend((child, True) for child in reversed(list(ast.iter_child_nodes(node))))
+        else:
+            stack.extend((child, conditional) for child in reversed(list(ast.iter_child_nodes(node))))
+
+
+def _is_capitalized_call(func: ast.expr) -> bool:
+    """True for a bare `Foo(...)` or qualified `mod.Foo(...)`/`self.Foo(...)`
+    call whose final dotted component starts with an uppercase letter -- the
+    Python convention for a class/constructor.
+    """
+    if isinstance(func, ast.Name):
+        return bool(func.id) and func.id[0].isupper()
+    if isinstance(func, ast.Attribute):
+        return bool(func.attr) and func.attr[0].isupper()
+    return False
 
 
 def analyze_function(
@@ -158,48 +248,54 @@ def analyze_function(
         if isinstance(stmt, ast.ClassDef):
             defined_classes.add(stmt.name)
 
-    for node in ast.walk(func_node):
+    for node, conditional in _iter_own_scope(func_node):
         if isinstance(node, (ast.Yield, ast.YieldFrom)):
+            # A yield anywhere in the body -- even behind a guard -- makes
+            # the whole function a generator, so this isn't gated on
+            # `conditional` the way the verb flags below are.
             flags["yields"] = True
         if isinstance(node, ast.Call):
             name = _call_name(node.func)
-            if not name:
-                continue
-            lname = name.lower()
-            if lname == "open" or lname.endswith((".read", ".read_text", ".read_bytes", ".load")):
-                flags["disk_read"] = True
-            if lname.endswith((".write", ".save", ".dump")):
-                flags["disk_write"] = True
-            if lname.endswith(("json.loads", "yaml.safe_load", "yaml.load")):
-                flags["parses"] = True
-            if lname.endswith(("json.dumps", "yaml.dump")):
-                flags["renders"] = True
-            if any(lib in lname for lib in ("requests", "httpx", "urllib", "aiohttp", "socket", "grpc")):
-                if any(verb in lname for verb in ("get", "fetch", "download", "read", "recv", "request")):
-                    flags["network_read"] = True
-                if any(verb in lname for verb in ("post", "put", "send", "upload", "patch")):
-                    flags["network_write"] = True
-            if lname == "print" or (lname.endswith(".write") and ("stdout" in lname or "stderr" in lname)):
-                flags["outputs"] = True
-            if lname.endswith((".info", ".debug", ".warning", ".error")):
-                flags["outputs"] = True
-            if lname in (
-                "sum",
-                "min",
-                "max",
-                "statistics.mean",
-                "statistics.median",
-            ) or lname.endswith(".aggregate"):
-                flags["aggregates"] = True
-            if lname.endswith((".find", ".search", ".index")):
-                flags["searches"] = True
-            if lname.endswith((".is_valid", ".validate")):
-                flags["validates"] = True
-            if lname.endswith((".transform", ".map")):
-                flags["transforms"] = True
-            # Capitalized callee is a Python convention for a class/constructor.
-            if isinstance(node.func, ast.Name) and node.func.id and node.func.id[0].isupper():
-                flags["creates_object"] = True
+            # Verb flags below are evidence of what this function's defining
+            # action is, so they only count when the call is reached
+            # unconditionally -- a call nested behind a guard (an `if`/`try`
+            # cache-or-construct-on-miss fallback, e.g.) doesn't dominate the
+            # function's own name the way an always-run call does.
+            if name and not conditional:
+                lname = name.lower()
+                if lname == "open" or lname.endswith((".read", ".read_text", ".read_bytes", ".load")):
+                    flags["disk_read"] = True
+                if lname.endswith((".write", ".save", ".dump")):
+                    flags["disk_write"] = True
+                if lname.endswith(("json.loads", "yaml.safe_load", "yaml.load")):
+                    flags["parses"] = True
+                if lname.endswith(("json.dumps", "yaml.dump")):
+                    flags["renders"] = True
+                if any(lib in lname for lib in ("requests", "httpx", "urllib", "aiohttp", "socket", "grpc")):
+                    if any(verb in lname for verb in ("get", "fetch", "download", "read", "recv", "request")):
+                        flags["network_read"] = True
+                    if any(verb in lname for verb in ("post", "put", "send", "upload", "patch")):
+                        flags["network_write"] = True
+                if lname == "print" or (lname.endswith(".write") and ("stdout" in lname or "stderr" in lname)):
+                    flags["outputs"] = True
+                if lname.endswith((".info", ".debug", ".warning", ".error")):
+                    flags["outputs"] = True
+                if lname in (
+                    "sum",
+                    "min",
+                    "max",
+                    "statistics.mean",
+                    "statistics.median",
+                ) or lname.endswith(".aggregate"):
+                    flags["aggregates"] = True
+                if lname.endswith((".find", ".search", ".index")):
+                    flags["searches"] = True
+                if lname.endswith((".is_valid", ".validate")):
+                    flags["validates"] = True
+                if lname.endswith((".transform", ".map")):
+                    flags["transforms"] = True
+                if _is_capitalized_call(node.func):
+                    flags["creates_object"] = True
 
             if isinstance(node.func, ast.Name) and node.func.id.startswith(GET_PREFIX):
                 parent = getattr(node, "parent", None)
@@ -274,9 +370,12 @@ def analyze_function(
                     flags["mutates_args"] = True
 
         # Heuristic for a find_root-style function: a while loop polling
-        # .exists()/.parent (e.g. walking up a filesystem tree).
-        if isinstance(node, ast.While):
-            for sub in ast.walk(node):
+        # .exists()/.parent (e.g. walking up a filesystem tree). Only trusted
+        # when the loop itself is unconditionally reached, and scanned with
+        # the same scope-aware traversal so a nested def/lambda/genexp inside
+        # the loop can't leak a match into this function's own evidence.
+        if isinstance(node, ast.While) and not conditional:
+            for sub, _sub_conditional in _iter_scope([(node, False)]):
                 if isinstance(sub, ast.Call):
                     n = _call_name(sub.func)
                     if n and n.endswith(".exists"):
@@ -286,7 +385,7 @@ def analyze_function(
 
     # Delegation: the function returns a variable assigned by get_*, or
     # returns a call to get_* directly.
-    for node in ast.walk(func_node):
+    for node, _conditional in _iter_own_scope(func_node):
         if isinstance(node, ast.Return):
             if isinstance(node.value, ast.Call):
                 call_name = _call_name(node.value.func)
@@ -310,7 +409,7 @@ def analyze_function(
     if has_loop_checking_exists_or_parent:
         flags["searches"] = True
 
-    assigns = [n for n in ast.walk(func_node) if isinstance(n, ast.Assign)]
+    assigns = [n for n, _conditional in _iter_own_scope(func_node) if isinstance(n, ast.Assign)]
     for a in assigns:
         for t in a.targets:
             if isinstance(t, ast.Name) and t.id.lower() in (
@@ -498,23 +597,7 @@ def extract_first_verb(docstring_line: str) -> str | None:
 
 
 def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis: FunctionBehavior) -> tuple[str, str]:
-    """Returns (suggested_name, reason).
-
-    Suggestion priority (first match wins):
-    1. Properties → noun
-    2. Collection/parsing → extract_/parse_
-    3. Searching → find_
-    4. I/O operations → load_/save_to_/fetch_
-    5. Boolean → is_
-    6. Aggregation → calculate_
-    7. Generator → iter_
-    8. Creation → create_
-    9. Mutation → update_
-    10. Validation → validate_
-    11. Rendering → render_
-    12. Transformation → transform_
-    Fallback: "no confident suggestion"
-    """
+    """Returns (suggested_name, reason); first matching category below wins."""
     old = func_node.name
     entity = derive_entity_from_name(old)
 
@@ -565,6 +648,15 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
     if analysis["is_property"]:
         suggested = entity or old
         reason = "@property: prefer noun name rather than verb"
+        return suggested, reason
+
+    # A generator's calling contract (must be iterated, can't be used as a
+    # plain return value) is a stronger, unambiguous signal than any verb
+    # guessed from a call inside its body, so this is checked before the
+    # verb-guessing categories below.
+    if analysis["yields"]:
+        suggested = f"iter_{entity}" if entity else "iter"
+        reason = "generator/iterator"
         return suggested, reason
 
     # Functions that create test objects (mock/factory/fixture patterns)
@@ -636,11 +728,6 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
     if analysis["aggregates"]:
         suggested = f"calculate_{entity}" if entity else "calculate"
         reason = "aggregates or computes a summary"
-        return suggested, reason
-
-    if analysis["yields"]:
-        suggested = f"iter_{entity}" if entity else "iter"
-        reason = "generator/iterator"
         return suggested, reason
 
     if analysis["creates_object"]:

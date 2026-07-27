@@ -9,6 +9,8 @@ import pytest
 from pre_commit_hooks.ast_checks.validate_function_name.analysis import (
     _call_name,
     _get_base_name,
+    _is_capitalized_call,
+    _iter_own_scope,
     analyze_function,
     attach_parents,
     decorator_name,
@@ -258,6 +260,33 @@ def get_config(settings):
             {"searches": True},
         ),
         (
+            # The while loop itself only runs when guarded -- not trusted
+            # as unconditional evidence of a search/find pattern.
+            (
+                "def get_data(flag, path):\n"
+                "    if flag:\n"
+                "        while not path.exists():\n"
+                "            path = path.parent\n"
+                "    return path\n"
+            ),
+            "get_data",
+            {"searches": False},
+        ),
+        (
+            # A nested helper def inside the while loop is a separate,
+            # deferred scope -- its own .exists() call isn't this loop's.
+            (
+                "def get_data(path):\n"
+                "    while True:\n"
+                "        def helper():\n"
+                "            return path.exists()\n"
+                "        break\n"
+                "    return path\n"
+            ),
+            "get_data",
+            {"searches": False},
+        ),
+        (
             "def get_data(form):\n    errors = []\n    return errors\n",
             "get_data",
             {"validates": True},
@@ -312,6 +341,167 @@ def get_config(settings):
             "get_class",
             {"returns_class": True},
         ),
+        (
+            # Mirrors CacheManager.get_cached_result (issue #110): the disk
+            # read only happens on the try's happy path, with an except
+            # branch that skips it entirely -- not unconditional evidence.
+            (
+                "def get_config():\n"
+                "    if refresh:\n"
+                '        with open("config.json") as f:\n'
+                "            return json.load(f)\n"
+                "    return _cached_config\n"
+            ),
+            "get_config",
+            {"disk_read": False, "parses": False},
+        ),
+        (
+            # Mirrors get_session (issue #110): construction only happens on
+            # a cache-miss fallback inside a try/except, not on every call.
+            (
+                "def get_value(key):\n"
+                "    try:\n"
+                "        return _cache[key]\n"
+                "    except KeyError:\n"
+                "        value = Expensive(key)\n"
+                "        _cache[key] = value\n"
+                "        return value\n"
+            ),
+            "get_value",
+            {"creates_object": False},
+        ),
+        (
+            "def get_data(n):\n    while n > 0:\n        n = process(n)\n        total = sum([n])\n    return n\n",
+            "get_data",
+            {"aggregates": False},
+        ),
+        (
+            "def get_data(urls):\n    for url in urls:\n        return requests.get(url).json()\n    return None\n",
+            "get_data",
+            {"network_read": False},
+        ),
+        (
+            # Only the print() inside the unrelated if-guard is suppressed;
+            # the unconditional disk read after it is still real evidence --
+            # a guard doesn't blanket-disable the rest of the function.
+            "def get_data(should_log):\n    if should_log:\n        print('x')\n    return open('f').read()\n",
+            "get_data",
+            {"disk_read": True, "outputs": False},
+        ),
+        (
+            # A `with` block doesn't skip its body, so it isn't a guard.
+            "def get_data(path):\n    with open(path) as f:\n        return f.read()\n",
+            "get_data",
+            {"disk_read": True},
+        ),
+        (
+            # A call in an If's test position always evaluates -- it's what
+            # decides the branch -- so it isn't conditional.
+            "def get_data(path):\n    if open(path).read():\n        return True\n    return False\n",
+            "get_data",
+            {"disk_read": True},
+        ),
+        (
+            (
+                "def get_data(source):\n"
+                "    while source.find(1) is not None:\n"
+                "        source = source.next\n"
+                "    return source\n"
+            ),
+            "get_data",
+            {"searches": True},
+        ),
+        (
+            "def get_data(path):\n    for line in open(path):\n        print(line)\n    return None\n",
+            "get_data",
+            {"disk_read": True, "outputs": False},
+        ),
+        (
+            "def get_data(existing):\n    return existing if existing is not None else Expensive()\n",
+            "get_data",
+            {"creates_object": False},
+        ),
+        (
+            "def get_data(path):\n    return 'ok' if open(path).read() else 'empty'\n",
+            "get_data",
+            {"disk_read": True},
+        ),
+        (
+            (
+                "def get_data(x):\n"
+                "    match x:\n"
+                "        case 1:\n"
+                "            return open('f').read()\n"
+                "        case _:\n"
+                "            return None\n"
+            ),
+            "get_data",
+            {"disk_read": False},
+        ),
+        (
+            "def get_data():\n    def helper():\n        return open('f').read()\n    return 1\n",
+            "get_data",
+            {"disk_read": False},
+        ),
+        (
+            "def get_data():\n    f = lambda: open('f').read()\n    return f\n",
+            "get_data",
+            {"disk_read": False},
+        ),
+        (
+            (
+                "def get_data():\n"
+                "    class Helper:\n"
+                "        def run(self):\n"
+                "            return open('f').read()\n"
+                "    return Helper\n"
+            ),
+            "get_data",
+            {"disk_read": False, "returns_class": True},
+        ),
+        (
+            "def get_data(paths):\n    return [open(p).read() for p in paths]\n",
+            "get_data",
+            {"disk_read": True},
+        ),
+        (
+            # Unlike a list comprehension, a generator expression is lazy --
+            # open() doesn't run until a caller iterates the result, if ever.
+            "def get_data(paths):\n    return (open(p) for p in paths)\n",
+            "get_data",
+            {"disk_read": False},
+        ),
+        (
+            "def get_thing():\n    return models.User(id=1)\n",
+            "get_thing",
+            {"creates_object": True},
+        ),
+        (
+            "def get_thing():\n    return self.session(id=1)\n",
+            "get_thing",
+            {"creates_object": False},
+        ),
+        (
+            # A finally block always runs, so this must stay flagged just
+            # like an ordinary unconditional read would be.
+            (
+                "def get_config():\n"
+                "    try:\n"
+                "        pass\n"
+                "    finally:\n"
+                '        cfg = open("f").read()\n'
+                "    return cfg\n"
+            ),
+            "get_config",
+            {"disk_read": True},
+        ),
+        (
+            # A parameter default value on a nested helper evaluates at
+            # get_thing's own call time, not the helper's -- real evidence.
+            'def get_thing():\n    def helper(x=open("f").read()):\n        pass\n    return helper\n',
+            "get_thing",
+            {"disk_read": True},
+        ),
     ],
     ids=[
         "get-or-create-module-cache-not-mutation",
@@ -344,6 +534,8 @@ def get_config(settings):
         "mutates-args-true-augmented-name-param",
         "mutates-args-false-augmented-local-variable",
         "searches-via-exists-loop",
+        "guarded-while-loop-search-not-unconditional",
+        "nested-def-inside-while-loop-does-not-leak-search",
         "validates-errors-variable",
         "is-property-false-non-property-decorator",
         "delegates-get-direct-return",
@@ -352,6 +544,27 @@ def get_config(settings):
         "mutation-detection-skips-unresolvable-call-name",
         "exists-loop-scan-skips-non-exists-call",
         "returns-class-for-type-call",
+        "if-guarded-disk-read-not-unconditional",
+        "try-guarded-creates-object-not-unconditional",
+        "while-guarded-call-not-unconditional",
+        "for-guarded-call-not-unconditional",
+        "unconditional-sibling-after-unrelated-guard-still-counted",
+        "with-block-not-a-guard",
+        "if-test-position-not-conditional",
+        "while-test-position-not-conditional",
+        "for-iter-position-not-conditional",
+        "ifexp-orelse-branch-is-conditional",
+        "ifexp-test-position-not-conditional",
+        "match-case-body-is-conditional",
+        "nested-function-def-does-not-leak-effects",
+        "nested-lambda-does-not-leak-effects",
+        "nested-class-does-not-leak-effects",
+        "comprehension-is-not-a-scope-boundary",
+        "generator-expression-is-lazy-not-unconditional",
+        "qualified-capitalized-attribute-call-creates-object",
+        "qualified-lowercase-attribute-call-not-creates-object",
+        "finally-block-always-runs-still-flagged",
+        "nested-helper-default-value-still-flagged",
     ],
 )
 def test_analyze_function_flags(source: str, func_name: str, flags: dict[str, bool]) -> None:
@@ -361,6 +574,217 @@ def test_analyze_function_flags(source: str, func_name: str, flags: dict[str, bo
 
     for flag, expected in flags.items():
         assert analysis[flag] is expected, flag
+
+
+def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
+    func_node = _func(source, func_name)
+    return {
+        name: conditional
+        for node, conditional in _iter_own_scope(func_node)
+        if isinstance(node, ast.Call) and (name := _call_name(node.func)) is not None
+    }
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("def get_data():\n    if flag:\n        open('f')\n    return 1\n", {"open": True}),
+        (
+            "def get_data():\n    if flag:\n        open('f')\n    else:\n        close('f')\n    return 1\n",
+            {"open": True, "close": True},
+        ),
+        ("def get_data():\n    while flag:\n        open('f')\n    return 1\n", {"open": True}),
+        ("def get_data():\n    for x in items:\n        open('f')\n    return 1\n", {"open": True}),
+        (
+            "def get_data():\n    try:\n        open('f')\n    except OSError:\n        close('f')\n    return 1\n",
+            {"open": True, "close": True},
+        ),
+        (
+            # Unlike body/handlers/orelse, a finally block always runs once
+            # the try is reached -- it inherits the try's own conditional
+            # level (here, unconditional) rather than being forced True.
+            "def get_data():\n    try:\n        pass\n    finally:\n        open('f')\n    return 1\n",
+            {"open": False},
+        ),
+        (
+            (
+                "def get_data():\n"
+                "    if flag:\n"
+                "        try:\n"
+                "            pass\n"
+                "        finally:\n"
+                "            open('f')\n"
+                "    return 1\n"
+            ),
+            {"open": True},
+        ),
+        (
+            "def get_data():\n    match flag:\n        case 1:\n            open('f')\n    return 1\n",
+            {"open": True},
+        ),
+        (
+            "def get_data():\n    match flag:\n        case 1 if open('f'):\n            pass\n    return 1\n",
+            {"open": True},
+        ),
+        (
+            "def get_data():\n    x = open('f') if flag else close('f')\n    return x\n",
+            {"open": True, "close": True},
+        ),
+        (
+            # `with` doesn't skip its body, so both the context expression
+            # and the body statement stay unconditional.
+            "def get_data():\n    with open('f') as fh:\n        read(fh)\n    return 1\n",
+            {"open": False, "read": False},
+        ),
+        # `.read()`'s own func is an Attribute rooted at a Call (`open('f')`),
+        # not a Name, so `_call_name` can't resolve it to "read" -- only
+        # "open" is checked here; the resolvable-.read() case is covered at
+        # the analyze_function level (disk_read still True from `open` alone).
+        ("def get_data():\n    if open('f').read():\n        return 1\n    return 0\n", {"open": False}),
+        ("def get_data():\n    while open('f').read():\n        pass\n    return 1\n", {"open": False}),
+        ("def get_data():\n    for x in open('f'):\n        pass\n    return 1\n", {"open": False}),
+        (
+            "def get_data():\n    return (open(p) for p in paths)\n",
+            {"open": True},
+        ),
+        (
+            # Deliberately conservative: a genexp's outermost iterable is
+            # technically evaluated eagerly in real Python, but the whole
+            # GeneratorExp subtree is treated as conditional anyway, since a
+            # false negative here is far cheaper than the false positive
+            # this rule exists to fix.
+            "def get_data():\n    return (x for x in open('f'))\n",
+            {"open": True},
+        ),
+    ],
+    ids=[
+        "if-body-conditional",
+        "if-else-both-branches-conditional",
+        "while-body-conditional",
+        "for-body-conditional",
+        "try-body-and-except-conditional",
+        "finally-body-inherits-unconditional",
+        "finally-body-inherits-conditional-from-guarded-try",
+        "match-case-body-conditional",
+        "match-case-guard-conditional",
+        "ifexp-both-branches-conditional",
+        "with-body-not-conditional",
+        "if-test-not-conditional",
+        "while-test-not-conditional",
+        "for-iter-not-conditional",
+        "generator-expression-elt-conditional",
+        "generator-expression-outer-iter-conservatively-conditional",
+    ],
+)
+def test_iter_own_scope_conditional_tagging(source: str, expected: dict[str, bool]) -> None:
+    conditional_by_call_name = _conditional_by_call_name(source, "get_data")
+    for call_name, expected_conditional in expected.items():
+        assert conditional_by_call_name[call_name] is expected_conditional, call_name
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_call_names"),
+    [
+        ("def get_data():\n    def helper():\n        open('f')\n    return 1\n", set()),
+        ("def get_data():\n    f = lambda: open('f')\n    return f\n", set()),
+        (
+            "def get_data():\n    class Helper:\n        def run(self):\n            open('f')\n    return Helper\n",
+            set(),
+        ),
+        ("def get_data():\n    return [open(p) for p in paths]\n", {"open"}),
+        (
+            # A decorator argument evaluates at definition time, in
+            # get_data's own execution -- unlike helper's deferred body.
+            "def get_data():\n    @deco(open('f'))\n    def helper():\n        pass\n    return 1\n",
+            {"deco", "open"},
+        ),
+        (
+            # A parameter default value likewise evaluates once, at
+            # definition time, not each time helper is later called.
+            "def get_data():\n    def helper(x=open('f')):\n        pass\n    return 1\n",
+            {"open"},
+        ),
+        (
+            # A base class / keyword argument (e.g. metaclass=) evaluates at
+            # class-creation time, in get_data's own execution.
+            "def get_data():\n    class Helper(Base(open('f'))):\n        pass\n    return 1\n",
+            {"Base", "open"},
+        ),
+        (
+            # A class body's own top-level statements run immediately when
+            # the class statement is reached -- unlike a nested method body.
+            "def get_data():\n    class Helper:\n        x = open('f')\n    return 1\n",
+            {"open"},
+        ),
+        (
+            # A return annotation evaluates at definition time too.
+            "def get_data():\n    def helper() -> open('f'):\n        pass\n    return 1\n",
+            {"open"},
+        ),
+    ],
+    ids=[
+        "nested-function-def-not-descended",
+        "nested-lambda-not-descended",
+        "nested-class-not-descended",
+        "comprehension-still-descended",
+        "decorator-argument-still-descended",
+        "parameter-default-still-descended",
+        "class-base-and-keyword-still-descended",
+        "class-body-top-level-statement-still-descended",
+        "return-annotation-still-descended",
+    ],
+)
+def test_iter_own_scope_scope_boundary(source: str, expected_call_names: set[str]) -> None:
+    func_node = _func(source, "get_data")
+    call_names = {
+        name
+        for node, _conditional in _iter_own_scope(func_node)
+        if isinstance(node, ast.Call) and (name := _call_name(node.func)) is not None
+    }
+    assert call_names == expected_call_names
+
+
+def test_iter_own_scope_handles_deep_if_nesting_without_recursion_error() -> None:
+    # Iterative (explicit stack), not recursive -- see attach_parents for the
+    # analogous concern with expression nesting. 90 is close to the deepest
+    # nesting ast.parse itself will accept (CPython's tokenizer caps
+    # indentation at 100 levels), well within what a recursive
+    # implementation of this traversal would blow Python's call stack on.
+    depth = 90
+    lines = ["def get_data():"]
+    lines.extend("    " * (level + 1) + "if True:" for level in range(depth))
+    lines.append("    " * (depth + 1) + "open('f')")
+    lines.append("    return 1")
+    source = "\n".join(lines) + "\n"
+
+    func_node = _func(source, "get_data")
+
+    assert list(_iter_own_scope(func_node))  # must not raise RecursionError
+
+
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        ("Foo()", True),
+        ("foo()", False),
+        ("mod.Foo()", True),
+        ("mod.foo()", False),
+        ("self.Session()", True),
+        ("factory()()", False),
+    ],
+    ids=[
+        "bare-capitalized-name",
+        "bare-lowercase-name",
+        "qualified-capitalized-attribute",
+        "qualified-lowercase-attribute",
+        "self-capitalized-attribute",
+        "unresolvable-func-not-name-or-attribute",
+    ],
+)
+def test_is_capitalized_call(expr: str, *, expected: bool) -> None:
+    node = ast.parse(expr, mode="eval").body
+    assert isinstance(node, ast.Call)
+    assert _is_capitalized_call(node.func) is expected
 
 
 def test_process_file_with_get_or_create_cache_pattern(tmp_path: Path) -> None:
@@ -661,6 +1085,20 @@ def test_extract_first_verb(docstring_line: str, verb: str | None) -> None:
             "transform_data",
             "performs a transformation",
         ),
+        (
+            # A generator's calling contract dominates an internal call
+            # shape: this must suggest iter_, not load_, even though the
+            # body also reads a file.
+            (
+                "def get_lines(filename):\n"
+                "    with open(filename) as f:\n"
+                "        for line in f:\n"
+                "            yield line.strip()\n"
+            ),
+            "get_lines",
+            "iter_lines",
+            "generator/iterator",
+        ),
     ],
     ids=[
         "test-prefixed-untouched",
@@ -669,6 +1107,7 @@ def test_extract_first_verb(docstring_line: str, verb: str | None) -> None:
         "outputs-only-suggests-print",
         "validates-only-suggests-validate",
         "transforms-only-suggests-transform",
+        "generator-outranks-disk-read",
     ],
 )
 def test_suggest_name_for(source: str, func_name: str, suggested_name: str, reason: str) -> None:
