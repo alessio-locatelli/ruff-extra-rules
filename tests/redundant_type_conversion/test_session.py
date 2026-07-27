@@ -244,6 +244,17 @@ def test_hover(tmp_path: Path, hover_result: object, *, hover_raises: bool, expe
     assert session.hover(tmp_path / "f.py", 0, 0) == expected
 
 
+def test_hover_strips_a_docstring_appended_after_tys_own_separator(tmp_path: Path) -> None:
+    # See ADR-0035's "Detection method": `ty` appends a symbol's own
+    # docstring after a fixed dashed-line separator in the same hover
+    # response -- only the part before it is a type/signature.
+    raw = "<class 'CallsiteParameter'>\n---------------------------------------------\nDocstring here.\n"
+    client = _StubLSPClient(hover_result={"contents": {"kind": "plaintext", "value": raw}})
+    session = _session_with_stub_client(client)
+
+    assert session.hover(tmp_path / "f.py", 0, 0) == "<class 'CallsiteParameter'>"
+
+
 def test_close_file_is_a_no_op_for_a_file_that_was_never_opened(tmp_path: Path) -> None:
     client = _StubLSPClient()
     session = _session_with_stub_client(client)

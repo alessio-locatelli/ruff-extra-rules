@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import re
 import tempfile
 import threading
 from pathlib import Path
@@ -22,6 +23,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger("ast_checks")
 
 _TY_COMMAND = ("ty", "server")
+
+# See ADR-0035's "Detection method" for why this separator is stripped.
+_HOVER_DOC_SEPARATOR = re.compile(r"\n-{3,}\n")
 
 _INSTALL_HINT = (
     "redundant-type-conversion (TRI006) requires Astral's `ty` type checker on PATH, but it could not be "
@@ -152,10 +156,13 @@ class TySession:
         if not response:
             return None
         contents = response.get("contents")
-        if isinstance(contents, dict):
-            value = contents.get("value")
-            return value if isinstance(value, str) else None
-        return None
+        if not isinstance(contents, dict):
+            return None
+        value = contents.get("value")
+        if not isinstance(value, str):
+            return None
+        match = _HOVER_DOC_SEPARATOR.search(value)
+        return value[: match.start()] if match else value
 
     def close_file(self, filepath: Path) -> None:
         """Discards `filepath`'s in-memory document, bounding this long-lived session's own memory use."""

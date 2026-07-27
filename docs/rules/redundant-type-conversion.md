@@ -18,6 +18,8 @@ or as your own project's dev dependency. If `ty` isn't found, or an installed `t
 
 Run this check with your project's own virtual environment active. `ty` resolves whichever version is first on `PATH` at that moment, and needs your project's own dependencies importable to correctly infer their types — an inactive shell can silently pick up a different, unrelated `ty` install (with different diagnostics, since `ty` is pre-1.0) instead of the one pinned as your project's own dev dependency.
 
+Also run it from inside the project being checked. `ty` resolves its own workspace root from the current working directory, so invoking this check's CLI directly (rather than through prek/pre-commit, which always runs a hook from the repo it's checking) against a file outside the current directory points `ty` at the wrong project — it won't see that project's own dependencies or configuration, which can change its diagnostics.
+
 ## Example
 
 ```python

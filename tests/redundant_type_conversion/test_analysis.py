@@ -164,6 +164,35 @@ def test_decide_candidates_restores_pristine_source_before_each_candidates_hover
     assert session.opened_content == [source, modified_1, source, modified_2]
 
 
+def test_decide_candidates_skips_a_len_wrapped_candidate_that_is_not_an_exact_match() -> None:
+    # See ADR-0035's `len()` sink exclusion.
+    source = "len(set(op_ids))\n"
+    redundant, session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset()},  # "len(op_ids)\n" deliberately not recorded
+        hover_by_position={(0, 13): "list[int]"},
+        level=ConfidenceLevel.PERMISSIVE,
+    )
+
+    assert redundant == []
+    # The expensive synthetic-rewrite-and-recheck must never run once the
+    # len()-wrap exclusion alone already decided this candidate.
+    assert session.opened_content == [source]
+
+
+def test_decide_candidates_still_flags_a_len_wrapped_candidate_that_is_an_exact_match() -> None:
+    source = "len(set(op_ids))\n"
+    redundant, _session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset(), "len(op_ids)\n": frozenset()},
+        hover_by_position={(0, 13): "set[int]"},
+        level=ConfidenceLevel.PERMISSIVE,
+    )
+
+    assert len(redundant) == 1
+    assert redundant[0].candidate.constructor == "set"
+
+
 def test_decide_candidates_permissive_includes_mutable_constructors() -> None:
     source = "takes_list(list(bar))\n"
     redundant, _session = _decide(

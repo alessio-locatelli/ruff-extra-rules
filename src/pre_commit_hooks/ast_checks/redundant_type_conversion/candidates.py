@@ -22,6 +22,7 @@ class Candidate:
     call_end_col: int
     arg_start_col: int
     arg_end_col: int
+    wrapped_in_len: bool  # See ADR-0035's `len()` sink exclusion.
 
 
 def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidate]:
@@ -36,7 +37,9 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
     """
     if _has_wildcard_import(tree):
         return []
-    return list(_iter_candidates(tree, eligible - _shadowed_names(tree)))
+    shadowed = _shadowed_names(tree)
+    len_wrapped = frozenset() if "len" in shadowed else _len_wrapped_call_ids(tree)
+    return list(_iter_candidates(tree, eligible - shadowed, len_wrapped))
 
 
 def _has_wildcard_import(tree: ast.Module) -> bool:
@@ -87,6 +90,20 @@ def _ends_in_call(arg: ast.expr) -> bool:
     )
 
 
+def _len_wrapped_call_ids(tree: ast.Module) -> frozenset[int]:
+    # See ADR-0035's `len()` sink exclusion.
+    return frozenset(
+        id(node.args[0])
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "len"
+        and not node.keywords
+        and len(node.args) == 1
+        and isinstance(node.args[0], ast.Call)
+    )
+
+
 def _bound_name(node: ast.AST) -> str | None:
     if isinstance(node, _BINDING_DEF_TYPES):
         return node.name
@@ -103,7 +120,7 @@ def _bound_name(node: ast.AST) -> str | None:
     return None
 
 
-def _iter_candidates(tree: ast.Module, eligible: frozenset[str]) -> Iterator[Candidate]:
+def _iter_candidates(tree: ast.Module, eligible: frozenset[str], len_wrapped: frozenset[int]) -> Iterator[Candidate]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -132,4 +149,5 @@ def _iter_candidates(tree: ast.Module, eligible: frozenset[str]) -> Iterator[Can
             call_end_col=node.end_col_offset,
             arg_start_col=arg.col_offset,
             arg_end_col=arg.end_col_offset,
+            wrapped_in_len=id(node) in len_wrapped,
         )
