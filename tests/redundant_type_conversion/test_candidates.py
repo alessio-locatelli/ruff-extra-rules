@@ -195,3 +195,30 @@ def test_finds_multiple_independent_candidates_on_different_lines() -> None:
     source = "a = str(x)\nb = int(y)\n"
     candidates = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
     assert [(c.constructor, c.line) for c in candidates] == [("str", 1), ("int", 2)]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "a = list(get_items())\n",  # argument is itself a call
+        "a = list(get(1, 2))\n",  # a nested call with its own arguments
+        "a = str(a or get_default())\n",  # a nested call as the tail of a larger expression
+    ],
+    ids=["bare-call", "call-with-arguments", "call-as-tail-of-larger-expression"],
+)
+def test_ignores_a_candidate_whose_argument_ends_in_a_nested_call(source: str) -> None:
+    # See ADR-0035's "Detection method".
+    assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
+
+
+def test_a_candidate_whose_argument_is_an_attribute_is_still_found() -> None:
+    # Attribute/Subscript arguments don't end on a Call's own closing
+    # paren, so they're unaffected by the nested-call exclusion above.
+    source = "a = list(box.value)\n"
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.constructor == "list"
+
+
+def test_a_candidate_whose_argument_is_a_subscript_is_still_found() -> None:
+    (candidate,) = find_candidates(ast.parse("a = list(items[0])\n"), ALL_CONSTRUCTORS)
+    assert candidate.constructor == "list"

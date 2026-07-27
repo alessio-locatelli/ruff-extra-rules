@@ -31,8 +31,20 @@ def test_permissive_is_all_eleven() -> None:
     assert eligible_constructors(ConfidenceLevel.PERMISSIVE) == ALL_CONSTRUCTORS
 
 
-@pytest.mark.parametrize("hover_text", [None, "", "Any"])
+@pytest.mark.parametrize(
+    "hover_text",
+    [
+        None,
+        "",
+        "Any",
+        "Unknown",
+        "Any & ~AlwaysFalsy",
+        "Unknown & ~AlwaysFalsy",
+    ],
+    ids=["none", "empty", "any", "unknown", "narrowed-any", "narrowed-unknown"],
+)
 def test_gate_rejects_unusable_hover_at_both_levels(hover_text: str | None) -> None:
+    # See ADR-0035's "Confidence tiering" for why "Unknown" is rejected like "Any".
     assert hover_passes_gate(hover_text, ConfidenceLevel.CONSERVATIVE, "str") is False
     assert hover_passes_gate(hover_text, ConfidenceLevel.PERMISSIVE, "str") is False
 
@@ -121,7 +133,43 @@ def test_conservative_rejects_a_literal_of_a_different_scalar(hover_text: str, c
 
 @pytest.mark.parametrize(
     "hover_text",
-    ["str | None", "Iterable[str]", "list[int]", "dict[str, int]", 'Literal["hi"]', "SomeCustomClass"],
+    ["Iterable[str]", "list[int]", "dict[str, int]", 'Literal["hi"]', "SomeCustomClass"],
 )
-def test_permissive_accepts_any_resolved_type(hover_text: str) -> None:
+def test_permissive_accepts_any_resolved_non_union_type(hover_text: str) -> None:
     assert hover_passes_gate(hover_text, ConfidenceLevel.PERMISSIVE, "list") is True
+
+
+@pytest.mark.parametrize(
+    ("hover_text", "constructor"),
+    [
+        ("int | float", "int"),  # a real float value would be truncated, not a no-op
+        ("str | None", "list"),  # neither union member is even a list
+        ("Literal[True] | int", "bool"),  # the plain-int member isn't exactly bool
+    ],
+    ids=["int-or-float", "str-or-none-as-list", "bool-literal-or-int"],
+)
+def test_permissive_rejects_a_union_with_a_non_matching_member(hover_text: str, constructor: str) -> None:
+    # See ADR-0035's "Confidence tiering".
+    assert hover_passes_gate(hover_text, ConfidenceLevel.PERMISSIVE, constructor) is False
+
+
+@pytest.mark.parametrize(
+    "hover_text",
+    ["Iterable[str | int]", "Mapping[str, int | float]", "Callable[[int | str], None]"],
+    ids=["union-in-generic-arg", "union-in-mapping-value", "union-in-callable-arg"],
+)
+def test_permissive_does_not_split_a_union_nested_inside_brackets(hover_text: str) -> None:
+    # Regression: a " | " nested inside a generic's own brackets isn't a top-level union.
+    assert hover_passes_gate(hover_text, ConfidenceLevel.PERMISSIVE, "list") is True
+
+
+@pytest.mark.parametrize(
+    ("hover_text", "constructor"),
+    [
+        ("list[int] | list[str]", "list"),
+        ("Literal[1] | Literal[2]", "int"),
+    ],
+    ids=["list-generic-union", "int-literal-union"],
+)
+def test_permissive_accepts_a_union_whose_every_member_matches(hover_text: str, constructor: str) -> None:
+    assert hover_passes_gate(hover_text, ConfidenceLevel.PERMISSIVE, constructor) is True

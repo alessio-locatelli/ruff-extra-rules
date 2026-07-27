@@ -29,9 +29,10 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
 
     Excludes: keyword/zero/multi-argument calls, a starred argument, a
     call spanning multiple physical lines (see ADR-0035's "Detection
-    method"), a shadowed constructor name (`_shadowed_names()`), and
-    every candidate in a module with a wildcard import
-    (`_has_wildcard_import()`).
+    method"), a shadowed constructor name (`_shadowed_names()`), every
+    candidate in a module with a wildcard import
+    (`_has_wildcard_import()`), and an argument ending in a nested call
+    (`_ends_in_call()`).
     """
     if _has_wildcard_import(tree):
         return []
@@ -78,6 +79,14 @@ def _shadowed_names(tree: ast.Module) -> frozenset[str]:
     return frozenset(shadowed)
 
 
+def _ends_in_call(arg: ast.expr) -> bool:
+    # See ADR-0035's "Detection method" for why this can't be hovered reliably.
+    return any(
+        isinstance(node, ast.Call) and node.end_lineno == arg.end_lineno and node.end_col_offset == arg.end_col_offset
+        for node in ast.walk(arg)
+    )
+
+
 def _bound_name(node: ast.AST) -> str | None:
     if isinstance(node, _BINDING_DEF_TYPES):
         return node.name
@@ -110,6 +119,8 @@ def _iter_candidates(tree: ast.Module, eligible: frozenset[str]) -> Iterator[Can
         if node.lineno != node.end_lineno:
             continue
         if arg.end_lineno is None or arg.end_col_offset is None:
+            continue
+        if _ends_in_call(arg):
             continue
 
         yield Candidate(

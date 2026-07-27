@@ -36,7 +36,7 @@ def test_is_not_cacheable() -> None:
 def test_prefilter_pattern_includes_every_eligible_constructor_call() -> None:
     pattern = RedundantTypeConversionCheck().get_prefilter_pattern()
     assert pattern is not None
-    assert set(pattern) == {
+    assert set(pattern) == {  # pytriage: ignore=TRI006
         "str(",
         "int(",
         "float(",

@@ -87,7 +87,7 @@ def _list_python_files_in_dir(directory: Path) -> list[str]:
     """
     resolved_dir = directory.resolve()
     try:
-        cmd = ["git", "-C", str(directory), "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
+        cmd: list[str | Path] = ["git", "-C", directory, "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
         # cmd is built entirely from this function's own hardcoded git
         # subcommand/flags plus a directory supplied by this hook's own CLI
         # invocation (never from untrusted external input), so no shell is
@@ -214,10 +214,10 @@ def _warn_about_ignored_python_files(directory: Path) -> None:
     allowed to just not fire.
     """
     try:
-        cmd = [
+        cmd: list[str | Path] = [
             "git",
             "-C",
-            str(directory),
+            directory,
             "status",
             "--porcelain=v1",
             "-z",

@@ -111,6 +111,6 @@ def _build_modified_text(source_lines: list[str], candidate: Candidate) -> str:
         + line_bytes[candidate.arg_start_col : candidate.arg_end_col]
         + line_bytes[candidate.call_end_col :]
     )
-    new_lines = list(source_lines)
+    new_lines = list(source_lines)  # pytriage: ignore=TRI006 -- copy, not redundant: avoids aliasing the caller's list
     new_lines[candidate.line - 1] = new_line_bytes.decode("utf-8")
     return "".join(new_lines)

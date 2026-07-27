@@ -152,7 +152,7 @@ def test_real_invocation_does_not_leak_a_traceback_onto_stderr(tmp_path: Path) -
 
     try:
         completed_process = subprocess.run(  # noqa: S603
-            [sys.executable, "-m", "pre_commit_hooks.ast_checks", "--select", "forbid-vars", str(filepath)],
+            [sys.executable, "-m", "pre_commit_hooks.ast_checks", "--select", "forbid-vars", filepath],
             capture_output=True,
             text=True,
             check=False,
@@ -190,7 +190,7 @@ def test_verbose_flag_surfaces_the_underlying_exception_on_stderr(tmp_path: Path
                 "--verbose",
                 "--select",
                 "forbid-vars",
-                str(filepath),
+                filepath,
             ],
             capture_output=True,
             text=True,
@@ -226,7 +226,7 @@ def test_verbose_flag_does_not_change_violations_or_exit_code(tmp_path: Path) ->
             "permissive",
             *extra_args,
         ]
-        return subprocess.run([*cmd, str(filepath)], capture_output=True, text=True, check=False, timeout=30)  # noqa: S603
+        return subprocess.run([*cmd, filepath], capture_output=True, text=True, check=False, timeout=30)  # noqa: S603
 
     quiet = _run()
     verbose = _run("--verbose")

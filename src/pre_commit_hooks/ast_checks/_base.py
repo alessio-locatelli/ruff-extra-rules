@@ -358,7 +358,7 @@ def atomic_write_text(path: Path, content: str, encoding: str) -> None:
         # outside a function, `break`/`continue` outside a loop, or a
         # `from __future__ import` that isn't the first statement. All
         # still raise SyntaxError, just later in the pipeline than parsing.
-        compile(content, str(path), "exec")
+        compile(content, path, "exec")
     except SyntaxError as syntax_error:
         raise FixValidationError(path, syntax_error) from syntax_error
 
