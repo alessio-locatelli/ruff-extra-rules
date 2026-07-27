@@ -115,10 +115,7 @@ class LSPClient:
         self._next_id = 0
         self._pending: dict[int, queue.Queue[dict[str, Any]]] = {}
         self._pending_lock = threading.Lock()
-        # _connection_lost (set by _read_loop) is distinct from
-        # _close_called (set by close()) -- conflating them made close()
-        # silently skip its own stdin close/wait/kill cleanup whenever the
-        # server had already exited on its own.
+        # _close_called alone gates close()'s idempotency; _connection_lost (set by _read_loop) never does.
         self._connection_lost = False
         self._close_called = False
         self._reader = threading.Thread(target=self._read_loop, daemon=True)

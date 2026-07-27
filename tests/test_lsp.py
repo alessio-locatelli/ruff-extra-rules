@@ -99,12 +99,7 @@ def test_request_returns_result(tmp_path: Path) -> None:
 
 
 def test_a_large_stderr_write_does_not_deadlock_the_server(tmp_path: Path) -> None:
-    # Regression: an unread stderr PIPE fills once the server writes enough
-    # to it (64KiB is a typical Linux pipe buffer size) -- the server then
-    # blocks on its own next stderr write, stalling its entire
-    # request/response loop. This would otherwise surface as a mysterious
-    # request timeout rather than as the stderr backpressure that actually
-    # caused it.
+    # Draining stderr in the background keeps a full pipe from blocking the server and stalling every request.
     client = _spawn_fake_server(tmp_path)
     try:
         response = client.request("spam_stderr_then_respond", {"hello": "world"}, timeout=5.0)
@@ -204,16 +199,11 @@ def test_close_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_close_still_cleans_up_after_the_server_already_exited_on_its_own(tmp_path: Path) -> None:
-    # Regression: close()'s own idempotency guard used to reuse the same
-    # flag the background reader thread sets once it observes the
-    # connection is gone (EOF after the server exits on its own, e.g. after
-    # an "exit" notification) -- so close() silently no-opped without ever
-    # closing stdin, once the server had already exited first.
+    # close() must still close stdin/wait/kill even when the server already exited and _connection_lost is set.
     client = _spawn_fake_server(tmp_path)
     client.notify("exit", {})
     client._process.wait(timeout=5)
-    # Give the background reader thread a moment to observe the EOF and set
-    # _connection_lost, the exact pre-condition the regression needs.
+    # Let the background reader thread observe the EOF and set _connection_lost before close() runs.
     time.sleep(0.2)
 
     client.close()
