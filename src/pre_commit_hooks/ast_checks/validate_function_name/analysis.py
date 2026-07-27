@@ -231,6 +231,9 @@ def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, boo
                 if case.guard is not None:
                     stack.append((case.guard, True))
                 stack.extend(reversed(_seed_block(case.body, base_conditional=True)))
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            stack.extend((item, conditional) for item in reversed(node.items))
+            stack.extend(reversed(_seed_block(node.body, base_conditional=conditional)))
         elif isinstance(node, ast.GeneratorExp):
             stack.extend((child, True) for child in reversed(list(ast.iter_child_nodes(node))))
         else:
@@ -311,7 +314,9 @@ def analyze_function(
         if isinstance(stmt, ast.ClassDef):
             defined_classes.add(stmt.name)
 
-    for node, conditional in _iter_own_scope(func_node):
+    own_scope_nodes = list(_iter_own_scope(func_node))
+
+    for node, conditional in own_scope_nodes:
         if isinstance(node, (ast.Yield, ast.YieldFrom)):
             # A yield anywhere in the body -- even behind a guard -- makes
             # the whole function a generator, so this isn't gated on
@@ -450,7 +455,7 @@ def analyze_function(
 
     # Delegation: the function returns a variable assigned by get_*, or
     # returns a call to get_* directly.
-    for node, _conditional in _iter_own_scope(func_node):
+    for node, _conditional in own_scope_nodes:
         if isinstance(node, ast.Return):
             if isinstance(node.value, ast.Call):
                 call_name = _call_name(node.value.func)
@@ -474,7 +479,7 @@ def analyze_function(
     if has_loop_checking_exists_or_parent:
         flags["searches"] = True
 
-    assigns = [n for n, _conditional in _iter_own_scope(func_node) if isinstance(n, ast.Assign)]
+    assigns = [n for n, _conditional in own_scope_nodes if isinstance(n, ast.Assign)]
     for a in assigns:
         for t in a.targets:
             if isinstance(t, ast.Name) and t.id.lower() in (
