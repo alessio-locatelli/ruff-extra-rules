@@ -33,22 +33,39 @@ def test_is_not_cacheable() -> None:
     assert RedundantTypeConversionCheck().cacheable is False
 
 
-def test_prefilter_pattern_includes_every_eligible_constructor_call() -> None:
-    pattern = RedundantTypeConversionCheck().get_prefilter_pattern()
+@pytest.mark.parametrize(
+    ("level", "expected"),
+    [
+        (
+            ConfidenceLevel.CONSERVATIVE,
+            {"str(", "int(", "float(", "bool(", "bytes(", "frozenset(", "tuple("},
+        ),
+        (
+            ConfidenceLevel.PERMISSIVE,
+            {
+                "str(",
+                "int(",
+                "float(",
+                "bool(",
+                "bytes(",
+                "frozenset(",
+                "tuple(",
+                "list(",
+                "dict(",
+                "set(",
+                "bytearray(",
+            },
+        ),
+    ],
+    ids=["conservative", "permissive"],
+)
+def test_prefilter_pattern_matches_the_configured_levels_eligible_constructors(
+    level: ConfidenceLevel, expected: set[str]
+) -> None:
+    # Narrowed to eligible_constructors(level), not every constructor TRI006 knows about.
+    pattern = RedundantTypeConversionCheck(level=level).get_prefilter_pattern()
     assert pattern is not None
-    assert set(pattern) == {  # pytriage: ignore=TRI006
-        "str(",
-        "int(",
-        "float(",
-        "bool(",
-        "bytes(",
-        "frozenset(",
-        "tuple(",
-        "list(",
-        "dict(",
-        "set(",
-        "bytearray(",
-    }
+    assert set(pattern) == expected  # pytriage: ignore=TRI006
 
 
 def test_fix_never_applies_a_fix() -> None:
