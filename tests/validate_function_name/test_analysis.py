@@ -670,6 +670,13 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
         ("def get_data():\n    while open('f').read():\n        pass\n    return 1\n", {"open": False}),
         ("def get_data():\n    for x in open('f'):\n        pass\n    return 1\n", {"open": False}),
         (
+            # A for-target subscript/attribute expression is evaluated once
+            # per item the iterator yields, same as the body -- unlike
+            # `iter`, which always evaluates when the statement is reached.
+            "def get_data():\n    for container[open('f')] in items:\n        pass\n    return 1\n",
+            {"open": True},
+        ),
+        (
             "def get_data():\n    return (open(p) for p in paths)\n",
             {"open": True},
         ),
@@ -698,6 +705,7 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
         "if-test-not-conditional",
         "while-test-not-conditional",
         "for-iter-not-conditional",
+        "for-target-conditional",
         "generator-expression-elt-conditional",
         "generator-expression-outer-iter-conservatively-conditional",
     ],
