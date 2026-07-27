@@ -28,8 +28,6 @@ THIRD_PARTY_IGNORE_PATTERN = re.compile(r"#\s*(?:type|pyright|ty)\s*:\s*ignore\b
 ERROR_CODE = "TRI006"
 CHECK_ID = "redundant-type-conversion"
 
-_CONSTRUCTOR_NAMES = ("str", "int", "float", "bool", "bytes", "frozenset", "tuple", "list", "dict", "set", "bytearray")
-
 
 def _format_message(item: RedundantConversion) -> str:
     constructor = item.candidate.constructor
@@ -69,7 +67,7 @@ class RedundantTypeConversionCheck(BaseCheck):
         return False
 
     def get_prefilter_pattern(self) -> list[str] | None:
-        return [f"{name}(" for name in _CONSTRUCTOR_NAMES]
+        return [f"{name}(" for name in eligible_constructors(self._level)]
 
     @classmethod
     def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
