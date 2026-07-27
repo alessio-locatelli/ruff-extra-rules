@@ -395,6 +395,37 @@ def get_config(settings):
             {"creates_object": False},
         ),
         (
+            # The lazy-singleton guard clause, written as an early return
+            # with no `else` instead of nested if/else: construction is
+            # only reached on a cache miss, same as the if/else form.
+            "def get_session():\n    if _session is not None:\n        return _session\n    return Session()\n",
+            "get_session",
+            {"creates_object": False},
+        ),
+        (
+            # Same guard-clause shape via try/except instead of if/else:
+            # the fallback after the try only runs when the try's own
+            # return didn't happen (a KeyError was raised instead).
+            (
+                "def get_value(key):\n"
+                "    try:\n"
+                "        return _cache[key]\n"
+                "    except KeyError:\n"
+                "        pass\n"
+                "    return Expensive(key)\n"
+            ),
+            "get_value",
+            {"creates_object": False},
+        ),
+        (
+            # A guarded body that doesn't diverge (no return/raise) is an
+            # unrelated guard, not a guard clause -- the following call
+            # stays real, unconditional evidence.
+            "def get_data(should_log):\n    if should_log:\n        log()\n    return Session()\n",
+            "get_data",
+            {"creates_object": True},
+        ),
+        (
             "def get_data(n):\n    while n > 0:\n        n = process(n)\n        total = sum([n])\n    return n\n",
             "get_data",
             {"aggregates": False},
@@ -572,6 +603,9 @@ def get_config(settings):
         "returns-class-for-type-call",
         "if-guarded-disk-read-not-unconditional",
         "try-guarded-creates-object-not-unconditional",
+        "if-guard-clause-no-else-narrows-scope",
+        "try-except-guard-clause-narrows-scope",
+        "non-diverging-guard-does-not-narrow-scope",
         "while-guarded-call-not-unconditional",
         "for-guarded-call-not-unconditional",
         "unconditional-sibling-after-unrelated-guard-still-counted",
@@ -689,6 +723,38 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
             "def get_data():\n    return (x for x in open('f'))\n",
             {"open": True},
         ),
+        (
+            # A nested try whose `finally` always diverges makes the whole
+            # try diverge, regardless of handlers -- so the enclosing if's
+            # body diverges too, narrowing scope for what follows it.
+            (
+                "def get_data():\n"
+                "    if flag:\n"
+                "        try:\n"
+                "            pass\n"
+                "        finally:\n"
+                "            return compute()\n"
+                "    return fallback()\n"
+            ),
+            {"fallback": True},
+        ),
+        (
+            # A nested try with no finally still diverges when every
+            # handler diverges and its `else` clause (the try's own
+            # non-exception fallthrough) diverges too.
+            (
+                "def get_data():\n"
+                "    if flag:\n"
+                "        try:\n"
+                "            compute()\n"
+                "        except ValueError:\n"
+                "            return None\n"
+                "        else:\n"
+                "            return finish()\n"
+                "    return fallback()\n"
+            ),
+            {"fallback": True},
+        ),
     ],
     ids=[
         "if-body-conditional",
@@ -708,6 +774,8 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
         "for-target-conditional",
         "generator-expression-elt-conditional",
         "generator-expression-outer-iter-conservatively-conditional",
+        "nested-try-finally-diverges-narrows-outer-if-scope",
+        "nested-try-handlers-and-orelse-diverge-narrows-outer-if-scope",
     ],
 )
 def test_iter_own_scope_conditional_tagging(source: str, expected: dict[str, bool]) -> None:

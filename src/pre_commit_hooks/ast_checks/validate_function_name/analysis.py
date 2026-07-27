@@ -97,9 +97,76 @@ class FunctionBehavior(TypedDict):
     returns_class: bool  # returns a class object, not an instance
 
 
+def _is_wildcard_pattern(pattern: ast.pattern) -> bool:
+    return isinstance(pattern, ast.MatchAs) and pattern.pattern is None
+
+
+def _block_diverges(stmts: list[ast.stmt]) -> bool:
+    """True if running `stmts` in order is guaranteed to exit via return,
+    raise, break, or continue before reaching the end of the block --
+    i.e. control can never fall through to whatever follows this block.
+    """
+    return any(_stmt_diverges(stmt) for stmt in stmts)
+
+
+def _stmt_diverges(stmt: ast.stmt) -> bool:
+    if isinstance(stmt, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+        return True
+    if isinstance(stmt, ast.If):
+        return bool(stmt.orelse) and _block_diverges(stmt.body) and _block_diverges(stmt.orelse)
+    if isinstance(stmt, (ast.Try, ast.TryStar)):
+        if stmt.finalbody and _block_diverges(stmt.finalbody):
+            return True
+        if not stmt.handlers or not all(_block_diverges(h.body) for h in stmt.handlers):
+            return False
+        return _block_diverges(stmt.orelse) if stmt.orelse else _block_diverges(stmt.body)
+    if isinstance(stmt, ast.Match):
+        return (
+            bool(stmt.cases)
+            and all(_block_diverges(c.body) for c in stmt.cases)
+            and any(c.guard is None and _is_wildcard_pattern(c.pattern) for c in stmt.cases)
+        )
+    return False
+
+
+def _stmt_narrows_scope(stmt: ast.stmt) -> bool:
+    """True if this statement guarantees later siblings in the same block
+    are reached, if at all, only through a path its own primary body
+    didn't take -- an implicit else/handler, even when none is written.
+
+    Broader than `_stmt_diverges`: an `if`/`try` whose primary body always
+    diverges narrows what follows even without a matching `else`/handler
+    that itself diverges -- e.g. a guard-clause `if cached: return cached`
+    with no `else` still means the next statement only runs on a cache
+    miss, same as if it were nested in an `else`. See ADR-0037.
+    """
+    if isinstance(stmt, ast.If):
+        return _block_diverges(stmt.body)
+    if isinstance(stmt, (ast.Try, ast.TryStar)):
+        return bool(stmt.handlers) and _block_diverges(stmt.body)
+    return _stmt_diverges(stmt)
+
+
+def _seed_block(stmts: list[ast.stmt], *, base_conditional: bool) -> list[tuple[ast.AST, bool]]:
+    """Pairs each statement in a block with its conditional state.
+
+    Once an earlier sibling narrows scope (see `_stmt_narrows_scope`),
+    every statement after it in the same block is only reached via a path
+    that sibling didn't take -- an implicit guard, the same as if it were
+    nested in an `else`, even though it isn't. See ADR-0037.
+    """
+    pairs: list[tuple[ast.AST, bool]] = []
+    reachable = True
+    for stmt in stmts:
+        pairs.append((stmt, base_conditional if reachable else True))
+        if reachable and _stmt_narrows_scope(stmt):
+            reachable = False
+    return pairs
+
+
 def _iter_own_scope(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[tuple[ast.AST, bool]]:
     """Yields (node, conditional) for every node in func_node's own execution scope. See ADR-0037."""
-    yield from _iter_scope([(stmt, False) for stmt in reversed(func_node.body)])
+    yield from _iter_scope(list(reversed(_seed_block(func_node.body, base_conditional=False))))
 
 
 def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, bool]]:
@@ -129,41 +196,41 @@ def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, boo
             stack.extend((d, conditional) for d in reversed(node.decorator_list))
             stack.extend((b, conditional) for b in reversed(node.bases))
             stack.extend((kw, conditional) for kw in reversed(node.keywords))
-            stack.extend((stmt, conditional) for stmt in reversed(node.body))
+            stack.extend(reversed(_seed_block(node.body, base_conditional=conditional)))
         elif isinstance(node, ast.If):
             stack.append((node.test, conditional))
-            stack.extend((n, True) for n in reversed(node.body))
-            stack.extend((n, True) for n in reversed(node.orelse))
+            stack.extend(reversed(_seed_block(node.body, base_conditional=True)))
+            stack.extend(reversed(_seed_block(node.orelse, base_conditional=True)))
         elif isinstance(node, ast.IfExp):
             stack.append((node.test, conditional))
             stack.append((node.body, True))
             stack.append((node.orelse, True))
         elif isinstance(node, ast.While):
             stack.append((node.test, conditional))
-            stack.extend((n, True) for n in reversed(node.body))
-            stack.extend((n, True) for n in reversed(node.orelse))
+            stack.extend(reversed(_seed_block(node.body, base_conditional=True)))
+            stack.extend(reversed(_seed_block(node.orelse, base_conditional=True)))
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             stack.append((node.iter, conditional))
             # The target is only assigned once the iterator yields an item,
             # same as the body -- unlike `iter`, which always evaluates.
             stack.append((node.target, True))
-            stack.extend((n, True) for n in reversed(node.body))
-            stack.extend((n, True) for n in reversed(node.orelse))
+            stack.extend(reversed(_seed_block(node.body, base_conditional=True)))
+            stack.extend(reversed(_seed_block(node.orelse, base_conditional=True)))
         elif isinstance(node, (ast.Try, ast.TryStar)):
-            stack.extend((n, True) for n in reversed(node.body))
+            stack.extend(reversed(_seed_block(node.body, base_conditional=True)))
             for handler in reversed(node.handlers):
-                stack.extend((n, True) for n in reversed(handler.body))
-            stack.extend((n, True) for n in reversed(node.orelse))
+                stack.extend(reversed(_seed_block(handler.body, base_conditional=True)))
+            stack.extend(reversed(_seed_block(node.orelse, base_conditional=True)))
             # A finally block always runs once the try is reached, whether
             # the body succeeded, raised, or returned -- unlike the branches
             # above, it isn't skippable, so it inherits conditional as-is.
-            stack.extend((n, conditional) for n in reversed(node.finalbody))
+            stack.extend(reversed(_seed_block(node.finalbody, base_conditional=conditional)))
         elif isinstance(node, ast.Match):
             stack.append((node.subject, conditional))
             for case in reversed(node.cases):
                 if case.guard is not None:
                     stack.append((case.guard, True))
-                stack.extend((n, True) for n in reversed(case.body))
+                stack.extend(reversed(_seed_block(case.body, base_conditional=True)))
         elif isinstance(node, ast.GeneratorExp):
             stack.extend((child, True) for child in reversed(list(ast.iter_child_nodes(node))))
         else:
