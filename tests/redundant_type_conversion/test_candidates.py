@@ -224,6 +224,21 @@ def test_a_candidate_whose_argument_is_a_subscript_is_still_found() -> None:
     assert candidate.constructor == "list"
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "a = tuple(x for x in y)\n",
+        "a = tuple(x for x in y if x > 0)\n",
+        "a = tuple(idx for idx, _ in sorted(y)[:3])\n",
+        "a = tuple((x for x in y))\n",  # explicitly parenthesized -- still never already a tuple/list/etc.
+    ],
+    ids=["plain", "with-a-filter-clause", "nested-subscript-in-the-iterable", "explicitly-parenthesized"],
+)
+def test_ignores_a_candidate_whose_argument_is_a_generator_expression(source: str) -> None:
+    # See ADR-0035's "Detection method".
+    assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
+
+
 def test_a_candidate_that_is_lens_sole_argument_is_marked_wrapped_in_len() -> None:
     # See ADR-0035's `len()` sink exclusion.
     (candidate,) = find_candidates(ast.parse("len(set(op_ids))\n"), ALL_CONSTRUCTORS)
