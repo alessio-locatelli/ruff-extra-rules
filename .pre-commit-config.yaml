@@ -57,12 +57,13 @@ repos:
         types: [python]
         files: ^(src|tests)/
         exclude: ^tests/fixtures/
-        args: [
+        args:
+          [
             "--fix",
             "--forbid-vars-level=permissive",
             "--redundant-assignment-level=permissive",
             "--redundant-type-conversion-level=permissive",
-        ]
+          ]
 
   - repo: https://github.com/alessio-locatelli/ruff-extra-rules
     rev: v0.0.36
