@@ -226,19 +226,15 @@ class CheckOrchestrator:
             return None
 
         cacheable_ids = {check.check_id for check in cacheable_checks}
-        if not self.fix_mode and cacheable_checks and not (new_failure_ids & cacheable_ids):
-            # Cache only the cacheable group's own violations: a
-            # non-cacheable check's result must never be written to the
-            # cache, whatever it is. Gated on a *cacheable* check having
-            # crashed specifically — an always-rerun check's own crash
-            # doesn't touch the cache either way, so it must not also
-            # block caching a cacheable check's own, otherwise-complete
-            # result for this file (that check ran fine; only the
-            # unrelated always-rerun one didn't). Never cache a result
-            # collected while a cacheable check crashed — it's known
-            # incomplete, and caching it would let a future cache-hit run
-            # silently keep treating the crash as "clean" until the tree
-            # hash changes.
+        # incomplete_ids covers both a cacheable check that crashed this
+        # file (new_failure_ids) and one that's globally unavailable this
+        # run (_unavailable_check_ids, e.g. a missing prerequisite) --
+        # either way its own results for this file are missing, and
+        # caching the rest of the group as if it were complete would let
+        # a future cache hit keep serving that gap even after the check
+        # recovers, until the file or cache version changes.
+        incomplete_ids = new_failure_ids | self._unavailable_check_ids
+        if not self.fix_mode and cacheable_checks and not (incomplete_ids & cacheable_ids):
             self._cache_violations(filepath, [v for v in violations if v.check_id in cacheable_ids])
 
         return violations
