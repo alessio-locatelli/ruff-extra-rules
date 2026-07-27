@@ -75,6 +75,14 @@ def _split_top_level_union(hover_text: str) -> list[str]:
     return members
 
 
+def is_exact_match(hover_text: str, constructor: str) -> bool:
+    """Whether `hover_text` is genuinely `constructor`'s own type, not just accepted by a weak recheck sink."""
+    if _exact_match(hover_text, constructor):
+        return True
+    members = _split_top_level_union(hover_text)
+    return len(members) > 1 and all(_exact_match(member, constructor) for member in members)
+
+
 def hover_passes_gate(hover_text: str | None, level: ConfidenceLevel, constructor: str) -> bool:
     """Cheap pre-filter for whether a candidate is worth the recheck's own cost. See ADR-0035's "Confidence tiering"."""
     if not hover_text or _is_unreliable(hover_text):

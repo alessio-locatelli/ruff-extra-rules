@@ -16,6 +16,8 @@ uv tool install ty
 
 or as your own project's dev dependency. If `ty` isn't found, or an installed `ty` doesn't behave the way this check expects, the check fails immediately with a message explaining which of the two happened and what to do about it — never a silent, empty result.
 
+Run this check with your project's own virtual environment active. `ty` resolves whichever version is first on `PATH` at that moment, and needs your project's own dependencies importable to correctly infer their types — an inactive shell can silently pick up a different, unrelated `ty` install (with different diagnostics, since `ty` is pre-1.0) instead of the one pinned as your project's own dev dependency.
+
 ## Example
 
 ```python

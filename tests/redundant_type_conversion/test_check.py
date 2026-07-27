@@ -123,6 +123,27 @@ def test_check_flags_a_redundant_conservative_case(monkeypatch: pytest.MonkeyPat
     assert "pytriage: ignore=TRI006" in violations[0].message
 
 
+def test_check_hedges_the_message_for_a_non_exact_permissive_match(monkeypatch: pytest.MonkeyPatch) -> None:
+    # See ADR-0035's permissive-gate limitation.
+    source = "y = str({'a': [1]}) == 1\n"
+    session = FakeSession(
+        diagnostics_by_content={source: frozenset(), "y = {'a': [1]} == 1\n": frozenset()},
+        hover_by_position={(0, 17): "dict[str, list[int]]"},
+    )
+    _patch_session(monkeypatch, session)
+
+    violations = RedundantTypeConversionCheck(level=ConfidenceLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
+
+    assert len(violations) == 1
+    message = violations[0].message
+    assert "already `str`" not in message
+    assert "dict[str, list[int]]" in message
+    assert "not `str`" in message
+    assert "pytriage: ignore=TRI006" in message
+
+
 def test_check_honors_pytriage_inline_ignore(monkeypatch: pytest.MonkeyPatch) -> None:
     source = "y = str(x)  # pytriage: ignore=TRI006\n"
     session = FakeSession(diagnostics_by_content={}, hover_by_position={})
