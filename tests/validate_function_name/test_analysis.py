@@ -260,6 +260,13 @@ def get_config(settings):
             {"searches": True},
         ),
         (
+            # A .parent access reached unconditionally through the loop's
+            # own test position (not just the loop body) also counts.
+            "def get_root(path):\n    while path.parent != path:\n        path = path.parent\n    return path\n",
+            "get_root",
+            {"searches": True},
+        ),
+        (
             # The while loop itself only runs when guarded -- not trusted
             # as unconditional evidence of a search/find pattern.
             (
@@ -284,6 +291,23 @@ def get_config(settings):
                 "    return path\n"
             ),
             "get_data",
+            {"searches": False},
+        ),
+        (
+            # An unconditional while loop whose only .exists()/.parent
+            # matches sit behind a nested if/else inside the loop body isn't
+            # trusted -- both branches are skippable per iteration, just like
+            # any other guarded call.
+            (
+                "def get_root(path):\n"
+                "    while True:\n"
+                "        if debug:\n"
+                "            path.exists()\n"
+                "        else:\n"
+                "            path = path.parent\n"
+                "    return path\n"
+            ),
+            "get_root",
             {"searches": False},
         ),
         (
@@ -534,8 +558,10 @@ def get_config(settings):
         "mutates-args-true-augmented-name-param",
         "mutates-args-false-augmented-local-variable",
         "searches-via-exists-loop",
+        "searches-via-parent-in-loop-test-position",
         "guarded-while-loop-search-not-unconditional",
         "nested-def-inside-while-loop-does-not-leak-search",
+        "guarded-if-else-inside-while-loop-does-not-count-as-search",
         "validates-errors-variable",
         "is-property-false-non-property-decorator",
         "delegates-get-direct-return",
