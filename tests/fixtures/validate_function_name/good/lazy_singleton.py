@@ -19,3 +19,12 @@ def get_session() -> Session:
         if _session is None:
             _session = Session(root=".")
         return _session
+
+
+def get_session_guard_clause() -> Session:
+    global _session
+    with _session_lock:
+        if _session is not None:
+            return _session
+        _session = Session(root=".")
+        return _session
