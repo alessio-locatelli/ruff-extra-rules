@@ -103,11 +103,6 @@ def test_suppressed_conversions_are_never_flagged() -> None:
 
 
 def test_the_real_installed_ty_still_passes_this_checks_own_self_test() -> None:
-    # Deliberately calls the *real*, unmocked get_session() (bypassing the
-    # ty_session fixture above) -- this is what actually catches a pinned
-    # `ty` dev-dependency bump silently drifting away from what this
-    # check's self-test (and its recorded-fixture unit tests) assume.
-    # Self-contained fixtures (no cross-file imports), so this is safe to
-    # run regardless of the current working directory.
+    # Deliberately unmocked: a failed self-test raises CheckUnavailableError, failing this test on its own.
     session = real_get_session()
-    assert session is not None
+    assert isinstance(session, TySession)
