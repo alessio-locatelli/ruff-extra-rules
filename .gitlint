@@ -1,0 +1,14 @@
+[general]
+contrib=contrib-title-conventional-commits,CT1
+regex-style-search=true
+
+[title-must-not-contain-word]
+# AI writes meaningless "apply reviewer feedback" (a.k.a. "I did something")
+# messages instead of writing what was changed and why.
+words=resolve thread,resolve threads,resolve remark,resolve remarks,wip,implement review comments,reviewer changes,reviewer feedback,address code review feedback,address reviewer,apply reviewer,address review feedback,address feedback,review findings
+
+[body-max-line-length]
+line-length=100
+
+[body-min-length]
+min-length=3
