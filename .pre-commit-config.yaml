@@ -66,17 +66,14 @@ repos:
           ]
 
   - repo: https://github.com/alessio-locatelli/ruff-extra-rules
-    rev: v0.0.36
+    rev: v0.0.37
     hooks:
       - id: ruff-extra-rules
         exclude: ^tests/fixtures/
-        # rev v0.0.36 accepts --forbid-vars-level, not --meaningless-vars-level
-        # (used by the local hook above): this pin tracks a tagged release,
-        # never the working tree.
         args:
           [
             --fix,
-            --forbid-vars-level=permissive,
+            --meaningless-vars-level=permissive,
             --redundant-assignment-level=permissive,
           ]
 
