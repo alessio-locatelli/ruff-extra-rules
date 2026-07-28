@@ -1,4 +1,4 @@
-"""Confidence tiering for TRI006 — see ADR-0035 and `docs/rules/redundant-type-conversion.md`."""
+"""Confidence tiering for TR6 — see ADR-0035 and `docs/rules/redundant-type-conversion.md`."""
 
 from __future__ import annotations
 

@@ -14,7 +14,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures" / "misplaced_comments"
 def test_check_id_and_error_code() -> None:
     check = MisplacedCommentCheck()
     assert check.check_id == "misplaced-comment"
-    assert check.error_code == "STYLE-001"
+    assert check.error_code == "TR7"
 
 
 def test_prefilter_pattern_is_hash() -> None:
@@ -34,7 +34,7 @@ def test_check_detects_trailing_comment(source: str, line: int, *, fixable: bool
     violations = MisplacedCommentCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert len(violations) == 1
-    assert violations[0].error_code == "STYLE-001"
+    assert violations[0].error_code == "TR7"
     assert violations[0].line == line
     assert violations[0].fixable is fixable
 
@@ -43,7 +43,7 @@ def test_check_detects_trailing_comment(source: str, line: int, *, fixable: bool
     "source",
     [
         "result = func(\n    arg  # Comment inline on expression\n)\n",
-        "result = func(\n    arg\n)  # Comment  # pytriage: ignore=STYLE-001\n",
+        "result = func(\n    arg\n)  # Comment  # pytriage: TR7\n",
         # `[1, 2][0]  # c`: tokens between the first `]` and the comment aren't COMMENT.
         "items = [1, 2][0]  # not a bracket-only line\n",
     ],
@@ -97,7 +97,7 @@ def test_fix_moves_trailing_comment(source: str, fixed_source: str, tmp_path: Pa
         # with anything to do here — but fix() must independently honor the
         # ignore comment too, since it re-scans the source rather than
         # trusting its input.
-        "result = func(\n    arg\n)  # Comment  # pytriage: ignore=STYLE-001\n",
+        "result = func(\n    arg\n)  # Comment  # pytriage: TR7\n",
     ],
     ids=["nothing-to-fix", "ignore-comment-respected"],
 )

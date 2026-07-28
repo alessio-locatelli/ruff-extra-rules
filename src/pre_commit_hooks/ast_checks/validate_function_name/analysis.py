@@ -15,8 +15,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("validate_function_name")
 
-# Format: # pytriage: ignore=TRI004
-IGNORE_PATTERN = ignore_pattern_for("TRI004")
+# Format: # pytriage: TR4
+IGNORE_PATTERN = ignore_pattern_for("TR4")
 GET_PREFIX = "get_"
 
 

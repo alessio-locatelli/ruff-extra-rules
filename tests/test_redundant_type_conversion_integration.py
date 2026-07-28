@@ -1,4 +1,4 @@
-"""Integration layer for TRI006: runs the real `ty` binary (pinned as a dev
+"""Integration layer for TR6: runs the real `ty` binary (pinned as a dev
 dependency, see pyproject.toml), sharing one warm `ty server` session
 across this whole module -- mirroring the check's own production design
 (one session per hook invocation, not one per file/query).
@@ -55,7 +55,7 @@ def test_same_scope_scalar_conversion_is_flagged() -> None:
 
     assert len(violations) == 1
     assert violations[0].line == 2
-    assert violations[0].error_code == "TRI006"
+    assert violations[0].error_code == "TR6"
 
 
 def test_cross_file_call_site_conversion_is_flagged_at_permissive() -> None:
@@ -66,7 +66,7 @@ def test_cross_file_call_site_conversion_is_flagged_at_permissive() -> None:
     violations = _check(BAD_ROOT / "cross_file_call_site.py", level=ConfidenceLevel.PERMISSIVE)
 
     assert {v.line for v in violations} == {5, 6}
-    assert {v.error_code for v in violations} == {"TRI006"}
+    assert {v.error_code for v in violations} == {"TR6"}
 
 
 def test_cross_file_call_site_conversion_is_not_flagged_at_conservative() -> None:

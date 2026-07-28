@@ -1,9 +1,9 @@
 """Check for meaningless variable names like 'data', 'result', and 'results'.
 
-TRI001: Detects and suggests replacements for meaningless variable names that
+TR1: Detects and suggests replacements for meaningless variable names that
 reduce code maintainability.
 
-Inline ignore: # pytriage: ignore=TRI001
+Inline ignore: # pytriage: TR1
 """
 
 from __future__ import annotations
@@ -33,8 +33,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("meaningless_vars")
 
-# Format: # pytriage: ignore=TRI001
-IGNORE_PATTERN = ignore_pattern_for("TRI001")
+# Format: # pytriage: TR1
+IGNORE_PATTERN = ignore_pattern_for("TR1")
 
 type VariableName = str
 type _ComprehensionNode = ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
@@ -807,7 +807,7 @@ class MeaninglessVarsCheck(BaseCheck):
 
     @property
     def error_code(self) -> str:
-        return "TRI001"
+        return "TR1"
 
     def get_prefilter_pattern(self) -> list[str] | None:
         return sorted(self.meaningless_names)
@@ -819,7 +819,7 @@ class MeaninglessVarsCheck(BaseCheck):
             choices=["conservative", "permissive"],
             default="conservative",
             help=(
-                "Whether meaningless-vars (TRI001) reports a meaningless name "
+                "Whether meaningless-vars (TR1) reports a meaningless name "
                 "that has no suggested replacement. 'conservative' "
                 "(default) reports a name only when a rename can be "
                 "suggested; 'permissive' reports every meaningless name "
@@ -856,7 +856,7 @@ class MeaninglessVarsCheck(BaseCheck):
                 message = f"'{v['name']}' is a meaningless variable name — '{v['suggestion']}' is more descriptive."
             else:
                 message = f"Meaningless variable name '{v['name']}' found. Use a more descriptive name."
-            message += " Or add '# pytriage: ignore=TRI001' to suppress."
+            message += " Or add '# pytriage: TR1' to suppress."
 
             violations.append(
                 Violation(

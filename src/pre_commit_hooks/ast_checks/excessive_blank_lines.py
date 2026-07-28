@@ -1,9 +1,9 @@
 """Check and fix excessive blank lines after module headers.
 
-TRI002: Collapse 2+ consecutive blank lines after module headers (copyright,
+TR2: Collapse 2+ consecutive blank lines after module headers (copyright,
 docstring, or comments) to a single blank line.
 
-Inline ignore: # pytriage: ignore=TRI002, placed on the first code line after
+Inline ignore: # pytriage: TR2, placed on the first code line after
 the blank run (the violation's own line is blank, so it can't carry a
 trailing comment itself).
 """
@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("excessive_blank_lines")
 
-IGNORE_PATTERN = ignore_pattern_for("TRI002")
+IGNORE_PATTERN = ignore_pattern_for("TR2")
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +42,7 @@ class _BlankRunViolation:
 def _format_message(blank_count: int, target: int) -> str:
     return (
         f"Excessive blank lines ({blank_count}) should be collapsed to {target}. "
-        "Add '# pytriage: ignore=TRI002' to the line following the blank run "
+        "Add '# pytriage: TR2' to the line following the blank run "
         "to suppress."
     )
 
@@ -206,7 +206,7 @@ class ExcessiveBlankLinesCheck(BaseCheck):
 
     @property
     def error_code(self) -> str:
-        return "TRI002"
+        return "TR2"
 
     def get_prefilter_pattern(self) -> list[str] | None:
         return None

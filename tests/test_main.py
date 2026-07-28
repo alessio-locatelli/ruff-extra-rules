@@ -233,6 +233,6 @@ def test_verbose_flag_does_not_change_violations_or_exit_code(tmp_path: Path) ->
 
     assert quiet.returncode == verbose.returncode == 1
     assert quiet.stdout == verbose.stdout == ""
-    violation_line = f"{filepath}:1:1: TRI001:"
+    violation_line = f"{filepath}:1:1: TR1:"
     assert any(line.startswith(violation_line) for line in quiet.stderr.splitlines())
     assert any(line.startswith(violation_line) for line in verbose.stderr.splitlines())

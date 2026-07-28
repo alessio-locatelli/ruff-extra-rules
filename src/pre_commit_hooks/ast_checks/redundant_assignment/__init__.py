@@ -1,6 +1,6 @@
-"""Check for redundant variable assignments (TRI005).
+"""Check for redundant variable assignments (TR5).
 
-TRI005: Detects redundant variable assignments where the variable doesn't add
+TR5: Detects redundant variable assignments where the variable doesn't add
 clarity, transformation, or simplification to the code.
 
 Patterns detected:
@@ -8,7 +8,7 @@ Patterns detected:
 2. Single-use variables: x = calc(); return x
 3. Literal identity: foo = "foo"
 
-Inline ignore: # pytriage: ignore=TRI005
+Inline ignore: # pytriage: TR5
 
 Examples:
     # ❌ Redundant
@@ -49,10 +49,10 @@ if TYPE_CHECKING:
     import ast
     from pathlib import Path
 
-# Format: # pytriage: ignore=TRI005
-IGNORE_PATTERN = ignore_pattern_for("TRI005")
+# Format: # pytriage: TR5
+IGNORE_PATTERN = ignore_pattern_for("TR5")
 
-ERROR_CODE = "TRI005"
+ERROR_CODE = "TR5"
 CHECK_ID = "redundant-assignment"
 
 
@@ -61,22 +61,22 @@ def format_message(var_name: str, pattern_type: str) -> str:
         "IMMEDIATE_SINGLE_USE": (
             f"Redundant assignment '{var_name}' used only once immediately "
             f"after. Consider inlining the value. Or add "
-            f"'# pytriage: ignore={ERROR_CODE}' to suppress."
+            f"'# pytriage: {ERROR_CODE}' to suppress."
         ),
         "SINGLE_USE": (
             f"Variable '{var_name}' assigned and used only once. "
             f"Consider inlining the expression. Or add "
-            f"'# pytriage: ignore={ERROR_CODE}' to suppress."
+            f"'# pytriage: {ERROR_CODE}' to suppress."
         ),
         "LITERAL_IDENTITY": (
             f"Identity assignment '{var_name}' is redundant. "
             f"Consider using literal directly. Or add "
-            f"'# pytriage: ignore={ERROR_CODE}' to suppress."
+            f"'# pytriage: {ERROR_CODE}' to suppress."
         ),
     }
     return messages.get(
         pattern_type,
-        f"Redundant assignment '{var_name}'. Or add '# pytriage: ignore={ERROR_CODE}' to suppress.",
+        f"Redundant assignment '{var_name}'. Or add '# pytriage: {ERROR_CODE}' to suppress.",
     )
 
 
@@ -104,7 +104,7 @@ class RedundantAssignmentCheck(BaseCheck):
             choices=["conservative", "permissive"],
             default="conservative",
             help=(
-                "How eagerly redundant-assignment (TRI005) reports a "
+                "How eagerly redundant-assignment (TR5) reports a "
                 "violation. 'conservative' (default) flags only the "
                 "clearest, safest-to-inline cases; 'permissive' flags a "
                 "broader range. Either way, --fix applies to whatever is "

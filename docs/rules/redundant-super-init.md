@@ -1,4 +1,4 @@
-# redundant-super-init (TRI003)
+# redundant-super-init (TR3)
 
 Detects when a class forwards `**kwargs` to a parent `__init__` that accepts no arguments.
 
@@ -32,5 +32,5 @@ class Child(Base):
 - Analyzes class hierarchies and method signatures
 - Handles multiple inheritance correctly
 - Limited to same-file parent classes — an imported or stdlib parent is skipped rather than guessed at
-- Inline suppression with `# pytriage: ignore=TRI003`, placed on the `__init__` definition line
+- Inline suppression with `# pytriage: TR3`, placed on the `__init__` definition line
 - No autofix — this check flags a design decision the caller has to make

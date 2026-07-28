@@ -60,7 +60,7 @@ def test_ignore_fixtures_are_not_flagged(fixture_path: Path) -> None:
         ("", False),
         # The blank run's own line is blank, so the ignore comment goes on
         # the first code line after it instead.
-        ('"""Docstring."""\n\n\n\ndef foo():  # pytriage: ignore=TRI002\n    pass\n', False),
+        ('"""Docstring."""\n\n\n\ndef foo():  # pytriage: TR2\n    pass\n', False),
     ],
     ids=["raw-prefixed-docstring", "comment-only-file", "empty-file", "inline-ignore"],
 )
@@ -75,7 +75,7 @@ def test_leading_blank_lines_before_first_code_with_no_header() -> None:
     assert _check("\n\n\nimport os\n") == [
         (
             "Excessive blank lines (3) should be collapsed to 1. Add "
-            "'# pytriage: ignore=TRI002' to the line following the blank run "
+            "'# pytriage: TR2' to the line following the blank run "
             "to suppress."
         )
     ]
@@ -84,7 +84,7 @@ def test_leading_blank_lines_before_first_code_with_no_header() -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        '"""Docstring."""\n\n\n\ndef foo():  # pytriage: ignore=TRI002\n    pass\n',
+        '"""Docstring."""\n\n\n\ndef foo():  # pytriage: TR2\n    pass\n',
         '"""Docstring."""\n\ndef foo():\n    pass\n',
     ],
     ids=["ignore-comment-respected", "no-current-violation"],

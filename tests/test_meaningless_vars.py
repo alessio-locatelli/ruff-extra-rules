@@ -79,17 +79,24 @@ def create_model():
 """,
         """
 def process():
-    data = {}  # pytriage: ignore=TRI001
+    data = {}  # pytriage: TR1
     return data
 """,
         """
 def process():
-    data = {}  # pytriage: ignore=TRI001
-    result = None  # pytriage: ignore=TRI001
+    data = {}  # pytriage: TR1
+    result = None  # pytriage: TR1
     return data, result
 """,
         """def process():
-    data = 1  # pytriage: ignore=TRI001
+    data = 1  # pytriage: TR1
+""",
+        # A comma-separated suppression list also suppresses this check's
+        # own code, wherever it falls in the list.
+        """
+def process():
+    data = {}  # pytriage: TR5,TR1
+    return data
 """,
         # An annotated assignment whose target is an attribute (e.g.
         # ``self.data: int = 5``), not a plain name, is skipped entirely —
@@ -143,6 +150,7 @@ def feed_data(
         "inline-ignore-comment",
         "all-suppressed",
         "single-suppressed",
+        "multi-code-suppression-list",
         "annotated-attribute-assignment",
         "async-model-validator-decorator",
         "multiple-assignment-targets",
@@ -525,7 +533,7 @@ def test_check_ids() -> None:
     check = MeaninglessVarsCheck()
 
     assert check.check_id == "meaningless-vars"
-    assert check.error_code == "TRI001"
+    assert check.error_code == "TR1"
 
 
 def test_prefilter_pattern() -> None:
@@ -1643,7 +1651,7 @@ def f(x: data) -> result:
 
     assert len(violations) == 2
     assert all(
-        violation.message.endswith("Use a more descriptive name. Or add '# pytriage: ignore=TRI001' to suppress.")
+        violation.message.endswith("Use a more descriptive name. Or add '# pytriage: TR1' to suppress.")
         for violation in violations
     )
     assert all(violation.fixable is False for violation in violations)

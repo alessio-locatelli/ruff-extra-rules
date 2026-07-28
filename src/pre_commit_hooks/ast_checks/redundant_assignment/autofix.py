@@ -1,4 +1,4 @@
-"""Auto-fix implementation for TRI005 redundant assignments."""
+"""Auto-fix implementation for TR5 redundant assignments."""
 
 from __future__ import annotations
 

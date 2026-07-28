@@ -1,4 +1,4 @@
-# meaningless-vars (TRI001)
+# meaningless-vars (TR1)
 
 Flags meaningless variable names like `data` and `result`.
 
@@ -16,7 +16,7 @@ Meaningless variable names reduce code clarity and maintainability. See [Peter H
 
 - Detects meaningless names in assignments, function parameters, and async functions
 - **Autofixing**: derives names from file-local semantics such as concrete annotations, imported standard APIs, producers, and consumers (`--fix`). The rename is scope-aware — it replaces only the AST `Name` nodes for that specific binding within its scope, not every textual occurrence in the file. `--fix` applies only high-confidence local renames; weaker evidence is reported as a suggestion without changing the file.
-- Inline suppression with `# pytriage: ignore=TRI001`
+- Inline suppression with `# pytriage: TR1`
 
 ## Reporting level
 
@@ -30,13 +30,13 @@ Meaningless variable names reduce code clarity and maintainability. See [Peter H
 ## Suggest mode (default)
 
 ```
-src/process.py:2: TRI001: 'data' is a meaningless variable name — 'user' is more descriptive. Or add '# pytriage: ignore=TRI001' to suppress.
+src/process.py:2: TR1: 'data' is a meaningless variable name — 'user' is more descriptive. Or add '# pytriage: TR1' to suppress.
 ```
 
 **Permissive mode**, reporting a `result` binding the conservative default left out because no replacement could be suggested for it:
 
 ```
-src/process.py:3: TRI001: Meaningless variable name 'result' found. Use a more descriptive name. Or add '# pytriage: ignore=TRI001' to suppress.
+src/process.py:3: TR1: Meaningless variable name 'result' found. Use a more descriptive name. Or add '# pytriage: TR1' to suppress.
 ```
 
 ## Fix mode
@@ -56,6 +56,6 @@ src/process.py:3: TRI001: Meaningless variable name 'result' found. Use a more d
 
 ```python
 def process():
-    data = get_user()  # pytriage: ignore=TRI001
+    data = get_user()  # pytriage: TR1
     return data
 ```

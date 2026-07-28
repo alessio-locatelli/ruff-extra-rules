@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 def test_check_id_and_error_code() -> None:
     check = RedundantAssignmentCheck()
     assert check.check_id == "redundant-assignment"
-    assert check.error_code == "TRI005"
+    assert check.error_code == "TR5"
 
 
 def test_prefilter_pattern() -> None:
@@ -62,11 +62,11 @@ def example():
     return formatted_timestamp
 """,
         """
-x = "foo"  # pytriage: ignore=TRI005
+x = "foo"  # pytriage: TR5
 func(x=x)
 """,
         """
-x = "foo"  # PYTRIAGE: IGNORE=TRI005
+x = "foo"  # PYTRIAGE: IGNORE=TR5
 func(x=x)
 """,
         """
@@ -334,7 +334,7 @@ def find_place_document(place_id):
 """,
         """
 def func(depot_data, depots):
-    depot_iso_country = depot_data.iso_country  # pytriage: ignore=TRI005
+    depot_iso_country = depot_data.iso_country  # pytriage: TR5
     return [x for x in depots if x.country == depot_iso_country]
 """,
     ],
@@ -995,7 +995,7 @@ def test_check_never_flags_variable(source: str, path: str, excluded: str) -> No
 # ---------------------------------------------------------------------------
 # check(): issue #76 calibration cases — the conservative (default) level
 # must not flag these, even though each scores low enough to have qualified
-# under TRI005's old single reporting threshold.
+# under TR5's old single reporting threshold.
 # ---------------------------------------------------------------------------
 
 
@@ -1073,7 +1073,7 @@ def test_conservative_level_calibration_cases_not_flagged(source: str, excluded:
 def test_screaming_snake_case_string_constant_still_flagged_at_permissive_level() -> None:
     # Rule 12 (see should_report_violation) is conservative-only, matching
     # Rule 11's precedent — permissive still reports every single-use
-    # string assignment TRI005 always used to, name shape included.
+    # string assignment TR5 always used to, name shape included.
     source = """
 _GREY = "rgb(201, 203, 207)"
 config = {"colors": [_GREY]}
@@ -1202,16 +1202,16 @@ def test_untracked_rebinding_not_flagged_as_redundant(source: str, excluded_name
 
 
 def test_ignore_marker_inside_string_literal_does_not_suppress_violation() -> None:
-    # A string literal that merely contains the ignore-marker text is not
-    # a real suppression comment and must not hide a violation on that
+    # A string literal that merely contains the suppression-marker text is
+    # not a real suppression comment and must not hide a violation on that
     # line. Regression: line-based ignore detection used a plain text
     # search over raw source lines, so a string literal containing '#
-    # pytriage: ignore=...' text was indistinguishable from an actual
-    # comment. Ignore detection must be tokenize-based so it only matches
-    # genuine COMMENT tokens.
+    # pytriage: TR5' text was indistinguishable from an actual comment.
+    # Ignore detection must be tokenize-based so it only matches genuine
+    # COMMENT tokens.
     source = """
 def call_it():
-    x = "foo"; note = "# pytriage: ignore=TRI005"
+    x = "foo"; note = "# pytriage: TR5"
     func(x=x)
 """
     violations = _check(source)
@@ -1330,7 +1330,7 @@ def func_scope():
 
     assert len(violations) >= 1
     violation = violations[0]
-    assert violation.error_code == "TRI005"
+    assert violation.error_code == "TR5"
     assert "x" in violation.message
 
 
@@ -1479,4 +1479,4 @@ def test_orchestrator_skips_file_with_invalid_syntax(tmp_path: Path) -> None:
     orchestrator = CheckOrchestrator(checks=[RedundantAssignmentCheck()])
     violations = orchestrator.process_files([str(filepath)])
 
-    assert violations.get(str(filepath), []) == []  # pytriage: ignore=TRI006
+    assert violations.get(str(filepath), []) == []  # pytriage: TR6

@@ -1,11 +1,11 @@
 """misplaced-comment - move trailing comments off closing-bracket-only lines.
 
-STYLE-001: a comment trailing a line that contains only closing brackets
+TR7: a comment trailing a line that contains only closing brackets
 should move to the expression line instead (inline if it fits within 88
 chars, otherwise as a preceding comment). Linter pragma comments (noqa,
 type-checker ignores, coverage pragmas, etc.) are never moved.
 
-Inline ignore: # pytriage: ignore=STYLE-001
+Inline ignore: # pytriage: TR7
 """
 
 from __future__ import annotations
@@ -36,9 +36,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger("misplaced_comment")
 
 CHECK_ID = "misplaced-comment"
-ERROR_CODE = "STYLE-001"
+ERROR_CODE = "TR7"
 
-IGNORE_PATTERN = ignore_pattern_for("STYLE-001")
+IGNORE_PATTERN = ignore_pattern_for("TR7")
 
 # Linter pragma patterns that should NEVER be moved
 LINTER_PRAGMA_PATTERNS = [
@@ -172,7 +172,7 @@ class MisplacedCommentCheck(BaseCheck):
                 message=(
                     f"Comment on line {item.comment_line} should not be on "
                     "closing bracket line. Or add "
-                    "'# pytriage: ignore=STYLE-001' to suppress."
+                    "'# pytriage: TR7' to suppress."
                 ),
                 fixable=True,
             )

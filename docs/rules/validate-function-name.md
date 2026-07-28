@@ -1,4 +1,4 @@
-# validate-function-name (TRI004)
+# validate-function-name (TR4)
 
 Detects functions where `get_` prefix is misused or inappropriate and suggests a more specific verb based on their behavior patterns.
 
@@ -55,7 +55,7 @@ Applies equally to `async def get_*` functions.
 - Detects 15+ behavioral patterns using AST analysis
 - Suggests appropriate function names based on what the function actually does
 - **Safe autofix mode**: automatically renames small, simple functions. The rename is AST-scoped — it renames the definition plus true call-site references (`self.x`/`cls.x` within the same class for methods, or `Name` references across the module for free functions), and never touches string/byte literals, comments, or identically-named symbols in unrelated scopes (e.g. a same-named method on a different class). See [ADR-0033](../adr/0033-validate-function-name-safe-autofix-criteria.md) for the exact safety criteria.
-- Inline suppression with `# pytriage: ignore=TRI004`
+- Inline suppression with `# pytriage: TR4`
 - Automatically skips:
   - `@property` decorators
   - `@override` / `@abstractmethod` decorators
@@ -72,7 +72,7 @@ Applies equally to `async def get_*` functions.
 ## Suppression
 
 ```python
-def get_user(id: int) -> User:  # pytriage: ignore=TRI004
+def get_user(id: int) -> User:  # pytriage: TR4
     """Legacy API - name cannot be changed."""
     return User.objects.get(id=id)
 ```

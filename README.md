@@ -18,15 +18,15 @@ Individual checks are toggled with `--select`/`--ignore`, and `--fix` applies wh
 - `--select=<id>,<id>` restricts the hook to **only** the listed check(s).
 - `--ignore=<id>,<id>` excludes the listed check(s) — it composes with `--select` rather than replacing it, just like `ruff check --select`/`--ignore`.
 
-| Rule                                                                 | Code      | Description                                                                                                                                                                       |
-| -------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [meaningless-vars](docs/rules/meaningless-vars.md)                   | TRI001    | Flags meaningless variable names like `data`, `result`, and `results`.                                                                                                            |
-| [excessive-blank-lines](docs/rules/excessive-blank-lines.md)         | TRI002    | Collapses multiple blank lines after a module header to a single one.                                                                                                             |
-| [redundant-super-init](docs/rules/redundant-super-init.md)           | TRI003    | Flags `**kwargs` forwarded to a parent `__init__` that accepts none.                                                                                                              |
-| [validate-function-name](docs/rules/validate-function-name.md)       | TRI004    | Flags functions where `get_*` is misused or inappropriate and suggests a more specific verb.                                                                                      |
-| [redundant-assignment](docs/rules/redundant-assignment.md)           | TRI005    | Flags (and optionally inlines) variable assignments that add no clarity.                                                                                                          |
-| [redundant-type-conversion](docs/rules/redundant-type-conversion.md) | TRI006    | Flags a builtin type conversion that `ty` considers redundant given the argument's real type, including across files. Requires [`ty`](https://github.com/astral-sh/ty) on `PATH`. |
-| [misplaced-comment](docs/rules/misplaced-comment.md)                 | STYLE-001 | Moves a trailing comment off a closing bracket onto the expression line.                                                                                                          |
+| Rule                                                                 | Code | Description                                                                                                                                                                       |
+| -------------------------------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [meaningless-vars](docs/rules/meaningless-vars.md)                   | TR1  | Flags meaningless variable names like `data`, `result`, and `results`.                                                                                                            |
+| [excessive-blank-lines](docs/rules/excessive-blank-lines.md)         | TR2  | Collapses multiple blank lines after a module header to a single one.                                                                                                             |
+| [redundant-super-init](docs/rules/redundant-super-init.md)           | TR3  | Flags `**kwargs` forwarded to a parent `__init__` that accepts none.                                                                                                              |
+| [validate-function-name](docs/rules/validate-function-name.md)       | TR4  | Flags functions where `get_*` is misused or inappropriate and suggests a more specific verb.                                                                                      |
+| [redundant-assignment](docs/rules/redundant-assignment.md)           | TR5  | Flags (and optionally inlines) variable assignments that add no clarity.                                                                                                          |
+| [redundant-type-conversion](docs/rules/redundant-type-conversion.md) | TR6  | Flags a builtin type conversion that `ty` considers redundant given the argument's real type, including across files. Requires [`ty`](https://github.com/astral-sh/ty) on `PATH`. |
+| [misplaced-comment](docs/rules/misplaced-comment.md)                 | TR7  | Moves a trailing comment off a closing bracket onto the expression line.                                                                                                          |
 
 ## Installation
 
@@ -44,7 +44,7 @@ repos:
 
 ### Inline Suppression
 
-Use `# pytriage: ignore=<code>` (e.g., `# pytriage: ignore=TRI001`).
+Use `# pytriage: <code>` (e.g., `# pytriage: TR1`), or a comma-separated list to suppress more than one check on the same line (`# pytriage: TR1,TR5`).
 
 ---
 

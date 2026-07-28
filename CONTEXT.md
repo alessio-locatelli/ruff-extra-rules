@@ -9,7 +9,7 @@ An installable unit registered in `.pre-commit-hooks.yaml` that pre-commit/prek 
 _Avoid_: linter, tool
 
 **Check**:
-A single, independently toggleable rule (e.g. `meaningless-vars`, `redundant-assignment`, `misplaced-comment`) implementing the `ASTCheck` protocol, identified by a `check_id` and an error code (`TRI00N` or `STYLE-001`). Many checks run inside one hook invocation, orchestrated by `CheckOrchestrator`.
+A single, independently toggleable rule (e.g. `meaningless-vars`, `redundant-assignment`, `misplaced-comment`) implementing the `ASTCheck` protocol, identified by a `check_id` and an error code (e.g. `TR1`). Many checks run inside one hook invocation, orchestrated by `CheckOrchestrator`.
 _Avoid_: rule, linter, hook — a check is not a hook; several checks share one hook
 
 **Violation**:
@@ -21,7 +21,7 @@ A fixed string a check declares via `get_prefilter_pattern()` so `git grep` can 
 _Avoid_: filter — the user-facing `--exclude` glob is a distinct, unrelated concept (excludes files outright; a prefilter pattern only skips _checking_, never skips reporting if matched)
 
 **Inline ignore comment**:
-A `# pytriage: ignore=TRI00N` (or `=STYLE-001`) comment suppressing one violation on the line it appears on. Detected via `tokenize`, never text/regex matching, so a string or byte literal containing the same text can't be mistaken for one.
+A `# pytriage: TR1` comment, or a comma-separated list (`# pytriage: TR1,TR5`) to suppress more than one check's violation on the same line. Detected via `tokenize`, never text/regex matching, so a string or byte literal containing the same text can't be mistaken for one.
 _Avoid_: pragma — this repo's own suppression comment is distinct from the _third-party_ linter pragmas (`noqa`, `type: ignore`, `pylint:`, etc.) that `misplaced-comment` recognizes and refuses to ever move; don't conflate the two.
 
 **Fix**:

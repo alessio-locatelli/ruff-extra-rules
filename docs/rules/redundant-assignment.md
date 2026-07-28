@@ -1,4 +1,4 @@
-# redundant-assignment (TRI005)
+# redundant-assignment (TR5)
 
 Detects and optionally auto-fixes redundant variable assignments where the variable doesn't add meaningful clarity or simplification to the code.
 
@@ -50,7 +50,7 @@ print(msg)
   - Multi-part descriptive names (`user_email_address`)
   - Type annotations
 - **Safe autofix mode**: automatically inlines simple, low-value assignments when mechanically safe — see [ADR-0032](../adr/0032-redundant-assignment-autofix-safety-criteria.md) for the exact safety criteria
-- Inline suppression with `# pytriage: ignore=TRI005`
+- Inline suppression with `# pytriage: TR5`
 - **Test-file relaxation**: a file under a `tests`/`test` directory, or named `test_*.py`/`*_test.py`, gets a higher semantic-value score for descriptive variable names — test code idiomatically uses named intermediates (`mock_response`, `expected_total`) for readability far more than production code does, so fewer of them get flagged
 - Gracefully handles:
   - Augmented assignments (`x += 1`)
@@ -100,6 +100,6 @@ func(x="foo")
 ## Suppression
 
 ```python
-result = expensive_calculation()  # pytriage: ignore=TRI005
+result = expensive_calculation()  # pytriage: TR5
 return result
 ```

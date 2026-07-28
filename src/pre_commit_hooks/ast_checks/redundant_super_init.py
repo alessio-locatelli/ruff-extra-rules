@@ -1,10 +1,10 @@
 """Check for redundant **kwargs forwarding to parent __init__ methods.
 
-TRI003: Detects when a class forwards **kwargs to a parent __init__ that
+TR3: Detects when a class forwards **kwargs to a parent __init__ that
 accepts no arguments. This is a logic error that creates misleading inheritance
 patterns.
 
-Inline ignore: # pytriage: ignore=TRI003, placed on the __init__ definition line.
+Inline ignore: # pytriage: TR3, placed on the __init__ definition line.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("redundant_super_init")
 
-IGNORE_PATTERN = ignore_pattern_for("TRI003")
+IGNORE_PATTERN = ignore_pattern_for("TR3")
 
 
 class SuperInitChecker(ast.NodeVisitor):
@@ -68,7 +68,7 @@ class SuperInitChecker(ast.NodeVisitor):
                                 (
                                     f"Redundant **kwargs forwarded to {base.id}.__init__() "
                                     "which accepts no arguments. Or add "
-                                    "'# pytriage: ignore=TRI003' to suppress."
+                                    "'# pytriage: TR3' to suppress."
                                 ),
                             )
                         )
@@ -132,7 +132,7 @@ class RedundantSuperInitCheck(BaseCheck):
 
     @property
     def error_code(self) -> str:
-        return "TRI003"
+        return "TR3"
 
     def get_prefilter_pattern(self) -> list[str] | None:
         return ["super().__init__"]

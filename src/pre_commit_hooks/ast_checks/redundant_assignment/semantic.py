@@ -1,4 +1,4 @@
-"""Semantic value analysis for variable names in TRI005."""
+"""Semantic value analysis for variable names in TR5."""
 
 from __future__ import annotations
 
@@ -639,7 +639,7 @@ def should_report_violation(
     # deliberately documenting what that call returns — e.g. `warning =
     # conn.recv()` or `ci_headers = CIMultiDict(headers)` — rather than a
     # redundant restatement of it. Doesn't apply to the permissive level,
-    # which reports the same broader set TRI005 always used to.
+    # which reports the same broader set TR5 always used to.
     if (
         level is AggressivenessLevel.CONSERVATIVE
         and isinstance(assignment.rhs_node, ast.Call)
@@ -730,7 +730,7 @@ def _is_generic_call_result_name(var_name: str, rhs_node: ast.Call) -> bool:
 # the conservative level now reports only what the old default used to
 # auto-fix, and reporting alone (no separate, softer autofix-specific
 # ceiling) decides what's eligible for --fix. The permissive ceiling (49,
-# i.e. score < 50) reproduces TRI005's old, single default reporting bar.
+# i.e. score < 50) reproduces TR5's old, single default reporting bar.
 _CONSERVATIVE_REPORT_CEILING = {
     PatternType.IMMEDIATE_SINGLE_USE: 10,
     PatternType.LITERAL_IDENTITY: 10,

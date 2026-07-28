@@ -1,4 +1,4 @@
-"""AST-level candidate detection for TRI006, before any `ty` session is involved. See ADR-0035."""
+"""AST-level candidate detection for TR6, before any `ty` session is involved. See ADR-0035."""
 
 from __future__ import annotations
 

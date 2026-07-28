@@ -1,7 +1,7 @@
 # This is a module comment
 
 
-import os  # pytriage: ignore=TRI002
+import os  # pytriage: TR2
 
 
 def example():
