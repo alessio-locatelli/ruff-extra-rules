@@ -37,7 +37,7 @@ dev = [
   "polyfactory>=3.3.0",
   "slotscheck>=0.20.1",
   "pytest-cov>=7.1.0",
-  "ty>=0.0.63",
+  "ty>=0.0.64",
 ]
 
 [tool.setuptools.packages.find]
