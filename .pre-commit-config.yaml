@@ -70,10 +70,9 @@ repos:
     hooks:
       - id: ruff-extra-rules
         exclude: ^tests/fixtures/
-        # v0.0.36 still ships the pre-rename --forbid-vars-level flag (this
-        # check is now meaningless-vars): this pin tracks a tagged release,
-        # never the working tree, so it can't take the renamed flag until a
-        # new tag bumps rev: here.
+        # rev v0.0.36 accepts --forbid-vars-level, not --meaningless-vars-level
+        # (used by the local hook above): this pin tracks a tagged release,
+        # never the working tree.
         args:
           [
             --fix,
