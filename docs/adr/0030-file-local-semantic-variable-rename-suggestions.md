@@ -2,13 +2,13 @@
 
 ## Context
 
-TRI001 must keep reporting forbidden names wherever they are bound, while useful rename suggestions require more information than a right-hand-side spelling pattern can provide. A misleading automatic rename is worse than no rename, and a hook must remain fast, deterministic, offline, and independent of repository-wide analysis.
+TRI001 must keep reporting meaningless names wherever they are bound, while useful rename suggestions require more information than a right-hand-side spelling pattern can provide. A misleading automatic rename is worse than no rename, and a hook must remain fast, deterministic, offline, and independent of repository-wide analysis.
 
 ## Decision
 
-TRI001 keeps detection and scope-aware rewriting in `forbid_vars.py`. A dedicated private module builds a file-local model from the parsed AST and returns structured rename proposals for eligible simple local assignments.
+TRI001 keeps detection and scope-aware rewriting in `meaningless_vars.py`. A dedicated private module builds a file-local model from the parsed AST and returns structured rename proposals for eligible simple local assignments.
 
-A small number of narrow exceptions cover a forbidden name bound as a _parameter_ rather than a local assignment: a test parameter declared through `@pytest.mark.parametrize` and compared for equality in the test body, and a `data` parameter of a function whose own name is a recognized transformation verb (e.g. `compress`/`decompress`). Both are always suggestion-only, never auto-fixed — a correct rewrite would have to touch the parameter's own declaration (and, for the `parametrize` case, the decorator's own argnames literal too), which is a different rewrite surface than the `ast.Name`-position rewriting the fixer performs everywhere else.
+A small number of narrow exceptions cover a meaningless name bound as a _parameter_ rather than a local assignment: a test parameter declared through `@pytest.mark.parametrize` and compared for equality in the test body, and a `data` parameter of a function whose own name is a recognized transformation verb (e.g. `compress`/`decompress`). Both are always suggestion-only, never auto-fixed — a correct rewrite would have to touch the parameter's own declaration (and, for the `parametrize` case, the decorator's own argnames literal too), which is a different rewrite surface than the `ast.Name`-position rewriting the fixer performs everywhere else.
 
 The model separates expression, type annotation, consumer, control-flow, import-resolved API, and lexical-safety evidence from name generation. It recognizes a small fixed vocabulary of standard APIs and derives ordinary producer, collection, predicate, and annotation names without network access or project configuration.
 

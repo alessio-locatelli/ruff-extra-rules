@@ -390,11 +390,11 @@ def func():
 def test_zero_arg_call_immediate_single_use_is_fixable(tmp_path: Path) -> None:
     # Regression test (issue #22): IMMEDIATE_SINGLE_USE never allowed a
     # Call RHS, even trivial zero-arg ones, so idiomatic test code like
-    # `check = ForbidVarsCheck(); check.check(...)` was never auto-fixed.
+    # `check = MeaninglessVarsCheck(); check.check(...)` was never auto-fixed.
     # A zero-arg call has no operands whose evaluation order inlining
     # could disturb, so it's safe to allow as a narrow carve-out.
     source = """def test_something():
-    check = ForbidVarsCheck()
+    check = MeaninglessVarsCheck()
     violations = check.check(Path("test.py"), tree, source)
 """
     filepath = tmp_path / "source.py"
@@ -412,7 +412,7 @@ def test_zero_arg_call_immediate_single_use_is_fixable(tmp_path: Path) -> None:
 
     fixed_content = filepath.read_text()
     assert "check = " not in fixed_content
-    assert "ForbidVarsCheck().check(" in fixed_content
+    assert "MeaninglessVarsCheck().check(" in fixed_content
 
 
 def test_augmented_assignment_use_not_flagged_for_zero_arg_call(

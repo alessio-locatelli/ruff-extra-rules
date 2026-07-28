@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 
 from pre_commit_hooks.ast_checks._base import is_fix_failed
-from pre_commit_hooks.ast_checks.forbid_vars import (
-    ForbidVarsCheck,
-    ForbidVarsLevel,
+from pre_commit_hooks.ast_checks.meaningless_vars import (
+    MeaninglessVarsCheck,
+    MeaninglessVarsLevel,
     _collect_replacements,
     _collect_scope_replacements,
     _function_name_describes_parameter,
@@ -107,7 +107,7 @@ def process():
 """,
         # Multiple assignment targets aren't supported, so the assignment
         # itself isn't flagged (though get_values() itself might be, if
-        # it existed as a forbidden-named call).
+        # it existed as a meaningless-named call).
         """def process():
     data, result = get_values()  # Multiple targets - not supported
     return data, result
@@ -152,7 +152,10 @@ def feed_data(
     ],
 )
 def test_check_reports_no_violations(source: str) -> None:
-    assert ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source) == []
+    assert (
+        MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source)
+        == []
+    )
 
 
 @pytest.mark.parametrize(
@@ -349,7 +352,7 @@ def handle(self, data: Union[bytes, bytearray, memoryview]) -> Tuple[bool, bytes
         "function-annotated-assignment-with-value",
         "result-variable",
         "result-variable-in-class-method",
-        "forbidden-derived-name",
+        "meaningless-derived-name",
         "producer-suggestion-only",
         "http-json-payload-suggestion-only",
         "multiline-producer-suggestion-only",
@@ -358,7 +361,9 @@ def handle(self, data: Union[bytes, bytearray, memoryview]) -> Tuple[bool, bytes
     ],
 )
 def test_check_reports_single_violation(source: str, expected: dict[str, Any]) -> None:
-    violations = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source)
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert len(violations) == 1
     violation = violations[0]
@@ -399,11 +404,13 @@ result = None  # Should be flagged
     ids=["module-level-variables", "nested-function-scope-flagged-separately"],
 )
 def test_check_reports_violation_count(source: str, count: int) -> None:
-    violations = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source)
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
     assert len(violations) == count
 
 
-def test_multiple_forbidden_names() -> None:
+def test_multiple_meaningless_names() -> None:
     source = """
 def process():
     data = {}
@@ -412,7 +419,9 @@ def process():
     return data, result, results
 """
 
-    violations = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source)
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert len(violations) == 3
     names = {v.message.split("'")[1] for v in violations}
@@ -426,7 +435,9 @@ def test_multiple_violations_same_scope() -> None:
     return result
 """
 
-    violations = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source)
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert len(violations) == 2
     names = {v.fix_data["name"] for v in violations if v.fix_data}
@@ -441,7 +452,9 @@ def test_reassignment_suppresses_suggestions() -> None:
     return data
 """
 
-    violations = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source)
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert len(violations) == 2
     assert all(not violation.fixable for violation in violations)
@@ -450,7 +463,7 @@ def test_reassignment_suppresses_suggestions() -> None:
 
 def test_model_validator_decorator_skips_arg_check() -> None:
     # A function decorated with an irrelevant decorator is still checked
-    # for forbidden arg names, while one decorated with
+    # for meaningless arg names, while one decorated with
     # ``@model_validator`` (in either bare or called form) is exempt.
     source = """class Model:
     @staticmethod
@@ -466,7 +479,9 @@ def test_model_validator_decorator_skips_arg_check() -> None:
         return data
 """
 
-    violations = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source)
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     flagged_functions = {v.fix_data["name"] for v in violations if v.fix_data}
     assert flagged_functions == {"data"}
@@ -485,7 +500,9 @@ def test_name_collision_suppresses_suggestion() -> None:
         filepath = Path(tmpdir) / "test.py"
         filepath.write_text(source)
 
-        violations = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(filepath, ast.parse(source), source)
+        violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+            filepath, ast.parse(source), source
+        )
 
         assert len(violations) == 1
         assert not violations[0].fixable
@@ -497,22 +514,24 @@ def test_tokenize_error_handling() -> None:
     # Deliberately malformed so tokenizing may raise partway through.
     source = "def func():\n    data = 1  # missing closing quote"
 
-    violations = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source)
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert len(violations) >= 1
 
 
 def test_check_ids() -> None:
-    check = ForbidVarsCheck()
+    check = MeaninglessVarsCheck()
 
-    assert check.check_id == "forbid-vars"
+    assert check.check_id == "meaningless-vars"
     assert check.error_code == "TRI001"
 
 
 def test_prefilter_pattern() -> None:
-    patterns = ForbidVarsCheck().get_prefilter_pattern()
+    patterns = MeaninglessVarsCheck().get_prefilter_pattern()
 
-    # Returns ALL forbidden names so files with only 'result =' aren't
+    # Returns ALL meaningless names so files with only 'result =' aren't
     # silently skipped during pre-filtering.
     assert patterns is not None
     assert "data" in patterns
@@ -548,7 +567,7 @@ def fetch_users():
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
 
         assert len(violations) == 1
@@ -574,7 +593,7 @@ def test_autofix_no_fixable_violations() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         non_fixable = [v for v in violations if not v.fixable]
 
@@ -602,7 +621,7 @@ def test_autofix_follows_closure_reference_into_nested_function() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -610,10 +629,10 @@ def test_autofix_follows_closure_reference_into_nested_function() -> None:
 
     assert "data" not in fixed_content
     module_namespace: dict[str, Any] = {}
-    # "<forbid_vars_fixture>", not a real path: a filename resolving to a
+    # "<meaningless_vars_fixture>", not a real path: a filename resolving to a
     # path on disk (e.g. "test.py") makes coverage.py try to trace it as a
     # source file and fail the run.
-    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
     class FakeResponse:
         def json(self) -> dict[str, str]:
@@ -632,7 +651,7 @@ def test_autofix_follows_closure_reference_into_lambda() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -652,7 +671,7 @@ def test_autofix_follows_closure_reference_into_comprehension() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -681,7 +700,7 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is False
 
@@ -814,7 +833,7 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1036,7 +1055,7 @@ def test_autofix_does_not_rename_shadowed_reference_in_nested_scope(source: str,
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1059,7 +1078,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
     # compile() check to reject that after the fact, check() itself refuses
     # to suggest a fix at all when it detects `nonlocal`/`global` mentions
     # of the name anywhere in scope (see
-    # ForbiddenNameVisitor._referenced_via_global_or_nonlocal) — so the
+    # MeaninglessNameVisitor._referenced_via_global_or_nonlocal) — so the
     # violation is honestly reported as unfixable, not offered and then
     # rejected.
     source = """def outer(response):
@@ -1077,7 +1096,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert violations
         assert all(not v.fixable for v in violations)
@@ -1215,7 +1234,7 @@ def test_autofix_never_offered_when_same_scope_rebinds_via_non_name_construct(so
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert violations
         assert all(not v.fixable for v in violations)
@@ -1259,7 +1278,7 @@ def reader():
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert violations
         assert all(not v.fixable for v in violations)
@@ -1292,7 +1311,7 @@ def test_autofix_avoids_cross_scope_suggestion_collision() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is False
 
@@ -1320,7 +1339,7 @@ def test_autofix_avoids_suggestion_colliding_with_existing_nested_name() -> None
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is False
 
@@ -1347,7 +1366,7 @@ def test_autofix_avoids_suggestion_colliding_with_nested_parameter_name() -> Non
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is False
 
@@ -1379,7 +1398,7 @@ def outer(response):
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is False
 
@@ -1409,7 +1428,7 @@ def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_sco
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1417,7 +1436,7 @@ def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_sco
 
     assert "data" not in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
     class FakeResponse:
         def json(self) -> str:
@@ -1451,7 +1470,7 @@ def test_autofix_follows_closure_through_scope_that_itself_contains_a_shadowing_
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1459,7 +1478,7 @@ def test_autofix_follows_closure_through_scope_that_itself_contains_a_shadowing_
 
     assert "def deeper():\n            data = " in fixed_content  # deeper's own local, untouched
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
     class FakeResponse:
         def json(self) -> str:
@@ -1490,7 +1509,7 @@ def test_autofix_avoids_suggestion_collision_when_nested_closure_precedes_captur
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is False
 
@@ -1525,7 +1544,7 @@ def outer(response):
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1533,7 +1552,7 @@ def outer(response):
 
     assert "def inner(x: data):" in fixed_content  # annotation untouched
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
     class FakeResponse:
         def json(self) -> str:
@@ -1563,7 +1582,7 @@ def test_autofix_still_follows_annotation_closure_without_deferred_annotations()
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1580,7 +1599,7 @@ def test_autofix_still_follows_annotation_closure_without_deferred_annotations()
     # (non-deferred) annotation path the deferred-annotations exclusion
     # above must leave alone.
     exec(  # noqa: S102
-        compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec", dont_inherit=True), module_namespace
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec", dont_inherit=True), module_namespace
     )
 
     class FakeResponse:
@@ -1618,7 +1637,9 @@ result = response.json()
 def f(x: data) -> result:
     return x
 """
-    violations = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source)
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert len(violations) == 2
     assert all(
@@ -1655,7 +1676,7 @@ def test_autofix_follows_closure_into_type_parameter_bound_and_default() -> None
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1664,7 +1685,7 @@ def test_autofix_follows_closure_into_type_parameter_bound_and_default() -> None
     assert "data" not in fixed_content
     assert "def inner[**Q, T: payload = payload, *Ts = payload, **P = payload]():" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
     class FakeResponse:
         def json(self) -> str:
@@ -1700,7 +1721,7 @@ def test_autofix_does_not_rename_type_parameter_bound_referencing_a_peer_type_pa
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1708,7 +1729,7 @@ def test_autofix_does_not_rename_type_parameter_bound_referencing_a_peer_type_pa
 
     assert "def inner[data, T: data]():" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
     class FakeResponse:
         def json(self) -> str:
@@ -1744,7 +1765,7 @@ def test_autofix_does_not_reuse_a_nested_functions_own_mapping_for_its_default()
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1754,7 +1775,7 @@ def test_autofix_does_not_reuse_a_nested_functions_own_mapping_for_its_default()
     assert "def inner(x=payload):" in fixed_content
     assert "inner_payload: InnerPayload = response.json()" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
     class FakeResponse:
         def json(self) -> str:
@@ -1785,7 +1806,7 @@ def test_autofix_does_not_rename_a_nested_functions_own_type_parameter_bound_via
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is False
 
@@ -1815,7 +1836,7 @@ def test_autofix_does_not_rename_type_alias_bound_referencing_a_peer_type_parame
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1824,7 +1845,7 @@ def test_autofix_does_not_rename_type_alias_bound_referencing_a_peer_type_parame
     assert "type Alias[data, T: data] = T" in fixed_content
     assert "payload: Payload = response.json()" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
     class FakeResponse:
         def json(self) -> str:
@@ -1857,7 +1878,7 @@ def test_autofix_follows_closure_into_type_alias_value() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1866,7 +1887,7 @@ def test_autofix_follows_closure_into_type_alias_value() -> None:
     assert "data" not in fixed_content
     assert "type Alias[T: int] = tuple[T, payload]" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
     class FakeResponse:
         def json(self) -> str:
@@ -1905,7 +1926,7 @@ def test_autofix_follows_closure_into_generic_functions_own_annotation_despite_b
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1919,7 +1940,7 @@ def test_autofix_follows_closure_into_generic_functions_own_annotation_despite_b
     # otherwise leak into the compiled fixture regardless of what
     # fixed_content itself contains.
     exec(  # noqa: S102
-        compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec", dont_inherit=True), module_namespace
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec", dont_inherit=True), module_namespace
     )
 
     class FakeResponse:
@@ -1950,7 +1971,7 @@ def test_autofix_does_not_rename_generic_functions_own_annotation_referencing_a_
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -1960,7 +1981,7 @@ def test_autofix_does_not_rename_generic_functions_own_annotation_referencing_a_
     module_namespace: dict[str, Any] = {}
     # dont_inherit=True: see test_autofix_still_follows_annotation_closure_without_deferred_annotations.
     exec(  # noqa: S102
-        compile(ast.parse(fixed_content), "<forbid_vars_fixture>", "exec", dont_inherit=True), module_namespace
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec", dont_inherit=True), module_namespace
     )
 
     class FakeResponse:
@@ -1994,7 +2015,7 @@ def outer(response):
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -2023,7 +2044,7 @@ def test_scope_names_ignore_unnamed_except_and_match_captures() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert check.fix(filepath, violations, source, tree) is True
 
@@ -2048,7 +2069,7 @@ def fetch_users():
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         check.fix(filepath, violations, source, tree)
 
@@ -2078,7 +2099,7 @@ def test_autofix_avoids_walrus_target_collision_in_comprehension() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         check.fix(filepath, violations, source, tree)
 
@@ -2103,7 +2124,7 @@ def func2():
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert len(violations) == 2
 
@@ -2141,7 +2162,7 @@ def test_repeated_binding_leaves_the_file_unchanged() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert len(violations) == 2
 
@@ -2154,7 +2175,7 @@ def test_repeated_binding_leaves_the_file_unchanged() -> None:
 
 def test_autofix_replaces_name_on_line_with_non_ascii_text() -> None:
     # Regression: ast.col_offset is a UTF-8 byte offset, not a character
-    # offset. Non-ASCII text earlier on the same line as the forbidden
+    # offset. Non-ASCII text earlier on the same line as the meaningless
     # name must not throw off the position used to locate and replace it.
     source = """import requests
 
@@ -2168,7 +2189,7 @@ def process():
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
         assert len(violations) == 1
 
@@ -2190,7 +2211,9 @@ def test_check_reports_character_offset_not_byte_offset_before_multibyte_text() 
     # characters but 7 UTF-8 bytes ('é' is 2 bytes), so a byte-offset
     # column would over-count "data"'s own position by one.
     source = "café; data = requests.get(url)\n"
-    violations = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("module.py"), ast.parse(source), source)
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        Path("module.py"), ast.parse(source), source
+    )
 
     assert len(violations) == 1
     assert violations[0].col == 6
@@ -2213,7 +2236,7 @@ def other():
     filepath = tmp_path / "missing_dir" / "test.py"
 
     tree = ast.parse(source)
-    check = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
+    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
     violations = check.check(filepath, tree, source)
     # "result = 42" has no autofix pattern match, so it's non-fixable —
     # included specifically so the marking loop below has both a fixable
@@ -2244,8 +2267,8 @@ def test_default_level_is_conservative() -> None:
 """
     tree = ast.parse(source)
 
-    assert ForbidVarsCheck().check(Path("test.py"), tree, source) == ForbidVarsCheck(
-        level=ForbidVarsLevel.CONSERVATIVE
+    assert MeaninglessVarsCheck().check(Path("test.py"), tree, source) == MeaninglessVarsCheck(
+        level=MeaninglessVarsLevel.CONSERVATIVE
     ).check(Path("test.py"), tree, source)
 
 
@@ -2274,8 +2297,8 @@ def fetch_users():
 def test_conservative_level_gates_on_suggestion_presence(source: str, conservative_count: int) -> None:
     tree = ast.parse(source)
 
-    conservative = ForbidVarsCheck().check(Path("test.py"), tree, source)
-    permissive = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("test.py"), tree, source)
+    conservative = MeaninglessVarsCheck().check(Path("test.py"), tree, source)
+    permissive = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(Path("test.py"), tree, source)
 
     assert len(conservative) == conservative_count
     assert len(permissive) == 1

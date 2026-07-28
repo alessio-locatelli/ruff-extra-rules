@@ -289,18 +289,18 @@ class _ClassVisitor(ast.NodeVisitor):
 
 def plan_suggestions(
     tree: ast.Module,
-    forbidden_names: set[str],
+    meaningless_names: set[str],
     ignored_lines: set[int],
 ) -> dict[TargetKey, RenameProposal]:
     index = _Index(tree)
     proposals = [
         proposal
         for scope in _iter_scopes(index.root)
-        for proposal in _scope_proposals(scope, forbidden_names, ignored_lines)
+        for proposal in _scope_proposals(scope, meaningless_names, ignored_lines)
     ]
-    plan = _remove_collisions(proposals, forbidden_names)
-    plan.update(_parametrize_result_proposals(index, forbidden_names, ignored_lines))
-    plan.update(_verb_parameter_proposals(index, forbidden_names, ignored_lines))
+    plan = _remove_collisions(proposals, meaningless_names)
+    plan.update(_parametrize_result_proposals(index, meaningless_names, ignored_lines))
+    plan.update(_verb_parameter_proposals(index, meaningless_names, ignored_lines))
     return plan
 
 
@@ -312,7 +312,7 @@ class _PlannedProposal:
 
 def _scope_proposals(
     scope: ScopeInfo,
-    forbidden_names: set[str],
+    meaningless_names: set[str],
     ignored_lines: set[int],
 ) -> Iterable[_PlannedProposal]:
     if isinstance(scope.node, ast.Module):
@@ -320,12 +320,12 @@ def _scope_proposals(
     for assignment in scope.candidates:
         if assignment.target.lineno in ignored_lines or not _eligible(assignment):
             continue
-        proposal = _proposal_for(assignment, forbidden_names)
+        proposal = _proposal_for(assignment, meaningless_names)
         if proposal is not None:
             yield _PlannedProposal(assignment, proposal)
 
 
-def _proposal_for(assignment: Assignment, forbidden_names: set[str]) -> RenameProposal | None:
+def _proposal_for(assignment: Assignment, meaningless_names: set[str]) -> RenameProposal | None:
     candidates: dict[str, set[str]] = defaultdict(set)
     constraints = _annotation_constraints(assignment.annotation)
     annotation_name = _annotation_name(assignment.annotation)
@@ -347,7 +347,7 @@ def _proposal_for(assignment: Assignment, forbidden_names: set[str]) -> RenamePr
         return None
 
     name, evidence = next(iter(candidates.items()))
-    if not _is_valid_name(name, forbidden_names):
+    if not _is_valid_name(name, meaningless_names):
         return None
     if name in _reachable_names(assignment.scope):
         return None
@@ -551,7 +551,7 @@ def _declared_in_descendant(scope: ScopeInfo, name: str) -> bool:
 
 def _remove_collisions(
     planned: list[_PlannedProposal],
-    forbidden_names: set[str],
+    meaningless_names: set[str],
 ) -> dict[TargetKey, RenameProposal]:
     rejected: set[int] = set()
     proposals_by_scope: dict[int, list[int]] = defaultdict(list)
@@ -590,16 +590,16 @@ def _remove_collisions(
     return {
         _target_key(planned_proposal.assignment.target): planned_proposal.proposal
         for index, planned_proposal in enumerate(planned)
-        if index not in rejected and _is_valid_name(planned_proposal.proposal.name, forbidden_names)
+        if index not in rejected and _is_valid_name(planned_proposal.proposal.name, meaningless_names)
     }
 
 
 def _parametrize_result_proposals(
     index: _Index,
-    forbidden_names: set[str],
+    meaningless_names: set[str],
     ignored_lines: set[int],
 ) -> Iterable[tuple[TargetKey, RenameProposal]]:
-    if "result" not in forbidden_names:
+    if "result" not in meaningless_names:
         return
     for scope in _iter_scopes(index.root):
         node = scope.node
@@ -669,10 +669,10 @@ _VERB_PARAMETER_NAMES = {"compress": "uncompressed", "decompress": "compressed"}
 
 def _verb_parameter_proposals(
     index: _Index,
-    forbidden_names: set[str],
+    meaningless_names: set[str],
     ignored_lines: set[int],
 ) -> Iterable[tuple[TargetKey, RenameProposal]]:
-    if "data" not in forbidden_names:
+    if "data" not in meaningless_names:
         return
     for scope in _iter_scopes(index.root):
         node = scope.node
@@ -954,11 +954,11 @@ def _is_public_attribute(name: str) -> bool:
     return bool(_SNAKE_CASE.fullmatch(name)) and not name.startswith("_") and not name.isupper()
 
 
-def _is_valid_name(name: str, forbidden_names: set[str]) -> bool:
+def _is_valid_name(name: str, meaningless_names: set[str]) -> bool:
     return (
         bool(_SNAKE_CASE.fullmatch(name))
         and not keyword.iskeyword(name)
-        and name not in forbidden_names
+        and name not in meaningless_names
         and name not in _BUILTIN_NAMES
     )
 

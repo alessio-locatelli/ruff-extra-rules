@@ -1,4 +1,4 @@
-"""Test fixture: Python code with forbidden names suppressed by ignore comments."""
+"""Test fixture: Python code with meaningless names suppressed by ignore comments."""
 
 
 def legacy_code():

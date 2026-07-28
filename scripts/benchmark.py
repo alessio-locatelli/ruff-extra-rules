@@ -30,11 +30,11 @@ CHECKS: dict[str, list[str]] = {
         "-m",
         "pre_commit_hooks.ast_checks",
     ],
-    "forbid-vars": [
+    "meaningless-vars": [
         "python",
         "-m",
         "pre_commit_hooks.ast_checks",
-        "--select=forbid-vars",
+        "--select=meaningless-vars",
     ],
     "excessive-blank-lines": [
         "python",

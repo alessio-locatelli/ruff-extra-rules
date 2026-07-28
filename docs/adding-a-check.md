@@ -9,7 +9,7 @@ Checks live under `src/pre_commit_hooks/ast_checks/` and plug into the grouped `
 - Error code: `TRI00N` (next unused number), or `STYLE-00N` for a purely stylistic, always-safe-to-autofix check like `misplaced-comment`. `test_all_checks_have_unique_check_ids_and_error_codes` (`tests/test_orchestrator.py`) fails loudly if a new check's id or code collides with an existing one — see `docs/adr/0021-behavioral-contract-audit-rule-isolation-python-compat.md`.
 - Violation message format and whether the check needs an autofix mode.
 
-For the general prefilter-then-parse pipeline shape, see AGENTS.md's "Suggested Check Architecture". Concretely for this repo: almost nothing qualifies for a grep-only check, because every existing check needs to distinguish syntax context that only an AST gives you — e.g. `forbid-vars` must tell `data = 1` (violation) apart from `obj.data = 1` (attribute, fine) and `"data = 1"` (inside a string, fine), and must catch `def foo(data):` (a parameter, not an assignment) that grep would miss entirely. Use `get_prefilter_pattern()` for a cheap `git grep` pass to skip files that can't possibly match, then do the real detection with `ast`.
+For the general prefilter-then-parse pipeline shape, see AGENTS.md's "Suggested Check Architecture". Concretely for this repo: almost nothing qualifies for a grep-only check, because every existing check needs to distinguish syntax context that only an AST gives you — e.g. `meaningless-vars` must tell `data = 1` (violation) apart from `obj.data = 1` (attribute, fine) and `"data = 1"` (inside a string, fine), and must catch `def foo(data):` (a parameter, not an assignment) that grep would miss entirely. Use `get_prefilter_pattern()` for a cheap `git grep` pass to skip files that can't possibly match, then do the real detection with `ast`.
 
 ## 2. Implement
 
@@ -18,7 +18,7 @@ Every check implements the `ASTCheck` protocol (`src/pre_commit_hooks/ast_checks
 ```python
 class ASTCheck(Protocol):
     @property
-    def check_id(self) -> str: ...  # e.g. "forbid-vars"
+    def check_id(self) -> str: ...  # e.g. "meaningless-vars"
 
     @property
     def error_code(self) -> str: ...  # e.g. "TRI001"
@@ -54,7 +54,7 @@ Create `src/pre_commit_hooks/ast_checks/your_check.py` (or a package with `__ini
 - Support inline suppression: `# pytriage: ignore=TRI00N`.
 - If the check is experimental or prone to false positives, keep it out of the default-enabled set via `args: [--ignore=your-check-id]` in `.pre-commit-hooks.yaml`.
 - Write fixed content via `atomic_write_text()` (`_base.py`), never a direct `open()`/`Path.write_text()` — it validates the content parses as Python before committing, refusing (via `FixValidationError`) rather than ever writing broken syntax to disk. If your `fix()` writes once per call (most checks), let `FixValidationError` propagate uncaught — `CheckOrchestrator._apply_fixes` attributes the rejection to the check's violations for you. If it writes more than once per call, looping over violations individually (like `validate_function_name`), catch `FixValidationError` around each write and call `mark_fix_rejected()` on that specific violation so a later write in the same call still gets attempted. See `docs/adr/0010-fix-validation-before-write.md`.
-- Catch `OSError` around your own `atomic_write_text()` call (missing parent directory, permission denied, disk full) and return `False` — don't let it propagate. `ASTCheck.fix()`'s contract is "`True` if fixes were applied, `False` otherwise," not "or raises"; every shipped check with autofix follows this (see `forbid_vars.fix()`, `excessive_blank_lines.fix()`, or `validate_function_name/autofix.apply_fix()` for the pattern). `CheckOrchestrator._apply_fixes`'s own outer `except Exception` will mask a missed case when running through the full pipeline, but calling your check's `fix()` directly (as unit tests do) will raise instead of returning `False`. See `docs/adr/0011-behavioral-contract-audit-fix-engine.md`.
+- Catch `OSError` around your own `atomic_write_text()` call (missing parent directory, permission denied, disk full) and return `False` — don't let it propagate. `ASTCheck.fix()`'s contract is "`True` if fixes were applied, `False` otherwise," not "or raises"; every shipped check with autofix follows this (see `meaningless_vars.fix()`, `excessive_blank_lines.fix()`, or `validate_function_name/autofix.apply_fix()` for the pattern). `CheckOrchestrator._apply_fixes`'s own outer `except Exception` will mask a missed case when running through the full pipeline, but calling your check's `fix()` directly (as unit tests do) will raise instead of returning `False`. See `docs/adr/0011-behavioral-contract-audit-fix-engine.md`.
 - Any other exception your `fix()` raises (a genuine bug, not `FixValidationError` and not a caught `OSError`) is caught by `CheckOrchestrator._apply_fixes` and reported to the user as `[FIX ERRORED]`, distinct from `[FIX REJECTED]` — you don't need to do anything extra for this, just don't swallow exceptions yourself in a way that would hide them as a plain unfixed violation. See `docs/adr/0012-behavioral-contract-audit-internal-errors-exit-codes.md`.
 
 ## 3. Write tests
@@ -70,7 +70,7 @@ For larger example files, add fixtures under `tests/fixtures/your_check/`, follo
 
 ## 4. Document the check
 
-Add `docs/rules/your-check.md` (why it exists, a short example, suppression syntax — follow the format of an existing page like `docs/rules/forbid-vars.md`), then add a row for it to the table under README.md's "Available Checks".
+Add `docs/rules/your-check.md` (why it exists, a short example, suppression syntax — follow the format of an existing page like `docs/rules/meaningless-vars.md`), then add a row for it to the table under README.md's "Available Checks".
 
 ## 5. Validate
 

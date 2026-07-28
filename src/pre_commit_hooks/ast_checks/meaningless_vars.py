@@ -1,4 +1,4 @@
-"""Check for forbidden meaningless variable names like 'data', 'result', and 'results'.
+"""Check for meaningless variable names like 'data', 'result', and 'results'.
 
 TRI001: Detects and suggests replacements for meaningless variable names that
 reduce code maintainability.
@@ -23,7 +23,7 @@ from ._base import (
     mark_fix_failed,
     split_lines_like_ast,
 )
-from ._forbid_vars_suggestions import Confidence, plan_suggestions
+from ._meaningless_vars_suggestions import Confidence, plan_suggestions
 from ._scope import iter_within_scope_from
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
 
-logger = logging.getLogger("forbid_vars")
+logger = logging.getLogger("meaningless_vars")
 
 # Format: # pytriage: ignore=TRI001
 IGNORE_PATTERN = ignore_pattern_for("TRI001")
@@ -40,8 +40,8 @@ type VariableName = str
 type _ComprehensionNode = ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
 
 
-class ForbidVarsFixData(TypedDict):
-    """Constructed by ForbiddenNameVisitor._check_name(), read back by fix()
+class MeaninglessVarsFixData(TypedDict):
+    """Constructed by MeaninglessNameVisitor._check_name(), read back by fix()
     via _apply_fixes(). Must stay JSON-serializable — no AST node — since
     fix() re-resolves the enclosing scope from the fresh tree it's given
     instead (see _find_enclosing_function).
@@ -55,11 +55,11 @@ class ForbidVarsFixData(TypedDict):
     auto_fixable: bool
 
 
-DEFAULT_FORBIDDEN_NAMES = {"data", "result", "results"}
+DEFAULT_MEANINGLESS_NAMES = {"data", "result", "results"}
 
 
-class ForbidVarsLevel(Enum):
-    """See ForbidVarsCheck.check() and docs/adr/0031-forbid-vars-conservative-reporting-default.md."""
+class MeaninglessVarsLevel(Enum):
+    """See MeaninglessVarsCheck.check() and docs/adr/0031-meaningless-vars-conservative-reporting-default.md."""
 
     CONSERVATIVE = auto()
     PERMISSIVE = auto()
@@ -70,17 +70,17 @@ def _function_name_describes_parameter(function_name: str, parameter_name: Varia
     return function_name.endswith(suffix) and len(function_name) > len(suffix)
 
 
-class ForbiddenNameVisitor(ast.NodeVisitor):
-    """Detects forbidden variable names in every context where a variable is defined."""
+class MeaninglessNameVisitor(ast.NodeVisitor):
+    """Detects meaningless variable names in every context where a variable is defined."""
 
     def __init__(
         self,
-        forbidden_names: set[VariableName],
+        meaningless_names: set[VariableName],
         source: str,
     ) -> None:
-        self.forbidden_names = forbidden_names
+        self.meaningless_names = meaningless_names
         self._ast_lines = split_lines_like_ast(source)
-        self.violations: list[ForbidVarsFixData] = []
+        self.violations: list[MeaninglessVarsFixData] = []
 
     def _check_name(
         self,
@@ -88,12 +88,12 @@ class ForbiddenNameVisitor(ast.NodeVisitor):
         lineno: int,
         col_offset: int,
     ) -> None:
-        if name in self.forbidden_names:
+        if name in self.meaningless_names:
             # fix_data (built from this dict) must stay serializable, so it
             # can't carry an AST node — fix() re-resolves the enclosing
             # scope from the fresh tree it's given instead (see
             # _find_enclosing_function).
-            violation: ForbidVarsFixData = {
+            violation: MeaninglessVarsFixData = {
                 "name": name,
                 "line": lineno,
                 # col_offset is a UTF-8 byte offset (from ast.col_offset);
@@ -216,7 +216,7 @@ def _binds_name_in_nested_scope(scope_node: ast.AST, name: VariableName) -> bool
     the same conservative bail-out `validate_function_name.autofix`'s
     `_is_rebound_in_scope` already uses for an analogous ambiguity — and
     it's not just conservative but necessary: unlike `global`/`nonlocal`
-    (which `ForbiddenNameVisitor._referenced_via_global_or_nonlocal`
+    (which `MeaninglessNameVisitor._referenced_via_global_or_nonlocal`
     already refuses to suggest a fix for at all, at check() time, precisely
     because a rename can't safely follow into either), `def f(): except E
     as data: return data` renamed to `return payload` is *syntactically
@@ -591,7 +591,7 @@ def _collect_replacements(
     A class body is never recursed into: `self.x`/`cls.x` access is a
     distinct `ast.Attribute` node, not `ast.Name`, so a bare class-body
     reference to an enclosing scope's variable is a separate, rarer pattern
-    this function doesn't attempt — consistent with `ForbiddenNameVisitor`
+    this function doesn't attempt — consistent with `MeaninglessNameVisitor`
     already excluding class-level attribute assignments from detection
     entirely (see its `visit_ClassDef`).
 
@@ -728,7 +728,7 @@ def _find_enclosing_function(tree: ast.Module, line: int) -> ast.FunctionDef | a
 
 def _apply_fixes(
     filepath: Path,
-    violations: list[ForbidVarsFixData],
+    violations: list[MeaninglessVarsFixData],
     source: str,
     tree: ast.Module,
     encoding: str = "utf-8",
@@ -740,9 +740,9 @@ def _apply_fixes(
     has_future_annotations = _has_future_annotations_import(tree)
 
     # Step 1: Group violations by their enclosing scope. The caller
-    # (ForbidVarsCheck.fix()) already filters to violations with a
+    # (MeaninglessVarsCheck.fix()) already filters to violations with a
     # suggestion and only calls here with a non-empty list.
-    violations_by_scope: dict[int | None, list[ForbidVarsFixData]] = {}
+    violations_by_scope: dict[int | None, list[MeaninglessVarsFixData]] = {}
     scope_nodes: dict[int | None, ast.AST] = {}
     for v in violations:
         scope_node = _find_enclosing_function(tree, v["line"])
@@ -794,35 +794,35 @@ def _apply_fixes(
     atomic_write_text(filepath, "".join(lines), encoding)
 
 
-class ForbidVarsCheck(BaseCheck):
-    __slots__ = ("_level", "forbidden_names")
+class MeaninglessVarsCheck(BaseCheck):
+    __slots__ = ("_level", "meaningless_names")
 
-    def __init__(self, level: ForbidVarsLevel = ForbidVarsLevel.CONSERVATIVE) -> None:
-        self.forbidden_names = DEFAULT_FORBIDDEN_NAMES
+    def __init__(self, level: MeaninglessVarsLevel = MeaninglessVarsLevel.CONSERVATIVE) -> None:
+        self.meaningless_names = DEFAULT_MEANINGLESS_NAMES
         self._level = level
 
     @property
     def check_id(self) -> str:
-        return "forbid-vars"
+        return "meaningless-vars"
 
     @property
     def error_code(self) -> str:
         return "TRI001"
 
     def get_prefilter_pattern(self) -> list[str] | None:
-        return sorted(self.forbidden_names)
+        return sorted(self.meaningless_names)
 
     @classmethod
     def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
         parser.add_argument(
-            "--forbid-vars-level",
+            "--meaningless-vars-level",
             choices=["conservative", "permissive"],
             default="conservative",
             help=(
-                "Whether forbid-vars (TRI001) reports a forbidden name "
+                "Whether meaningless-vars (TRI001) reports a meaningless name "
                 "that has no suggested replacement. 'conservative' "
                 "(default) reports a name only when a rename can be "
-                "suggested; 'permissive' reports every forbidden name "
+                "suggested; 'permissive' reports every meaningless name "
                 "regardless. --fix only ever applies a high-confidence "
                 "suggestion at either level."
             ),
@@ -830,16 +830,16 @@ class ForbidVarsCheck(BaseCheck):
 
     @classmethod
     def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
-        return {"level": ForbidVarsLevel[args.forbid_vars_level.upper()]}
+        return {"level": MeaninglessVarsLevel[args.meaningless_vars_level.upper()]}
 
     def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
-        visitor = ForbiddenNameVisitor(self.forbidden_names, source)
+        visitor = MeaninglessNameVisitor(self.meaningless_names, source)
         visitor.visit(tree)
 
         if visitor.violations:
             ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
             raw_violations = [v for v in visitor.violations if v["line"] not in ignored_lines]
-            suggestions = plan_suggestions(tree, self.forbidden_names, ignored_lines)
+            suggestions = plan_suggestions(tree, self.meaningless_names, ignored_lines)
         else:
             raw_violations = []
             suggestions = {}
@@ -850,12 +850,12 @@ class ForbidVarsCheck(BaseCheck):
             if proposal is not None:
                 v["suggestion"] = proposal.name
                 v["auto_fixable"] = proposal.confidence is Confidence.AUTO_FIX
-            if self._level is ForbidVarsLevel.CONSERVATIVE and not v["suggestion"]:
+            if self._level is MeaninglessVarsLevel.CONSERVATIVE and not v["suggestion"]:
                 continue
             if v.get("suggestion"):
                 message = f"'{v['name']}' is a meaningless variable name — '{v['suggestion']}' is more descriptive."
             else:
-                message = f"Forbidden variable name '{v['name']}' found. Use a more descriptive name."
+                message = f"Meaningless variable name '{v['name']}' found. Use a more descriptive name."
             message += " Or add '# pytriage: ignore=TRI001' to suppress."
 
             violations.append(
@@ -867,7 +867,7 @@ class ForbidVarsCheck(BaseCheck):
                     message=message,
                     fixable=v["auto_fixable"],
                     # Violation.fix_data is intentionally untyped (dict[str,
-                    # Any]) at this boundary; see ForbidVarsFixData above for
+                    # Any]) at this boundary; see MeaninglessVarsFixData above for
                     # the shape check()/fix() actually agree on.
                     fix_data=cast("dict[str, Any]", v),
                 )
@@ -883,7 +883,7 @@ class ForbidVarsCheck(BaseCheck):
         tree: ast.Module,
         encoding: str = "utf-8",
     ) -> bool:
-        fixable = [cast("ForbidVarsFixData", v.fix_data) for v in violations if v.fixable and v.fix_data]
+        fixable = [cast("MeaninglessVarsFixData", v.fix_data) for v in violations if v.fixable and v.fix_data]
 
         if not fixable:
             return False

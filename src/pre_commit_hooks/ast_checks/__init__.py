@@ -6,7 +6,7 @@ AST parsing operations.
 
 Error Codes
 -----------
-  - TRI001: Forbid meaningless variable names (forbid-vars)
+  - TRI001: Meaningless variable names (meaningless-vars)
   - TRI002: Excessive blank lines (excessive-blank-lines)
   - TRI003: Redundant super init (redundant-super-init)
   - TRI004: Function naming violations (validate-function-name)
@@ -29,7 +29,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .excessive_blank_lines import ExcessiveBlankLinesCheck
-from .forbid_vars import ForbidVarsCheck
+from .meaningless_vars import MeaninglessVarsCheck
 from .misplaced_comment import MisplacedCommentCheck
 from .redundant_assignment import RedundantAssignmentCheck
 from .redundant_super_init import RedundantSuperInitCheck
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
 # all that's needed — add new checks here rather than via a registration
 # side effect.
 ALL_CHECKS: list[type[ASTCheck]] = [
-    ForbidVarsCheck,
+    MeaninglessVarsCheck,
     ExcessiveBlankLinesCheck,
     RedundantSuperInitCheck,
     ValidateFunctionNameCheck,

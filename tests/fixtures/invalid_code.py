@@ -1,4 +1,4 @@
-"""Test fixture: Python code with forbidden variable names (should fail)."""
+"""Test fixture: Python code with meaningless variable names (should fail)."""
 
 
 def process():
@@ -31,10 +31,10 @@ def get_info(*, result=None):
 
 
 def varargs_example(*data):
-    """Example with *args using forbidden name."""
+    """Example with *args using meaningless name."""
     return data
 
 
 def kwargs_example(**result):
-    """Example with **kwargs using forbidden name."""
+    """Example with **kwargs using meaningless name."""
     return result

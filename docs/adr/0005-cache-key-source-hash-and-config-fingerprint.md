@@ -2,7 +2,7 @@
 
 `CacheManager.CACHE_VERSION` (`_cache.py:53`) is a single string a developer must remember to bump whenever any check's detection/fix logic changes in a way that could make a previously-cached result stale. Forgetting has already caused a real bug, fixed in `0e3efba` ("rewrite stale version tag when invalidating a cache blob") — that fix repaired the symptom (a stale version tag not being rewritten), not the underlying fragility of relying on a human to remember to bump a global string at all.
 
-While designing the replacement, a second, related gap surfaced: `CheckOrchestrator._generate_cache_key()` (`ast_checks/__init__.py:185-192`) builds its cache key from the sorted `check_id` list only — it never accounts for a check's runtime configuration. `ForbidVarsCheck(forbidden_names={"custom"})` and `ForbidVarsCheck()` both produce the identical key `"forbid-vars"`, so changing `--forbid-vars-names` or `[tool.forbid-vars.autofix]` between runs on an unchanged file serves the previous run's violations under the old configuration, silently.
+While designing the replacement, a second, related gap surfaced: `CheckOrchestrator._generate_cache_key()` (`ast_checks/__init__.py:185-192`) builds its cache key from the sorted `check_id` list only — it never accounts for a check's runtime configuration. `MeaninglessVarsCheck(meaningless_names={"custom"})` and `MeaninglessVarsCheck()` both produce the identical key `"meaningless-vars"`, so changing `--meaningless-vars-names` or `[tool.meaningless-vars.autofix]` between runs on an unchanged file serves the previous run's violations under the old configuration, silently.
 
 ## Considered Options
 
