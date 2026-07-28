@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     import argparse
+    from collections.abc import Iterable, Iterator
 
 logger = logging.getLogger("ast_checks")
 
@@ -387,30 +388,46 @@ def ignore_pattern_for(error_code: str) -> re.Pattern[str]:
     return re.compile(rf"#\s*pytriage:\s*(?:[^,\s]+\s*,\s*)*{escaped}(?!\w)", re.IGNORECASE)
 
 
-def find_ignored_lines(source: str, pattern: re.Pattern[str]) -> set[int]:
-    """Extract line numbers that have an inline ignore comment matching `pattern`.
+def tokenize_source(source: str) -> Iterator[tokenize.TokenInfo]:
+    """Tokenize `source`, normalizing line endings first (see
+    `normalize_for_tokenize`) — the one `tokenize`-invocation boilerplate
+    every tokenize-based helper in this module shares.
+    """
+    return tokenize.generate_tokens(io.StringIO(normalize_for_tokenize(source)).readline)
+
+
+def ignored_lines_from_tokens(tokens: Iterable[tokenize.TokenInfo], *patterns: re.Pattern[str]) -> set[int]:
+    """Extract line numbers with a comment matching any of `patterns` from an
+    already-tokenized stream.
+
+    Shared building block for `find_ignored_lines` (which tokenizes `source`
+    itself) and a caller that already has its own token stream in hand (e.g.
+    `misplaced_comment`, which would otherwise tokenize the same source a
+    second time just to check for suppression comments).
+    """
+    return {
+        tok.start[0] for tok in tokens if tok.type == tokenize.COMMENT and any(p.search(tok.string) for p in patterns)
+    }
+
+
+def find_ignored_lines(source: str, *patterns: re.Pattern[str]) -> set[int]:
+    """Extract line numbers that have an inline ignore comment matching any
+    of `patterns`.
 
     Uses the tokenize module to accurately detect comments, so a string or
     byte literal that happens to contain matching text (e.g. a dict key)
-    is never mistaken for a suppression directive.
+    is never mistaken for a suppression directive. Accepts more than one
+    pattern so a caller checking several suppression forms against the same
+    source (e.g. redundant-type-conversion's own pragma plus a third-party
+    type-checker's `# type: ignore`) tokenizes it only once.
     """
-    ignored: set[int] = set()
-
     try:
-        tokens = tokenize.generate_tokens(io.StringIO(normalize_for_tokenize(source)).readline)
-
-        for tok_type, tok_string, (line, _), _, _ in tokens:
-            if tok_type != tokenize.COMMENT:
-                continue
-
-            if pattern.search(tok_string):
-                ignored.add(line)
+        return ignored_lines_from_tokens(tokenize_source(source), *patterns)
     except tokenize.TokenError as token_error:  # pragma: no cover
         # Defensive: source is already parsed by AST, so tokenizing it can't
         # realistically fail. If it ever does, treat it as no lines ignored.
         logger.debug(repr(token_error))
-
-    return ignored
+        return set()
 
 
 _NON_CODE_TOKEN_TYPES = frozenset(
@@ -444,8 +461,7 @@ def classify_comment_lines(source: str) -> tuple[set[int], set[int]]:
     code_lines: set[int] = set()
 
     try:
-        tokens = tokenize.generate_tokens(io.StringIO(normalize_for_tokenize(source)).readline)
-        for tok_type, _tok_string, start, end, _ in tokens:
+        for tok_type, _tok_string, start, end, _ in tokenize_source(source):
             if tok_type == tokenize.COMMENT:
                 comment_lines.add(start[0])
             elif tok_type not in _NON_CODE_TOKEN_TYPES:

@@ -4,12 +4,8 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from .confidence import PUREPATH_HOVER_NAMES
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator
 
 
 @dataclass(slots=True, frozen=True)
@@ -36,12 +32,31 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
     lines (see ADR-0035's "Detection method"), a shadowed constructor
     name, every candidate in a module with a wildcard import, and an
     argument ending in a nested call (`_ends_in_call()`). All scanned in
-    one `_scan()` pass over `tree`.
+    one `_scan()` pass over `tree` -- `_scan()` already collects every
+    structurally-eligible call (`raw_candidates` below) while it computes
+    `shadowed`, so this never needs its own second pass over `tree` just
+    to re-find them.
     """
-    scan = _scan(tree)
+    scan = _scan(tree, eligible)
     if scan.has_wildcard_import:
         return []
-    return list(_iter_candidates(tree, eligible - scan.shadowed, scan.len_wrapped, scan.equality_compared))
+    final_eligible = eligible - scan.shadowed
+    return [
+        Candidate(
+            constructor=raw.constructor,
+            call=raw.call,
+            arg=raw.arg,
+            line=raw.line,
+            call_start_col=raw.call_start_col,
+            call_end_col=raw.call_end_col,
+            arg_start_col=raw.arg_start_col,
+            arg_end_col=raw.arg_end_col,
+            wrapped_in_len=id(raw.call) in scan.len_wrapped,
+            in_equality_comparison=id(raw.call) in scan.equality_compared,
+        )
+        for raw in scan.raw_candidates
+        if raw.constructor in final_eligible
+    ]
 
 
 _BINDING_DEF_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
@@ -50,14 +65,34 @@ _EQUALITY_OPS = (ast.Eq, ast.NotEq, ast.In, ast.NotIn, ast.Is, ast.IsNot)
 
 
 @dataclass(slots=True, frozen=True)
+class _RawCandidate:
+    """A `name(single_positional_arg)` call found during `_scan()`'s own walk, already past every *local*
+    structural filter (arg shape, single-line span, not ending in a nested call) -- everything about it that
+    doesn't depend on whole-module shadowing, which isn't known until the scan finishes. `find_candidates()`
+    applies the final `eligible - shadowed` filter against this already-narrow list instead of re-walking `tree`
+    a second time just to re-find the same calls.
+    """
+
+    constructor: str
+    call: ast.Call
+    arg: ast.expr
+    line: int
+    call_start_col: int
+    call_end_col: int
+    arg_start_col: int
+    arg_end_col: int
+
+
+@dataclass(slots=True, frozen=True)
 class _Scan:
     has_wildcard_import: bool
     shadowed: frozenset[str]
     len_wrapped: frozenset[int]
     equality_compared: frozenset[int]
+    raw_candidates: list[_RawCandidate]
 
 
-def _scan(tree: ast.Module) -> _Scan:
+def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
     """One walk over `tree` computing every whole-module signal `find_candidates()` needs.
 
     `shadowed`: every name bound anywhere in `tree` -- def/class, import
@@ -79,12 +114,20 @@ def _scan(tree: ast.Module) -> _Scan:
     if a `pathlib` path class name is bound to anything other than an
     ordinary `from pathlib import <Name>` anywhere in `tree`, the same
     scope-blind bias as `shadowed` itself.
+
+    `raw_candidates`: pre-filtered by `node.func.id in eligible` (the raw
+    set, before subtracting `shadowed`) -- cheap, and safe to do this
+    early: `eligible - shadowed` can only ever shrink `eligible`, so
+    nothing this filters out here could have passed the final filter
+    either, and it skips the pricier remaining checks (span, `_ends_in_call`)
+    for a call whose name was never eligible to begin with.
     """
     has_wildcard_import = False
     shadowed: set[str] = set()
     purepath_shadowed: set[str] = set()
     len_wrapped: set[int] = set()
     equality_compared: set[int] = set()
+    raw_candidates: list[_RawCandidate] = []
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -110,15 +153,33 @@ def _scan(tree: ast.Module) -> _Scan:
             shadowed.add(name)
             purepath_shadowed.add(name)
 
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "len"
-            and not node.keywords
-            and len(node.args) == 1
-            and isinstance(node.args[0], ast.Call)
-        ):
-            len_wrapped.add(id(node.args[0]))
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and not node.keywords and len(node.args) == 1:
+            (only_arg,) = node.args
+            if node.func.id == "len" and isinstance(only_arg, ast.Call):
+                len_wrapped.add(id(only_arg))
+
+            if (
+                node.func.id in eligible
+                and not isinstance(only_arg, (ast.Starred, ast.GeneratorExp))
+                and node.end_lineno is not None
+                and node.end_col_offset is not None
+                and node.lineno == node.end_lineno
+                and only_arg.end_lineno is not None
+                and only_arg.end_col_offset is not None
+                and not _ends_in_call(only_arg)
+            ):
+                raw_candidates.append(
+                    _RawCandidate(
+                        constructor=node.func.id,
+                        call=node,
+                        arg=only_arg,
+                        line=node.lineno,
+                        call_start_col=node.col_offset,
+                        call_end_col=node.end_col_offset,
+                        arg_start_col=only_arg.col_offset,
+                        arg_end_col=only_arg.end_col_offset,
+                    )
+                )
 
         if isinstance(node, ast.Compare):
             operands = [node.left, *node.comparators]
@@ -132,6 +193,7 @@ def _scan(tree: ast.Module) -> _Scan:
         shadowed=frozenset(shadowed),
         len_wrapped=frozenset() if "len" in shadowed else frozenset(len_wrapped),
         equality_compared=(frozenset() if purepath_shadowed & PUREPATH_HOVER_NAMES else frozenset(equality_compared)),
+        raw_candidates=raw_candidates,
     )
 
 
@@ -170,39 +232,3 @@ def _bound_name(node: ast.AST) -> str | None:
     if isinstance(node, ast.MatchMapping):
         return node.rest
     return None
-
-
-def _iter_candidates(
-    tree: ast.Module, eligible: frozenset[str], len_wrapped: frozenset[int], equality_compared: frozenset[int]
-) -> Iterator[Candidate]:
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if not isinstance(node.func, ast.Name) or node.func.id not in eligible:
-            continue
-        if node.keywords or len(node.args) != 1:
-            continue
-        (arg,) = node.args
-        if isinstance(arg, (ast.Starred, ast.GeneratorExp)):
-            continue
-        if node.end_lineno is None or node.end_col_offset is None:
-            continue
-        if node.lineno != node.end_lineno:
-            continue
-        if arg.end_lineno is None or arg.end_col_offset is None:
-            continue
-        if _ends_in_call(arg):
-            continue
-
-        yield Candidate(
-            constructor=node.func.id,
-            call=node,
-            arg=arg,
-            line=node.lineno,
-            call_start_col=node.col_offset,
-            call_end_col=node.end_col_offset,
-            arg_start_col=arg.col_offset,
-            arg_end_col=arg.end_col_offset,
-            wrapped_in_len=id(node) in len_wrapped,
-            in_equality_comparison=id(node) in equality_compared,
-        )

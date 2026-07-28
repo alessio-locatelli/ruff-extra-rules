@@ -90,19 +90,21 @@ class RedundantTypeConversionCheck(BaseCheck):
         return {"level": ConfidenceLevel[args.redundant_type_conversion_level.upper()]}
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
-        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN) | find_ignored_lines(
-            source, THIRD_PARTY_IGNORE_PATTERN
-        )
-
-        # Checked before get_session() (which starts `ty` on this
-        # process's first call): a prefilter match doesn't guarantee a
-        # real candidate, and ignored_lines can suppress every real one.
+        # A prefilter match doesn't guarantee a real candidate: computed
+        # before ever tokenizing `source` for ignored_lines (let alone
+        # calling get_session(), which starts `ty` on this process's first
+        # call) so a file with no syntactic candidates at all never pays
+        # for either.
         candidates = find_candidates(tree, eligible_constructors(self._level))
+        if not candidates:
+            return []
+
+        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN, THIRD_PARTY_IGNORE_PATTERN)
         if not any(candidate.line not in ignored_lines for candidate in candidates):
             return []
 
         redundant = decide_candidates(
-            get_session(), filepath, tree, source, level=self._level, ignored_lines=ignored_lines
+            get_session(), filepath, candidates, source, level=self._level, ignored_lines=ignored_lines
         )
 
         return [

@@ -10,7 +10,11 @@ from pre_commit_hooks._lsp import LSPError
 from pre_commit_hooks.ast_checks._base import CheckUnavailableError
 from pre_commit_hooks.ast_checks.redundant_type_conversion.analysis import _build_modified_text, decide_candidates
 from pre_commit_hooks.ast_checks.redundant_type_conversion.candidates import find_candidates
-from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import ALL_CONSTRUCTORS, ConfidenceLevel
+from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import (
+    ALL_CONSTRUCTORS,
+    ConfidenceLevel,
+    eligible_constructors,
+)
 
 from ._helpers import FakeSession
 
@@ -27,8 +31,9 @@ def _decide(
     ignored_lines: set[int] | None = None,
 ) -> tuple[list[RedundantConversion], FakeSession]:
     session = FakeSession(diagnostics_by_content=diagnostics_by_content, hover_by_position=hover_by_position)
+    candidates = find_candidates(ast.parse(source), eligible_constructors(level))
     redundant = decide_candidates(
-        session, Path("test.py"), ast.parse(source), source, level=level, ignored_lines=ignored_lines or set()
+        session, Path("test.py"), candidates, source, level=level, ignored_lines=ignored_lines or set()
     )
     return redundant, session
 
@@ -273,9 +278,10 @@ def test_decide_candidates_converts_a_lost_session_to_check_unavailable_error(ra
         raise_on_call=raise_on_call,
     )
 
+    candidates = find_candidates(ast.parse(source), eligible_constructors(ConfidenceLevel.CONSERVATIVE))
     with pytest.raises(CheckUnavailableError, match="lost its connection to `ty`"):
         decide_candidates(
-            session, Path("test.py"), ast.parse(source), source, level=ConfidenceLevel.CONSERVATIVE, ignored_lines=set()
+            session, Path("test.py"), candidates, source, level=ConfidenceLevel.CONSERVATIVE, ignored_lines=set()
         )
 
     assert session.closed_files == [Path("test.py")]
@@ -293,15 +299,11 @@ class _SessionRaisingFromHover(FakeSession):
 def test_decide_candidates_still_closes_the_file_when_a_candidate_raises_unexpectedly() -> None:
     source = "y = str(x)\n"
     session = _SessionRaisingFromHover(diagnostics_by_content={source: frozenset()}, hover_by_position={})
+    candidates = find_candidates(ast.parse(source), eligible_constructors(ConfidenceLevel.CONSERVATIVE))
 
     with pytest.raises(RuntimeError, match="unexpected failure"):
         decide_candidates(
-            session,
-            Path("test.py"),
-            ast.parse(source),
-            source,
-            level=ConfidenceLevel.CONSERVATIVE,
-            ignored_lines=set(),
+            session, Path("test.py"), candidates, source, level=ConfidenceLevel.CONSERVATIVE, ignored_lines=set()
         )
 
     assert session.closed_files == [Path("test.py")]

@@ -22,8 +22,8 @@ from ._base import (
     BaseCheck,
     Violation,
     atomic_write_text,
-    find_ignored_lines,
     ignore_pattern_for,
+    ignored_lines_from_tokens,
     line_terminator,
     mark_fix_failed,
     normalize_for_tokenize,
@@ -62,11 +62,7 @@ def is_linter_pragma(comment_text: str) -> bool:
     return any(pattern.search(comment_text) for pattern in _COMPILED_LINTER_PATTERNS)
 
 
-def is_bracket_only_line(tokens: tuple[tokenize.TokenInfo, ...], bracket_token_idx: int) -> bool:
-    bracket_token = tokens[bracket_token_idx]
-    line_num = bracket_token.start[0]
-
-    line_tokens = [t for t in tokens if t.start[0] == line_num]
+def is_bracket_only_line(line_tokens: list[tokenize.TokenInfo]) -> bool:
     code_tokens = [
         t
         for t in line_tokens
@@ -100,37 +96,43 @@ def _scan_misplaced_comments(
     Shared by check() and fix() so both agree on what counts as a violation.
     Dedupes by bracket_line: a line like `))  # comment` visits the scan once
     per closing bracket token, but is one violation, not one per bracket.
+
+    Groups tokens by physical line once, up front: a physical line's own
+    trailing comment, if any, is always among that same line's own tokens
+    (`tokenize` never emits a `COMMENT` past its own line's `NEWLINE`), so
+    a bracket's verdict only ever depends on its own line's token group,
+    never on anything past it.
     """
+    tokens_by_line: dict[int, list[tokenize.TokenInfo]] = {}
+    for token in tokens:
+        tokens_by_line.setdefault(token.start[0], []).append(token)
+
     found: list[_MisplacedComment] = []
     seen_bracket_lines: set[int] = set()
 
-    for i, token in enumerate(tokens):
+    for token in tokens:
         if token.type != tokenize.OP or token.string not in ")}]":
             continue
         bracket_line = token.start[0]
         if bracket_line in seen_bracket_lines:
             continue
+        seen_bracket_lines.add(bracket_line)
 
-        # Find the first token that's either a comment (a candidate, since
-        # anything else on this same line doesn't matter) or on a later
-        # line (nothing to find on this bracket's line). Every token stream
-        # ends with an ENDMARKER on a line past the last real line, so this
-        # always finds something.
-        next_token = next(t for t in tokens[i + 1 :] if t.start[0] > bracket_line or t.type == tokenize.COMMENT)
+        line_tokens = tokens_by_line[bracket_line]
+        comment_token = next((t for t in line_tokens if t.type == tokenize.COMMENT), None)
         if (
-            next_token.start[0] == bracket_line
-            and not is_linter_pragma(next_token.string)
-            and is_bracket_only_line(tokens, i)
+            comment_token is not None
+            and not is_linter_pragma(comment_token.string)
+            and is_bracket_only_line(line_tokens)
         ):
             found.append(
                 _MisplacedComment(
                     bracket_line=bracket_line,
-                    comment_line=next_token.start[0],
-                    comment_col=next_token.start[1],
-                    comment_text=next_token.string,
+                    comment_line=comment_token.start[0],
+                    comment_col=comment_token.start[1],
+                    comment_text=comment_token.string,
                 )
             )
-            seen_bracket_lines.add(bracket_line)
 
     return found
 
@@ -162,7 +164,7 @@ class MisplacedCommentCheck(BaseCheck):
         if not found:
             return []
 
-        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
+        ignored_lines = ignored_lines_from_tokens(tokens, IGNORE_PATTERN)
         return [
             Violation(
                 check_id=self.check_id,
@@ -200,7 +202,7 @@ class MisplacedCommentCheck(BaseCheck):
         if not found:
             return False
 
-        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
+        ignored_lines = ignored_lines_from_tokens(tokens, IGNORE_PATTERN)
         lines = source.splitlines(keepends=True)
         fixed_any = False
 
