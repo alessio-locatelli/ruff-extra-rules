@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import os
 import shutil
 import subprocess
 import sys
 import types
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
 from unittest import mock
 
 import pytest
@@ -37,6 +38,13 @@ if TYPE_CHECKING:
 
     from pre_commit_hooks.ast_checks import ASTCheck
     from pre_commit_hooks.ast_checks.validate_function_name.analysis import Suggestion
+
+
+def _raises(exc_type: type[BaseException], message: str) -> Callable[..., NoReturn]:
+    def _raise(*_args: object, **_kwargs: object) -> NoReturn:
+        raise exc_type(message)
+
+    return _raise
 
 
 @pytest.mark.parametrize(
@@ -87,9 +95,7 @@ def test_expand_directories_uses_git_ls_files_inside_a_git_repo(tmp_path: Path) 
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         tracked = tmp_path / "tracked.py"
@@ -97,8 +103,6 @@ def test_expand_directories_uses_git_ls_files_inside_a_git_repo(tmp_path: Path) 
         subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
 
         assert expand_directories([str(tmp_path)]) == [str(tracked.resolve())]
-    finally:
-        os.chdir(original_dir)
 
 
 def test_expand_directories_includes_untracked_file_inside_a_git_repo(tmp_path: Path) -> None:
@@ -112,9 +116,7 @@ def test_expand_directories_includes_untracked_file_inside_a_git_repo(tmp_path: 
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         tracked = tmp_path / "tracked.py"
@@ -125,8 +127,6 @@ def test_expand_directories_includes_untracked_file_inside_a_git_repo(tmp_path: 
         untracked.write_text("y = 1\n")
 
         assert expand_directories([str(tmp_path)]) == [str(tracked.resolve()), str(untracked.resolve())]
-    finally:
-        os.chdir(original_dir)
 
 
 def test_expand_directories_excludes_gitignored_file_but_warns(
@@ -140,9 +140,7 @@ def test_expand_directories_excludes_gitignored_file_but_warns(
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         (tmp_path / ".gitignore").write_text("ignored.py\n")
@@ -153,8 +151,6 @@ def test_expand_directories_excludes_gitignored_file_but_warns(
 
         assert matches == []
         assert "ignored.py" in caplog.text
-    finally:
-        os.chdir(original_dir)
 
 
 def test_expand_directories_warns_about_an_ignored_directory_with_an_unrecognized_name(
@@ -167,9 +163,7 @@ def test_expand_directories_warns_about_an_ignored_directory_with_an_unrecognize
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         (tmp_path / ".gitignore").write_text("vendored/\n")
@@ -182,8 +176,6 @@ def test_expand_directories_warns_about_an_ignored_directory_with_an_unrecognize
 
         assert matches == []
         assert "vendored" in caplog.text
-    finally:
-        os.chdir(original_dir)
 
 
 def test_expand_directories_does_not_warn_about_known_non_source_directories(
@@ -197,9 +189,7 @@ def test_expand_directories_does_not_warn_about_known_non_source_directories(
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         (tmp_path / ".gitignore").write_text("__pycache__/\n*.egg-info/\n.cache/\n")
@@ -221,8 +211,6 @@ def test_expand_directories_does_not_warn_about_known_non_source_directories(
 
         assert matches == []
         assert not any(record.levelname == "WARNING" for record in caplog.records)
-    finally:
-        os.chdir(original_dir)
 
 
 def test_expand_directories_does_not_warn_about_ruff_cache_even_though_its_own_gitignore_is_nested(
@@ -238,9 +226,7 @@ def test_expand_directories_does_not_warn_about_ruff_cache_even_though_its_own_g
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         ruff_cache = tmp_path / ".ruff_cache"
@@ -253,8 +239,6 @@ def test_expand_directories_does_not_warn_about_ruff_cache_even_though_its_own_g
 
         assert matches == []
         assert not any(record.levelname == "WARNING" for record in caplog.records)
-    finally:
-        os.chdir(original_dir)
 
 
 def test_expand_directories_warns_about_ignored_file_regardless_of_status_showuntrackedfiles_config(
@@ -269,9 +253,7 @@ def test_expand_directories_warns_about_ignored_file_regardless_of_status_showun
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
         subprocess.run([git, "config", "status.showUntrackedFiles", "no"], check=True, cwd=tmp_path)  # noqa: S603
 
@@ -283,8 +265,6 @@ def test_expand_directories_warns_about_ignored_file_regardless_of_status_showun
 
         assert matches == []
         assert "ignored.py" in caplog.text
-    finally:
-        os.chdir(original_dir)
 
 
 def test_expand_directories_caps_gitignore_warning_at_a_bounded_number_of_paths(
@@ -299,9 +279,7 @@ def test_expand_directories_caps_gitignore_warning_at_a_bounded_number_of_paths(
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         (tmp_path / "README.md").write_text("keep this directory partially tracked\n")
@@ -317,25 +295,38 @@ def test_expand_directories_caps_gitignore_warning_at_a_bounded_number_of_paths(
 
         assert f"{num_ignored} gitignored path(s)" in caplog.text
         assert "showing first 20" in caplog.text
-    finally:
-        os.chdir(original_dir)
 
 
-def test_expand_directories_ignores_a_git_status_failure_when_checking_for_gitignored_files(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+def _git_status_missing(_cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    raise FileNotFoundError("git not found")
+
+
+def _git_status_reports_stderr(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="error: failed to stat\n")
+
+
+@pytest.mark.parametrize(
+    "simulate_status_failure",
+    [_git_status_missing, _git_status_reports_stderr],
+    ids=["status-subprocess-missing", "status-reports-stderr"],
+)
+def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unreliable(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    simulate_status_failure: Callable[[list[str]], subprocess.CompletedProcess[str]],
 ) -> None:
     # Self-healing: if the extra `git status --ignored` probe used to detect
-    # gitignored exclusions worth warning about itself fails (e.g. git
-    # errors or times out), the directory listing must still succeed --
-    # only the warning is skipped, silently (debug-only, same contract as
-    # git ls-files's own subprocess failure above).
+    # gitignored exclusions worth warning about is itself unreliable --
+    # missing entirely (e.g. git errors or times out), or succeeding with a
+    # per-path stderr error next to incomplete stdout (the same "don't trust
+    # a result alongside stderr" rule git_grep_filter and the primary git
+    # ls-files call both already follow) -- the directory listing must still
+    # succeed; only the warning is skipped, silently.
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
     real_run = subprocess.run
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         tracked = tmp_path / "tracked.py"
@@ -344,41 +335,7 @@ def test_expand_directories_ignores_a_git_status_failure_when_checking_for_gitig
 
         def fake_run(cmd: list[str], *args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
             if "status" in cmd:
-                raise FileNotFoundError("git not found")
-            return real_run(cmd, *args, **kwargs)  # type: ignore[call-overload]
-
-        with mock.patch("subprocess.run", side_effect=fake_run), caplog.at_level("DEBUG"):
-            matches = expand_directories([str(tmp_path)])
-
-        assert matches == [str(tracked.resolve())]
-        assert not any(record.levelname == "WARNING" for record in caplog.records)
-    finally:
-        os.chdir(original_dir)
-
-
-def test_expand_directories_skips_gitignore_warning_when_git_status_reports_stderr(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-    # Same "don't trust a result alongside stderr" rule git_grep_filter and
-    # the primary git ls-files call both already follow: a per-path error on
-    # stderr must not produce a (possibly wrong) warning built from
-    # incomplete stdout.
-    git = shutil.which("git")
-    assert git is not None
-
-    original_dir = Path.cwd()
-    real_run = subprocess.run
-    try:
-        os.chdir(tmp_path)
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
-
-        tracked = tmp_path / "tracked.py"
-        tracked.write_text("x = 1\n")
-        subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
-
-        def fake_run(cmd: list[str], *args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
-            if "status" in cmd:
-                return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="error: failed to stat\n")
+                return simulate_status_failure(cmd)
             return real_run(cmd, *args, **kwargs)  # type: ignore[call-overload]
 
         with mock.patch("subprocess.run", side_effect=fake_run), caplog.at_level("WARNING"):
@@ -386,8 +343,6 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_reports_stde
 
         assert matches == [str(tracked.resolve())]
         assert not any(record.levelname == "WARNING" for record in caplog.records)
-    finally:
-        os.chdir(original_dir)
 
 
 def test_expand_directories_skips_tracked_file_deleted_from_working_tree(tmp_path: Path) -> None:
@@ -400,9 +355,7 @@ def test_expand_directories_skips_tracked_file_deleted_from_working_tree(tmp_pat
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         deleted = tmp_path / "deleted.py"
@@ -411,8 +364,6 @@ def test_expand_directories_skips_tracked_file_deleted_from_working_tree(tmp_pat
         deleted.unlink()
 
         assert expand_directories([str(tmp_path)]) == []
-    finally:
-        os.chdir(original_dir)
 
 
 def test_expand_directories_falls_back_when_git_ls_files_fails(
@@ -449,9 +400,7 @@ def test_expand_directories_includes_a_file_with_a_non_utf8_name(tmp_path: Path)
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         bad_path_bytes = str(tmp_path).encode() + b"/bad-\xff\xfe.py"
@@ -462,8 +411,6 @@ def test_expand_directories_includes_a_file_with_a_non_utf8_name(tmp_path: Path)
 
         assert len(matches) == 1
         assert Path(matches[0]).exists()
-    finally:
-        os.chdir(original_dir)
 
 
 def test_main_directory_with_no_python_files_returns_zero(tmp_path: Path) -> None:
@@ -476,9 +423,7 @@ def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: 
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         filepath = tmp_path / "module.py"
@@ -489,8 +434,6 @@ def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: 
 
         assert exit_code == 1
         assert "TR1" in capsys.readouterr().err
-    finally:
-        os.chdir(original_dir)
 
 
 def test_main_directory_argument_matches_explicit_file_argument_for_untracked_file(
@@ -503,9 +446,7 @@ def test_main_directory_argument_matches_explicit_file_argument_for_untracked_fi
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         untracked = tmp_path / "untracked.py"
@@ -516,8 +457,6 @@ def test_main_directory_argument_matches_explicit_file_argument_for_untracked_fi
 
         assert main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
         assert "TR1" in capsys.readouterr().err
-    finally:
-        os.chdir(original_dir)
 
 
 def test_main_directory_scan_does_not_crash_on_a_file_with_a_non_utf8_name(tmp_path: Path) -> None:
@@ -530,9 +469,7 @@ def test_main_directory_scan_does_not_crash_on_a_file_with_a_non_utf8_name(tmp_p
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         bad_path_bytes = str(tmp_path).encode() + b"/bad-\xff\xfe.py"
@@ -540,8 +477,6 @@ def test_main_directory_scan_does_not_crash_on_a_file_with_a_non_utf8_name(tmp_p
             f.write(b"result = 1\n")
 
         assert main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
-    finally:
-        os.chdir(original_dir)
 
 
 def test_process_files_handles_utf8_bom(tmp_path: Path) -> None:
@@ -769,11 +704,7 @@ def test_refresh_stale_positions_records_rule_failure_when_check_raises(
     # isolated (ch. 5) like every other check failure, not left to crash
     # the whole run or silently leave the check's own stale entries in
     # `violations`.
-    def boom(*_args: object, **_kwargs: object) -> list[Violation]:
-        msg = "simulated check failure"
-        raise RuntimeError(msg)
-
-    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", _raises(RuntimeError, "simulated check failure"))
 
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
@@ -961,10 +892,9 @@ def test_process_files_second_call_uses_cache(tmp_path: Path, monkeypatch: pytes
     first = orchestrator.process_files([str(filepath)])
     assert first[str(filepath)][0].error_code == "TR1"
 
-    def boom(*_args: object, **_kws: object) -> None:
-        raise AssertionError("_check_file should not run on a cache hit")
-
-    monkeypatch.setattr(CheckOrchestrator, "_check_file", boom)
+    monkeypatch.setattr(
+        CheckOrchestrator, "_check_file", _raises(AssertionError, "_check_file should not run on a cache hit")
+    )
     second = orchestrator.process_files([str(filepath)])
     assert second[str(filepath)][0].error_code == "TR1"
 
@@ -986,11 +916,10 @@ def test_cache_hit_and_cache_miss_report_equivalent_violations(tmp_path: Path, m
     cache_miss = cache_miss_orchestrator.process_files([str(filepath)])[str(filepath)]
     assert {v.error_code for v in cache_miss} == {"TR1", "TR2"}
 
-    def boom(*_args: object, **_kws: object) -> None:
-        raise AssertionError("_check_file should not run on a cache hit")
-
     cache_hit_orchestrator = CheckOrchestrator(checks=checks)
-    monkeypatch.setattr(CheckOrchestrator, "_check_file", boom)
+    monkeypatch.setattr(
+        CheckOrchestrator, "_check_file", _raises(AssertionError, "_check_file should not run on a cache hit")
+    )
     cache_hit = cache_hit_orchestrator.process_files([str(filepath)])[str(filepath)]
 
     def as_comparable(v: Violation) -> tuple[str, str, int, int, str, bool]:
@@ -1074,10 +1003,7 @@ def test_cache_violations_serialization_error_is_caught(tmp_path: Path, monkeypa
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
 
-    def boom(*_args: object, **_kws: object) -> None:
-        raise TypeError("simulated cache backend failure")
-
-    monkeypatch.setattr(CacheManager, "set_cached_result", boom)
+    monkeypatch.setattr(CacheManager, "set_cached_result", _raises(TypeError, "simulated cache backend failure"))
 
     # Must not raise, just skip caching for this file.
     violations = orchestrator.process_files([str(filepath)])
@@ -1090,10 +1016,7 @@ def test_process_files_check_exception_is_logged_and_skipped(tmp_path: Path, mon
     filepath = tmp_path / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
 
-    def boom(*_args: object, **_kws: object) -> None:
-        raise ValueError("simulated check failure")
-
-    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", _raises(ValueError, "simulated check failure"))
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(), ExcessiveBlankLinesCheck()])
     violations = orchestrator.process_files([str(filepath)])
@@ -1110,10 +1033,7 @@ def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monk
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    def boom(*_args: object, **_kwargs: object) -> list[Violation]:
-        raise ValueError("simulated check failure")
-
-    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", _raises(ValueError, "simulated check failure"))
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     violations = orchestrator.process_files([str(filepath)])
@@ -1264,10 +1184,11 @@ def test_process_files_a_non_cacheable_checks_own_crash_does_not_block_caching_a
     assert {v.error_code for v in first[str(filepath)]} == {"TR1"}
     assert orchestrator.rule_failures == [(str(filepath), "crashing-always-rerun-probe")]  # pytriage: TR6
 
-    def boom(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("meaningless-vars must have been cached despite the always-rerun check's own crash")
-
-    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
+    monkeypatch.setattr(
+        MeaninglessVarsCheck,
+        "check",
+        _raises(AssertionError, "meaningless-vars must have been cached despite the always-rerun check's own crash"),
+    )
 
     second_orchestrator = CheckOrchestrator(
         checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), _CrashingAlwaysRerunCheck()]
@@ -1319,10 +1240,11 @@ def test_process_files_non_cacheable_check_does_not_disturb_a_cacheable_checks_o
     meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
     meaningless_vars_only.process_files([str(filepath)])
 
-    def boom(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("a cacheable check must not be recomputed once already cached")
-
-    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
+    monkeypatch.setattr(
+        MeaninglessVarsCheck,
+        "check",
+        _raises(AssertionError, "a cacheable check must not be recomputed once already cached"),
+    )
 
     probe = _AlwaysRerunProbeCheck()
     combined = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), probe])
@@ -1931,10 +1853,7 @@ def _fix_returns_false(
 def _fix_raises(
     _orchestrator: CheckOrchestrator, _meaningless_vars: MeaninglessVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def boom(*_args: object, **_kws: object) -> bool:
-        raise RuntimeError("simulated fix failure")
-
-    monkeypatch.setattr(MeaninglessVarsCheck, "fix", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", _raises(RuntimeError, "simulated fix failure"))
 
 
 @pytest.mark.parametrize(
@@ -2126,9 +2045,7 @@ def test_main_permission_denied_file_returns_one_inside_git_repo(
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         filepath = tmp_path / "module.py"
@@ -2149,8 +2066,6 @@ def test_main_permission_denied_file_returns_one_inside_git_repo(
         # NOT emit uncontrolled human-oriented text into a machine-readable
         # output stream").
         assert all(record.levelname == "DEBUG" for record in caplog.records)
-    finally:
-        os.chdir(original_dir)
 
 
 def test_main_check_crash_returns_one_and_reports_check_and_file(
@@ -2159,10 +2074,7 @@ def test_main_check_crash_returns_one_and_reports_check_and_file(
     # Regression: a check that crashes on every file it sees used to make
     # the whole run look clean (exit code 0, nothing printed) whenever no
     # other check reported a violation for the same files.
-    def boom(*_args: object, **_kwargs: object) -> list[Violation]:
-        raise ValueError("simulated check failure")
-
-    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", _raises(ValueError, "simulated check failure"))
 
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
@@ -2527,9 +2439,10 @@ def test_main_check_specific_cli_arg_round_trip(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # redundant-assignment's own --redundant-assignment-level flag (see
-    # test_main_redundant_assignment_level_flag below) already exercises
-    # this wiring against a shipped check; this synthetic one keeps that
-    # coverage independent of TR5's own reporting rules.
+    # test_main_level_flag_switches_between_conservative_and_permissive_reporting
+    # below) already exercises this wiring against a shipped check; this
+    # synthetic one keeps that coverage independent of TR5's own reporting
+    # rules.
     # Exercises main()'s add_cli_arguments -> parse_args ->
     # cli_kwargs_from_args -> check_args wiring end-to-end against a
     # synthetic check.
@@ -2589,73 +2502,70 @@ def test_main_check_specific_cli_arg_round_trip(
     assert "custom-message" in capsys.readouterr().err
 
 
-def test_main_redundant_assignment_level_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    # Issue #76: --redundant-assignment-level selects between the
-    # conservative (default) and permissive presets. A type-annotated
-    # single-use assignment scores just above the conservative report
-    # ceiling but under the permissive one (see
-    # tests/redundant_assignment/test_check.py::test_annotated_assignment_tracked),
-    # so it's a clean way to tell the two presets apart end-to-end through
-    # the real CLI.
-    filepath = tmp_path / "module.py"
-    filepath.write_text('def example():\n    x: str = "foo"\n    func(x)\n')
+class _LevelFlagCase(NamedTuple):
+    check_id: str
+    level_flag: str
+    source: str
+    permissive_needle: str
 
-    default_exit_code = main([str(filepath), "--select", "redundant-assignment"])
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        _LevelFlagCase(
+            "redundant-assignment",
+            "--redundant-assignment-level",
+            # A type-annotated single-use assignment scores just above the
+            # conservative report ceiling but under the permissive one (see
+            # tests/redundant_assignment/test_check.py::test_annotated_assignment_tracked).
+            'def example():\n    x: str = "foo"\n    func(x)\n',
+            "'x'",
+        ),
+        _LevelFlagCase(
+            "meaningless-vars",
+            "--meaningless-vars-level",
+            # "result = 42" has no suggested rename.
+            "def other():\n    result = 42\n    return result\n",
+            "'result'",
+        ),
+    ],
+    ids=["redundant-assignment", "meaningless-vars"],
+)
+def test_main_level_flag_switches_between_conservative_and_permissive_reporting(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], case: _LevelFlagCase
+) -> None:
+    # Issue #76 (redundant-assignment) / docs/adr/0031 (meaningless-vars):
+    # both checks share one conservative/permissive vocabulary for "how
+    # eagerly does this check speak up" -- the default must agree with an
+    # explicit "conservative", and only "permissive" surfaces this
+    # borderline violation.
+    filepath = tmp_path / "module.py"
+    filepath.write_text(case.source)
+
+    default_exit_code = main([str(filepath), "--select", case.check_id])
     assert default_exit_code == 0
 
-    conservative_exit_code = main(
-        [str(filepath), "--select", "redundant-assignment", "--redundant-assignment-level", "conservative"]
-    )
+    conservative_exit_code = main([str(filepath), "--select", case.check_id, case.level_flag, "conservative"])
     assert conservative_exit_code == 0
 
-    permissive_exit_code = main(
-        [str(filepath), "--select", "redundant-assignment", "--redundant-assignment-level", "permissive"]
-    )
+    permissive_exit_code = main([str(filepath), "--select", case.check_id, case.level_flag, "permissive"])
     assert permissive_exit_code == 1
-    assert "'x'" in capsys.readouterr().err
+    assert case.permissive_needle in capsys.readouterr().err
 
 
-def test_main_redundant_assignment_level_rejects_unknown_value(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    "level_flag",
+    ["--redundant-assignment-level", "--meaningless-vars-level"],
+    ids=["redundant-assignment", "meaningless-vars"],
+)
+def test_main_level_flag_rejects_unknown_value(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], level_flag: str
 ) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1\n")
 
     with pytest.raises(SystemExit) as exc_info:
-        main([str(filepath), "--redundant-assignment-level", "bogus"])
-
-    assert exc_info.value.code == 2
-    assert "invalid choice" in capsys.readouterr().err
-
-
-def test_main_meaningless_vars_level_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    # See docs/adr/0031-meaningless-vars-conservative-reporting-default.md.
-    # "result = 42" has no suggested rename, so it's a clean way to tell the
-    # two presets apart end-to-end through the real CLI.
-    filepath = tmp_path / "module.py"
-    filepath.write_text("def other():\n    result = 42\n    return result\n")
-
-    default_exit_code = main([str(filepath), "--select", "meaningless-vars"])
-    assert default_exit_code == 0
-
-    conservative_exit_code = main(
-        [str(filepath), "--select", "meaningless-vars", "--meaningless-vars-level", "conservative"]
-    )
-    assert conservative_exit_code == 0
-
-    permissive_exit_code = main(
-        [str(filepath), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]
-    )
-    assert permissive_exit_code == 1
-    assert "'result'" in capsys.readouterr().err
-
-
-def test_main_meaningless_vars_level_rejects_unknown_value(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    filepath = tmp_path / "module.py"
-    filepath.write_text("x = 1\n")
-
-    with pytest.raises(SystemExit) as exc_info:
-        main([str(filepath), "--meaningless-vars-level", "bogus"])
+        main([str(filepath), level_flag, "bogus"])
 
     assert exc_info.value.code == 2
     assert "invalid choice" in capsys.readouterr().err
@@ -2832,17 +2742,13 @@ def test_main_handles_path_containing_spaces_and_unicode(
         grep_results.append(completed_process)
         return completed_process
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         # Args are hardcoded test setup, not untrusted input.
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
         subprocess.run([git, "add", filepath], check=True)  # noqa: S603
 
         monkeypatch.setattr(subprocess, "run", _spy_run)
         exit_code = main([str(filepath), "--select", "meaningless-vars", "--fix"])
-    finally:
-        os.chdir(original_dir)
 
     assert grep_results, "git grep was never invoked -- fell back to the Python-only path"
     assert all(result.stderr == "" for result in grep_results)
