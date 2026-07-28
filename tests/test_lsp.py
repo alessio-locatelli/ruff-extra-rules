@@ -90,64 +90,44 @@ def _spawn_fake_server(cwd: Path) -> LSPClient:
 
 
 def test_request_returns_result(tmp_path: Path) -> None:
-    client = _spawn_fake_server(tmp_path)
-    try:
+    with _spawn_fake_server(tmp_path) as client:
         response = client.request("echo", {"hello": "world"})
         assert response == {"hello": "world"}
-    finally:
-        client.close()
 
 
 def test_a_large_stderr_write_does_not_deadlock_the_server(tmp_path: Path) -> None:
     # Draining stderr in the background keeps a full pipe from blocking the server and stalling every request.
-    client = _spawn_fake_server(tmp_path)
-    try:
+    with _spawn_fake_server(tmp_path) as client:
         response = client.request("spam_stderr_then_respond", {"hello": "world"}, timeout=5.0)
         assert response == {"hello": "world"}
-    finally:
-        client.close()
 
 
 def test_request_raises_lsp_error_on_error_response(tmp_path: Path) -> None:
-    client = _spawn_fake_server(tmp_path)
-    try:
-        with pytest.raises(LSPError, match="simulated failure"):
-            client.request("boom", {})
-    finally:
-        client.close()
+    with _spawn_fake_server(tmp_path) as client, pytest.raises(LSPError, match="simulated failure"):
+        client.request("boom", {})
 
 
 def test_request_times_out_when_server_never_responds(tmp_path: Path) -> None:
-    client = _spawn_fake_server(tmp_path)
-    try:
-        with pytest.raises(LSPTimeoutError, match="never_respond"):
-            client.request("never_respond", {}, timeout=0.2)
-    finally:
-        client.close()
+    with _spawn_fake_server(tmp_path) as client, pytest.raises(LSPTimeoutError, match="never_respond"):
+        client.request("never_respond", {}, timeout=0.2)
 
 
 def test_pending_request_is_cleaned_up_after_timeout(tmp_path: Path) -> None:
     # A request that already timed out must not leave a stale entry in the
     # pending-request table -- a later, unrelated request reusing that
     # table must not be able to collide with it.
-    client = _spawn_fake_server(tmp_path)
-    try:
+    with _spawn_fake_server(tmp_path) as client:
         with pytest.raises(LSPTimeoutError):
             client.request("never_respond", {}, timeout=0.2)
         assert client._pending == {}
         assert client.request("echo", {"ok": True}) == {"ok": True}
-    finally:
-        client.close()
 
 
 def test_notify_does_not_wait_for_a_response(tmp_path: Path) -> None:
-    client = _spawn_fake_server(tmp_path)
-    try:
+    with _spawn_fake_server(tmp_path) as client:
         client.notify("exit", {})
         client._process.wait(timeout=5)
         assert client._process.returncode == 0
-    finally:
-        client.close()
 
 
 def test_close_performs_clean_shutdown_handshake(tmp_path: Path) -> None:
@@ -213,19 +193,17 @@ def test_close_still_cleans_up_after_the_server_already_exited_on_its_own(tmp_pa
 
 
 def test_request_after_server_exits_raises_instead_of_hanging(tmp_path: Path) -> None:
-    client = _spawn_fake_server(tmp_path)
-    try:
+    # The server process is already gone by the time this block exits, so
+    # its stdin pipe is broken -- close() must tolerate that (it swallows
+    # LSPError from its own shutdown handshake) rather than this test
+    # leaking an unclosed, already-broken pipe for the GC to warn about
+    # later.
+    with _spawn_fake_server(tmp_path) as client:
         client.notify("exit", {})
         client._process.wait(timeout=5)
 
         with pytest.raises(LSPError):
             client.request("echo", {}, timeout=2.0)
-    finally:
-        # The server process is already gone; its stdin pipe is broken.
-        # close() must tolerate that (it swallows LSPError from its own
-        # shutdown handshake) rather than this test leaking an unclosed,
-        # already-broken pipe for the GC to warn about later.
-        client.close()
 
 
 def test_request_raises_lsp_error_when_server_exits_without_responding(tmp_path: Path) -> None:
@@ -233,12 +211,8 @@ def test_request_raises_lsp_error_when_server_exits_without_responding(tmp_path:
     # to a request that's still pending when the connection is lost (as
     # opposed to LSPTimeoutError, which fires from the requester's own side
     # without the reader loop's involvement).
-    client = _spawn_fake_server(tmp_path)
-    try:
-        with pytest.raises(LSPError, match="LSP connection closed"):
-            client.request("die_immediately", timeout=5.0)
-    finally:
-        client.close()
+    with _spawn_fake_server(tmp_path) as client, pytest.raises(LSPError, match="LSP connection closed"):
+        client.request("die_immediately", timeout=5.0)
 
 
 def test_reader_loop_marks_connection_lost_on_a_malformed_frame(tmp_path: Path) -> None:
@@ -246,14 +220,11 @@ def test_reader_loop_marks_connection_lost_on_a_malformed_frame(tmp_path: Path) 
     # _read_message raise inside the reader loop's own try block -- this
     # must be caught, not crash the thread silently, and still mark the
     # connection lost so a later request fails fast instead of hanging.
-    client = _spawn_fake_server(tmp_path)
-    try:
+    with _spawn_fake_server(tmp_path) as client:
         client.notify("send_garbage")
         client._reader.join(timeout=5)
         assert client._reader.is_alive() is False
         assert client._connection_lost is True
-    finally:
-        client.close()
 
 
 def test_late_response_after_a_timeout_is_silently_dropped(tmp_path: Path) -> None:
@@ -261,16 +232,13 @@ def test_late_response_after_a_timeout_is_silently_dropped(tmp_path: Path) -> No
     # (removed from _pending after its own timeout) must not raise or
     # corrupt a later, unrelated request -- it has nowhere to go, so the
     # reader loop just drops it.
-    client = _spawn_fake_server(tmp_path)
-    try:
+    with _spawn_fake_server(tmp_path) as client:
         with pytest.raises(LSPTimeoutError):
             client.request("delayed_echo", {"value": 1}, timeout=0.05)
 
         time.sleep(0.5)  # let the server's delayed response actually arrive
 
         assert client.request("echo", {"ok": True}) == {"ok": True}
-    finally:
-        client.close()
 
 
 def test_read_message_returns_none_on_clean_eof() -> None:
