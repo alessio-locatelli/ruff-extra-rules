@@ -8,6 +8,7 @@ import pytest
 import pre_commit_hooks.ast_checks.validate_function_name as module
 from pre_commit_hooks.ast_checks._base import FixValidationError, is_fix_errored, is_fix_rejected
 from pre_commit_hooks.ast_checks.validate_function_name import ValidateFunctionNameCheck
+from tests._helpers import raises, restricted_permissions
 from tests.factories import ViolationFactory
 
 if TYPE_CHECKING:
@@ -115,11 +116,8 @@ def test_fix_returns_false_when_apply_fix_fails_without_raising(
     violations = check.check(filepath, tree, source)
     assert len(violations) == 1
 
-    tmp_path.chmod(0o555)
-    try:
+    with restricted_permissions(tmp_path, 0o555, restore=0o755):
         assert check.fix(filepath, violations, source, tree) is False
-    finally:
-        tmp_path.chmod(0o755)
 
     assert not (violations[0].fix_data and violations[0].fix_data.get("fixed"))
 
@@ -142,10 +140,7 @@ def test_fix_marks_violation_errored_and_continues_when_apply_fix_raises(
     violations = check.check(filepath, tree, source)
     assert len(violations) == 1
 
-    def boom(*_args: object, **_kws: object) -> bool:
-        raise RuntimeError("simulated apply_fix failure")
-
-    monkeypatch.setattr(module, "apply_fix", boom)
+    monkeypatch.setattr(module, "apply_fix", raises(RuntimeError, "simulated apply_fix failure"))
 
     with caplog.at_level("DEBUG"):
         assert check.fix(filepath, violations, source, tree) is False
