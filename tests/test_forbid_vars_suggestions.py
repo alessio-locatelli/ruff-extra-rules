@@ -890,6 +890,19 @@ def test_accumulator_append_evidence_produces_suggestion() -> None:
     _assert_plan_for(source, "results", "items", Confidence.SUGGESTION_ONLY, forbidden_names=_WITH_RESULTS)
 
 
+def test_accumulator_append_evidence_tolerates_repeated_matching_names() -> None:
+    source = """def f(first, second):
+    results = []
+    for item in first:
+        results.append(item)
+    for item in second:
+        results.append(item)
+    return results
+"""
+
+    _assert_plan_for(source, "results", "items", Confidence.SUGGESTION_ONLY, forbidden_names=_WITH_RESULTS)
+
+
 @pytest.mark.parametrize(
     "source",
     [
