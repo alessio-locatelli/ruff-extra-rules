@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+import tomllib
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -19,7 +22,6 @@ from ._helpers import FakeSession
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 
 @pytest.fixture(autouse=True)
@@ -353,3 +355,12 @@ def test_close_file_forgets_the_file_even_when_the_didclose_notification_fails(t
     session.close_file(filepath)  # must not raise
 
     assert uri not in session._open_versions
+
+
+def test_min_ty_version_matches_pyproject_pin() -> None:
+    pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    dev_dependencies = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))["dependency-groups"]["dev"]
+    (ty_pin,) = (dep for dep in dev_dependencies if re.match(r"^ty(?:[<>=~!]|$)", dep))
+    match = re.fullmatch(r"ty>=([\d.]+)", ty_pin)
+    assert match is not None, f"unexpected `ty` pin syntax in pyproject.toml: {ty_pin!r}"
+    assert match.group(1) == session_module._MIN_TY_VERSION

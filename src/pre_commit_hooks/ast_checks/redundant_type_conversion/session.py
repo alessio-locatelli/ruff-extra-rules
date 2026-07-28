@@ -27,18 +27,24 @@ _TY_COMMAND = ("ty", "server")
 # See ADR-0035's "Detection method" for why this separator is stripped.
 _HOVER_DOC_SEPARATOR = re.compile(r"\n-{3,}\n")
 
+# Kept in lockstep with pyproject.toml's `dependency-groups.dev` `ty>=X.Y.Z` pin by
+# test_min_ty_version_matches_pyproject_pin() -- see docs/adr/0039-tri006-unavailable-message-scope-and-wording.md.
+_MIN_TY_VERSION = "0.0.64"
+
 _INSTALL_HINT = (
-    "redundant-type-conversion (TRI006) requires Astral's `ty` type checker on PATH, but it could not be "
-    "started. Install it with `uv tool install ty`, `uvx --from ty ty --version` once to warm the uvx cache "
-    "and then ensure `ty` resolves on PATH, or add `ty` as a dev dependency of your own project. "
-    "See https://github.com/astral-sh/ty."
+    "redundant-type-conversion (TRI006) requires Astral's `ty` type checker on PATH. Install it with "
+    "`uv tool install ty` or add `ty` as a dev dependency of your own project, or opt out with "
+    "`--ignore=redundant-type-conversion`. See https://github.com/astral-sh/ty."
 )
 
 _SELF_TEST_FAILED_HINT = (
     "redundant-type-conversion (TRI006) found `ty` on PATH, but it failed this check's own compatibility "
     "self-test: a known redundant/necessary type-conversion pair didn't produce the diagnostics this check "
-    "expects. `ty` is pre-1.0 and its own diagnostics may change between versions — try a different "
-    "installed `ty` version. See docs/rules/redundant-type-conversion.md."
+    f"expects. `ty` is pre-1.0 and its diagnostics can change between versions in either direction. This "
+    f"release of ruff-extra-rules was validated against ty>={_MIN_TY_VERSION} -- if your `ty` predates that, "
+    "upgrade it; if not, it may be newer than validated, so pinning to an older `ty` (or waiting for a "
+    "ruff-extra-rules update) may help instead -- or opt out with `--ignore=redundant-type-conversion`. "
+    "See docs/rules/redundant-type-conversion.md."
 )
 
 _REDUNDANT_CONTROL_BEFORE = """\
