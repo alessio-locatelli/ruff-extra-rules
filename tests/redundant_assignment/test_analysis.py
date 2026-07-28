@@ -1055,7 +1055,7 @@ def f():
             # of that call's own arguments — nothing precedes it.
             """
 def f():
-    check = ForbidVarsCheck()
+    check = MeaninglessVarsCheck()
     violations = check.check(Path("test.py"), tree, source)
 """,
             "check",

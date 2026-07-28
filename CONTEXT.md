@@ -9,7 +9,7 @@ An installable unit registered in `.pre-commit-hooks.yaml` that pre-commit/prek 
 _Avoid_: linter, tool
 
 **Check**:
-A single, independently toggleable rule (e.g. `forbid-vars`, `redundant-assignment`, `misplaced-comment`) implementing the `ASTCheck` protocol, identified by a `check_id` and an error code (`TRI00N` or `STYLE-001`). Many checks run inside one hook invocation, orchestrated by `CheckOrchestrator`.
+A single, independently toggleable rule (e.g. `meaningless-vars`, `redundant-assignment`, `misplaced-comment`) implementing the `ASTCheck` protocol, identified by a `check_id` and an error code (`TRI00N` or `STYLE-001`). Many checks run inside one hook invocation, orchestrated by `CheckOrchestrator`.
 _Avoid_: rule, linter, hook — a check is not a hook; several checks share one hook
 
 **Violation**:

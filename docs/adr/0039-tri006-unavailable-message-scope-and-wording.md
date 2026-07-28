@@ -12,7 +12,7 @@ Separately, the two messages `CheckUnavailableError` carries here (`_INSTALL_HIN
 
 For the repetition itself:
 
-- **`require_serial: true`** on the `ruff-extra-rules` hook: would collapse every worker process into one, making ADR-0036's per-process guarantee also a per-run guarantee. Rejected: this hook entry point bundles every check in `ALL_CHECKS` (forbid-vars, validate-function-name, redundant-type-conversion, ...), not just TRI006, so this would remove prek/pre-commit's parallelism for the whole hook, on every commit, forever — not only on the runs where `ty` happens to be missing. Nothing in this codebase replaces that parallelism internally.
+- **`require_serial: true`** on the `ruff-extra-rules` hook: would collapse every worker process into one, making ADR-0036's per-process guarantee also a per-run guarantee. Rejected: this hook entry point bundles every check in `ALL_CHECKS` (meaningless-vars, validate-function-name, redundant-type-conversion, ...), not just TRI006, so this would remove prek/pre-commit's parallelism for the whole hook, on every commit, forever — not only on the runs where `ty` happens to be missing. Nothing in this codebase replaces that parallelism internally.
 - **Cross-process shared state** (e.g. a sentinel/lockfile so worker processes agree to print only once): rejected. It would need real scoping and lifetime rules (per run? per commit?), has races between workers that start concurrently, and can go stale (a sentinel written before `ty` gets installed mid-session would keep suppressing the hint after the prerequisite is already fixed) — meaningful complexity for what is otherwise a cosmetic repeat.
 - **Accept the repeat, bounded by worker count**: adopted.
 

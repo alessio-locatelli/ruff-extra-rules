@@ -635,7 +635,7 @@ def should_report_violation(
     # Rule 11 (conservative level only): a Call RHS returns some domain
     # object the tracker can't inspect, so a name that isn't a generic
     # placeholder (`result`, `value`, ...) or a restatement of the callee
-    # itself (`check = ForbidVarsCheck()`) is presumed to be the author
+    # itself (`check = MeaninglessVarsCheck()`) is presumed to be the author
     # deliberately documenting what that call returns — e.g. `warning =
     # conn.recv()` or `ci_headers = CIMultiDict(headers)` — rather than a
     # redundant restatement of it. Doesn't apply to the permissive level,
@@ -704,7 +704,7 @@ def _is_generic_call_result_name(var_name: str, rhs_node: ast.Call) -> bool:
     """True when `var_name` adds no descriptive value beyond what
     `rhs_node`'s call already conveys — either a placeholder generic enough
     to carry no domain meaning on its own, or a name that just restates the
-    callee it's assigned from (`check = ForbidVarsCheck()`, `state =
+    callee it's assigned from (`check = MeaninglessVarsCheck()`, `state =
     me.state(...)`) rather than describing the domain value the call
     returns (`warning = conn.recv()`).
     """

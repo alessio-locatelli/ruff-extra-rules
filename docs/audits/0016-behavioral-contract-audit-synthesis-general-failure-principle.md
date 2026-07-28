@@ -58,18 +58,18 @@ Each decision was correct within its own audit's scope: #33 predates #43 and del
 Reproduced against the current code: with `src/tracked.py` staged (`data = 1`) and `src/untracked.py` not staged (`result = 2`) in a fresh git repository —
 
 ```
-$ uv run python -m pre_commit_hooks.ast_checks --select=forbid-vars src/untracked.py
-src/untracked.py:1:1: TRI001: Forbidden variable name 'result' found. ...
+$ uv run python -m pre_commit_hooks.ast_checks --select=meaningless-vars src/untracked.py
+src/untracked.py:1:1: TRI001: Meaningless variable name 'result' found. ...
 (exit 1)
 
-$ uv run python -m pre_commit_hooks.ast_checks --select=forbid-vars src/
-src/tracked.py:1:1: TRI001: Forbidden variable name 'data' found. ...
+$ uv run python -m pre_commit_hooks.ast_checks --select=meaningless-vars src/
+src/tracked.py:1:1: TRI001: Meaningless variable name 'data' found. ...
 (exit 1 -- but only because of tracked.py; untracked.py's own violation is never reported)
 ```
 
 If `tracked.py` had no violation of its own, the directory-argument run would exit 0 — a false-clean result for a file that was never examined, and precisely the failure mode `adr/0024` fixed for the sibling code path. This also matches ch. 35's own general rule directly: a "no change" (skip the file) with no visible warning is exactly "try something, ignore errors, and report success," not "fail visibly."
 
-This is also the exact workflow `AGENTS.md`'s own documented dev commands use (`uv run python -m pre_commit_hooks.ast_checks --select=forbid-vars,validate-function-name src/`) — the command a solo maintainer runs directly against a new, not-yet-staged file, before `git add`ing it.
+This is also the exact workflow `AGENTS.md`'s own documented dev commands use (`uv run python -m pre_commit_hooks.ast_checks --select=meaningless-vars,validate-function-name src/`) — the command a solo maintainer runs directly against a new, not-yet-staged file, before `git add`ing it.
 
 Filed as [issue #67](https://github.com/alessio-locatelli/ruff-extra-rules/issues/67) rather than fixed inline here, per #45's own acceptance criteria ("Any cross-cutting gap found gets its own follow-up issue (not fixed inline in this ticket)").
 
@@ -77,7 +77,7 @@ Filed as [issue #67](https://github.com/alessio-locatelli/ruff-extra-rules/issue
 
 `adr/0014` (#32) scoped itself to "chapter 33 ... only for its cache-invalidation-on-version-change portions ... the rest of ch. 33 is CLI/config UX and release process, not caching" and no later ticket picked up the remainder — an audit-trail completeness gap, not a behavior gap, closed here rather than by a follow-up issue since no code change results:
 
-- **"MUST define how behavior changes between tool versions"** and **"MUST document behavior changes that can produce large source diffs"**: satisfied by this audit series' own existing practice, not a dedicated changelog — every behavior change chapters 1–34's audits made is recorded in its own ADR (`docs/adr/0011`–`0026`) with a linked, detailed audit report (e.g. `adr/0023`'s `forbid_vars` rewrite, which can change which names get renamed across a whole file, is documented exactly this way). No `CHANGELOG.md`/`HISTORY.md` exists in the repository, and this project's own GitHub releases have empty bodies — confirmed by `git ls-files | rg -i changelog` (no match) and `gh release view v0.0.31 --json body` (empty). No dedicated changelog is warranted: `AGENTS.md` states this is a personal hobby project "not used by anyone else," so there's no external consumer a changelog would need to inform.
+- **"MUST define how behavior changes between tool versions"** and **"MUST document behavior changes that can produce large source diffs"**: satisfied by this audit series' own existing practice, not a dedicated changelog — every behavior change chapters 1–34's audits made is recorded in its own ADR (`docs/adr/0011`–`0026`) with a linked, detailed audit report (e.g. `adr/0023`'s `meaningless_vars` rewrite, which can change which names get renamed across a whole file, is documented exactly this way). No `CHANGELOG.md`/`HISTORY.md` exists in the repository, and this project's own GitHub releases have empty bodies — confirmed by `git ls-files | rg -i changelog` (no match) and `gh release view v0.0.31 --json body` (empty). No dedicated changelog is warranted: `AGENTS.md` states this is a personal hobby project "not used by anyone else," so there's no external consumer a changelog would need to inform.
 - **"MUST avoid silently changing auto-fix semantics in a patch release unless the compatibility policy permits it"**: satisfied by a declared policy — `AGENTS.md` states "Breaking changes are allowed and expected" for this project's own hook ids/CLI surface, which is this project's compatibility policy, and it explicitly permits a behavior change at any release granularity.
 - **"MUST provide a migration path for incompatible configuration changes"** and **"MUST avoid silently interpreting old configuration according to a materially different meaning"**: N/A — no configuration file exists anywhere in this pipeline (`adr/0019`/#35 confirmed this by grep: no `tomllib`, no config parsing); there is nothing to migrate or reinterpret.
 - **"MUST ensure that serialized internal data is versioned or safely invalidated when its format changes"** and **"MUST ensure that old cache data cannot silently produce incorrect results after an incompatible upgrade"**: already satisfied — `CacheManager`'s own `cache_data["version"]` field is checked against `cache_version` on every read and discarded on mismatch (`_cache.py`'s `get_cached_result`/`set_cached_result`), and `cache_version` itself is computed from a hash of the package's own source tree (`adr/0005`, reconfirmed by `adr/0014`), so any upgrade that changes behavior necessarily changes the cache key. Predates this audit series; reconfirmed correct here, not newly fixed.

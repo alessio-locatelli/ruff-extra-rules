@@ -74,7 +74,7 @@ Use [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
 uv run python -m pre_commit_hooks.ast_checks --list-checks
-uv run python -m pre_commit_hooks.ast_checks --select=forbid-vars,validate-function-name src/
+uv run python -m pre_commit_hooks.ast_checks --select=meaningless-vars,validate-function-name src/
 uv run python -m pre_commit_hooks.ast_checks --ignore=redundant-assignment --fix src/
 ```
 

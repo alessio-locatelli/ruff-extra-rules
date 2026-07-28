@@ -115,7 +115,7 @@ def test_real_sigterm_mid_run_stops_gracefully_without_leftover_temp_files(
 
     monkeypatch.setattr(CheckOrchestrator, "_check_file", _check_file_then_send_sigterm_on_third_call)
 
-    exit_code = run(["--select", "forbid-vars", "--fix", *filepaths])
+    exit_code = run(["--select", "meaningless-vars", "--fix", *filepaths])
 
     assert exit_code == 1
     assert "Interrupted." in capsys.readouterr().err
@@ -152,7 +152,7 @@ def test_real_invocation_does_not_leak_a_traceback_onto_stderr(tmp_path: Path) -
 
     try:
         completed_process = subprocess.run(  # noqa: S603
-            [sys.executable, "-m", "pre_commit_hooks.ast_checks", "--select", "forbid-vars", filepath],
+            [sys.executable, "-m", "pre_commit_hooks.ast_checks", "--select", "meaningless-vars", filepath],
             capture_output=True,
             text=True,
             check=False,
@@ -189,7 +189,7 @@ def test_verbose_flag_surfaces_the_underlying_exception_on_stderr(tmp_path: Path
                 "pre_commit_hooks.ast_checks",
                 "--verbose",
                 "--select",
-                "forbid-vars",
+                "meaningless-vars",
                 filepath,
             ],
             capture_output=True,
@@ -221,8 +221,8 @@ def test_verbose_flag_does_not_change_violations_or_exit_code(tmp_path: Path) ->
             "-m",
             "pre_commit_hooks.ast_checks",
             "--select",
-            "forbid-vars",
-            "--forbid-vars-level",
+            "meaningless-vars",
+            "--meaningless-vars-level",
             "permissive",
             *extra_args,
         ]

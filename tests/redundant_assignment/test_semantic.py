@@ -238,8 +238,8 @@ def test_should_autofix_allows_zero_arg_call() -> None:
     # just SINGLE_USE): a zero-arg call with nothing else evaluating
     # before its use (within the use's statement) has no sibling operand
     # whose order inlining could disturb, so it's safe to inline.
-    rhs_node = ast.parse("ForbidVarsCheck()", mode="eval").body
-    lifecycle = _make_single_use_lifecycle("ForbidVarsCheck()", rhs_node, var_name="check", preceded_by_call=False)
+    rhs_node = ast.parse("MeaninglessVarsCheck()", mode="eval").body
+    lifecycle = _make_single_use_lifecycle("MeaninglessVarsCheck()", rhs_node, var_name="check", preceded_by_call=False)
     assert should_autofix(lifecycle) is True
 
 
@@ -297,7 +297,7 @@ def test_should_autofix_uses_real_use_line_length_when_available() -> None:
         ("result", "get_value()", True),
         ("value", "get_value()", True),
         ("x", "get_value()", True),  # Too short (<=2 chars) to carry any domain meaning.
-        ("check", "ForbidVarsCheck()", True),  # Restates the callee's own name.
+        ("check", "MeaninglessVarsCheck()", True),  # Restates the callee's own name.
         ("state", "me.state(State)", True),  # Restates the callee's own (attribute) name.
         ("warning", "conn.recv()", False),
         ("ci_headers", "CIMultiDict(headers)", False),

@@ -1,12 +1,12 @@
-# forbid-vars adds `results`, bounded to DB-API vocabulary and single-target accumulators
+# meaningless-vars adds `results`, bounded to DB-API vocabulary and single-target accumulators
 
 ## Context
 
-TRI001's default forbidden-name set was `data`/`result`; `results` — the plural accumulator/collection form — was not included, so `plan_suggestions()` (see `docs/adr/0030-file-local-semantic-variable-rename-suggestions.md`) never ran against it. A read-only scan of `results = ...` bindings across five real-world Python projects (aiohttp, mesop, structlog, mongo-python-driver, aiohttp-client-cache) plus duckdb-python — 46 bindings total — showed two recurring shapes with no existing evidence source: a call to a DB-API-style cursor "fetch" method (`cursor.fetchall()`, `qcoll.find()....to_list()`, 18/46), and an accumulator (`results = []` populated later via `.append()`, 8/46). The remaining bindings were either already covered by existing annotation/producer/registry evidence or genuinely ambiguous (`asyncio.gather(...)`, `db.command(...)`), with no safe name derivable from local context.
+TRI001's default meaningless-name set was `data`/`result`; `results` — the plural accumulator/collection form — was not included, so `plan_suggestions()` (see `docs/adr/0030-file-local-semantic-variable-rename-suggestions.md`) never ran against it. A read-only scan of `results = ...` bindings across five real-world Python projects (aiohttp, mesop, structlog, mongo-python-driver, aiohttp-client-cache) plus duckdb-python — 46 bindings total — showed two recurring shapes with no existing evidence source: a call to a DB-API-style cursor "fetch" method (`cursor.fetchall()`, `qcoll.find()....to_list()`, 18/46), and an accumulator (`results = []` populated later via `.append()`, 8/46). The remaining bindings were either already covered by existing annotation/producer/registry evidence or genuinely ambiguous (`asyncio.gather(...)`, `db.command(...)`), with no safe name derivable from local context.
 
 ## Decision
 
-`results` joins `DEFAULT_FORBIDDEN_NAMES`. Two new evidence sources were added to close the gap the scan identified, both scoped deliberately narrower than the coverage they could theoretically reach:
+`results` joins `DEFAULT_MEANINGLESS_NAMES`. Two new evidence sources were added to close the gap the scan identified, both scoped deliberately narrower than the coverage they could theoretically reach:
 
 **DB-API fetch methods.** A call whose terminal attribute name is `fetchall` or `fetchmany` proposes `rows`; `fetchone` proposes `row` — PEP 249 DB-API standard vocabulary (sqlite3, psycopg2, duckdb, ...). `to_list()`, pymongo/motor's async-cursor equivalent, proposes `documents` instead: MongoDB is a document store, and pymongo's own source consistently uses that term (`Collection.find()`'s docstring: "matches documents"; `Cursor.to_list() -> list[_DocumentType]`), never "row". All four are bare attribute-name matches — the same style already used for `_attribute_role` (`.status_code`/`.headers`/... → `response`) — with no receiver-type confirmation, since this codebase tracks no import information for database drivers. `fetchnumpy` (duckdb) is deliberately excluded: it returns a dict keyed by column name, not row-oriented data, so `rows` would misdescribe it rather than merely being unhelpful.
 
@@ -14,7 +14,7 @@ TRI001's default forbidden-name set was `data`/`result`; `results` — the plura
 
 Both sources are single-evidence, so per the existing confidence rule (`"annotation" in evidence or len(evidence) >= 2` → `AUTO_FIX`, else `SUGGESTION_ONLY`) they never auto-fix on their own — only in combination with another evidence source (e.g. a confirming annotation), same as every other registry- or producer-derived candidate.
 
-The producer-prefix vocabulary (`get_`/`fetch_`/`load_`/.../`find_`) also gained `list_` and `collect_` (e.g. `list_collections()` → `collections`), motivated by the same scan and by this repo's own `_collect_replacements` accumulator. This applies to every forbidden name, not just `results`.
+The producer-prefix vocabulary (`get_`/`fetch_`/`load_`/.../`find_`) also gained `list_` and `collect_` (e.g. `list_collections()` → `collections`), motivated by the same scan and by this repo's own `_collect_replacements` accumulator. This applies to every meaningless name, not just `results`.
 
 ## Alternatives considered
 

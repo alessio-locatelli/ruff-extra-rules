@@ -27,7 +27,7 @@ from pre_commit_hooks.ast_checks._cli import main
 from pre_commit_hooks.ast_checks._discovery import expand_directories, filter_excluded_files
 from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, load_checks
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
-from pre_commit_hooks.ast_checks.forbid_vars import ForbidVarsCheck, ForbidVarsLevel
+from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsCheck, MeaninglessVarsLevel
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
 from tests.factories import ViolationFactory
 
@@ -485,7 +485,7 @@ def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: 
         filepath.write_text("data = 1\n")
         subprocess.run([git, "add", "module.py"], check=True, cwd=tmp_path)  # noqa: S603
 
-        exit_code = main([str(tmp_path), "--select", "forbid-vars", "--forbid-vars-level", "permissive"])
+        exit_code = main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"])
 
         assert exit_code == 1
         assert "TRI001" in capsys.readouterr().err
@@ -511,10 +511,10 @@ def test_main_directory_argument_matches_explicit_file_argument_for_untracked_fi
         untracked = tmp_path / "untracked.py"
         untracked.write_text("result = 2\n")
 
-        assert main([str(untracked), "--select", "forbid-vars", "--forbid-vars-level", "permissive"]) == 1
+        assert main([str(untracked), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
         assert "TRI001" in capsys.readouterr().err
 
-        assert main([str(tmp_path), "--select", "forbid-vars", "--forbid-vars-level", "permissive"]) == 1
+        assert main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
         assert "TRI001" in capsys.readouterr().err
     finally:
         os.chdir(original_dir)
@@ -524,7 +524,7 @@ def test_main_directory_scan_does_not_crash_on_a_file_with_a_non_utf8_name(tmp_p
     # Regression: expand_directories() safely includes a file whose name
     # isn't valid UTF-8 (see test_expand_directories_includes_a_file_with_a_
     # non_utf8_name), but that file still has to survive _prefilter.py's own
-    # git_grep_filter() call once forbid-vars' prefilter pattern runs against
+    # git_grep_filter() call once meaningless-vars' prefilter pattern runs against
     # it -- that call decodes git grep's stdout the same way, and would
     # crash right there instead of reporting the violation.
     git = shutil.which("git")
@@ -539,7 +539,7 @@ def test_main_directory_scan_does_not_crash_on_a_file_with_a_non_utf8_name(tmp_p
         with Path(os.fsdecode(bad_path_bytes)).open("wb") as f:
             f.write(b"result = 1\n")
 
-        assert main([str(tmp_path), "--select", "forbid-vars", "--forbid-vars-level", "permissive"]) == 1
+        assert main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
     finally:
         os.chdir(original_dir)
 
@@ -553,7 +553,7 @@ def test_process_files_handles_utf8_bom(tmp_path: Path) -> None:
     filepath = tmp_path / "with_bom.py"
     filepath.write_bytes(b"\xef\xbb\xbfdata = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
     violations = orchestrator.process_files([str(filepath)])
 
     assert len(violations[str(filepath)]) == 1
@@ -570,7 +570,7 @@ def test_apply_fixes_handles_utf8_bom(tmp_path: Path) -> None:
         b"\xef\xbb\xbfimport requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()], fix_mode=True)
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()], fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
     fix_data = violations[str(filepath)][0].fix_data
 
@@ -715,14 +715,16 @@ def test_refresh_stale_positions_never_drops_an_unrelated_open_violation_sharing
     filepath = tmp_path / "module.py"
     filepath.write_text("data = requests.get(url)\n")
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     # Same message on purpose -- e.g. two identically-named functions in
     # different scopes would produce identical violation text.
-    shared_message = "Forbidden variable name 'data' found. Consider renaming to 'response'."
+    shared_message = "Meaningless variable name 'data' found. Consider renaming to 'response'."
     terminal = ViolationFactory.build(
-        check_id="forbid-vars", message=shared_message, fixable=True, fix_data={"fix_failed": True}
+        check_id="meaningless-vars", message=shared_message, fixable=True, fix_data={"fix_failed": True}
     )
-    open_violation = ViolationFactory.build(check_id="forbid-vars", message=shared_message, fixable=True, fix_data=None)
+    open_violation = ViolationFactory.build(
+        check_id="meaningless-vars", message=shared_message, fixable=True, fix_data=None
+    )
     violations = [terminal, open_violation]
 
     orchestrator._refresh_stale_positions(filepath, violations)
@@ -738,7 +740,7 @@ def test_refresh_stale_positions_returns_when_final_read_fails(tmp_path: Path) -
     # than guess.
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     violations: list[Violation] = []
 
     filepath.unlink()
@@ -752,7 +754,7 @@ def test_refresh_stale_positions_returns_when_final_parse_fails(tmp_path: Path) 
     # racing with this run) must not crash the reconciliation pass.
     filepath = tmp_path / "module.py"
     filepath.write_text("def broken(:\n")
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     violations: list[Violation] = []
 
     orchestrator._refresh_stale_positions(filepath, violations)
@@ -771,19 +773,19 @@ def test_refresh_stale_positions_records_rule_failure_when_check_raises(
         msg = "simulated check failure"
         raise RuntimeError(msg)
 
-    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
 
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     # A still-open (unmarked) violation for this check_id, so there's
     # something for the reconciliation pass to actually attempt refreshing.
-    stale_violation = ViolationFactory.build(check_id="forbid-vars", fixable=True, fix_data=None)
+    stale_violation = ViolationFactory.build(check_id="meaningless-vars", fixable=True, fix_data=None)
     violations = [stale_violation]
 
     orchestrator._refresh_stale_positions(filepath, violations)
 
-    assert (str(filepath), "forbid-vars") in orchestrator.rule_failures  # pytriage: ignore=TRI006
+    assert (str(filepath), "meaningless-vars") in orchestrator.rule_failures  # pytriage: ignore=TRI006
     # Left exactly as it was -- the check crashed before it could report
     # anything current to replace it with.
     assert violations == [stale_violation]
@@ -822,7 +824,7 @@ def test_fix_preserves_crlf_line_endings(tmp_path: Path) -> None:
 
 
 def test_process_files_empty_filepaths_returns_empty() -> None:
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     assert orchestrator.process_files([]) == {}
 
 
@@ -861,13 +863,13 @@ def test_process_files_none_pattern_check_still_sees_a_file_other_checks_pattern
     # get_prefilter_pattern() returns None (see
     # test_process_files_no_prefilter_pattern_checks_all_files) precisely so
     # it sees every file regardless of what else is enabled. This file has a
-    # real excessive-blank-lines violation but contains none of forbid-vars'
+    # real excessive-blank-lines violation but contains none of meaningless-vars'
     # own patterns ("data"/"result"), so the old combined filter dropped it
     # before it was ever parsed.
     filepath = tmp_path / "module.py"
     filepath.write_text('"""Doc."""\n\n\n\nclass Foo:\n    pass\n')
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(), ExcessiveBlankLinesCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(), ExcessiveBlankLinesCheck()])
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations[str(filepath)][0].error_code == "TRI002"
@@ -879,7 +881,7 @@ def test_process_files_applies_each_checks_prefilter_independently(
     # Regression (#46): a file must only run through a check whose own
     # prefilter pattern it actually matches -- not through every enabled
     # check merely because some *other* check's pattern matched. This file
-    # contains forbid-vars' own pattern ("data") but not
+    # contains meaningless-vars' own pattern ("data") but not
     # redundant-super-init's ("super().__init__"), so redundant-super-init's
     # check() must never even be called against it.
     filepath = tmp_path / "module.py"
@@ -889,7 +891,9 @@ def test_process_files_applies_each_checks_prefilter_independently(
     spy_check = mock.MagicMock(wraps=redundant_super_init.check)
     monkeypatch.setattr(RedundantSuperInitCheck, "check", spy_check)
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), redundant_super_init])
+    orchestrator = CheckOrchestrator(
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), redundant_super_init]
+    )
     violations = orchestrator.process_files([str(filepath)])
 
     spy_check.assert_not_called()
@@ -911,7 +915,7 @@ def test_process_files_unreadable_file_is_skipped(tmp_path: Path, write_file: Ca
     if write_file is not None:
         write_file(filepath)
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations == {}
@@ -953,7 +957,7 @@ def test_process_files_second_call_uses_cache(tmp_path: Path, monkeypatch: pytes
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
     first = orchestrator.process_files([str(filepath)])
     assert first[str(filepath)][0].error_code == "TRI001"
 
@@ -976,7 +980,7 @@ def test_cache_hit_and_cache_miss_report_equivalent_violations(tmp_path: Path, m
     # cached one.
     filepath = tmp_path / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
-    checks: list[ASTCheck] = [ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), ExcessiveBlankLinesCheck()]
+    checks: list[ASTCheck] = [MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), ExcessiveBlankLinesCheck()]
 
     cache_miss_orchestrator = CheckOrchestrator(checks=checks)
     cache_miss = cache_miss_orchestrator.process_files([str(filepath)])[str(filepath)]
@@ -1001,11 +1005,11 @@ def test_process_files_different_check_set_forces_recheck(tmp_path: Path) -> Non
     filepath = tmp_path / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
 
-    forbid_vars_only = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
-    forbid_vars_only.process_files([str(filepath)])
+    meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
+    meaningless_vars_only.process_files([str(filepath)])
 
     both_checks = CheckOrchestrator(
-        checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), ExcessiveBlankLinesCheck()]
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), ExcessiveBlankLinesCheck()]
     )
     violations = both_checks.process_files([str(filepath)])
 
@@ -1023,7 +1027,7 @@ def test_generate_cache_key_changes_when_source_tree_changes(tmp_path: Path, mon
     (fake_root / "module.py").write_text("x = 1\n")
     monkeypatch.setattr(_orchestrator, "_PACKAGE_ROOT", fake_root)
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     key_before = orchestrator._generate_cache_key()
 
     (fake_root / "module.py").write_text("x = 2\n")
@@ -1039,7 +1043,7 @@ def test_generate_cache_key_changes_when_python_version_changes(monkeypatch: pyt
     # results. Patches the `sys` name binding inside the _orchestrator
     # module (not the real global sys module) so only _generate_cache_key()
     # sees a different version.
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     key_before = orchestrator._generate_cache_key()
 
     fake_sys = types.SimpleNamespace(
@@ -1057,7 +1061,7 @@ def test_get_cached_violations_ignores_corrupted_cache_entry(
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     orchestrator.cache.set_cached_result(filepath, "ruff-extra-rules", {"violations": [{}]})
 
     cached_violations = orchestrator._get_cached_violations(filepath)
@@ -1068,7 +1072,7 @@ def test_cache_violations_serialization_error_is_caught(tmp_path: Path, monkeypa
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
 
     def boom(*_args: object, **_kws: object) -> None:
         raise TypeError("simulated cache backend failure")
@@ -1089,9 +1093,9 @@ def test_process_files_check_exception_is_logged_and_skipped(tmp_path: Path, mon
     def boom(*_args: object, **_kws: object) -> None:
         raise ValueError("simulated check failure")
 
-    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(), ExcessiveBlankLinesCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(), ExcessiveBlankLinesCheck()])
     violations = orchestrator.process_files([str(filepath)])
 
     error_codes = {v.error_code for v in violations[str(filepath)]}
@@ -1109,13 +1113,13 @@ def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monk
     def boom(*_args: object, **_kwargs: object) -> list[Violation]:
         raise ValueError("simulated check failure")
 
-    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations == {}
-    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]  # pytriage: ignore=TRI006
+    assert orchestrator.rule_failures == [(str(filepath), "meaningless-vars")]  # pytriage: ignore=TRI006
 
 
 def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1126,22 +1130,22 @@ def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: p
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    forbid_vars = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
-    original_check = forbid_vars.check
+    meaningless_vars = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+    original_check = meaningless_vars.check
     calls = {"n": 0}
 
-    def flaky_check(_self: ForbidVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def flaky_check(_self: MeaninglessVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
         calls["n"] += 1
         if calls["n"] == 1:
             raise ValueError("simulated check failure")
         return original_check(fp, tree, source)
 
-    monkeypatch.setattr(ForbidVarsCheck, "check", flaky_check)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", flaky_check)
 
-    orchestrator = CheckOrchestrator(checks=[forbid_vars])
+    orchestrator = CheckOrchestrator(checks=[meaningless_vars])
     first = orchestrator.process_files([str(filepath)])
     assert first == {}
-    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]  # pytriage: ignore=TRI006
+    assert orchestrator.rule_failures == [(str(filepath), "meaningless-vars")]  # pytriage: ignore=TRI006
 
     second = orchestrator.process_files([str(filepath)])
     assert second[str(filepath)][0].error_code == "TRI001"
@@ -1155,22 +1159,22 @@ def test_process_files_unavailable_checks_result_is_not_cached(tmp_path: Path, m
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    forbid_vars = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)
-    original_check = forbid_vars.check
+    meaningless_vars = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+    original_check = meaningless_vars.check
     calls = {"n": 0}
 
-    def flaky_check(_self: ForbidVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def flaky_check(_self: MeaninglessVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
         calls["n"] += 1
         if calls["n"] == 1:
             raise CheckUnavailableError("some prerequisite is missing")
         return original_check(fp, tree, source)
 
-    monkeypatch.setattr(ForbidVarsCheck, "check", flaky_check)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", flaky_check)
 
-    orchestrator = CheckOrchestrator(checks=[forbid_vars])
+    orchestrator = CheckOrchestrator(checks=[meaningless_vars])
     first = orchestrator.process_files([str(filepath)])
     assert first == {}
-    assert orchestrator.unavailable_checks == [("forbid-vars", "some prerequisite is missing")]
+    assert orchestrator.unavailable_checks == [("meaningless-vars", "some prerequisite is missing")]
 
     second = orchestrator.process_files([str(filepath)])
     assert second[str(filepath)][0].error_code == "TRI001"
@@ -1254,19 +1258,19 @@ def test_process_files_a_non_cacheable_checks_own_crash_does_not_block_caching_a
     filepath.write_text("data = 1\n")
 
     orchestrator = CheckOrchestrator(
-        checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), _CrashingAlwaysRerunCheck()]
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), _CrashingAlwaysRerunCheck()]
     )
     first = orchestrator.process_files([str(filepath)])
     assert {v.error_code for v in first[str(filepath)]} == {"TRI001"}
     assert orchestrator.rule_failures == [(str(filepath), "crashing-always-rerun-probe")]  # pytriage: ignore=TRI006
 
     def boom(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("forbid-vars must have been cached despite the always-rerun check's own crash")
+        raise AssertionError("meaningless-vars must have been cached despite the always-rerun check's own crash")
 
-    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
 
     second_orchestrator = CheckOrchestrator(
-        checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), _CrashingAlwaysRerunCheck()]
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), _CrashingAlwaysRerunCheck()]
     )
     second = second_orchestrator.process_files([str(filepath)])
     assert {v.error_code for v in second[str(filepath)]} == {"TRI001"}
@@ -1312,16 +1316,16 @@ def test_process_files_non_cacheable_check_does_not_disturb_a_cacheable_checks_o
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    forbid_vars_only = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
-    forbid_vars_only.process_files([str(filepath)])
+    meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
+    meaningless_vars_only.process_files([str(filepath)])
 
     def boom(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("a cacheable check must not be recomputed once already cached")
 
-    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
 
     probe = _AlwaysRerunProbeCheck()
-    combined = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), probe])
+    combined = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), probe])
     violations = combined.process_files([str(filepath)])
 
     error_codes = {v.error_code for v in violations[str(filepath)]}
@@ -1339,12 +1343,14 @@ def test_process_single_file_reports_unprocessable_when_always_rerun_group_fails
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    forbid_vars_only = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE)])
-    forbid_vars_only.process_files([str(filepath)])  # populates the cache
+    meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
+    meaningless_vars_only.process_files([str(filepath)])  # populates the cache
 
-    combined = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), _AlwaysRerunProbeCheck()])
+    combined = CheckOrchestrator(
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), _AlwaysRerunProbeCheck()]
+    )
 
-    # ForbidVarsCheck's own result for this file is already cached above, so
+    # MeaninglessVarsCheck's own result for this file is already cached above, so
     # _process_single_file only ever calls _check_file for the always-rerun
     # group (checks == [_AlwaysRerunProbeCheck()]) here -- nothing else calls this stub.
     def unreadable_always_rerun_group(
@@ -1368,8 +1374,8 @@ def test_process_files_enabling_a_non_cacheable_check_does_not_change_cache_key(
     (fake_root / "module.py").write_text("x = 1\n")
     monkeypatch.setattr(_orchestrator, "_PACKAGE_ROOT", fake_root)
 
-    without_probe = CheckOrchestrator(checks=[ForbidVarsCheck()])
-    with_probe = CheckOrchestrator(checks=[ForbidVarsCheck(), _AlwaysRerunProbeCheck()])
+    without_probe = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
+    with_probe = CheckOrchestrator(checks=[MeaninglessVarsCheck(), _AlwaysRerunProbeCheck()])
     assert without_probe._generate_cache_key() == with_probe._generate_cache_key()
 
 
@@ -1412,17 +1418,19 @@ def test_check_unavailable_error_does_not_discard_other_checks_results(tmp_path:
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE), _UnavailableCheck()])
+    orchestrator = CheckOrchestrator(
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), _UnavailableCheck()]
+    )
     all_violations = orchestrator.process_files([str(filepath)])
 
-    assert {v.check_id for v in all_violations[str(filepath)]} == {"forbid-vars"}
+    assert {v.check_id for v in all_violations[str(filepath)]} == {"meaningless-vars"}
     assert orchestrator.unavailable_checks == [("always-rerun-probe", "some prerequisite is missing")]
 
 
 def test_refresh_stale_positions_skips_a_check_already_known_unavailable(tmp_path: Path) -> None:
     # A check that raised CheckUnavailableError during this same file's own
     # _check_file pass is already recorded in _unavailable_check_ids by the
-    # time a different check's fix (here, ForbidVarsCheck's own rename)
+    # time a different check's fix (here, MeaninglessVarsCheck's own rename)
     # triggers _refresh_stale_positions for that file -- it must not be
     # attempted (and fail) all over again there.
     class _UnavailableCheck(_AlwaysRerunProbeCheck):
@@ -1442,7 +1450,7 @@ def test_refresh_stale_positions_skips_a_check_already_known_unavailable(tmp_pat
     )
 
     check = _UnavailableCheck()
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck(), check], fix_mode=True)
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(), check], fix_mode=True)
     orchestrator.process_files([str(filepath)])
 
     assert filepath.read_text() == (
@@ -1476,7 +1484,7 @@ def test_main_reports_check_unavailable_error_once_and_exits_nonzero(
 
 def test_apply_fixes_skips_check_with_no_fixable_violations(tmp_path: Path) -> None:
     # redundant-super-init never marks violations fixable; when mixed with
-    # a fixable forbid-vars violation in the same file, its check must be
+    # a fixable meaningless-vars violation in the same file, its check must be
     # skipped in the fix loop rather than attempting (and no-op'ing) a fix.
     filepath = tmp_path / "module.py"
     filepath.write_text(
@@ -1494,14 +1502,14 @@ def test_apply_fixes_skips_check_with_no_fixable_violations(tmp_path: Path) -> N
         "        super().__init__(**kwargs)\n"
     )
 
-    checks = load_checks(select={"forbid-vars", "redundant-super-init"})
+    checks = load_checks(select={"meaningless-vars", "redundant-super-init"})
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
     by_check = {v.check_id: v for v in violations[str(filepath)]}
-    forbid_vars_fix_data = by_check["forbid-vars"].fix_data
-    assert forbid_vars_fix_data is not None
-    assert forbid_vars_fix_data.get("fixed") is True
+    meaningless_vars_fix_data = by_check["meaningless-vars"].fix_data
+    assert meaningless_vars_fix_data is not None
+    assert meaningless_vars_fix_data.get("fixed") is True
     assert by_check["redundant-super-init"].fixable is False
 
 
@@ -1593,21 +1601,21 @@ def test_apply_fixes_marks_violation_rejected_when_fix_produces_invalid_syntax(
         "\n\n\nimport requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    def broken_fix(_self: ForbidVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
+    def broken_fix(_self: MeaninglessVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
         atomic_write_text(fp, "def broken(:\n", "utf-8")
 
-    monkeypatch.setattr(ForbidVarsCheck, "fix", broken_fix)
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", broken_fix)
 
-    checks: list[ASTCheck] = [ForbidVarsCheck(), ExcessiveBlankLinesCheck()]
+    checks: list[ASTCheck] = [MeaninglessVarsCheck(), ExcessiveBlankLinesCheck()]
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
     by_check = {v.check_id: v for v in violations[str(filepath)]}
-    forbid_vars_violation = by_check["forbid-vars"]
+    meaningless_vars_violation = by_check["meaningless-vars"]
     blank_lines_violation = by_check["excessive-blank-lines"]
 
-    assert is_fix_rejected(forbid_vars_violation)
-    assert not (forbid_vars_violation.fix_data and forbid_vars_violation.fix_data.get("fixed"))
+    assert is_fix_rejected(meaningless_vars_violation)
+    assert not (meaningless_vars_violation.fix_data and meaningless_vars_violation.fix_data.get("fixed"))
     assert not is_fix_rejected(blank_lines_violation)
     assert blank_lines_violation.fix_data == {"fixed": True}
     assert "data = requests.get(url)" in filepath.read_text()
@@ -1630,19 +1638,19 @@ def test_apply_fixes_marks_violation_errored_when_fix_raises_unexpectedly(
     def broken_fix(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("simulated fix bug")
 
-    monkeypatch.setattr(ForbidVarsCheck, "fix", broken_fix)
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", broken_fix)
 
-    checks: list[ASTCheck] = [ForbidVarsCheck(), ExcessiveBlankLinesCheck()]
+    checks: list[ASTCheck] = [MeaninglessVarsCheck(), ExcessiveBlankLinesCheck()]
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
     by_check = {v.check_id: v for v in violations[str(filepath)]}
-    forbid_vars_violation = by_check["forbid-vars"]
+    meaningless_vars_violation = by_check["meaningless-vars"]
     blank_lines_violation = by_check["excessive-blank-lines"]
 
-    assert is_fix_errored(forbid_vars_violation)
-    assert not is_fix_rejected(forbid_vars_violation)
-    assert not (forbid_vars_violation.fix_data and forbid_vars_violation.fix_data.get("fixed"))
+    assert is_fix_errored(meaningless_vars_violation)
+    assert not is_fix_rejected(meaningless_vars_violation)
+    assert not (meaningless_vars_violation.fix_data and meaningless_vars_violation.fix_data.get("fixed"))
     assert not is_fix_errored(blank_lines_violation)
     assert blank_lines_violation.fix_data == {"fixed": True}
     assert "data = requests.get(url)" in filepath.read_text()
@@ -1669,7 +1677,7 @@ def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
         "    return result.status_code\n"
     )
 
-    def partial_then_raise(_self: ForbidVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
+    def partial_then_raise(_self: MeaninglessVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
         # Simulates a multi-write check that already committed the fix for
         # "data" before crashing while attempting "result".
         atomic_write_text(
@@ -1685,9 +1693,9 @@ def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
         )
         raise RuntimeError("simulated fix bug partway through")
 
-    monkeypatch.setattr(ForbidVarsCheck, "fix", partial_then_raise)
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", partial_then_raise)
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()], fix_mode=True)
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()], fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
     by_line = {v.line: v for v in violations[str(filepath)]}
@@ -1720,7 +1728,7 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    def fix_then_raise(_self: ForbidVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
+    def fix_then_raise(_self: MeaninglessVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
         atomic_write_text(
             fp,
             "import requests\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n",
@@ -1728,16 +1736,16 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
         )
         raise RuntimeError("simulated cleanup bug after a successful fix")
 
-    monkeypatch.setattr(ForbidVarsCheck, "fix", fix_then_raise)
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", fix_then_raise)
 
-    orchestrator = CheckOrchestrator(checks=[ForbidVarsCheck()], fix_mode=True)
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()], fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
     violation = violations[str(filepath)][0]
     assert violation.fix_data is not None
     assert violation.fix_data.get("fixed") is True
     assert not is_fix_errored(violation)
-    assert orchestrator.rule_failures == [(str(filepath), "forbid-vars")]  # pytriage: ignore=TRI006
+    assert orchestrator.rule_failures == [(str(filepath), "meaningless-vars")]  # pytriage: ignore=TRI006
     assert filepath.read_text() == (
         "import requests\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n"
     )
@@ -1841,7 +1849,7 @@ def test_apply_fixes_marks_errored_violation_of_a_multi_write_check_when_apply_f
 
 
 def _disappear_before_refetch(
-    _orchestrator: CheckOrchestrator, _forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
+    _orchestrator: CheckOrchestrator, _meaningless_vars: MeaninglessVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # If the file can't be re-read inside _apply_fixes (e.g. deleted by a
     # concurrent process), that check's fix is skipped rather than crashing.
@@ -1858,7 +1866,7 @@ def _disappear_before_refetch(
 
 
 def _disappear_after_fix(
-    _orchestrator: CheckOrchestrator, _forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
+    _orchestrator: CheckOrchestrator, _meaningless_vars: MeaninglessVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # If the file can't be re-read for the post-fix verification (e.g.
     # deleted right after the fix wrote it), the fix isn't reported as
@@ -1880,53 +1888,53 @@ def _disappear_after_fix(
 
 
 def _recompute_finds_no_fixable_violations(
-    _orchestrator: CheckOrchestrator, forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
+    _orchestrator: CheckOrchestrator, meaningless_vars: MeaninglessVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    original_check = forbid_vars.check
+    original_check = meaningless_vars.check
     calls = {"n": 0}
 
-    def flaky_check(_self: ForbidVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def flaky_check(_self: MeaninglessVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
         calls["n"] += 1
         if calls["n"] == 1:
             return original_check(fp, tree, source)
         return []
 
-    monkeypatch.setattr(ForbidVarsCheck, "check", flaky_check)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", flaky_check)
 
 
 def _recompute_raises(
-    _orchestrator: CheckOrchestrator, forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
+    _orchestrator: CheckOrchestrator, meaningless_vars: MeaninglessVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A crash in _apply_fixes' own pre-fix recompute call is distinct from
     # fix() itself raising (which is caught separately and marked [FIX
     # ERRORED], see test_apply_fixes_marks_violation_errored_when_fix_raises_unexpectedly)
     # — fix() is never even reached here. The original, already-reported
     # violation must stay exactly as it was rather than silently vanishing.
-    original_check = forbid_vars.check
+    original_check = meaningless_vars.check
     calls = {"n": 0}
 
-    def flaky_check(_self: ForbidVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def flaky_check(_self: MeaninglessVarsCheck, fp: Path, tree: ast.Module, source: str) -> list[Violation]:
         calls["n"] += 1
         if calls["n"] == 1:
             return original_check(fp, tree, source)
         raise ValueError("simulated recompute failure")
 
-    monkeypatch.setattr(ForbidVarsCheck, "check", flaky_check)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", flaky_check)
 
 
 def _fix_returns_false(
-    _orchestrator: CheckOrchestrator, _forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
+    _orchestrator: CheckOrchestrator, _meaningless_vars: MeaninglessVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(ForbidVarsCheck, "fix", lambda *_a, **_k: False)
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", lambda *_a, **_k: False)
 
 
 def _fix_raises(
-    _orchestrator: CheckOrchestrator, _forbid_vars: ForbidVarsCheck, monkeypatch: pytest.MonkeyPatch
+    _orchestrator: CheckOrchestrator, _meaningless_vars: MeaninglessVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def boom(*_args: object, **_kws: object) -> bool:
         raise RuntimeError("simulated fix failure")
 
-    monkeypatch.setattr(ForbidVarsCheck, "fix", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", boom)
 
 
 @pytest.mark.parametrize(
@@ -1951,16 +1959,16 @@ def _fix_raises(
 def test_apply_fixes_marks_nothing_fixed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    configure: Callable[[CheckOrchestrator, ForbidVarsCheck, pytest.MonkeyPatch], None],
+    configure: Callable[[CheckOrchestrator, MeaninglessVarsCheck, pytest.MonkeyPatch], None],
 ) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text(
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    forbid_vars = ForbidVarsCheck()
-    orchestrator = CheckOrchestrator(checks=[forbid_vars], fix_mode=True)
-    configure(orchestrator, forbid_vars, monkeypatch)
+    meaningless_vars = MeaninglessVarsCheck()
+    orchestrator = CheckOrchestrator(checks=[meaningless_vars], fix_mode=True)
+    configure(orchestrator, meaningless_vars, monkeypatch)
 
     violations = orchestrator.process_files([str(filepath)])
     v = violations[str(filepath)][0]
@@ -1970,15 +1978,15 @@ def test_apply_fixes_marks_nothing_fixed(
 def test_load_checks_explicit_check_args_none_default() -> None:
     # Passing check_args explicitly (not relying on the None default)
     # takes the same path as leaving it unset.
-    checks = load_checks(select={"forbid-vars"}, check_args={})
+    checks = load_checks(select={"meaningless-vars"}, check_args={})
     assert len(checks) == 1
-    assert checks[0].check_id == "forbid-vars"
+    assert checks[0].check_id == "meaningless-vars"
 
 
 def test_load_checks_ignore_set_skips_matching_check() -> None:
-    checks = load_checks(ignore={"forbid-vars"})
+    checks = load_checks(ignore={"meaningless-vars"})
     check_ids = {c.check_id for c in checks}
-    assert "forbid-vars" not in check_ids
+    assert "meaningless-vars" not in check_ids
     assert len(check_ids) == len(ALL_CHECKS) - 1
 
 
@@ -1986,7 +1994,7 @@ def test_load_checks_ignore_composes_with_select() -> None:
     # Regression: `select` used to make `ignore` a no-op entirely (an
     # `elif` instead of two independent checks), so `--select`+`--ignore`
     # couldn't be combined the way `ruff check --select`/`--ignore` can.
-    checks = load_checks(select={"forbid-vars", "redundant-super-init"}, ignore={"forbid-vars"})
+    checks = load_checks(select={"meaningless-vars", "redundant-super-init"}, ignore={"meaningless-vars"})
     assert {c.check_id for c in checks} == {"redundant-super-init"}
 
 
@@ -2011,7 +2019,7 @@ def test_load_checks_check_specific_args_are_applied(
 ) -> None:
     # Exercises the generic re-instantiate-with-kwargs branch in
     # `load_checks` against a synthetic check with a second, unrelated
-    # configurable `__init__`, rather than forbid-vars' own.
+    # configurable `__init__`, rather than meaningless-vars' own.
     class ConfigurableCheck:
         check_id = "configurable"
 
@@ -2044,8 +2052,8 @@ def test_load_checks_skips_check_whose_init_raises(
 
 def test_load_checks_skips_check_when_custom_args_raise() -> None:
     checks = load_checks(
-        select={"forbid-vars"},
-        check_args={"forbid-vars": {"not_a_real_kwarg": 1}},
+        select={"meaningless-vars"},
+        check_args={"meaningless-vars": {"not_a_real_kwarg": 1}},
     )
     assert checks == []
 
@@ -2055,7 +2063,7 @@ def test_main_list_checks(capsys: pytest.CaptureFixture[str]) -> None:
 
     out = capsys.readouterr().out
     assert "Available checks:" in out
-    assert "forbid-vars: TRI001" in out
+    assert "meaningless-vars: TRI001" in out
 
 
 def test_main_no_filenames_returns_zero() -> None:
@@ -2112,8 +2120,8 @@ def test_main_permission_denied_file_returns_one_inside_git_repo(
     # stderr, without changing its exit code for the files it *could*
     # read. main() never inspected that stderr, so the file was silently
     # dropped before ever reaching _check_file — the whole run reported
-    # exit code 0, as if the file never existed. ForbidVarsCheck has a
-    # prefilter pattern ("data" is one of its forbidden names), so this
+    # exit code 0, as if the file never existed. MeaninglessVarsCheck has a
+    # prefilter pattern ("data" is one of its meaningless names), so this
     # only reproduces via the check that actually calls into git grep.
     git = shutil.which("git")
     assert git is not None
@@ -2130,7 +2138,7 @@ def test_main_permission_denied_file_returns_one_inside_git_repo(
 
         try:
             with caplog.at_level("DEBUG"):
-                exit_code = main(["module.py", "--select", "forbid-vars"])
+                exit_code = main(["module.py", "--select", "meaningless-vars"])
         finally:
             filepath.chmod(0o644)
 
@@ -2154,15 +2162,15 @@ def test_main_check_crash_returns_one_and_reports_check_and_file(
     def boom(*_args: object, **_kwargs: object) -> list[Violation]:
         raise ValueError("simulated check failure")
 
-    monkeypatch.setattr(ForbidVarsCheck, "check", boom)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", boom)
 
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    exit_code = main([str(filepath), "--select", "forbid-vars"])
+    exit_code = main([str(filepath), "--select", "meaningless-vars"])
     assert exit_code == 1
 
-    assert f"{filepath}: error: check 'forbid-vars' raised an unexpected exception" in capsys.readouterr().err
+    assert f"{filepath}: error: check 'meaningless-vars' raised an unexpected exception" in capsys.readouterr().err
 
 
 def test_main_reports_non_fixable_violation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -2188,7 +2196,7 @@ def test_main_reports_non_fixable_violation(tmp_path: Path, capsys: pytest.Captu
 
 
 def test_main_reports_column_alongside_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    # Violation.col is computed accurately (forbid-vars reports the assigned
+    # Violation.col is computed accurately (meaningless-vars reports the assigned
     # name's own ast.col_offset, converted to a character offset) but
     # main()'s printed line used to drop it entirely, reporting only the
     # line -- ch. 7: "MUST report line and column information accurately
@@ -2197,7 +2205,7 @@ def test_main_reports_column_alongside_line(tmp_path: Path, capsys: pytest.Captu
     filepath = tmp_path / "module.py"
     filepath.write_text("def process():\n    data = requests.get(url)\n    return data\n")
 
-    exit_code = main([str(filepath), "--select", "forbid-vars", "--forbid-vars-level", "permissive"])
+    exit_code = main([str(filepath), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"])
     assert exit_code == 1
 
     assert f"{filepath}:2:5: TRI001:" in capsys.readouterr().err
@@ -2209,7 +2217,7 @@ def test_main_reports_fixable_violation_without_fix_flag(tmp_path: Path, capsys:
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    exit_code = main([str(filepath), "--select", "forbid-vars"])
+    exit_code = main([str(filepath), "--select", "meaningless-vars"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
@@ -2223,7 +2231,7 @@ def test_main_fix_flag_marks_violation_fixed(tmp_path: Path, capsys: pytest.Capt
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+    exit_code = main([str(filepath), "--select", "meaningless-vars", "--fix"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
@@ -2251,7 +2259,7 @@ def test_main_fix_flag_reports_rejected_fix(
     def broken_fix(_self: object, fp: Path, *_args: object, **_kwargs: object) -> None:
         atomic_write_text(fp, "def broken(:\n", "utf-8")
 
-    monkeypatch.setattr(ForbidVarsCheck, "fix", broken_fix)
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", broken_fix)
 
     filepath = tmp_path / "module.py"
     filepath.write_text(
@@ -2259,7 +2267,7 @@ def test_main_fix_flag_reports_rejected_fix(
     )
 
     with caplog.at_level("DEBUG"):
-        exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+        exit_code = main([str(filepath), "--select", "meaningless-vars", "--fix"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
@@ -2289,7 +2297,7 @@ def test_main_fix_flag_reports_errored_fix(
     def broken_fix(*_args: object, **_kwargs: object) -> None:
         raise RuntimeError("simulated fix bug")
 
-    monkeypatch.setattr(ForbidVarsCheck, "fix", broken_fix)
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", broken_fix)
 
     filepath = tmp_path / "module.py"
     filepath.write_text(
@@ -2297,7 +2305,7 @@ def test_main_fix_flag_reports_errored_fix(
     )
 
     with caplog.at_level("DEBUG"):
-        exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+        exit_code = main([str(filepath), "--select", "meaningless-vars", "--fix"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
@@ -2333,7 +2341,7 @@ def test_main_fix_flag_reports_failed_fix(
     subdir.chmod(0o555)
     try:
         with caplog.at_level("DEBUG"):
-            exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+            exit_code = main([str(filepath), "--select", "meaningless-vars", "--fix"])
     finally:
         subdir.chmod(0o755)
 
@@ -2384,19 +2392,19 @@ def test_main_reports_rule_failure_when_reread_fails_mid_fix_loop(
         "class Child(Base):\n    def __init__(self, **kwargs):\n        super().__init__(**kwargs)\n"
     )
 
-    # A second, never-fixable check alongside forbid-vars: its own
+    # A second, never-fixable check alongside meaningless-vars: its own
     # violation must be left alone by the marking loop below (only
-    # forbid-vars' violation matches check.check_id), exercising that the
+    # meaningless-vars' violation matches check.check_id), exercising that the
     # loop's `if` condition can also be False for a violation from an
     # unrelated check_id, not just True for a matching, fixable one.
-    checks = load_checks(select={"forbid-vars", "redundant-super-init"})
+    checks = load_checks(select={"meaningless-vars", "redundant-super-init"})
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
-    assert (str(filepath), "forbid-vars") in orchestrator.rule_failures  # pytriage: ignore=TRI006
-    forbid_vars_violation = next(v for v in violations[str(filepath)] if v.check_id == "forbid-vars")
+    assert (str(filepath), "meaningless-vars") in orchestrator.rule_failures  # pytriage: ignore=TRI006
+    meaningless_vars_violation = next(v for v in violations[str(filepath)] if v.check_id == "meaningless-vars")
     super_init_violation = next(v for v in violations[str(filepath)] if v.check_id == "redundant-super-init")
-    assert is_fix_errored(forbid_vars_violation)
+    assert is_fix_errored(meaningless_vars_violation)
     assert not is_fix_errored(super_init_violation)
     # The re-read failure means nothing was ever written back.
     assert "data = requests.get(url)" in filepath.read_text()
@@ -2414,11 +2422,11 @@ def test_main_reports_rule_failure_when_recompute_raises_mid_fix_loop(
     # to catch it -- logging the exception but never recording a
     # rule_failure or marking any violation, so the run could look
     # completely clean depending on what else was reported for the file.
-    original_check = ForbidVarsCheck.check
+    original_check = MeaninglessVarsCheck.check
     calls = 0
 
     def check_raises_on_second_call(
-        self: ForbidVarsCheck, filepath: Path, tree: ast.Module, source: str
+        self: MeaninglessVarsCheck, filepath: Path, tree: ast.Module, source: str
     ) -> list[Violation]:
         nonlocal calls
         calls += 1
@@ -2427,7 +2435,7 @@ def test_main_reports_rule_failure_when_recompute_raises_mid_fix_loop(
             raise RuntimeError(msg)
         return original_check(self, filepath, tree, source)
 
-    monkeypatch.setattr(ForbidVarsCheck, "check", check_raises_on_second_call)
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", check_raises_on_second_call)
 
     filepath = tmp_path / "module.py"
     filepath.write_text(
@@ -2439,17 +2447,17 @@ def test_main_reports_rule_failure_when_recompute_raises_mid_fix_loop(
         "class Child(Base):\n    def __init__(self, **kwargs):\n        super().__init__(**kwargs)\n"
     )
 
-    # A second, never-fixable check alongside forbid-vars: its own
+    # A second, never-fixable check alongside meaningless-vars: its own
     # violation must be left alone by the marking loop below (only
-    # forbid-vars' violation matches check.check_id), exercising that the
+    # meaningless-vars' violation matches check.check_id), exercising that the
     # loop's `if` condition can also be False for a violation from an
     # unrelated check_id, not just True for a matching, fixable one.
     with caplog.at_level("DEBUG"):
-        exit_code = main([str(filepath), "--select", "forbid-vars,redundant-super-init", "--fix"])
+        exit_code = main([str(filepath), "--select", "meaningless-vars,redundant-super-init", "--fix"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
-    assert f"{filepath}: error: check 'forbid-vars' raised an unexpected exception" in err
+    assert f"{filepath}: error: check 'meaningless-vars' raised an unexpected exception" in err
     assert "[FIX ERRORED]" in err
     assert "Run with --fix" not in err
     # Nothing was ever written back -- the recompute failed before fix() could run.
@@ -2480,7 +2488,7 @@ def test_main_reports_rule_failure_when_fix_raises_after_resolving_everything(
         )
         raise RuntimeError("simulated cleanup bug after a successful fix")
 
-    monkeypatch.setattr(ForbidVarsCheck, "fix", fix_then_raise)
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", fix_then_raise)
 
     filepath = tmp_path / "module.py"
     filepath.write_text(
@@ -2488,13 +2496,13 @@ def test_main_reports_rule_failure_when_fix_raises_after_resolving_everything(
     )
 
     with caplog.at_level("DEBUG"):
-        exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+        exit_code = main([str(filepath), "--select", "meaningless-vars", "--fix"])
     assert exit_code == 1
 
     err = capsys.readouterr().err
     assert "[FIXED]" in err
     assert "[FIX ERRORED]" not in err
-    assert f"{filepath}: error: check 'forbid-vars' raised an unexpected exception" in err
+    assert f"{filepath}: error: check 'meaningless-vars' raised an unexpected exception" in err
     assert filepath.read_text() == (
         "import requests\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n"
     )
@@ -2620,30 +2628,34 @@ def test_main_redundant_assignment_level_rejects_unknown_value(
     assert "invalid choice" in capsys.readouterr().err
 
 
-def test_main_forbid_vars_level_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    # See docs/adr/0031-forbid-vars-conservative-reporting-default.md.
+def test_main_meaningless_vars_level_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # See docs/adr/0031-meaningless-vars-conservative-reporting-default.md.
     # "result = 42" has no suggested rename, so it's a clean way to tell the
     # two presets apart end-to-end through the real CLI.
     filepath = tmp_path / "module.py"
     filepath.write_text("def other():\n    result = 42\n    return result\n")
 
-    default_exit_code = main([str(filepath), "--select", "forbid-vars"])
+    default_exit_code = main([str(filepath), "--select", "meaningless-vars"])
     assert default_exit_code == 0
 
-    conservative_exit_code = main([str(filepath), "--select", "forbid-vars", "--forbid-vars-level", "conservative"])
+    conservative_exit_code = main(
+        [str(filepath), "--select", "meaningless-vars", "--meaningless-vars-level", "conservative"]
+    )
     assert conservative_exit_code == 0
 
-    permissive_exit_code = main([str(filepath), "--select", "forbid-vars", "--forbid-vars-level", "permissive"])
+    permissive_exit_code = main(
+        [str(filepath), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]
+    )
     assert permissive_exit_code == 1
     assert "'result'" in capsys.readouterr().err
 
 
-def test_main_forbid_vars_level_rejects_unknown_value(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_meaningless_vars_level_rejects_unknown_value(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1\n")
 
     with pytest.raises(SystemExit) as exc_info:
-        main([str(filepath), "--forbid-vars-level", "bogus"])
+        main([str(filepath), "--meaningless-vars-level", "bogus"])
 
     assert exc_info.value.code == 2
     assert "invalid choice" in capsys.readouterr().err
@@ -2674,29 +2686,29 @@ def test_main_ignoring_all_checks_returns_one(tmp_path: Path, capsys: pytest.Cap
 
 
 @pytest.mark.parametrize(
-    ("flag", "forbid_vars_runs"),
+    ("flag", "meaningless_vars_runs"),
     [("--select", True), ("--ignore", False)],
     ids=["select", "ignore"],
 )
 def test_main_trailing_comma_does_not_report_blank_unknown_check(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str, forbid_vars_runs: bool
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str, meaningless_vars_runs: bool
 ) -> None:
     # Regression: a trailing comma left an empty string in the parsed set,
     # reported as a confusing blank "Unknown checks: " instead of being
     # tolerated like --exclude's own comma list already is. Asserting on the
     # TRI001 violation itself (not just the exit code) is what actually
-    # proves forbid-vars was recognized: both the fixed and the reverted
+    # proves meaningless-vars was recognized: both the fixed and the reverted
     # behavior exit 1 for --select (a real violation vs. the old bogus
     # "Unknown checks" error), so the exit code alone can't tell them apart.
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    exit_code = main([str(filepath), flag, "forbid-vars,", "--forbid-vars-level", "permissive"])
+    exit_code = main([str(filepath), flag, "meaningless-vars,", "--meaningless-vars-level", "permissive"])
     err = capsys.readouterr().err
 
     assert "Unknown checks" not in err
-    assert ("TRI001" in err) is forbid_vars_runs
-    assert exit_code == (1 if forbid_vars_runs else 0)
+    assert ("TRI001" in err) is meaningless_vars_runs
+    assert exit_code == (1 if meaningless_vars_runs else 0)
 
 
 def test_main_select_only_commas_reports_no_checks_enabled(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -2724,9 +2736,9 @@ def test_main_select_and_ignore_compose(tmp_path: Path, capsys: pytest.CaptureFi
         [
             str(filepath),
             "--select",
-            "forbid-vars,redundant-super-init",
+            "meaningless-vars,redundant-super-init",
             "--ignore",
-            "forbid-vars",
+            "meaningless-vars",
         ]
     )
     assert exit_code == 0
@@ -2780,7 +2792,7 @@ def test_fix_converges_after_one_pass_across_all_checks(fixture_path: Path, tmp_
 def test_main_handles_path_containing_spaces_and_unicode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # ch. 31: "MUST test paths containing spaces and Unicode." forbid-vars
+    # ch. 31: "MUST test paths containing spaces and Unicode." meaningless-vars
     # declares a prefilter pattern, so a normal run first passes this path to
     # git_grep_filter()'s real `git grep` subprocess call as a plain argument,
     # never through a shell (0006/0015's file-discovery audit) -- but only
@@ -2807,7 +2819,7 @@ def test_main_handles_path_containing_spaces_and_unicode(
 
     real_run = subprocess.run
     # Every subprocess.run call made once the spy is installed below is a
-    # git-grep call: forbid-vars' own two prefilter patterns ("data",
+    # git-grep call: meaningless-vars' own two prefilter patterns ("data",
     # "result") are the only thing that invokes git_grep_filter() for this
     # single-file, single-check run (a lone file argument never triggers
     # expand_directories()'s own git ls-files call).
@@ -2828,7 +2840,7 @@ def test_main_handles_path_containing_spaces_and_unicode(
         subprocess.run([git, "add", filepath], check=True)  # noqa: S603
 
         monkeypatch.setattr(subprocess, "run", _spy_run)
-        exit_code = main([str(filepath), "--select", "forbid-vars", "--fix"])
+        exit_code = main([str(filepath), "--select", "meaningless-vars", "--fix"])
     finally:
         os.chdir(original_dir)
 
@@ -2864,7 +2876,7 @@ def test_process_files_handles_a_large_file(tmp_path: Path) -> None:
     filepath = tmp_path / "large_module.py"
     filepath.write_text(source + "\n", encoding="utf-8")
 
-    orchestrator = CheckOrchestrator(checks=load_checks(select={"forbid-vars"}), fix_mode=True)
+    orchestrator = CheckOrchestrator(checks=load_checks(select={"meaningless-vars"}), fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
     assert orchestrator.unprocessable_files == []

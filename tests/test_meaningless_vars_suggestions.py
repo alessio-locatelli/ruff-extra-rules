@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-from pre_commit_hooks.ast_checks._forbid_vars_suggestions import (
+from pre_commit_hooks.ast_checks._meaningless_vars_suggestions import (
     Confidence,
     RenameProposal,
     _annotation_constraints,
@@ -28,19 +28,19 @@ from pre_commit_hooks.ast_checks._forbid_vars_suggestions import (
 def _plans(
     source: str,
     ignored_lines: set[int] | None = None,
-    forbidden_names: set[str] | None = None,
+    meaningless_names: set[str] | None = None,
 ) -> dict[tuple[int, int], RenameProposal]:
-    return plan_suggestions(ast.parse(source), forbidden_names or {"data", "result"}, ignored_lines or set())
+    return plan_suggestions(ast.parse(source), meaningless_names or {"data", "result"}, ignored_lines or set())
 
 
-def _plan_for(source: str, target: str = "data", forbidden_names: set[str] | None = None) -> RenameProposal | None:
+def _plan_for(source: str, target: str = "data", meaningless_names: set[str] | None = None) -> RenameProposal | None:
     tree = ast.parse(source)
     target_node = next(
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == target
     )
-    return _plans(source, forbidden_names=forbidden_names).get((target_node.lineno, target_node.col_offset))
+    return _plans(source, meaningless_names=meaningless_names).get((target_node.lineno, target_node.col_offset))
 
 
 def _assert_plan_for(
@@ -48,9 +48,9 @@ def _assert_plan_for(
     target: str,
     expected_name: str | None,
     expected_confidence: Confidence | None,
-    forbidden_names: set[str] | None = None,
+    meaningless_names: set[str] | None = None,
 ) -> None:
-    proposal = _plan_for(source, target, forbidden_names=forbidden_names)
+    proposal = _plan_for(source, target, meaningless_names=meaningless_names)
 
     assert (proposal is None) is (expected_name is None)
     if proposal is not None:
@@ -322,7 +322,7 @@ def test_parametrize_result_without_full_evidence_produces_no_proposal(source: s
     assert (parameter.lineno, parameter.col_offset) not in plans
 
 
-def test_parametrize_result_proposal_requires_result_in_forbidden_names() -> None:
+def test_parametrize_result_proposal_requires_result_in_meaningless_names() -> None:
     source = (
         'import pytest\n\n@pytest.mark.parametrize("source,result", [("a", "a")])\n'
         "def test_ok(source: str, result: str) -> None:\n"
@@ -392,7 +392,7 @@ def test_verb_parameter_proposal_requires_a_recognised_verb_and_data_parameter(s
     assert plan_suggestions(ast.parse(source), {"data", "result"}, set()) == {}
 
 
-def test_verb_parameter_proposal_requires_data_in_forbidden_names() -> None:
+def test_verb_parameter_proposal_requires_data_in_meaningless_names() -> None:
     source = "class Codec:\n    def compress(self, data: bytes) -> bytes: ...\n"
     assert plan_suggestions(ast.parse(source), {"result"}, set()) == {}
 
@@ -858,14 +858,14 @@ _WITH_RESULTS = {"data", "result", "results"}
     ],
 )
 def test_db_fetch_method_evidence_produces_suggestions(source: str, target: str, name: str) -> None:
-    _assert_plan_for(source, target, name, Confidence.SUGGESTION_ONLY, forbidden_names=_WITH_RESULTS)
+    _assert_plan_for(source, target, name, Confidence.SUGGESTION_ONLY, meaningless_names=_WITH_RESULTS)
 
 
 def test_db_fetch_method_evidence_excludes_fetchnumpy() -> None:
-    # See docs/adr/0038-forbid-vars-results-vocabulary-boundary.md
+    # See docs/adr/0038-meaningless-vars-results-vocabulary-boundary.md
     source = "def f(conn):\n    results = conn.fetchnumpy()\n    return results\n"
 
-    _assert_plan_for(source, "results", None, None, forbidden_names=_WITH_RESULTS)
+    _assert_plan_for(source, "results", None, None, meaningless_names=_WITH_RESULTS)
 
 
 @pytest.mark.parametrize(
@@ -876,7 +876,7 @@ def test_db_fetch_method_evidence_excludes_fetchnumpy() -> None:
     ],
 )
 def test_list_and_collect_producer_prefixes(source: str, target: str, name: str) -> None:
-    _assert_plan_for(source, target, name, Confidence.SUGGESTION_ONLY, forbidden_names=_WITH_RESULTS)
+    _assert_plan_for(source, target, name, Confidence.SUGGESTION_ONLY, meaningless_names=_WITH_RESULTS)
 
 
 def test_accumulator_append_evidence_produces_suggestion() -> None:
@@ -887,7 +887,7 @@ def test_accumulator_append_evidence_produces_suggestion() -> None:
     return results
 """
 
-    _assert_plan_for(source, "results", "items", Confidence.SUGGESTION_ONLY, forbidden_names=_WITH_RESULTS)
+    _assert_plan_for(source, "results", "items", Confidence.SUGGESTION_ONLY, meaningless_names=_WITH_RESULTS)
 
 
 def test_accumulator_append_evidence_tolerates_repeated_matching_names() -> None:
@@ -900,7 +900,7 @@ def test_accumulator_append_evidence_tolerates_repeated_matching_names() -> None
     return results
 """
 
-    _assert_plan_for(source, "results", "items", Confidence.SUGGESTION_ONLY, forbidden_names=_WITH_RESULTS)
+    _assert_plan_for(source, "results", "items", Confidence.SUGGESTION_ONLY, meaningless_names=_WITH_RESULTS)
 
 
 @pytest.mark.parametrize(
@@ -920,7 +920,7 @@ def test_accumulator_append_evidence_tolerates_repeated_matching_names() -> None
     ids=["non-name-argument", "conflicting-appended-names", "append-before-assignment", "irregular-plural"],
 )
 def test_accumulator_append_evidence_requires_a_single_unambiguous_later_call(source: str) -> None:
-    _assert_plan_for(source, "results", None, None, forbidden_names=_WITH_RESULTS)
+    _assert_plan_for(source, "results", None, None, meaningless_names=_WITH_RESULTS)
 
 
 @pytest.mark.parametrize(
@@ -933,10 +933,10 @@ def test_accumulator_append_evidence_requires_a_single_unambiguous_later_call(so
     ids=["non-list-initializer", "non-empty-list-literal", "list-call-not-literal"],
 )
 def test_accumulator_append_evidence_requires_an_empty_list_literal_initializer(source: str) -> None:
-    _assert_plan_for(source, "results", None, None, forbidden_names=_WITH_RESULTS)
+    _assert_plan_for(source, "results", None, None, meaningless_names=_WITH_RESULTS)
 
 
 def test_results_annotation_still_produces_autofix() -> None:
     source = "def f():\n    results: list[User] = []\n    return results\n"
 
-    _assert_plan_for(source, "results", "users", Confidence.AUTO_FIX, forbidden_names=_WITH_RESULTS)
+    _assert_plan_for(source, "results", "users", Confidence.AUTO_FIX, meaningless_names=_WITH_RESULTS)

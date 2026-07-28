@@ -62,13 +62,13 @@ class CacheManager:
     it.
 
     Example:
-        >>> cache = CacheManager(hook_name="forbid-vars", cache_version="1")
+        >>> cache = CacheManager(hook_name="meaningless-vars", cache_version="1")
         >>> result = cache.get_cached_result(Path("foo.py"))  # uses hook_name
         >>> if result is None:
         ...     # Run expensive check
         ...     violations = check_file("foo.py")
         ...     cache.set_cached_result(
-        ...         Path("foo.py"), "forbid-vars", {"violations": violations}
+        ...         Path("foo.py"), "meaningless-vars", {"violations": violations}
         ...     )
     """
 

@@ -28,7 +28,7 @@ class Violation:
     # 0-indexed *character* offset (or 0 when a check has no more specific
     # position than "this line") — not a byte offset. `ast.col_offset` is a
     # UTF-8 byte offset, so a check that reports one directly must first
-    # convert it via `byte_col_to_char_col()`, the same way `forbid_vars` and
+    # convert it via `byte_col_to_char_col()`, the same way `meaningless_vars` and
     # `redundant_assignment` already do; `misplaced_comment`'s own
     # `tokenize`-derived column is already a character offset. `main()`
     # reports this as a conventional 1-based column (`col + 1`).
@@ -46,7 +46,7 @@ class ASTCheck(Protocol):
 
     @property
     def check_id(self) -> str:
-        """Kebab-case identifier for this check, e.g. "forbid-vars"."""
+        """Kebab-case identifier for this check, e.g. "meaningless-vars"."""
         ...
 
     @property
@@ -75,7 +75,7 @@ class ASTCheck(Protocol):
         Examples:
             - ["def get_"] for validate-function-name
             - ["super().__init__"] for redundant-super-init
-            - ["data", "result"] for forbid-vars
+            - ["data", "result"] for meaningless-vars
             - None for excessive-blank-lines (check all files)
         """
         ...
