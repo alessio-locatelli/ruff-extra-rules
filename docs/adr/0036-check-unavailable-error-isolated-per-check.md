@@ -20,6 +20,8 @@
 
 ## Consequences
 
+**Amended by `docs/adr/0039-tri006-unavailable-message-scope-and-wording.md`:** "one-time" below means once per process, not once per run — prek/pre-commit's default parallelism runs a non-`require_serial` hook as multiple worker processes, each with its own fresh state, so a consumer can see the message once per worker process in a single run.
+
 - A consumer without `ty` installed still gets a clear, actionable, one-time failure message for TRI006 specifically, and exit code 1 — but every other enabled check's violations are still reported for every file, exactly as if TRI006 weren't enabled at all. Enabling a new check that depends on an optional external prerequisite can no longer silently break every other check for a consumer who hasn't installed it.
 - `CheckOrchestrator.process_files()` no longer raises `CheckUnavailableError` at all; `_cli.py`'s own `try`/`except` around it is gone, replaced by `report()` consulting `orchestrator.unavailable_checks` the same way it already consults `unprocessable_files` and `rule_failures`.
 - This is now the general contract for any check that can raise `CheckUnavailableError`, not a TRI006-specific carve-out — a future check with its own external prerequisite gets the same isolation for free.
