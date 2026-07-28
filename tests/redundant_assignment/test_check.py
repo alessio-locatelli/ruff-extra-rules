@@ -66,7 +66,7 @@ x = "foo"  # pytriage: TR5
 func(x=x)
 """,
         """
-x = "foo"  # PYTRIAGE: IGNORE=TR5
+x = "foo"  # PYTRIAGE: TR5
 func(x=x)
 """,
         """
