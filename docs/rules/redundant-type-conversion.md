@@ -1,4 +1,4 @@
-# redundant-type-conversion (TRI006)
+# redundant-type-conversion (TR6)
 
 Flags a builtin type/collection conversion call — `str(...)`, `list(...)`, and similar — that `ty` considers redundant given the real, statically-known type of the value it wraps, including when that value's type is declared in a different file.
 
@@ -72,7 +72,7 @@ Catching a redundant conversion at a call site whose parameter type is declared 
 
 ```python
 def echo(value: str) -> str:
-    return str(value)  # pytriage: ignore=TRI006
+    return str(value)  # pytriage: TR6
 ```
 
 A line already carrying a third-party type-checker suppression comment — `# type: ignore`, `# pyright: ignore`, `# ty: ignore` — is never flagged either, so a suppression you've already placed for an unrelated reason can't get misreported as a redundant conversion.

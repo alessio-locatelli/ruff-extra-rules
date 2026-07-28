@@ -1,4 +1,4 @@
-"""Variable tracking and redundancy pattern detection for TRI005."""
+"""Variable tracking and redundancy pattern detection for TR5."""
 
 from __future__ import annotations
 
@@ -808,7 +808,7 @@ class VariableTracker(ast.NodeVisitor):
     def _track_rebinding_use(self, var_name: str, line: int, col: int, scope_id: int, stmt_index: int) -> None:
         """Records that `var_name` was rebound (augmented-assignment or
         walrus) at this point — not a fresh `AssignmentInfo` (neither is a
-        standalone statement TRI005 could itself flag as redundant), but a
+        standalone statement TR5 could itself flag as redundant), but a
         "use" `_rhs_reference_reassigned` recognizes as disqualifying a
         snapshot taken from `var_name` earlier in the same scope.
         """
@@ -1219,7 +1219,7 @@ def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
     # Augmented-assignment targets (x += 1) can never be inlined: the "use"
     # IS an assignment target, and replacing it with the RHS expression
     # produces invalid syntax (`x = 5; x += 1` -> `5 += 1`). This also isn't
-    # the read-then-pass-through pattern TRI005 targets — the variable is
+    # the read-then-pass-through pattern TR5 targets — the variable is
     # being mutated, not merely forwarded.
     for use in lifecycle.uses:
         if use.context == "augmented_assignment":

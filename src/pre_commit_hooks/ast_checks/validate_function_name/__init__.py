@@ -1,6 +1,6 @@
 """validate_function_name - Detect get_* functions and suggest better names.
 
-TRI004: Functions with get_ prefix should use more descriptive names based on
+TR4: Functions with get_ prefix should use more descriptive names based on
 their behavior (e.g., load_, fetch_, calculate_, is_, iter_).
 
 This hook detects functions prefixed with `get_` and suggests more specific
@@ -23,10 +23,10 @@ This check runs as part of the grouped `ruff-extra-rules` hook:
     python -m pre_commit_hooks.ast_checks [--fix] <files>
 
 Suppression:
-    Add inline comment to suppress: # pytriage: ignore=TRI004
+    Add inline comment to suppress: # pytriage: TR4
 
 Example:
-    def get_users() -> list[User]:  # pytriage: ignore=TRI004
+    def get_users() -> list[User]:  # pytriage: TR4
         return User.objects.all()
 """
 
@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     import ast
     from pathlib import Path
 
-ERROR_CODE = "TRI004"
+ERROR_CODE = "TR4"
 
 logger_check = logging.getLogger("validate_function_name_check")
 

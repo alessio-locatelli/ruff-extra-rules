@@ -1,4 +1,4 @@
-# excessive-blank-lines (TRI002)
+# excessive-blank-lines (TR2)
 
 Collapses multiple consecutive blank lines after module headers (copyright, docstrings, or comments) to a single blank line.
 
@@ -35,4 +35,4 @@ import os  # Good - 1 blank line
 - Preserves copyright comment spacing (1 blank line after copyright)
 - Only affects module-level blank lines, preserves function/class spacing
 - Maintains file encoding and handles different line ending styles
-- Inline suppression with `# pytriage: ignore=TRI002`, placed on the first code line after the blank run (the violation's own line is blank and can't carry a trailing comment)
+- Inline suppression with `# pytriage: TR2`, placed on the first code line after the blank run (the violation's own line is blank and can't carry a trailing comment)

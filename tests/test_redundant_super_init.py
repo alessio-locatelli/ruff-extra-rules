@@ -45,7 +45,7 @@ def test_ignore_fixtures_are_not_flagged(fixture_path: Path) -> None:
 def test_check_id_and_error_code() -> None:
     check = RedundantSuperInitCheck()
     assert check.check_id == "redundant-super-init"
-    assert check.error_code == "TRI003"
+    assert check.error_code == "TR3"
 
 
 def test_get_prefilter_pattern() -> None:
@@ -90,7 +90,7 @@ class Child(Base):
 
 
 class Child(Base):
-    def __init__(self, **kwargs):  # pytriage: ignore=TRI003
+    def __init__(self, **kwargs):  # pytriage: TR3
         super().__init__(**kwargs)
 """,
             False,

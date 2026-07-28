@@ -390,7 +390,7 @@ def func():
         (
             # An augmented-assignment target (`x += 1`) can't be inlined —
             # the result (`5 += 1`) is invalid syntax — and isn't the
-            # read-then-forward pattern TRI005 targets anyway.
+            # read-then-forward pattern TR5 targets anyway.
             """
 def func():
     x = 5

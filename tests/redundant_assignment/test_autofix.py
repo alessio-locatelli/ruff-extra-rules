@@ -129,9 +129,7 @@ def test_autofix_skips_violation_without_fix_data(tmp_path: Path) -> None:
     filepath = tmp_path / "source.py"
     filepath.write_text(source)
 
-    violation = ViolationFactory.build(
-        check_id="redundant-assignment", error_code="TRI005", fixable=True, fix_data=None
-    )
+    violation = ViolationFactory.build(check_id="redundant-assignment", error_code="TR5", fixable=True, fix_data=None)
 
     check = RedundantAssignmentCheck()
     assert check.fix(filepath, [violation], source, ast.parse(source)) is False
@@ -144,7 +142,7 @@ def test_autofix_skips_violation_with_invalid_fix_data(tmp_path: Path) -> None:
 
     # fix_data is missing 'use_line'.
     violation = ViolationFactory.build(
-        check_id="redundant-assignment", error_code="TRI005", fixable=True, fix_data={"other_key": "value"}
+        check_id="redundant-assignment", error_code="TR5", fixable=True, fix_data={"other_key": "value"}
     )
 
     check = RedundantAssignmentCheck()
@@ -176,7 +174,7 @@ def test_autofix_with_invalid_assignment_line(tmp_path: Path) -> None:
 
     violation = ViolationFactory.build(
         check_id="redundant-assignment",
-        error_code="TRI005",
+        error_code="TR5",
         fixable=True,
         fix_data={
             "pattern": "IMMEDIATE_SINGLE_USE",
@@ -199,7 +197,7 @@ def test_autofix_with_invalid_usage_line(tmp_path: Path) -> None:
 
     violation = ViolationFactory.build(
         check_id="redundant-assignment",
-        error_code="TRI005",
+        error_code="TR5",
         fixable=True,
         fix_data={
             "pattern": "IMMEDIATE_SINGLE_USE",
@@ -224,7 +222,7 @@ def test_autofix_with_multiple_uses(tmp_path: Path) -> None:
     # whenever a lifecycle doesn't have exactly one use.
     violation = ViolationFactory.build(
         check_id="redundant-assignment",
-        error_code="TRI005",
+        error_code="TR5",
         fixable=True,
         fix_data={
             "pattern": "SINGLE_USE",
@@ -248,7 +246,7 @@ def test_autofix_with_unsafe_inlining(tmp_path: Path) -> None:
 
     violation = ViolationFactory.build(
         check_id="redundant-assignment",
-        error_code="TRI005",
+        error_code="TR5",
         fixable=True,
         fix_data={
             "pattern": "IMMEDIATE_SINGLE_USE",
@@ -269,9 +267,7 @@ def test_fix_method_with_no_fixable_violations() -> None:
 x = "foo"
 func(x=x)
 """
-    violation = ViolationFactory.build(
-        check_id="redundant-assignment", error_code="TRI005", fixable=False, fix_data=None
-    )
+    violation = ViolationFactory.build(check_id="redundant-assignment", error_code="TR5", fixable=False, fix_data=None)
     assert apply_fixes(Path("test.py"), [violation], source) is False
 
 

@@ -6,21 +6,22 @@ AST parsing operations.
 
 Error Codes
 -----------
-  - TRI001: Meaningless variable names (meaningless-vars)
-  - TRI002: Excessive blank lines (excessive-blank-lines)
-  - TRI003: Redundant super init (redundant-super-init)
-  - TRI004: Function naming violations (validate-function-name)
-  - TRI005: Redundant variable assignments (redundant-assignment)
-  - TRI006: Redundant builtin type conversions (redundant-type-conversion)
-  - STYLE-001: Comment misplaced on closing bracket line (misplaced-comment)
+  - TR1: Meaningless variable names (meaningless-vars)
+  - TR2: Excessive blank lines (excessive-blank-lines)
+  - TR3: Redundant super init (redundant-super-init)
+  - TR4: Function naming violations (validate-function-name)
+  - TR5: Redundant variable assignments (redundant-assignment)
+  - TR6: Redundant builtin type conversions (redundant-type-conversion)
+  - TR7: Comment misplaced on closing bracket line (misplaced-comment)
 
 Inline Ignore Comments
 ----------------------
-Use `# pytriage: ignore=<code>` to suppress specific violations.
+Use `# pytriage: <code>` to suppress a specific violation, or a
+comma-separated list to suppress more than one on the same line.
 
 Example:
-    data = [1, 2, 3]  # pytriage: ignore=TRI001
-    def get_users():  # pytriage: ignore=TRI004
+    data = [1, 2, 3]  # pytriage: TR1
+    def get_users():  # pytriage: TR4
         return []
 """
 

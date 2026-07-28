@@ -1,4 +1,4 @@
-"""Drives one long-lived `ty server` LSP session for TRI006 — see
+"""Drives one long-lived `ty server` LSP session for TR6 — see
 docs/audits/type-checker-selection-for-redundant-type-conversion.md for why
 `ty`, driven over LSP, was chosen, and ADR-0035 for the self-test/session
 design this module implements.
@@ -32,14 +32,14 @@ _HOVER_DOC_SEPARATOR = re.compile(r"\n-{3,}\n")
 _MIN_TY_VERSION = "0.0.64"
 
 _INSTALL_HINT = (
-    "redundant-type-conversion (TRI006) requires Astral's `ty` type checker on PATH. Install it with "
+    "redundant-type-conversion (TR6) requires Astral's `ty` type checker on PATH. Install it with "
     "`uv tool install ty`, or add `ty` as a dev dependency of your own project and commit with that virtual "
     "environment active, or opt out with `--ignore=redundant-type-conversion`. "
     "See https://github.com/astral-sh/ty."
 )
 
 _SELF_TEST_FAILED_HINT = (
-    "redundant-type-conversion (TRI006) found `ty` on PATH, but it failed this check's own compatibility "
+    "redundant-type-conversion (TR6) found `ty` on PATH, but it failed this check's own compatibility "
     "self-test: a known redundant/necessary type-conversion pair didn't produce the diagnostics this check "
     f"expects. `ty` is pre-1.0 and its diagnostics can change between versions in either direction. This "
     f"release of ruff-extra-rules was validated against ty>={_MIN_TY_VERSION} -- if your `ty` predates that, "
@@ -158,7 +158,7 @@ class TySession:
                 timeout=10.0,
             )
         except LSPError:
-            logger.debug("TRI006 hover failed for %s", filepath, exc_info=True)
+            logger.debug("TR6 hover failed for %s", filepath, exc_info=True)
             return None
         if not response:
             return None
@@ -178,7 +178,7 @@ class TySession:
             try:
                 self._client.notify("textDocument/didClose", {"textDocument": {"uri": uri}})
             except LSPError:
-                logger.debug("TRI006 close_file failed for %s", filepath, exc_info=True)
+                logger.debug("TR6 close_file failed for %s", filepath, exc_info=True)
             del self._open_versions[uri]
 
     def close(self) -> None:
@@ -236,7 +236,7 @@ _session: TySession | None = None
 _session_lock = threading.Lock()
 
 
-def get_session() -> TySession:  # pytriage: ignore=TRI004 -- fixed by ADR-0037, pending a released pin bump
+def get_session() -> TySession:  # pytriage: ignore=TRI004,TR4 -- fixed by ADR-0037, pending a released pin bump
     """Process-wide `TySession` singleton, created lazily. See ADR-0035's "Invocation"/"Failure handling"."""
     global _session  # noqa: PLW0603 -- the documented, deliberate one-session-per-process singleton this whole module exists for
     with _session_lock:

@@ -58,7 +58,7 @@ def test_expand_directories_leaves_plain_files_untouched(tmp_path: Path) -> None
     filepath.write_text("x = 1\n")
 
     assert expand_directories([str(filepath), "also/does/not/exist.py"]) == [
-        str(filepath),  # pytriage: ignore=TRI006
+        str(filepath),  # pytriage: TR6
         "also/does/not/exist.py",
     ]
 
@@ -488,7 +488,7 @@ def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: 
         exit_code = main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"])
 
         assert exit_code == 1
-        assert "TRI001" in capsys.readouterr().err
+        assert "TR1" in capsys.readouterr().err
     finally:
         os.chdir(original_dir)
 
@@ -512,10 +512,10 @@ def test_main_directory_argument_matches_explicit_file_argument_for_untracked_fi
         untracked.write_text("result = 2\n")
 
         assert main([str(untracked), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
-        assert "TRI001" in capsys.readouterr().err
+        assert "TR1" in capsys.readouterr().err
 
         assert main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
-        assert "TRI001" in capsys.readouterr().err
+        assert "TR1" in capsys.readouterr().err
     finally:
         os.chdir(original_dir)
 
@@ -557,7 +557,7 @@ def test_process_files_handles_utf8_bom(tmp_path: Path) -> None:
     violations = orchestrator.process_files([str(filepath)])
 
     assert len(violations[str(filepath)]) == 1
-    assert violations[str(filepath)][0].error_code == "TRI001"
+    assert violations[str(filepath)][0].error_code == "TR1"
 
 
 def test_apply_fixes_handles_utf8_bom(tmp_path: Path) -> None:
@@ -785,7 +785,7 @@ def test_refresh_stale_positions_records_rule_failure_when_check_raises(
 
     orchestrator._refresh_stale_positions(filepath, violations)
 
-    assert (str(filepath), "meaningless-vars") in orchestrator.rule_failures  # pytriage: ignore=TRI006
+    assert (str(filepath), "meaningless-vars") in orchestrator.rule_failures  # pytriage: TR6
     # Left exactly as it was -- the check crashed before it could report
     # anything current to replace it with.
     assert violations == [stale_violation]
@@ -838,7 +838,7 @@ def test_process_files_no_prefilter_pattern_checks_all_files(tmp_path: Path) -> 
     orchestrator = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()])
     violations = orchestrator.process_files([str(filepath)])
 
-    assert violations[str(filepath)][0].error_code == "TRI002"
+    assert violations[str(filepath)][0].error_code == "TR2"
 
 
 def test_process_files_no_candidates_after_prefilter_returns_empty(
@@ -872,7 +872,7 @@ def test_process_files_none_pattern_check_still_sees_a_file_other_checks_pattern
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(), ExcessiveBlankLinesCheck()])
     violations = orchestrator.process_files([str(filepath)])
 
-    assert violations[str(filepath)][0].error_code == "TRI002"
+    assert violations[str(filepath)][0].error_code == "TR2"
 
 
 def test_process_files_applies_each_checks_prefilter_independently(
@@ -897,7 +897,7 @@ def test_process_files_applies_each_checks_prefilter_independently(
     violations = orchestrator.process_files([str(filepath)])
 
     spy_check.assert_not_called()
-    assert violations[str(filepath)][0].error_code == "TRI001"
+    assert violations[str(filepath)][0].error_code == "TR1"
 
 
 @pytest.mark.parametrize(
@@ -934,7 +934,7 @@ def test_process_files_records_unprocessable_file(tmp_path: Path) -> None:
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations == {}
-    assert orchestrator.unprocessable_files == [str(filepath)]  # pytriage: ignore=TRI006
+    assert orchestrator.unprocessable_files == [str(filepath)]  # pytriage: TR6
 
 
 def test_process_files_resets_unprocessable_files_between_calls(tmp_path: Path) -> None:
@@ -947,7 +947,7 @@ def test_process_files_resets_unprocessable_files_between_calls(tmp_path: Path) 
 
     orchestrator = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()])
     orchestrator.process_files([str(bad_filepath)])
-    assert orchestrator.unprocessable_files == [str(bad_filepath)]  # pytriage: ignore=TRI006
+    assert orchestrator.unprocessable_files == [str(bad_filepath)]  # pytriage: TR6
 
     orchestrator.process_files([str(good_filepath)])
     assert orchestrator.unprocessable_files == []
@@ -959,14 +959,14 @@ def test_process_files_second_call_uses_cache(tmp_path: Path, monkeypatch: pytes
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
     first = orchestrator.process_files([str(filepath)])
-    assert first[str(filepath)][0].error_code == "TRI001"
+    assert first[str(filepath)][0].error_code == "TR1"
 
     def boom(*_args: object, **_kws: object) -> None:
         raise AssertionError("_check_file should not run on a cache hit")
 
     monkeypatch.setattr(CheckOrchestrator, "_check_file", boom)
     second = orchestrator.process_files([str(filepath)])
-    assert second[str(filepath)][0].error_code == "TRI001"
+    assert second[str(filepath)][0].error_code == "TR1"
 
 
 def test_cache_hit_and_cache_miss_report_equivalent_violations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -984,7 +984,7 @@ def test_cache_hit_and_cache_miss_report_equivalent_violations(tmp_path: Path, m
 
     cache_miss_orchestrator = CheckOrchestrator(checks=checks)
     cache_miss = cache_miss_orchestrator.process_files([str(filepath)])[str(filepath)]
-    assert {v.error_code for v in cache_miss} == {"TRI001", "TRI002"}
+    assert {v.error_code for v in cache_miss} == {"TR1", "TR2"}
 
     def boom(*_args: object, **_kws: object) -> None:
         raise AssertionError("_check_file should not run on a cache hit")
@@ -1014,7 +1014,7 @@ def test_process_files_different_check_set_forces_recheck(tmp_path: Path) -> Non
     violations = both_checks.process_files([str(filepath)])
 
     error_codes = {v.error_code for v in violations[str(filepath)]}
-    assert error_codes == {"TRI001", "TRI002"}
+    assert error_codes == {"TR1", "TR2"}
 
 
 def test_generate_cache_key_changes_when_source_tree_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1081,7 +1081,7 @@ def test_cache_violations_serialization_error_is_caught(tmp_path: Path, monkeypa
 
     # Must not raise, just skip caching for this file.
     violations = orchestrator.process_files([str(filepath)])
-    assert violations[str(filepath)][0].error_code == "TRI001"
+    assert violations[str(filepath)][0].error_code == "TR1"
 
 
 def test_process_files_check_exception_is_logged_and_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1099,7 +1099,7 @@ def test_process_files_check_exception_is_logged_and_skipped(tmp_path: Path, mon
     violations = orchestrator.process_files([str(filepath)])
 
     error_codes = {v.error_code for v in violations[str(filepath)]}
-    assert error_codes == {"TRI002"}
+    assert error_codes == {"TR2"}
 
 
 def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1119,7 +1119,7 @@ def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monk
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations == {}
-    assert orchestrator.rule_failures == [(str(filepath), "meaningless-vars")]  # pytriage: ignore=TRI006
+    assert orchestrator.rule_failures == [(str(filepath), "meaningless-vars")]  # pytriage: TR6
 
 
 def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1145,10 +1145,10 @@ def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: p
     orchestrator = CheckOrchestrator(checks=[meaningless_vars])
     first = orchestrator.process_files([str(filepath)])
     assert first == {}
-    assert orchestrator.rule_failures == [(str(filepath), "meaningless-vars")]  # pytriage: ignore=TRI006
+    assert orchestrator.rule_failures == [(str(filepath), "meaningless-vars")]  # pytriage: TR6
 
     second = orchestrator.process_files([str(filepath)])
-    assert second[str(filepath)][0].error_code == "TRI001"
+    assert second[str(filepath)][0].error_code == "TR1"
 
 
 def test_process_files_unavailable_checks_result_is_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1177,7 +1177,7 @@ def test_process_files_unavailable_checks_result_is_not_cached(tmp_path: Path, m
     assert orchestrator.unavailable_checks == [("meaningless-vars", "some prerequisite is missing")]
 
     second = orchestrator.process_files([str(filepath)])
-    assert second[str(filepath)][0].error_code == "TRI001"
+    assert second[str(filepath)][0].error_code == "TR1"
 
 
 class _AlwaysRerunProbeCheck:
@@ -1261,8 +1261,8 @@ def test_process_files_a_non_cacheable_checks_own_crash_does_not_block_caching_a
         checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), _CrashingAlwaysRerunCheck()]
     )
     first = orchestrator.process_files([str(filepath)])
-    assert {v.error_code for v in first[str(filepath)]} == {"TRI001"}
-    assert orchestrator.rule_failures == [(str(filepath), "crashing-always-rerun-probe")]  # pytriage: ignore=TRI006
+    assert {v.error_code for v in first[str(filepath)]} == {"TR1"}
+    assert orchestrator.rule_failures == [(str(filepath), "crashing-always-rerun-probe")]  # pytriage: TR6
 
     def boom(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("meaningless-vars must have been cached despite the always-rerun check's own crash")
@@ -1273,7 +1273,7 @@ def test_process_files_a_non_cacheable_checks_own_crash_does_not_block_caching_a
         checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), _CrashingAlwaysRerunCheck()]
     )
     second = second_orchestrator.process_files([str(filepath)])
-    assert {v.error_code for v in second[str(filepath)]} == {"TRI001"}
+    assert {v.error_code for v in second[str(filepath)]} == {"TR1"}
 
 
 def test_process_files_non_cacheable_check_never_serves_a_stale_result(tmp_path: Path) -> None:
@@ -1329,7 +1329,7 @@ def test_process_files_non_cacheable_check_does_not_disturb_a_cacheable_checks_o
     violations = combined.process_files([str(filepath)])
 
     error_codes = {v.error_code for v in violations[str(filepath)]}
-    assert error_codes == {"TRI001", "ZZZ001"}
+    assert error_codes == {"TR1", "ZZZ001"}
     assert probe.call_count == 1
 
 
@@ -1363,7 +1363,7 @@ def test_process_single_file_reports_unprocessable_when_always_rerun_group_fails
     violations = combined.process_files([str(filepath)])
 
     assert violations == {}
-    assert combined.unprocessable_files == [str(filepath)]  # pytriage: ignore=TRI006
+    assert combined.unprocessable_files == [str(filepath)]  # pytriage: TR6
 
 
 def test_process_files_enabling_a_non_cacheable_check_does_not_change_cache_key(
@@ -1745,7 +1745,7 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
     assert violation.fix_data is not None
     assert violation.fix_data.get("fixed") is True
     assert not is_fix_errored(violation)
-    assert orchestrator.rule_failures == [(str(filepath), "meaningless-vars")]  # pytriage: ignore=TRI006
+    assert orchestrator.rule_failures == [(str(filepath), "meaningless-vars")]  # pytriage: TR6
     assert filepath.read_text() == (
         "import requests\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n"
     )
@@ -2063,7 +2063,7 @@ def test_main_list_checks(capsys: pytest.CaptureFixture[str]) -> None:
 
     out = capsys.readouterr().out
     assert "Available checks:" in out
-    assert "meaningless-vars: TRI001" in out
+    assert "meaningless-vars: TR1" in out
 
 
 def test_main_no_filenames_returns_zero() -> None:
@@ -2189,7 +2189,7 @@ def test_main_reports_non_fixable_violation(tmp_path: Path, capsys: pytest.Captu
     assert exit_code == 1
 
     err = capsys.readouterr().err
-    assert "TRI003" in err
+    assert "TR3" in err
     assert "[FIXABLE]" not in err
     assert "[FIXED]" not in err
     assert "Run with --fix" not in err
@@ -2208,7 +2208,7 @@ def test_main_reports_column_alongside_line(tmp_path: Path, capsys: pytest.Captu
     exit_code = main([str(filepath), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"])
     assert exit_code == 1
 
-    assert f"{filepath}:2:5: TRI001:" in capsys.readouterr().err
+    assert f"{filepath}:2:5: TR1:" in capsys.readouterr().err
 
 
 def test_main_reports_fixable_violation_without_fix_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -2401,7 +2401,7 @@ def test_main_reports_rule_failure_when_reread_fails_mid_fix_loop(
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
-    assert (str(filepath), "meaningless-vars") in orchestrator.rule_failures  # pytriage: ignore=TRI006
+    assert (str(filepath), "meaningless-vars") in orchestrator.rule_failures  # pytriage: TR6
     meaningless_vars_violation = next(v for v in violations[str(filepath)] if v.check_id == "meaningless-vars")
     super_init_violation = next(v for v in violations[str(filepath)] if v.check_id == "redundant-super-init")
     assert is_fix_errored(meaningless_vars_violation)
@@ -2529,7 +2529,7 @@ def test_main_check_specific_cli_arg_round_trip(
     # redundant-assignment's own --redundant-assignment-level flag (see
     # test_main_redundant_assignment_level_flag below) already exercises
     # this wiring against a shipped check; this synthetic one keeps that
-    # coverage independent of TRI005's own reporting rules.
+    # coverage independent of TR5's own reporting rules.
     # Exercises main()'s add_cli_arguments -> parse_args ->
     # cli_kwargs_from_args -> check_args wiring end-to-end against a
     # synthetic check.
@@ -2696,7 +2696,7 @@ def test_main_trailing_comma_does_not_report_blank_unknown_check(
     # Regression: a trailing comma left an empty string in the parsed set,
     # reported as a confusing blank "Unknown checks: " instead of being
     # tolerated like --exclude's own comma list already is. Asserting on the
-    # TRI001 violation itself (not just the exit code) is what actually
+    # TR1 violation itself (not just the exit code) is what actually
     # proves meaningless-vars was recognized: both the fixed and the reverted
     # behavior exit 1 for --select (a real violation vs. the old bogus
     # "Unknown checks" error), so the exit code alone can't tell them apart.
@@ -2707,7 +2707,7 @@ def test_main_trailing_comma_does_not_report_blank_unknown_check(
     err = capsys.readouterr().err
 
     assert "Unknown checks" not in err
-    assert ("TRI001" in err) is meaningless_vars_runs
+    assert ("TR1" in err) is meaningless_vars_runs
     assert exit_code == (1 if meaningless_vars_runs else 0)
 
 
@@ -2743,7 +2743,7 @@ def test_main_select_and_ignore_compose(tmp_path: Path, capsys: pytest.CaptureFi
     )
     assert exit_code == 0
 
-    assert "TRI001" not in capsys.readouterr().err
+    assert "TR1" not in capsys.readouterr().err
 
 
 def test_main_malformed_cli_argument_exits_via_argparse(capsys: pytest.CaptureFixture[str]) -> None:
@@ -2851,7 +2851,7 @@ def test_main_handles_path_containing_spaces_and_unicode(
     # a command that dropped the pathspec (searching the whole repo instead
     # of this one file) would still find the sole match and pass every
     # assertion above, silently losing path scoping without this check.
-    assert all(str(filepath) in command for command in grep_commands)  # pytriage: ignore=TRI006
+    assert all(str(filepath) in command for command in grep_commands)  # pytriage: TR6
 
     assert exit_code == 1
     assert "[FIXED]" in capsys.readouterr().err

@@ -6,7 +6,7 @@ Checks live under `src/pre_commit_hooks/ast_checks/` and plug into the grouped `
 
 - Purpose: one check, one responsibility.
 - Check id: kebab-case (e.g. `no-bare-except`).
-- Error code: `TRI00N` (next unused number), or `STYLE-00N` for a purely stylistic, always-safe-to-autofix check like `misplaced-comment`. `test_all_checks_have_unique_check_ids_and_error_codes` (`tests/test_orchestrator.py`) fails loudly if a new check's id or code collides with an existing one — see `docs/adr/0021-behavioral-contract-audit-rule-isolation-python-compat.md`.
+- Error code: `TR<N>` (next unused number). `test_all_checks_have_unique_check_ids_and_error_codes` (`tests/test_orchestrator.py`) fails loudly if a new check's id or code collides with an existing one — see `docs/adr/0021-behavioral-contract-audit-rule-isolation-python-compat.md`.
 - Violation message format and whether the check needs an autofix mode.
 
 For the general prefilter-then-parse pipeline shape, see AGENTS.md's "Suggested Check Architecture". Concretely for this repo: almost nothing qualifies for a grep-only check, because every existing check needs to distinguish syntax context that only an AST gives you — e.g. `meaningless-vars` must tell `data = 1` (violation) apart from `obj.data = 1` (attribute, fine) and `"data = 1"` (inside a string, fine), and must catch `def foo(data):` (a parameter, not an assignment) that grep would miss entirely. Use `get_prefilter_pattern()` for a cheap `git grep` pass to skip files that can't possibly match, then do the real detection with `ast`.
@@ -21,7 +21,7 @@ class ASTCheck(Protocol):
     def check_id(self) -> str: ...  # e.g. "meaningless-vars"
 
     @property
-    def error_code(self) -> str: ...  # e.g. "TRI001"
+    def error_code(self) -> str: ...  # e.g. "TR1"
 
     def get_prefilter_pattern(self) -> list[str] | None: ...  # git-grep fast path, None = check every file
 
@@ -51,7 +51,7 @@ Create `src/pre_commit_hooks/ast_checks/your_check.py` (or a package with `__ini
 
 - Standard library only, no external runtime dependencies.
 - Never touch text inside string/byte literals or comments when writing an autofix — locate targets via AST node positions (`node.lineno`/`node.col_offset`/`node.end_lineno`/`node.end_col_offset`), not blind regex substitution over the whole file. See `validate_function_name/autofix.py` for a worked example of AST-scoped renaming.
-- Support inline suppression: `# pytriage: ignore=TRI00N`.
+- Support inline suppression: `# pytriage: TR<N>` (also matches as one entry in a comma-separated list, e.g. `# pytriage: TR1,TR5`).
 - If the check is experimental or prone to false positives, keep it out of the default-enabled set via `args: [--ignore=your-check-id]` in `.pre-commit-hooks.yaml`.
 - Write fixed content via `atomic_write_text()` (`_base.py`), never a direct `open()`/`Path.write_text()` — it validates the content parses as Python before committing, refusing (via `FixValidationError`) rather than ever writing broken syntax to disk. If your `fix()` writes once per call (most checks), let `FixValidationError` propagate uncaught — `CheckOrchestrator._apply_fixes` attributes the rejection to the check's violations for you. If it writes more than once per call, looping over violations individually (like `validate_function_name`), catch `FixValidationError` around each write and call `mark_fix_rejected()` on that specific violation so a later write in the same call still gets attempted. See `docs/adr/0010-fix-validation-before-write.md`.
 - Catch `OSError` around your own `atomic_write_text()` call (missing parent directory, permission denied, disk full) and return `False` — don't let it propagate. `ASTCheck.fix()`'s contract is "`True` if fixes were applied, `False` otherwise," not "or raises"; every shipped check with autofix follows this (see `meaningless_vars.fix()`, `excessive_blank_lines.fix()`, or `validate_function_name/autofix.apply_fix()` for the pattern). `CheckOrchestrator._apply_fixes`'s own outer `except Exception` will mask a missed case when running through the full pipeline, but calling your check's `fix()` directly (as unit tests do) will raise instead of returning `False`. See `docs/adr/0011-behavioral-contract-audit-fix-engine.md`.
@@ -63,7 +63,7 @@ Create `tests/test_your_check.py` using `tmp_path` and `pytest.mark.parametrize`
 
 - Detection: true positives across the patterns the check targets.
 - No false positives on idiomatic code the check should leave alone.
-- Inline suppression (`# pytriage: ignore=TRI00N`).
+- Inline suppression (`# pytriage: TR<N>`).
 - Autofix, if implemented — including that it never mutates unrelated text (string literals, comments, identically-named symbols in unrelated scopes).
 
 For larger example files, add fixtures under `tests/fixtures/your_check/`, following the `good/`/`bad/`/`ignore/` (and `autofix/`, if relevant) convention used by `tests/fixtures/validate_function_name/`.

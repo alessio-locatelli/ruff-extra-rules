@@ -57,7 +57,7 @@ def test_fix_skips_violation_missing_suggestion(fix_data: dict[str, int] | None,
     filepath = tmp_path / "mod.py"
     filepath.write_text("def get_data() -> bool:\n    return True\n")
 
-    violation = ViolationFactory.build(check_id="validate-function-name", error_code="TRI004", fix_data=fix_data)
+    violation = ViolationFactory.build(check_id="validate-function-name", error_code="TR4", fix_data=fix_data)
 
     check = ValidateFunctionNameCheck()
     assert check.fix(filepath, [violation], "x = 1\n", ast.parse("x = 1\n")) is False

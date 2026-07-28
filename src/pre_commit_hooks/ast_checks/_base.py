@@ -51,7 +51,7 @@ class ASTCheck(Protocol):
 
     @property
     def error_code(self) -> str:
-        """Error code prefix for this check's violations, e.g. "TRI001"."""
+        """Error code prefix for this check's violations, e.g. "TR1"."""
         ...
 
     @property
@@ -376,14 +376,15 @@ def atomic_write_text(path: Path, content: str, encoding: str) -> None:
 
 
 def ignore_pattern_for(error_code: str) -> re.Pattern[str]:
-    """Compile the inline-ignore regex for a check's error code.
+    """Compile the inline-suppression regex for a check's error code.
 
-    Every check that supports `# pytriage: ignore=<code>` suppression
-    compiled a near-identical pattern by hand; this is the single place that
-    pattern is defined, so all checks agree on its syntax (case-insensitive,
-    optional whitespace around `:`).
+    Matches `# pytriage: TR1` alone or as one entry in a comma-separated
+    list (`# pytriage: TR1,TR5`), in any position. The trailing `(?!\\w)`
+    stops a short code from matching inside a longer one that starts with
+    the same digits (`TR1` inside `TR10`).
     """
-    return re.compile(rf"#\s*pytriage:\s*ignore={re.escape(error_code)}", re.IGNORECASE)
+    escaped = re.escape(error_code)
+    return re.compile(rf"#\s*pytriage:\s*(?:[^,\s]+\s*,\s*)*{escaped}(?!\w)", re.IGNORECASE)
 
 
 def find_ignored_lines(source: str, pattern: re.Pattern[str]) -> set[int]:

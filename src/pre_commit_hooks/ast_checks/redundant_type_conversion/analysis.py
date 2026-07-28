@@ -1,6 +1,6 @@
 """Ties AST candidate detection (`candidates.py`), confidence tiering
 (`confidence.py`), and `ty`'s own redundancy decision (`session.py`)
-together for TRI006.
+together for TR6.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from .confidence import ConfidenceLevel
 
 _SESSION_LOST_HINT = (
-    "redundant-type-conversion (TRI006) lost its connection to `ty` mid-run (the `ty server` process likely "
+    "redundant-type-conversion (TR6) lost its connection to `ty` mid-run (the `ty server` process likely "
     "crashed or exited). Re-run to start a fresh session; if this keeps happening, try a different installed "
     "`ty` version. See docs/rules/redundant-type-conversion.md."
 )
@@ -135,6 +135,6 @@ def _build_modified_text(source_lines: list[str], candidate: Candidate) -> str:
         + line_bytes[candidate.arg_start_col : candidate.arg_end_col]
         + line_bytes[candidate.call_end_col :]
     )
-    new_lines = list(source_lines)  # pytriage: ignore=TRI006 -- copy, not redundant: avoids aliasing the caller's list
+    new_lines = list(source_lines)  # pytriage: TR6 -- copy, not redundant: avoids aliasing the caller's list
     new_lines[candidate.line - 1] = new_line_bytes.decode("utf-8")
     return "".join(new_lines)

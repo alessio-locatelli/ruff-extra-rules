@@ -22,7 +22,7 @@ def _fail_if_called() -> NoReturn:
 def test_check_id_and_error_code() -> None:
     check = RedundantTypeConversionCheck()
     assert check.check_id == "redundant-type-conversion"
-    assert check.error_code == "TRI006"
+    assert check.error_code == "TR6"
 
 
 def test_is_not_cacheable() -> None:
@@ -62,10 +62,10 @@ def test_is_not_cacheable() -> None:
 def test_prefilter_pattern_matches_the_configured_levels_eligible_constructors(
     level: ConfidenceLevel, expected: set[str]
 ) -> None:
-    # Narrowed to eligible_constructors(level), not every constructor TRI006 knows about.
+    # Narrowed to eligible_constructors(level), not every constructor TR6 knows about.
     pattern = RedundantTypeConversionCheck(level=level).get_prefilter_pattern()
     assert pattern is not None
-    assert set(pattern) == expected  # pytriage: ignore=TRI006
+    assert set(pattern) == expected  # pytriage: TR6
 
 
 def test_fix_never_applies_a_fix() -> None:
@@ -88,7 +88,7 @@ def test_check_never_calls_get_session_when_the_file_has_no_real_candidate(monke
 
 
 def test_check_never_calls_get_session_when_every_candidate_is_suppressed(monkeypatch: pytest.MonkeyPatch) -> None:
-    source = "y = str(x)  # pytriage: ignore=TRI006\n"
+    source = "y = str(x)  # pytriage: TR6\n"
     monkeypatch.setattr(tri006_module, "get_session", _fail_if_called)
 
     violations = RedundantTypeConversionCheck().check(Path("test.py"), ast.parse(source), source)
@@ -133,11 +133,11 @@ def test_check_flags_a_redundant_conservative_case(monkeypatch: pytest.MonkeyPat
 
     assert len(violations) == 1
     assert violations[0].check_id == "redundant-type-conversion"
-    assert violations[0].error_code == "TRI006"
+    assert violations[0].error_code == "TR6"
     assert violations[0].line == 1
     assert violations[0].fixable is False
     assert "str" in violations[0].message
-    assert "pytriage: ignore=TRI006" in violations[0].message
+    assert "pytriage: TR6" in violations[0].message
 
 
 def test_check_hedges_the_message_for_a_non_exact_permissive_match(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,11 +158,11 @@ def test_check_hedges_the_message_for_a_non_exact_permissive_match(monkeypatch: 
     assert "already `str`" not in message
     assert "dict[str, list[int]]" in message
     assert "not `str`" in message
-    assert "pytriage: ignore=TRI006" in message
+    assert "pytriage: TR6" in message
 
 
 def test_check_honors_pytriage_inline_ignore(monkeypatch: pytest.MonkeyPatch) -> None:
-    source = "y = str(x)  # pytriage: ignore=TRI006\n"
+    source = "y = str(x)  # pytriage: TR6\n"
     session = FakeSession(diagnostics_by_content={}, hover_by_position={})
     _patch_session(monkeypatch, session)
 
@@ -224,4 +224,4 @@ def test_end_to_end_through_main_reports_a_violation(
     exit_code = main([str(filepath), "--select=redundant-type-conversion"])
 
     assert exit_code == 1
-    assert "TRI006" in capsys.readouterr().err
+    assert "TR6" in capsys.readouterr().err

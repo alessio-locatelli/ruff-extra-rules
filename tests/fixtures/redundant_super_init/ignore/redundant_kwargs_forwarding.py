@@ -12,7 +12,7 @@ class Base:
 class Child(Base):
     """Child class that redundantly forwards kwargs."""
 
-    def __init__(self, value, **kwargs):  # pytriage: ignore=TRI003
+    def __init__(self, value, **kwargs):  # pytriage: TR3
         """Initialize child."""
         self.value = value
         super().__init__(**kwargs)  # VIOLATION suppressed by inline ignore above

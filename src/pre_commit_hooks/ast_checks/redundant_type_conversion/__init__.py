@@ -1,4 +1,4 @@
-"""TRI006: redundant builtin type-conversion calls. See
+"""TR6: redundant builtin type-conversion calls. See
 `docs/rules/redundant-type-conversion.md` and ADR-0035.
 """
 
@@ -19,13 +19,13 @@ if TYPE_CHECKING:
     import ast
     from pathlib import Path
 
-# Format: # pytriage: ignore=TRI006
-IGNORE_PATTERN = ignore_pattern_for("TRI006")
+# Format: # pytriage: TR6
+IGNORE_PATTERN = ignore_pattern_for("TR6")
 
 # See docs/rules/redundant-type-conversion.md's Suppression section.
 THIRD_PARTY_IGNORE_PATTERN = re.compile(r"#\s*(?:type|pyright|ty)\s*:\s*ignore\b", re.IGNORECASE)
 
-ERROR_CODE = "TRI006"
+ERROR_CODE = "TR6"
 CHECK_ID = "redundant-type-conversion"
 
 
@@ -34,7 +34,7 @@ def _format_message(item: RedundantConversion) -> str:
     if is_exact_match(item.argument_type, constructor):
         return (
             f"Redundant `{constructor}(...)` conversion: the argument is already `{item.argument_type}`, so "
-            f"wrapping it in `{constructor}()` has no effect. Or add '# pytriage: ignore={ERROR_CODE}' to suppress."
+            f"wrapping it in `{constructor}()` has no effect. Or add '# pytriage: {ERROR_CODE}' to suppress."
         )
     # Not a real type match -- `ty` just didn't distinguish the two here
     # (e.g. either side of a weakly-typed `==`), see ADR-0035's permissive
@@ -43,7 +43,7 @@ def _format_message(item: RedundantConversion) -> str:
     return (
         f"Redundant `{constructor}(...)` conversion: `ty` sees no difference with or without this wrap here, "
         f"though the argument's own type is `{item.argument_type}`, not `{constructor}` -- verify before removing. "
-        f"Or add '# pytriage: ignore={ERROR_CODE}' to suppress."
+        f"Or add '# pytriage: {ERROR_CODE}' to suppress."
     )
 
 
@@ -76,7 +76,7 @@ class RedundantTypeConversionCheck(BaseCheck):
             choices=["conservative", "permissive"],
             default="conservative",
             help=(
-                "How eagerly redundant-type-conversion (TRI006) reports a violation. 'conservative' (default) "
+                "How eagerly redundant-type-conversion (TR6) reports a violation. 'conservative' (default) "
                 "flags str/int/float/bool/bytes/frozenset/tuple conversions, only when the wrapped value already "
                 "matches that type exactly. 'permissive' also flags copy-producing conversions "
                 "(list/dict/set/bytearray) and a looser match, e.g. an already-list[str] value passed somewhere "

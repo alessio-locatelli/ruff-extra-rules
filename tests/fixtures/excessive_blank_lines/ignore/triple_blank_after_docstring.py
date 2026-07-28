@@ -2,6 +2,6 @@
 
 
 
-def example():  # pytriage: ignore=TRI002
+def example():  # pytriage: TR2
     """Example function."""
     return None

@@ -179,8 +179,39 @@ def test_classify_comment_lines_on_cr_only_source() -> None:
 
 
 def test_find_ignored_lines_on_cr_only_source() -> None:
-    source = "x = 1\rdata = 2  # pytriage: ignore=TRI001\r"
-    assert find_ignored_lines(source, ignore_pattern_for("TRI001")) == {2}
+    source = "x = 1\rdata = 2  # pytriage: TR1\r"
+    assert find_ignored_lines(source, ignore_pattern_for("TR1")) == {2}
+
+
+@pytest.mark.parametrize(
+    ("comment", "code", "expected"),
+    [
+        ("# pytriage: TR1", "TR1", True),
+        ("# pytriage: tr1", "TR1", True),
+        ("# pytriage: TR1,TR5", "TR1", True),
+        ("# pytriage: TR1,TR5", "TR5", True),
+        ("# pytriage: TR7,TR1,TR12", "TR1", True),
+        ("# pytriage: TR1, TR5", "TR5", True),
+        ("# pytriage: TR10", "TR1", False),
+        ("# pytriage: TR10", "TR10", True),
+        ("# pytriage: TR10,TR5", "TR1", False),
+        ("# some unrelated comment mentioning TR1", "TR1", False),
+    ],
+    ids=[
+        "single-code",
+        "case-insensitive",
+        "list-first-entry",
+        "list-second-entry",
+        "list-middle-entry",
+        "list-space-after-comma",
+        "no-false-match-on-longer-code",
+        "exact-match-on-longer-code",
+        "no-false-match-with-list-prefix",
+        "no-match-without-pytriage-prefix",
+    ],
+)
+def test_ignore_pattern_for_comma_separated_codes(comment: str, code: str, expected: bool) -> None:
+    assert bool(find_ignored_lines(f"x = 1  {comment}\n", ignore_pattern_for(code))) is expected
 
 
 def _setup_plain(tmp_path: Path) -> Path:
