@@ -184,9 +184,7 @@ class CacheManager:
             logger.warning("Cache directory %s is unavailable, running without cache: %s", self.cache_dir, repr(error))
             self._cache_dir_unavailable = True
 
-    def get_cached_result(  # pytriage: ignore=TRI004,TR4 -- fixed by ADR-0037, pending a released pin bump
-        self, filepath: Path, hook_name: str | None = None
-    ) -> dict[str, Any] | None:
+    def get_cached_result(self, filepath: Path, hook_name: str | None = None) -> dict[str, Any] | None:
         """Uses mtime fast-path: if mtime unchanged, skip expensive hash computation.
         If mtime changed, verify with content hash.
 

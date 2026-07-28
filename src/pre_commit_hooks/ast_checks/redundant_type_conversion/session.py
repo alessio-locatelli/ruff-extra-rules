@@ -236,7 +236,7 @@ _session: TySession | None = None
 _session_lock = threading.Lock()
 
 
-def get_session() -> TySession:  # pytriage: ignore=TRI004,TR4 -- fixed by ADR-0037, pending a released pin bump
+def get_session() -> TySession:
     """Process-wide `TySession` singleton, created lazily. See ADR-0035's "Invocation"/"Failure handling"."""
     global _session  # noqa: PLW0603 -- the documented, deliberate one-session-per-process singleton this whole module exists for
     with _session_lock:
