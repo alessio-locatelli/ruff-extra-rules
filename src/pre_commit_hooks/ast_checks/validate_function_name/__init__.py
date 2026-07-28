@@ -44,7 +44,7 @@ from pre_commit_hooks.ast_checks._base import (
 )
 
 from .analysis import Suggestion, collect_suggestions
-from .autofix import apply_fix, should_autofix
+from .autofix import apply_fix, index_function_nodes, is_autofix_safe, should_autofix
 
 if TYPE_CHECKING:
     import ast
@@ -82,6 +82,7 @@ class ValidateFunctionNameCheck(BaseCheck):
         # re-reading and re-parsing the file (see analysis.process_file for
         # the standalone equivalent used by tests).
         suggestions = collect_suggestions(filepath, tree, source)
+        function_index = index_function_nodes(tree)
 
         violations = []
         for suggestion in suggestions:
@@ -98,7 +99,7 @@ class ValidateFunctionNameCheck(BaseCheck):
                     line=suggestion.lineno,
                     col=0,
                     message=message,
-                    fixable=True,  # May be fixable based on complexity
+                    fixable=is_autofix_safe(function_index, suggestion),
                     # Violation.fix_data is intentionally untyped (dict[str,
                     # Any]) at this boundary; see ValidateFunctionNameFixData
                     # above for the shape check()/fix() actually agree on.
