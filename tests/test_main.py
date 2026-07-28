@@ -11,6 +11,7 @@ import pytest
 
 from pre_commit_hooks.ast_checks.__main__ import _install_sigterm_handler, _raise_keyboard_interrupt, run
 from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator
+from tests._helpers import raises, restricted_permissions
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -46,11 +47,9 @@ def test_install_sigterm_handler_degrades_when_signal_signal_unavailable(
 ) -> None:
     original_handler = signal.getsignal(signal.SIGTERM)
 
-    def _raise_value_error(*_args: object, **_kwargs: object) -> None:
-        msg = "signal only works in main thread of the main interpreter"
-        raise ValueError(msg)
-
-    monkeypatch.setattr(signal, "signal", _raise_value_error)
+    monkeypatch.setattr(
+        signal, "signal", raises(ValueError, "signal only works in main thread of the main interpreter")
+    )
 
     with caplog.at_level("DEBUG"):
         _install_sigterm_handler()  # must not raise
@@ -148,9 +147,8 @@ def test_real_invocation_does_not_leak_a_traceback_onto_stderr(tmp_path: Path) -
     """
     filepath = tmp_path / "unreadable.py"
     filepath.write_text("data = requests.get(url)\n")
-    filepath.chmod(0o000)
 
-    try:
+    with restricted_permissions(filepath, 0o000, restore=0o644):
         completed_process = subprocess.run(  # noqa: S603
             [sys.executable, "-m", "pre_commit_hooks.ast_checks", "--select", "meaningless-vars", filepath],
             capture_output=True,
@@ -158,8 +156,6 @@ def test_real_invocation_does_not_leak_a_traceback_onto_stderr(tmp_path: Path) -
             check=False,
             timeout=30,
         )
-    finally:
-        filepath.chmod(0o644)
 
     assert completed_process.returncode == 1
     assert "Traceback" not in completed_process.stdout
@@ -179,9 +175,8 @@ def test_verbose_flag_surfaces_the_underlying_exception_on_stderr(tmp_path: Path
     """
     filepath = tmp_path / "unreadable.py"
     filepath.write_text("data = requests.get(url)\n")
-    filepath.chmod(0o000)
 
-    try:
+    with restricted_permissions(filepath, 0o000, restore=0o644):
         completed_process = subprocess.run(  # noqa: S603
             [
                 sys.executable,
@@ -197,8 +192,6 @@ def test_verbose_flag_surfaces_the_underlying_exception_on_stderr(tmp_path: Path
             check=False,
             timeout=30,
         )
-    finally:
-        filepath.chmod(0o644)
 
     assert completed_process.returncode == 1
     assert f"{filepath}: error: could not be read or parsed; file skipped" in completed_process.stderr

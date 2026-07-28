@@ -10,6 +10,7 @@ import pytest
 
 from pre_commit_hooks import _cache as cache_module
 from pre_commit_hooks._cache import CacheManager
+from tests._helpers import raises, restricted_permissions
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -183,12 +184,8 @@ def test_corrupted_cache_returns_miss_instead_of_crashing(cache_manager: CacheMa
 
 
 def test_cache_write_errors_do_not_crash(cache_manager: CacheManager, sample_file: Path, temp_cache_dir: Path) -> None:
-    temp_cache_dir.chmod(0o444)  # read-only dir triggers a write error
-
-    try:
+    with restricted_permissions(temp_cache_dir, 0o444, restore=0o755):  # read-only dir triggers a write error
         cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
-    finally:
-        temp_cache_dir.chmod(0o755)
 
 
 def test_construction_does_not_crash_when_cache_dir_is_unavailable(tmp_path: Path, sample_file: Path) -> None:
@@ -199,16 +196,13 @@ def test_construction_does_not_crash_when_cache_dir_is_unavailable(tmp_path: Pat
     # never be created.
     readonly_parent = tmp_path / "readonly_parent"
     readonly_parent.mkdir()
-    readonly_parent.chmod(0o555)
 
-    try:
+    with restricted_permissions(readonly_parent, 0o555, restore=0o755):
         cache = CacheManager(cache_dir=readonly_parent / "cache", hook_name="test-hook", cache_version="1")
 
         assert cache.get_cached_result(sample_file, "test-hook") is None
         cache.set_cached_result(sample_file, "test-hook", {"violations": []})
         assert cache.get_cached_result(sample_file, "test-hook") is None
-    finally:
-        readonly_parent.chmod(0o755)
 
 
 def test_construction_detects_pre_existing_read_only_cache_dir(tmp_path: Path) -> None:
@@ -221,13 +215,10 @@ def test_construction_detects_pre_existing_read_only_cache_dir(tmp_path: Path) -
     # neither a raised OSError nor a first write attempt would.
     existing_cache_dir = tmp_path / "cache"
     CacheManager(cache_dir=existing_cache_dir, hook_name="test-hook", cache_version="1")
-    existing_cache_dir.chmod(0o555)
 
-    try:
+    with restricted_permissions(existing_cache_dir, 0o555, restore=0o755):
         cache = CacheManager(cache_dir=existing_cache_dir, hook_name="test-hook", cache_version="1")
         assert cache._cache_dir_unavailable is True
-    finally:
-        existing_cache_dir.chmod(0o755)
 
 
 def test_unavailable_cache_dir_short_circuits_without_touching_filesystem(
@@ -241,10 +232,11 @@ def test_unavailable_cache_dir_short_circuits_without_touching_filesystem(
     cache = CacheManager(cache_dir=temp_cache_dir, hook_name="test-hook", cache_version="1")
     cache._cache_dir_unavailable = True
 
-    def boom(*_args: object, **_kwargs: object) -> Path:
-        raise AssertionError("_get_cache_path should not run once the cache dir is known unavailable")
-
-    monkeypatch.setattr(CacheManager, "_get_cache_path", boom)
+    monkeypatch.setattr(
+        CacheManager,
+        "_get_cache_path",
+        raises(AssertionError, "_get_cache_path should not run once the cache dir is known unavailable"),
+    )
 
     assert cache.get_cached_result(sample_file, "test-hook") is None
     cache.set_cached_result(sample_file, "test-hook", {"violations": []})

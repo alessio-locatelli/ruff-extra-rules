@@ -8,7 +8,7 @@ import subprocess
 import sys
 import types
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
+from typing import TYPE_CHECKING, Any, NamedTuple
 from unittest import mock
 
 import pytest
@@ -30,6 +30,7 @@ from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, load_ch
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsCheck, MeaninglessVarsLevel
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
+from tests._helpers import raises, restricted_permissions
 from tests.factories import ViolationFactory
 
 if TYPE_CHECKING:
@@ -38,13 +39,6 @@ if TYPE_CHECKING:
 
     from pre_commit_hooks.ast_checks import ASTCheck
     from pre_commit_hooks.ast_checks.validate_function_name.analysis import Suggestion
-
-
-def _raises(exc_type: type[BaseException], message: str) -> Callable[..., NoReturn]:
-    def _raise(*_args: object, **_kwargs: object) -> NoReturn:
-        raise exc_type(message)
-
-    return _raise
 
 
 @pytest.mark.parametrize(
@@ -704,7 +698,7 @@ def test_refresh_stale_positions_records_rule_failure_when_check_raises(
     # isolated (ch. 5) like every other check failure, not left to crash
     # the whole run or silently leave the check's own stale entries in
     # `violations`.
-    monkeypatch.setattr(MeaninglessVarsCheck, "check", _raises(RuntimeError, "simulated check failure"))
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", raises(RuntimeError, "simulated check failure"))
 
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
@@ -893,7 +887,7 @@ def test_process_files_second_call_uses_cache(tmp_path: Path, monkeypatch: pytes
     assert first[str(filepath)][0].error_code == "TR1"
 
     monkeypatch.setattr(
-        CheckOrchestrator, "_check_file", _raises(AssertionError, "_check_file should not run on a cache hit")
+        CheckOrchestrator, "_check_file", raises(AssertionError, "_check_file should not run on a cache hit")
     )
     second = orchestrator.process_files([str(filepath)])
     assert second[str(filepath)][0].error_code == "TR1"
@@ -918,7 +912,7 @@ def test_cache_hit_and_cache_miss_report_equivalent_violations(tmp_path: Path, m
 
     cache_hit_orchestrator = CheckOrchestrator(checks=checks)
     monkeypatch.setattr(
-        CheckOrchestrator, "_check_file", _raises(AssertionError, "_check_file should not run on a cache hit")
+        CheckOrchestrator, "_check_file", raises(AssertionError, "_check_file should not run on a cache hit")
     )
     cache_hit = cache_hit_orchestrator.process_files([str(filepath)])[str(filepath)]
 
@@ -1003,7 +997,7 @@ def test_cache_violations_serialization_error_is_caught(tmp_path: Path, monkeypa
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
 
-    monkeypatch.setattr(CacheManager, "set_cached_result", _raises(TypeError, "simulated cache backend failure"))
+    monkeypatch.setattr(CacheManager, "set_cached_result", raises(TypeError, "simulated cache backend failure"))
 
     # Must not raise, just skip caching for this file.
     violations = orchestrator.process_files([str(filepath)])
@@ -1016,7 +1010,7 @@ def test_process_files_check_exception_is_logged_and_skipped(tmp_path: Path, mon
     filepath = tmp_path / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
 
-    monkeypatch.setattr(MeaninglessVarsCheck, "check", _raises(ValueError, "simulated check failure"))
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", raises(ValueError, "simulated check failure"))
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(), ExcessiveBlankLinesCheck()])
     violations = orchestrator.process_files([str(filepath)])
@@ -1033,7 +1027,7 @@ def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monk
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    monkeypatch.setattr(MeaninglessVarsCheck, "check", _raises(ValueError, "simulated check failure"))
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", raises(ValueError, "simulated check failure"))
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     violations = orchestrator.process_files([str(filepath)])
@@ -1187,7 +1181,7 @@ def test_process_files_a_non_cacheable_checks_own_crash_does_not_block_caching_a
     monkeypatch.setattr(
         MeaninglessVarsCheck,
         "check",
-        _raises(AssertionError, "meaningless-vars must have been cached despite the always-rerun check's own crash"),
+        raises(AssertionError, "meaningless-vars must have been cached despite the always-rerun check's own crash"),
     )
 
     second_orchestrator = CheckOrchestrator(
@@ -1243,7 +1237,7 @@ def test_process_files_non_cacheable_check_does_not_disturb_a_cacheable_checks_o
     monkeypatch.setattr(
         MeaninglessVarsCheck,
         "check",
-        _raises(AssertionError, "a cacheable check must not be recomputed once already cached"),
+        raises(AssertionError, "a cacheable check must not be recomputed once already cached"),
     )
 
     probe = _AlwaysRerunProbeCheck()
@@ -1853,7 +1847,7 @@ def _fix_returns_false(
 def _fix_raises(
     _orchestrator: CheckOrchestrator, _meaningless_vars: MeaninglessVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(MeaninglessVarsCheck, "fix", _raises(RuntimeError, "simulated fix failure"))
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", raises(RuntimeError, "simulated fix failure"))
 
 
 @pytest.mark.parametrize(
@@ -2051,13 +2045,9 @@ def test_main_permission_denied_file_returns_one_inside_git_repo(
         filepath = tmp_path / "module.py"
         filepath.write_text("data = 1\n")
         subprocess.run([git, "add", "module.py"], check=True, cwd=tmp_path)  # noqa: S603
-        filepath.chmod(0o000)
 
-        try:
-            with caplog.at_level("DEBUG"):
-                exit_code = main(["module.py", "--select", "meaningless-vars"])
-        finally:
-            filepath.chmod(0o644)
+        with restricted_permissions(filepath, 0o000, restore=0o644), caplog.at_level("DEBUG"):
+            exit_code = main(["module.py", "--select", "meaningless-vars"])
 
         assert exit_code == 1
         assert "module.py: error: could not be read or parsed; file skipped" in capsys.readouterr().err
@@ -2074,7 +2064,7 @@ def test_main_check_crash_returns_one_and_reports_check_and_file(
     # Regression: a check that crashes on every file it sees used to make
     # the whole run look clean (exit code 0, nothing printed) whenever no
     # other check reported a violation for the same files.
-    monkeypatch.setattr(MeaninglessVarsCheck, "check", _raises(ValueError, "simulated check failure"))
+    monkeypatch.setattr(MeaninglessVarsCheck, "check", raises(ValueError, "simulated check failure"))
 
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
@@ -2250,12 +2240,8 @@ def test_main_fix_flag_reports_failed_fix(
     filepath.write_text(
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
-    subdir.chmod(0o555)
-    try:
-        with caplog.at_level("DEBUG"):
-            exit_code = main([str(filepath), "--select", "meaningless-vars", "--fix"])
-    finally:
-        subdir.chmod(0o755)
+    with restricted_permissions(subdir, 0o555, restore=0o755), caplog.at_level("DEBUG"):
+        exit_code = main([str(filepath), "--select", "meaningless-vars", "--fix"])
 
     assert exit_code == 1
     err = capsys.readouterr().err

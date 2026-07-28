@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
 import subprocess
@@ -14,6 +15,7 @@ from pre_commit_hooks._prefilter import (
     batch_filter_files,
     git_grep_filter,
 )
+from tests._helpers import restricted_permissions
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -79,9 +81,7 @@ def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         # Args are hardcoded test setup, not untrusted input.
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
@@ -94,8 +94,6 @@ def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None
 
         no_matches = git_grep_filter([str(file1)], "totally_absent_pattern", fixed_string=True)
         assert no_matches == []
-    finally:
-        os.chdir(original_dir)
 
 
 def test_git_grep_filter_includes_permission_denied_tracked_file(tmp_path: Path) -> None:
@@ -109,24 +107,17 @@ def test_git_grep_filter_includes_permission_denied_tracked_file(tmp_path: Path)
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         unreadable = tmp_path / "unreadable.py"
         unreadable.write_text("data = 1\n")
         subprocess.run([git, "add", "unreadable.py"], check=True, cwd=tmp_path)  # noqa: S603
-        unreadable.chmod(0o000)
 
-        try:
+        with restricted_permissions(unreadable, 0o000, restore=0o644):
             matches = git_grep_filter([str(unreadable)], "data", fixed_string=True)
-        finally:
-            unreadable.chmod(0o644)
 
         assert str(unreadable) in matches
-    finally:
-        os.chdir(original_dir)
 
 
 def test_git_grep_filter_includes_file_deleted_since_discovery(tmp_path: Path) -> None:
@@ -140,9 +131,7 @@ def test_git_grep_filter_includes_file_deleted_since_discovery(tmp_path: Path) -
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         vanished = tmp_path / "vanished.py"
@@ -150,8 +139,6 @@ def test_git_grep_filter_includes_file_deleted_since_discovery(tmp_path: Path) -
         matches = git_grep_filter([str(vanished)], "data", fixed_string=True)
 
         assert str(vanished) in matches
-    finally:
-        os.chdir(original_dir)
 
 
 def test_git_grep_filter_includes_untracked_file(tmp_path: Path) -> None:
@@ -165,9 +152,7 @@ def test_git_grep_filter_includes_untracked_file(tmp_path: Path) -> None:
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         untracked = tmp_path / "untracked.py"
@@ -177,8 +162,6 @@ def test_git_grep_filter_includes_untracked_file(tmp_path: Path) -> None:
         matches = git_grep_filter([str(untracked)], "data", fixed_string=True)
 
         assert matches == [str(untracked)]
-    finally:
-        os.chdir(original_dir)
 
 
 def test_git_grep_filter_includes_gitignored_file(tmp_path: Path) -> None:
@@ -188,9 +171,7 @@ def test_git_grep_filter_includes_gitignored_file(tmp_path: Path) -> None:
     git = shutil.which("git")
     assert git is not None
 
-    original_dir = Path.cwd()
-    try:
-        os.chdir(tmp_path)
+    with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
         (tmp_path / ".gitignore").write_text("ignored.py\n")
 
@@ -200,8 +181,6 @@ def test_git_grep_filter_includes_gitignored_file(tmp_path: Path) -> None:
         matches = git_grep_filter([str(ignored)], "data", fixed_string=True)
 
         assert matches == [str(ignored)]
-    finally:
-        os.chdir(original_dir)
 
 
 def test_git_grep_filter_match_order_is_independent_of_hash_seed(tmp_path: Path) -> None:
@@ -299,18 +278,18 @@ def test_python_fallback_includes_unreadable_files(tmp_path: Path, caplog: pytes
 
     file2 = tmp_path / "unreadable.py"
     file2.write_text("content")
-    file2.chmod(0o000)
 
-    try:
-        with mock.patch("subprocess.run") as mock_run, caplog.at_level("DEBUG"):
-            mock_run.side_effect = FileNotFoundError()
+    with (
+        restricted_permissions(file2, 0o000, restore=0o644),
+        mock.patch("subprocess.run") as mock_run,
+        caplog.at_level("DEBUG"),
+    ):
+        mock_run.side_effect = FileNotFoundError()
 
-            matches = git_grep_filter([str(file1), str(file2)], "data")
+        matches = git_grep_filter([str(file1), str(file2)], "data")
 
-            # Unreadable files are kept in; the hook itself surfaces the read error.
-            assert str(file2) in matches
-    finally:
-        file2.chmod(0o644)
+        # Unreadable files are kept in; the hook itself surfaces the read error.
+        assert str(file2) in matches
 
     # Regression: both the git-unavailable fallback and this file's own
     # unreadable-file fallback are self-healing (the caller already keeps
