@@ -33,8 +33,8 @@ _MIN_TY_VERSION = "0.0.64"
 
 _INSTALL_HINT = (
     "redundant-type-conversion (TRI006) requires Astral's `ty` type checker on PATH. Install it with "
-    "`uv tool install ty`, or add `ty` as a dev dependency of your own project and run this hook from that "
-    "active environment (e.g. via `uv run`), or opt out with `--ignore=redundant-type-conversion`. "
+    "`uv tool install ty`, or add `ty` as a dev dependency of your own project and commit with that virtual "
+    "environment active, or opt out with `--ignore=redundant-type-conversion`. "
     "See https://github.com/astral-sh/ty."
 )
 
