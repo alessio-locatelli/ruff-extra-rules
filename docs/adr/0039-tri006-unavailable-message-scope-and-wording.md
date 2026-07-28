@@ -30,7 +30,7 @@ For the message content, once the above put a floor under how "actionable" this 
 Both `CheckUnavailableError` messages in `session.py` were rewritten:
 
 - `_INSTALL_HINT` drops the uvx-cache-warming instruction entirely; it now only points to `uv tool install ty` or adding `ty` as the consumer's own dev dependency.
-- `_SELF_TEST_FAILED_HINT` no longer asserts a direction. It states the `ty` floor this release validated against (a new `_MIN_TY_VERSION` constant) and offers both possibilities: upgrade if the consumer's `ty` predates that floor, or pin to an older `ty` (or wait for a `ruff-extra-rules` update) if it doesn't.
+- `_SELF_TEST_FAILED_HINT` no longer asserts a direction. It states the `ty` floor this release validated against (a new `_MIN_TY_VERSION` constant) and offers both possibilities: upgrade if the consumer's `ty` predates that floor, or pin to an older `ty` (or wait for a `ruff-extra-rules` update) if it's newer than that floor — the exact validated version itself is never told to pin older, since that would only move away from the known-good state.
 - Both messages now mention `--ignore=redundant-type-conversion` as an explicit opt-out, so a consumer who doesn't want to deal with `ty` at all has a stated escape hatch instead of having to discover `--ignore` exists on their own.
 - `_MIN_TY_VERSION` is a plain hardcoded string, not derived from `pyproject.toml` at runtime. `test_min_ty_version_matches_pyproject_pin` (`tests/redundant_type_conversion/test_session.py`) parses `pyproject.toml`'s `dependency-groups.dev` `ty>=X.Y.Z` pin with stdlib `tomllib` plus a small regex and asserts it matches the constant, so a future pin bump that forgets the constant fails CI instead of drifting silently.
 

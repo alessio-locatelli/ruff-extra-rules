@@ -33,8 +33,9 @@ _MIN_TY_VERSION = "0.0.64"
 
 _INSTALL_HINT = (
     "redundant-type-conversion (TRI006) requires Astral's `ty` type checker on PATH. Install it with "
-    "`uv tool install ty` or add `ty` as a dev dependency of your own project, or opt out with "
-    "`--ignore=redundant-type-conversion`. See https://github.com/astral-sh/ty."
+    "`uv tool install ty`, or add `ty` as a dev dependency of your own project and run this hook from that "
+    "active environment (e.g. via `uv run`), or opt out with `--ignore=redundant-type-conversion`. "
+    "See https://github.com/astral-sh/ty."
 )
 
 _SELF_TEST_FAILED_HINT = (
@@ -42,8 +43,8 @@ _SELF_TEST_FAILED_HINT = (
     "self-test: a known redundant/necessary type-conversion pair didn't produce the diagnostics this check "
     f"expects. `ty` is pre-1.0 and its diagnostics can change between versions in either direction. This "
     f"release of ruff-extra-rules was validated against ty>={_MIN_TY_VERSION} -- if your `ty` predates that, "
-    "upgrade it; if not, it may be newer than validated, so pinning to an older `ty` (or waiting for a "
-    "ruff-extra-rules update) may help instead -- or opt out with `--ignore=redundant-type-conversion`. "
+    "upgrade it; if it's newer than that, pinning to an older `ty` (or waiting for a ruff-extra-rules update) "
+    "may help instead -- or opt out with `--ignore=redundant-type-conversion`. "
     "See docs/rules/redundant-type-conversion.md."
 )
 
