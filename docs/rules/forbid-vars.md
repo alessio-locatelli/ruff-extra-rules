@@ -10,6 +10,7 @@ Meaningless variable names reduce code clarity and maintainability. See [Peter H
 
 - `data`
 - `result`
+- `results`
 
 ## Features
 

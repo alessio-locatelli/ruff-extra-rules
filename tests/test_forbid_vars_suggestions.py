@@ -25,18 +25,22 @@ from pre_commit_hooks.ast_checks._forbid_vars_suggestions import (
 )
 
 
-def _plans(source: str, ignored_lines: set[int] | None = None) -> dict[tuple[int, int], RenameProposal]:
-    return plan_suggestions(ast.parse(source), {"data", "result"}, ignored_lines or set())
+def _plans(
+    source: str,
+    ignored_lines: set[int] | None = None,
+    forbidden_names: set[str] | None = None,
+) -> dict[tuple[int, int], RenameProposal]:
+    return plan_suggestions(ast.parse(source), forbidden_names or {"data", "result"}, ignored_lines or set())
 
 
-def _plan_for(source: str, target: str = "data") -> RenameProposal | None:
+def _plan_for(source: str, target: str = "data", forbidden_names: set[str] | None = None) -> RenameProposal | None:
     tree = ast.parse(source)
     target_node = next(
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == target
     )
-    return _plans(source).get((target_node.lineno, target_node.col_offset))
+    return _plans(source, forbidden_names=forbidden_names).get((target_node.lineno, target_node.col_offset))
 
 
 def _assert_plan_for(
@@ -44,8 +48,9 @@ def _assert_plan_for(
     target: str,
     expected_name: str | None,
     expected_confidence: Confidence | None,
+    forbidden_names: set[str] | None = None,
 ) -> None:
-    proposal = _plan_for(source, target)
+    proposal = _plan_for(source, target, forbidden_names=forbidden_names)
 
     assert (proposal is None) is (expected_name is None)
     if proposal is not None:
@@ -834,3 +839,83 @@ def f(client):
 """
 
     assert _plans(source) == {}
+
+
+_WITH_RESULTS = {"data", "result", "results"}
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "name"),
+    [
+        ("def f(cursor):\n    results = cursor.fetchall()\n    return results\n", "results", "rows"),
+        ("def f(cursor):\n    results = cursor.fetchmany()\n    return results\n", "results", "rows"),
+        (
+            "def f(qcoll):\n    results = qcoll.find().sort([('_id', 1)]).to_list()\n    return results\n",
+            "results",
+            "rows",
+        ),
+        ("def f(cursor):\n    result = cursor.fetchone()\n    return result\n", "result", "row"),
+    ],
+)
+def test_db_fetch_method_evidence_produces_suggestions(source: str, target: str, name: str) -> None:
+    _assert_plan_for(source, target, name, Confidence.SUGGESTION_ONLY, forbidden_names=_WITH_RESULTS)
+
+
+def test_db_fetch_method_evidence_excludes_fetchnumpy() -> None:
+    # duckdb's Cursor.fetchnumpy() returns a dict keyed by column name
+    # (results["col"]), not row-oriented data — "rows" would misdescribe it.
+    source = "def f(conn):\n    results = conn.fetchnumpy()\n    return results\n"
+
+    _assert_plan_for(source, "results", None, None, forbidden_names=_WITH_RESULTS)
+
+
+@pytest.mark.parametrize(
+    ("source", "target", "name"),
+    [
+        ("def f(db):\n    results = db.list_collections()\n    return results\n", "results", "collections"),
+        ("def f():\n    data = collect_items()\n    return data\n", "data", "items"),
+    ],
+)
+def test_list_and_collect_producer_prefixes(source: str, target: str, name: str) -> None:
+    _assert_plan_for(source, target, name, Confidence.SUGGESTION_ONLY, forbidden_names=_WITH_RESULTS)
+
+
+def test_accumulator_append_evidence_produces_suggestion() -> None:
+    source = """def f(source):
+    results = []
+    for item in source:
+        results.append(item)
+    return results
+"""
+
+    _assert_plan_for(source, "results", "items", Confidence.SUGGESTION_ONLY, forbidden_names=_WITH_RESULTS)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        # appended value isn't a bare Name
+        (
+            "def f(source):\n    results = []\n    for item in source:\n        results.append(compute(item))\n"
+            "    return results\n"
+        ),
+        # two different appended names make the element ambiguous
+        (
+            "def f(item, other):\n    results = []\n    results.append(item)\n    results.append(other)\n"
+            "    return results\n"
+        ),
+        # the append() call precedes the assignment it would confirm
+        "def f(item):\n    results.append(item)\n    results = []\n    return results\n",
+        # "person" has no regular plural form (see _IRREGULAR_WORDS)
+        "def f(person):\n    results = []\n    results.append(person)\n    return results\n",
+    ],
+    ids=["non-name-argument", "conflicting-appended-names", "append-before-assignment", "irregular-plural"],
+)
+def test_accumulator_append_evidence_requires_a_single_unambiguous_later_call(source: str) -> None:
+    _assert_plan_for(source, "results", None, None, forbidden_names=_WITH_RESULTS)
+
+
+def test_results_annotation_still_produces_autofix() -> None:
+    source = "def f():\n    results: list[User] = []\n    return results\n"
+
+    _assert_plan_for(source, "results", "users", Confidence.AUTO_FIX, forbidden_names=_WITH_RESULTS)

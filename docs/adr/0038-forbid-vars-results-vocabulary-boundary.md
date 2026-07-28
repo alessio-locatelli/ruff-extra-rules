@@ -1,0 +1,31 @@
+# forbid-vars adds `results`, bounded to DB-API vocabulary and single-target accumulators
+
+## Context
+
+TRI001's default forbidden-name set was `data`/`result`; `results` — the plural accumulator/collection form — was not included, so `plan_suggestions()` (see `docs/adr/0030-file-local-semantic-variable-rename-suggestions.md`) never ran against it. A read-only scan of `results = ...` bindings across five real-world Python projects (aiohttp, mesop, structlog, mongo-python-driver, aiohttp-client-cache) plus duckdb-python — 46 bindings total — showed two recurring shapes with no existing evidence source: a call to a DB-API-style cursor "fetch" method (`cursor.fetchall()`, `qcoll.find()....to_list()`, 18/46), and an accumulator (`results = []` populated later via `.append()`, 8/46). The remaining bindings were either already covered by existing annotation/producer/registry evidence or genuinely ambiguous (`asyncio.gather(...)`, `db.command(...)`), with no safe name derivable from local context.
+
+## Decision
+
+`results` joins `DEFAULT_FORBIDDEN_NAMES`. Two new evidence sources were added to close the gap the scan identified, both scoped deliberately narrower than the coverage they could theoretically reach:
+
+**DB-API fetch methods.** A call whose terminal attribute name is `fetchall`, `fetchmany`, or `to_list` proposes `rows`; `fetchone` proposes `row`. This is a bare attribute-name match — the same style already used for `_attribute_role` (`.status_code`/`.headers`/... → `response`) — with no receiver-type confirmation, since this codebase tracks no import information for database drivers. `fetchnumpy` (duckdb) is deliberately excluded: it returns a dict keyed by column name, not row-oriented data, so `rows` would misdescribe it rather than merely being unhelpful.
+
+**Accumulator elements.** When an eligible `results = []` (or annotated `results: list = []`) is followed, later in the same scope, by exactly one `results.append(<name>)` call where `<name>` is a single bare local `Name`, the pluralized form of `<name>` is proposed. Anything else — an attribute, a call, a literal, a second differently-named append target — contributes no candidate for that call; if it collides with a candidate from another evidence source, the existing "more than one candidate name → no proposal" rule in `_proposal_for` resolves the ambiguity, so no new collision-handling was needed.
+
+Both sources are single-evidence, so per the existing confidence rule (`"annotation" in evidence or len(evidence) >= 2` → `AUTO_FIX`, else `SUGGESTION_ONLY`) they never auto-fix on their own — only in combination with another evidence source (e.g. a confirming annotation), same as every other registry- or producer-derived candidate.
+
+The producer-prefix vocabulary (`get_`/`fetch_`/`load_`/.../`find_`) also gained `list_` and `collect_` (e.g. `list_collections()` → `collections`), motivated by the same scan and by this repo's own `_collect_replacements` accumulator. This applies to every forbidden name, not just `results`.
+
+## Alternatives considered
+
+- **Type-confirmed pymongo/ORM recognition** (import-tracking `pymongo`/`motor`/SQLAlchemy/Django, then resolving `.find()`/`.objects.filter()`/`.all()` through it): rejected as outside `docs/adr/0030`'s "small vocabulary of standard APIs" boundary. `fetchall`/`fetchmany`/`fetchone` are PEP 249 DB-API standard vocabulary (sqlite3, psycopg2, duckdb, ...) with `to_list()` as the async-cursor equivalent (pymongo/motor) — closer to this repo's existing `json`/`subprocess`/`requests`/`httpx` precedent than a single ORM would be. A specific ORM/driver choice is a per-project decision, not something users of this repo share the way a DB-API method name is.
+- **Requiring `.to_list()` to be chained onto a preceding `.find(...)` call** before it counts as evidence: considered as a narrower, more conservative version of the DB-API fetch-method check. Superseded once `fetchall`/`fetchmany` turned out to need no such chain confirmation (they're unambiguous DB-API vocabulary on their own) — requiring one only for `to_list()` would have meant two different evidence shapes for what is, in the vocabulary this repo already recognizes, the same kind of call.
+- **General accumulator-pattern support** (inferring an element name from whatever a loop appends, including calls, attribute access, or thread/worker objects passed by reference): rejected after inspecting every real accumulator instance the scan found — each held an element with no safely derivable name (a `Thread`, a timing `float`, a test helper instance mutated by reference rather than appended). Building broader inference to correctly produce zero suggestions on every real example found does not serve coverage; the single-bare-Name-argument scope was kept specifically because it's the one shape where the appended value's own name is already the evidence.
+
+## Consequences
+
+- A DB-API-style `results = cursor.fetchall()`/`results = cursor.fetchmany()`/`results = cursor.execute(...).fetchall()` now gets a `rows` suggestion; `result = cursor.fetchone()` gets `row`. `results = conn.fetchnumpy()` is left unresolved by design.
+- `results = []` followed by `results.append(item)` gets an `items` suggestion; two different appended names, a non-`Name` argument, or an `.append()` call before the assignment all correctly produce no suggestion.
+- pymongo's own `.find(...).to_list()` benefits from the DB-API check without any pymongo-specific code; no other ORM/driver gets bespoke recognition.
+- `pytest.mark.parametrize("results", ...)` was considered and dropped for lack of evidence — no occurrence of a plural `results` parametrize argname was found in any of the six scanned repos, unlike the existing singular `result` → `expected_result` special case in `_parametrize_result_proposals`, which stays untouched.
+- This repo's own dogfooding surfaced two `results` bindings with no available suggestion (`_collect_replacements`'s accumulator, a recursive call to a private, underscore-prefixed function that producer-prefix matching doesn't reach) and one with an automatic `AUTO_FIX` (`scripts/benchmark.py`'s annotated `results: list[CheckTimingResult] = []`). All three were renamed by hand rather than left to fail `local-ruff-extra-rules-aggressive`'s permissive-mode check on the next commit.

@@ -408,14 +408,15 @@ def test_multiple_forbidden_names() -> None:
 def process():
     data = {}
     result = None
-    return data, result
+    results = []
+    return data, result, results
 """
 
     violations = ForbidVarsCheck(level=ForbidVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source)
 
-    assert len(violations) == 2
+    assert len(violations) == 3
     names = {v.message.split("'")[1] for v in violations}
-    assert names == {"data", "result"}
+    assert names == {"data", "result", "results"}
 
 
 def test_multiple_violations_same_scope() -> None:
