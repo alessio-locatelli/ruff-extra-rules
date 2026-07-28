@@ -23,22 +23,20 @@ type SourcePosition = tuple[int, int]  # (1-indexed line, 0-indexed character co
 
 
 def _count_nesting_depth(func_node: _FuncNode) -> int:
-    """0 = no nesting, 1 = single level of control flow, etc."""
+    """0 = no nesting, 1 = single level of control flow, etc.
+
+    Iterative (explicit stack), not recursive: see `attach_parents` for why
+    a recursive AST walk isn't safe against ordinary, valid Python here
+    (e.g. `not not not ... True` chains deep enough to hit Python's default
+    recursion limit).
+    """
     max_depth = 0
-
-    def _walk_depth(node: ast.AST, current_depth: int) -> None:
-        nonlocal max_depth
-        max_depth = max(max_depth, current_depth)
-
-        if isinstance(node, (ast.If, ast.For, ast.While, ast.With, ast.Try)):
-            for child in ast.iter_child_nodes(node):
-                _walk_depth(child, current_depth + 1)
-        else:
-            for child in ast.iter_child_nodes(node):
-                _walk_depth(child, current_depth)
-
-    for stmt in func_node.body:
-        _walk_depth(stmt, 0)
+    stack: list[tuple[ast.AST, int]] = [(stmt, 0) for stmt in func_node.body]
+    while stack:
+        node, depth = stack.pop()
+        max_depth = max(max_depth, depth)
+        child_depth = depth + 1 if isinstance(node, (ast.If, ast.For, ast.While, ast.With, ast.Try)) else depth
+        stack.extend((child, child_depth) for child in ast.iter_child_nodes(node))
 
     return max_depth
 
@@ -71,7 +69,44 @@ def _find_function_node(tree: ast.Module, name: str, lineno: int) -> _FuncNode |
     return None
 
 
+type FunctionIndex = dict[tuple[str, int], _FuncNode]
+
+
+def index_function_nodes(tree: ast.Module) -> FunctionIndex:
+    """Maps each function/method's (name, lineno) to its own node, in one pass over `tree`.
+
+    Built once per tree and reused across every suggestion found in that
+    tree (see `is_autofix_safe`), instead of `_find_function_node` re-
+    walking the whole module once per suggestion.
+    """
+    return {
+        (node.name, node.lineno): node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
 def should_autofix(filepath: Path, suggestion: Suggestion) -> bool:
+    """Re-reads and re-parses `filepath` from disk, then defers to `is_autofix_safe`.
+
+    Only used by `fix()`, which needs the file's current on-disk state (an
+    earlier rename in the same batch may already have written to it) — see
+    its own docstring. `check()` already holds a parsed, parent-linked tree
+    of the exact source it was given, and calls `is_autofix_safe` directly
+    against that instead, to avoid re-reading/re-parsing the file once per
+    suggestion.
+    """
+    try:
+        tree = ast.parse(read_source(filepath))
+    except (OSError, SyntaxError, UnicodeDecodeError, LookupError) as error:
+        logger.warning("Filepath: %s. Error: %s", filepath, repr(error))
+        return False
+
+    attach_parents(tree)
+    return is_autofix_safe(index_function_nodes(tree), suggestion)
+
+
+def is_autofix_safe(function_index: FunctionIndex, suggestion: Suggestion) -> bool:
     """Determine if a suggestion is safe to auto-fix.
 
     Safe autofix criteria (ALL must be met):
@@ -86,23 +121,19 @@ def should_autofix(filepath: Path, suggestion: Suggestion) -> bool:
     differently-named receiver (e.g. `reader.get_report()` in a free
     function elsewhere in the file). Renaming the definition without being
     able to find every such call site would break real, unrenamed callers.
+
+    `function_index` must come from `index_function_nodes` on a tree that's
+    already parent-linked (see `attach_parents`).
     """
     # Check 1: Confidence
     if suggestion.reason == "no confident suggestion":
         return False
 
-    try:
-        tree = ast.parse(read_source(filepath))
-    except (OSError, SyntaxError, UnicodeDecodeError, LookupError) as error:
-        logger.warning("Filepath: %s. Error: %s", filepath, repr(error))
-        return False
-
-    func_node = _find_function_node(tree, suggestion.func_name, suggestion.lineno)
+    func_node = function_index.get((suggestion.func_name, suggestion.lineno))
     if func_node is None:
         return False
 
     # Check 2: Not a method
-    attach_parents(tree)
     if isinstance(getattr(func_node, "parent", None), ast.ClassDef):
         return False
 

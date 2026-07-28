@@ -97,6 +97,18 @@ def test_fix_skips_unsafe_suggestion(tmp_path: Path) -> None:
     assert filepath.read_text() == source
 
 
+def test_check_does_not_mark_unfixable_violation_fixable(tmp_path: Path) -> None:
+    filepath = tmp_path / "mod.py"
+    source = 'class Reader:\n    def get_data(self):\n        f = open("f.txt")\n        return f.read()\n'
+    filepath.write_text(source)
+
+    check = ValidateFunctionNameCheck()
+    violations = check.check(filepath, ast.parse(source), source)
+
+    assert len(violations) == 1
+    assert violations[0].fixable is False
+
+
 def test_fix_returns_false_when_apply_fix_fails_without_raising(
     tmp_path: Path,
 ) -> None:
