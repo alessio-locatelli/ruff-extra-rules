@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
-    from typing import IO
+    from typing import IO, Self
 
 __all__ = ["LSPClient", "LSPError", "LSPTimeoutError", "byte_col_to_utf16_col"]
 
@@ -122,6 +122,12 @@ class LSPClient:
         self._reader.start()
         self._stderr_reader = threading.Thread(target=self._drain_stderr, daemon=True)
         self._stderr_reader.start()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_exc_info: object) -> None:
+        self.close()
 
     def _drain_stderr(self) -> None:
         # An unread stderr PIPE fills once the server writes enough to it,
