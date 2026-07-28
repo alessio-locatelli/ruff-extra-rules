@@ -43,6 +43,7 @@ class ScopeInfo:
     conditions: dict[str, list[ast.stmt]] = field(default_factory=lambda: defaultdict(list))
     loops: dict[str, list[tuple[str, ast.Name]]] = field(default_factory=lambda: defaultdict(list))
     collection_uses: dict[str, list[ast.expr]] = field(default_factory=lambda: defaultdict(list))
+    appended_names: dict[str, list[tuple[str, ast.Call]]] = field(default_factory=lambda: defaultdict(list))
     global_or_nonlocal: set[str] = field(default_factory=set)
     children: list[ScopeInfo] = field(default_factory=list)
     has_reflection: bool = False
@@ -216,6 +217,17 @@ class _ScopeVisitor(ast.NodeVisitor):
                 and isinstance(keyword_argument.value.ctx, ast.Load)
             ):
                 self.scope.calls[keyword_argument.value.id].append(CallArgument(node, keyword_argument.arg))
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "append"
+            and isinstance(node.func.value, ast.Name)
+            and isinstance(node.func.value.ctx, ast.Load)
+            and len(node.args) == 1
+            and not node.keywords
+            and isinstance(node.args[0], ast.Name)
+            and isinstance(node.args[0].ctx, ast.Load)
+        ):
+            self.scope.appended_names[node.func.value.id].append((node.args[0].id, node))
         self.generic_visit(node)
 
     def visit_If(self, node: ast.If) -> None:
@@ -404,6 +416,12 @@ def _add_use_candidates(
     if any(_position(node) > position for node in scope.collection_uses[name]):
         _confirm_collection_candidates(candidates)
 
+    appended_names = {argument_name for argument_name, call in scope.appended_names[name] if _position(call) > position}
+    for argument_name in appended_names:
+        pluralized = _pluralize(argument_name)
+        if pluralized is not None:
+            candidates[pluralized].add("accumulator_element")
+
 
 def _refine_parser_candidates(candidates: dict[str, set[str]], constraints: set[str]) -> None:
     parser_roles = {name for name, evidence in candidates.items() if "parser" in evidence}
@@ -424,6 +442,9 @@ def _expression_candidates(value: ast.expr, scope: ScopeInfo) -> dict[str, set[s
     return {}
 
 
+_DB_FETCH_METHOD_NAMES = {"fetchall": "rows", "fetchmany": "rows", "to_list": "rows", "fetchone": "row"}
+
+
 def _call_candidates(node: ast.Call, scope: ScopeInfo) -> dict[str, set[str]]:
     if isinstance(node.func, ast.Attribute) and node.func.attr == "json" and isinstance(node.func.value, ast.Call):
         nested = _call_candidates(node.func.value, scope)
@@ -438,6 +459,9 @@ def _call_candidates(node: ast.Call, scope: ScopeInfo) -> dict[str, set[str]]:
     if _is_path_open(node, scope):
         return {"file_handle": {"registry"}}
 
+    if isinstance(node.func, ast.Attribute) and node.func.attr in _DB_FETCH_METHOD_NAMES:
+        return {_DB_FETCH_METHOD_NAMES[node.func.attr]: {"registry"}}
+
     name = _call_terminal_name(node.func)
     if name is None:
         return {}
@@ -446,7 +470,7 @@ def _call_candidates(node: ast.Call, scope: ScopeInfo) -> dict[str, set[str]]:
     deserialized_name = _deserialized_argument_name(qname, node)
     if deserialized_name is not None:
         candidates[deserialized_name] = {"deserializer"}
-    for prefix in ("get", "fetch", "load", "read", "parse", "create", "build", "make", "find"):
+    for prefix in ("get", "fetch", "load", "read", "parse", "create", "build", "make", "find", "list", "collect"):
         marker = f"{prefix}_"
         if name.startswith(marker) and len(name) > len(marker):
             candidates[name.removeprefix(marker)] = {"producer"}

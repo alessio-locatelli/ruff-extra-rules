@@ -1,4 +1,4 @@
-"""Check for forbidden meaningless variable names like 'data' and 'result'.
+"""Check for forbidden meaningless variable names like 'data', 'result', and 'results'.
 
 TRI001: Detects and suggests replacements for meaningless variable names that
 reduce code maintainability.
@@ -55,7 +55,7 @@ class ForbidVarsFixData(TypedDict):
     auto_fixable: bool
 
 
-DEFAULT_FORBIDDEN_NAMES = {"data", "result"}
+DEFAULT_FORBIDDEN_NAMES = {"data", "result", "results"}
 
 
 class ForbidVarsLevel(Enum):
@@ -605,9 +605,9 @@ def _collect_replacements(
         return []
 
     if isinstance(node, _CROSSABLE_SCOPE_NODES):
-        results: list[tuple[int, int, VariableName, VariableName]] = []
+        replacements: list[tuple[int, int, VariableName, VariableName]] = []
         for outer_child in _outer_scope_children(node, has_future_annotations=has_future_annotations):
-            results.extend(
+            replacements.extend(
                 _collect_replacements(outer_child, replace_names, has_future_annotations=has_future_annotations)
             )
 
@@ -615,7 +615,7 @@ def _collect_replacements(
             bound_default_names = _peer_filtered_replace_names(node.type_params, replace_names)
             if bound_default_names:
                 for expr in _type_param_defaults_and_bounds(node.type_params):
-                    results.extend(
+                    replacements.extend(
                         _collect_replacements(expr, bound_default_names, has_future_annotations=has_future_annotations)
                     )
 
@@ -623,11 +623,11 @@ def _collect_replacements(
                 annotation_names = _peer_filtered_replace_names(node.type_params, replace_names)
                 if annotation_names:
                     for expr in _signature_annotations(node.args):
-                        results.extend(
+                        replacements.extend(
                             _collect_replacements(expr, annotation_names, has_future_annotations=has_future_annotations)
                         )
                     if node.returns is not None:
-                        results.extend(
+                        replacements.extend(
                             _collect_replacements(
                                 node.returns, annotation_names, has_future_annotations=has_future_annotations
                             )
@@ -636,10 +636,10 @@ def _collect_replacements(
         nested_names = {name: new for name, new in replace_names.items() if not _binds_name_in_nested_scope(node, name)}
         if nested_names:
             for own_child in _own_scope_children(node):
-                results.extend(
+                replacements.extend(
                     _collect_replacements(own_child, nested_names, has_future_annotations=has_future_annotations)
                 )
-        return results
+        return replacements
 
     if isinstance(node, ast.TypeAlias):
         # `node.name` is bound in the *enclosing* scope (like a function's
@@ -649,17 +649,17 @@ def _collect_replacements(
         # CPython: `type Alias[data, T: data] = (T, data)` resolves both
         # `data` references to the peer `TypeVar`, not to an enclosing local
         # of the same name) — both use the same peer-filtered mapping.
-        results = _collect_replacements(node.name, replace_names, has_future_annotations=has_future_annotations)
+        replacements = _collect_replacements(node.name, replace_names, has_future_annotations=has_future_annotations)
         filtered_names = _peer_filtered_replace_names(node.type_params, replace_names)
         if filtered_names:
             for expr in _type_param_defaults_and_bounds(node.type_params):
-                results.extend(
+                replacements.extend(
                     _collect_replacements(expr, filtered_names, has_future_annotations=has_future_annotations)
                 )
-            results.extend(
+            replacements.extend(
                 _collect_replacements(node.value, filtered_names, has_future_annotations=has_future_annotations)
             )
-        return results
+        return replacements
 
     if isinstance(node, ast.ClassDef):
         return []

@@ -129,12 +129,12 @@ def benchmark_iteration(files: list[str], label: str) -> BenchmarkIterationResul
     print(f"{label}")
     print(f"{'=' * 60}")
 
-    results: list[CheckTimingResult] = []
+    check_timing_results: list[CheckTimingResult] = []
     total_start = time.perf_counter()
 
     for name, command in CHECKS.items():
         check_timing_result = run_check(name, command, files)
-        results.append(check_timing_result)
+        check_timing_results.append(check_timing_result)
         print(
             f"  {name:30s} {check_timing_result['elapsed_ms']:8.2f} ms ({check_timing_result['files_checked']} files)"
         )
@@ -147,7 +147,7 @@ def benchmark_iteration(files: list[str], label: str) -> BenchmarkIterationResul
     return {
         "label": label,
         "total_ms": total_elapsed * 1000,
-        "checks": results,
+        "checks": check_timing_results,
     }
 
 
