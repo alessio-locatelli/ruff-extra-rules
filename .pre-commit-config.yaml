@@ -71,7 +71,7 @@ repos:
           ]
 
   - repo: https://github.com/alessio-locatelli/ruff-extra-rules
-    rev: v0.0.37
+    rev: v0.0.38
     hooks:
       - id: ruff-extra-rules
         exclude: ^tests/fixtures/
