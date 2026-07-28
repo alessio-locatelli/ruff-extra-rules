@@ -10,11 +10,9 @@ from typing import TYPE_CHECKING, Protocol
 from pre_commit_hooks._lsp import LSPError
 from pre_commit_hooks.ast_checks._base import CheckUnavailableError, byte_col_to_char_col, split_lines_like_ast
 
-from .candidates import find_candidates
-from .confidence import eligible_constructors, hover_passes_gate, is_exact_match, is_purepath_hover
+from .confidence import hover_passes_gate, is_exact_match, is_purepath_hover
 
 if TYPE_CHECKING:
-    import ast
     from pathlib import Path
 
     from .candidates import Candidate
@@ -59,15 +57,24 @@ class RedundantConversion:
 def decide_candidates(
     session: RedundancySession,
     filepath: Path,
-    tree: ast.Module,
+    all_candidates: list[Candidate],
     source: str,
     *,
     level: ConfidenceLevel,
     ignored_lines: set[int],
 ) -> list[RedundantConversion]:
-    """Every candidate in `tree` that `ty` confirms is actually redundant at `level`."""
-    eligible = eligible_constructors(level)
-    candidates = [candidate for candidate in find_candidates(tree, eligible) if candidate.line not in ignored_lines]
+    """Every one of `all_candidates` (already found by `find_candidates()` --
+    see that function's own docstring for what qualifies) that `ty` confirms
+    is actually redundant.
+
+    Takes the already-found candidate list rather than re-deriving it from
+    `tree` itself: `find_candidates()` re-walks the whole tree, and the only
+    caller (`RedundantTypeConversionCheck.check()`) already has to run it
+    once anyway (to know whether tokenizing `source` for `ignored_lines` is
+    even worth doing) -- running it a second time here just to filter by
+    `ignored_lines` would repeat that whole-tree walk for nothing new.
+    """
+    candidates = [candidate for candidate in all_candidates if candidate.line not in ignored_lines]
     if not candidates:
         return []
 
