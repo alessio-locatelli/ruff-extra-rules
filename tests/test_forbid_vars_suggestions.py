@@ -862,8 +862,7 @@ def test_db_fetch_method_evidence_produces_suggestions(source: str, target: str,
 
 
 def test_db_fetch_method_evidence_excludes_fetchnumpy() -> None:
-    # duckdb's Cursor.fetchnumpy() returns a dict keyed by column name
-    # (results["col"]), not row-oriented data — "rows" would misdescribe it.
+    # See docs/adr/0038-forbid-vars-results-vocabulary-boundary.md
     source = "def f(conn):\n    results = conn.fetchnumpy()\n    return results\n"
 
     _assert_plan_for(source, "results", None, None, forbidden_names=_WITH_RESULTS)
@@ -894,24 +893,33 @@ def test_accumulator_append_evidence_produces_suggestion() -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        # appended value isn't a bare Name
         (
             "def f(source):\n    results = []\n    for item in source:\n        results.append(compute(item))\n"
             "    return results\n"
         ),
-        # two different appended names make the element ambiguous
         (
             "def f(item, other):\n    results = []\n    results.append(item)\n    results.append(other)\n"
             "    return results\n"
         ),
-        # the append() call precedes the assignment it would confirm
         "def f(item):\n    results.append(item)\n    results = []\n    return results\n",
-        # "person" has no regular plural form (see _IRREGULAR_WORDS)
         "def f(person):\n    results = []\n    results.append(person)\n    return results\n",
     ],
     ids=["non-name-argument", "conflicting-appended-names", "append-before-assignment", "irregular-plural"],
 )
 def test_accumulator_append_evidence_requires_a_single_unambiguous_later_call(source: str) -> None:
+    _assert_plan_for(source, "results", None, None, forbidden_names=_WITH_RESULTS)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def f(item):\n    results = factory()\n    results.append(item)\n    return results\n",
+        "def f(item):\n    results = [1, 2, 3]\n    results.append(item)\n    return results\n",
+        "def f(item):\n    results = list()\n    results.append(item)\n    return results\n",
+    ],
+    ids=["non-list-initializer", "non-empty-list-literal", "list-call-not-literal"],
+)
+def test_accumulator_append_evidence_requires_an_empty_list_literal_initializer(source: str) -> None:
     _assert_plan_for(source, "results", None, None, forbidden_names=_WITH_RESULTS)
 
 

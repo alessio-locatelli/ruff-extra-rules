@@ -358,6 +358,10 @@ def _proposal_for(assignment: Assignment, forbidden_names: set[str]) -> RenamePr
     return RenameProposal(name, confidence, frozenset(evidence))
 
 
+def _is_empty_list_literal(value: ast.expr) -> bool:
+    return isinstance(value, ast.List) and not value.elts
+
+
 def _add_use_candidates(
     candidates: dict[str, set[str]],
     constraints: set[str],
@@ -416,11 +420,14 @@ def _add_use_candidates(
     if any(_position(node) > position for node in scope.collection_uses[name]):
         _confirm_collection_candidates(candidates)
 
-    appended_names = {argument_name for argument_name, call in scope.appended_names[name] if _position(call) > position}
-    for argument_name in appended_names:
-        pluralized = _pluralize(argument_name)
-        if pluralized is not None:
-            candidates[pluralized].add("accumulator_element")
+    if _is_empty_list_literal(assignment.value):
+        appended_names = {
+            argument_name for argument_name, call in scope.appended_names[name] if _position(call) > position
+        }
+        for argument_name in appended_names:
+            pluralized = _pluralize(argument_name)
+            if pluralized is not None:
+                candidates[pluralized].add("accumulator_element")
 
 
 def _refine_parser_candidates(candidates: dict[str, set[str]], constraints: set[str]) -> None:
