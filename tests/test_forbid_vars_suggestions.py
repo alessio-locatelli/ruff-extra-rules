@@ -852,7 +852,7 @@ _WITH_RESULTS = {"data", "result", "results"}
         (
             "def f(qcoll):\n    results = qcoll.find().sort([('_id', 1)]).to_list()\n    return results\n",
             "results",
-            "rows",
+            "documents",
         ),
         ("def f(cursor):\n    result = cursor.fetchone()\n    return result\n", "result", "row"),
     ],

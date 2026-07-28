@@ -442,7 +442,7 @@ def _expression_candidates(value: ast.expr, scope: ScopeInfo) -> dict[str, set[s
     return {}
 
 
-_DB_FETCH_METHOD_NAMES = {"fetchall": "rows", "fetchmany": "rows", "to_list": "rows", "fetchone": "row"}
+_DB_FETCH_METHOD_NAMES = {"fetchall": "rows", "fetchmany": "rows", "fetchone": "row", "to_list": "documents"}
 
 
 def _call_candidates(node: ast.Call, scope: ScopeInfo) -> dict[str, set[str]]:
