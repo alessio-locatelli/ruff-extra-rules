@@ -639,7 +639,7 @@ def should_report_violation(
     # deliberately documenting what that call returns — e.g. `warning =
     # conn.recv()` or `ci_headers = CIMultiDict(headers)` — rather than a
     # redundant restatement of it. Doesn't apply to the permissive level,
-    # which reports the same broader set TR5 always used to.
+    # which instead falls through to the semantic-value ceiling below.
     if (
         level is AggressivenessLevel.CONSERVATIVE
         and isinstance(assignment.rhs_node, ast.Call)
@@ -725,12 +725,10 @@ def _is_generic_call_result_name(var_name: str, rhs_node: ast.Call) -> bool:
 
 
 # Score ceiling a violation's `calculate_semantic_value` must be at or under
-# to be reported. The conservative-level ceilings reuse the exact numbers
-# `should_autofix` used to gate autofix eligibility on before issue #76 — so
-# the conservative level now reports only what the old default used to
-# auto-fix, and reporting alone (no separate, softer autofix-specific
-# ceiling) decides what's eligible for --fix. The permissive ceiling (49,
-# i.e. score < 50) reproduces TR5's old, single default reporting bar.
+# to be reported. At the conservative level, `should_autofix()` doesn't
+# narrow these further with a separate, stricter semantic-value ceiling of
+# its own — see ADR-0032. The permissive ceiling (49, i.e. score < 50)
+# reports every case up to that bar.
 _CONSERVATIVE_REPORT_CEILING = {
     PatternType.IMMEDIATE_SINGLE_USE: 10,
     PatternType.LITERAL_IDENTITY: 10,

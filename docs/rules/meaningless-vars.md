@@ -29,13 +29,13 @@ Meaningless variable names reduce code clarity and maintainability. See [Peter H
 
 ## Suggest mode (default)
 
-```
+```text
 src/process.py:2: TR1: 'data' is a meaningless variable name — 'user' is more descriptive. Or add '# pytriage: TR1' to suppress.
 ```
 
 **Permissive mode**, reporting a `result` binding the conservative default left out because no replacement could be suggested for it:
 
-```
+```text
 src/process.py:3: TR1: Meaningless variable name 'result' found. Use a more descriptive name. Or add '# pytriage: TR1' to suppress.
 ```
 
