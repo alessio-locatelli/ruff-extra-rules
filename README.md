@@ -5,6 +5,7 @@ Extra Python rule checks and fixups that run as a pre-commit/prek hook alongside
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
 [![codecov](https://codecov.io/github/alessio-locatelli/ruff-extra-rules/graph/badge.svg?token=TMZ7VAVVUL)](https://codecov.io/github/alessio-locatelli/ruff-extra-rules)
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/alessio-locatelli/ruff-extra-rules?utm_source=oss&utm_medium=github&utm_campaign=alessio-locatelli%2Fruff-extra-rules&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
 
 ## Project Status
 
