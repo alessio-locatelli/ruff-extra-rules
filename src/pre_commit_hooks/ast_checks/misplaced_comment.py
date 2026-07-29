@@ -15,7 +15,6 @@ import logging
 import re
 import tokenize
 from dataclasses import dataclass
-from io import StringIO
 from typing import TYPE_CHECKING
 
 from ._base import (
@@ -26,7 +25,7 @@ from ._base import (
     ignored_lines_from_tokens,
     line_terminator,
     mark_fix_failed,
-    normalize_for_tokenize,
+    tokenize_source,
 )
 
 if TYPE_CHECKING:
@@ -152,7 +151,7 @@ class MisplacedCommentCheck(BaseCheck):
         return ["#"]
 
     def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
-        tokens = tuple(tokenize.generate_tokens(StringIO(normalize_for_tokenize(source)).readline))
+        tokens = tuple(tokenize_source(source))
         found = _scan_misplaced_comments(tokens)
         if not found:
             return []
@@ -183,7 +182,7 @@ class MisplacedCommentCheck(BaseCheck):
         _tree: ast.Module,
         encoding: str = "utf-8",
     ) -> bool:
-        tokens = tuple(tokenize.generate_tokens(StringIO(normalize_for_tokenize(source)).readline))
+        tokens = tuple(tokenize_source(source))
         found = _scan_misplaced_comments(tokens)
         if not found:
             return False

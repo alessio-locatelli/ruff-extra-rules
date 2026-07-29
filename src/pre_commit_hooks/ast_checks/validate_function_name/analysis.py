@@ -593,31 +593,38 @@ def collect_suggestions(filepath: Path, tree: ast.Module, source: str) -> list[S
     """`filepath` is used only to tag returned Suggestions; `tree` must already be parsed from `source`."""
     attach_parents(tree)
 
+    candidates = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith(GET_PREFIX)
+        and not is_decorator_override_or_abstract(node)
+        and not is_simple_accessor(node)
+    ]
+    if not candidates:
+        # See ADR-0040.
+        return []
+
     ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
     suggestions: list[Suggestion] = []
 
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(GET_PREFIX):
-            if is_decorator_override_or_abstract(node):
-                continue
-            if node.lineno in ignored_lines:
-                continue
-            if is_simple_accessor(node):
-                continue
+    for node in candidates:
+        if node.lineno in ignored_lines:
+            continue
 
-            analysis = analyze_function(node)
-            suggested_name, reason = suggest_name_for(node, analysis)
+        analysis = analyze_function(node)
+        suggested_name, reason = suggest_name_for(node, analysis)
 
-            if suggested_name != node.name:
-                suggestions.append(
-                    Suggestion(
-                        path=filepath,
-                        func_name=node.name,
-                        lineno=node.lineno,
-                        suggested_name=suggested_name,
-                        reason=reason,
-                    )
+        if suggested_name != node.name:
+            suggestions.append(
+                Suggestion(
+                    path=filepath,
+                    func_name=node.name,
+                    lineno=node.lineno,
+                    suggested_name=suggested_name,
+                    reason=reason,
                 )
+            )
 
     return suggestions
 
