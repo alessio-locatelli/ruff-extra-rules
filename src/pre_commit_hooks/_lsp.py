@@ -1,5 +1,5 @@
-"""Standard-library-only JSON-RPC/LSP client over stdio. See ADR-0035 and
-`docs/audits/type-checker-selection-for-redundant-type-conversion.md`.
+"""Standard-library-only JSON-RPC/LSP client over stdio. See ADR-0035,
+ADR-0041, and `docs/audits/type-checker-selection-for-redundant-type-conversion.md`.
 """
 
 from __future__ import annotations
@@ -12,11 +12,18 @@ import threading
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
     from typing import IO, Self
 
-__all__ = ["LSPClient", "LSPError", "LSPTimeoutError", "byte_col_to_utf16_col"]
+__all__ = [
+    "LSPClient",
+    "LSPError",
+    "LSPTimeoutError",
+    "byte_col_to_utf16_col",
+    "read_framed_message",
+    "write_framed_message",
+]
 
 logger = logging.getLogger("lsp")
 
@@ -42,14 +49,19 @@ def byte_col_to_utf16_col(line: str, byte_col: int) -> int:
     return len(prefix.encode("utf-16-le")) // 2
 
 
-def _read_message(stream: IO[bytes]) -> dict[str, Any] | None:
-    """One `Content-Length`-framed JSON-RPC message, or `None` on a clean EOF before any header bytes arrive."""
+def read_framed_message(stream: IO[bytes]) -> dict[str, Any] | None:
+    """One `Content-Length`-framed JSON message, or `None` on a clean EOF before any header bytes arrive.
+
+    Shared by `LSPClient` (talking to a real `ty server` over stdio) and
+    `_ty_daemon`'s own client/server socket protocol (ADR-0041) -- both use
+    the same wire framing, just over a different transport.
+    """
     header = b""
     while not header.endswith(b"\r\n\r\n"):
         chunk = stream.read(1)
         if not chunk:
             if header:
-                msg = f"LSP connection closed mid-header: {header!r}"
+                msg = f"connection closed mid-header: {header!r}"
                 raise LSPError(msg)
             return None
         header += chunk
@@ -59,18 +71,30 @@ def _read_message(stream: IO[bytes]) -> dict[str, Any] | None:
         if line.lower().startswith(b"content-length:"):
             content_length = int(line.split(b":", 1)[1].strip())
     if content_length is None:
-        msg = f"LSP message missing Content-Length header: {header!r}"
+        msg = f"message missing Content-Length header: {header!r}"
         raise LSPError(msg)
 
     body = b""
     while len(body) < content_length:
         chunk = stream.read(content_length - len(body))
         if not chunk:
-            msg = f"LSP connection closed mid-message (expected {content_length} bytes, got {len(body)})"
+            msg = f"connection closed mid-message (expected {content_length} bytes, got {len(body)})"
             raise LSPError(msg)
         body += chunk
 
     return json.loads(body)
+
+
+def write_framed_message(stream: IO[bytes], payload: dict[str, Any]) -> None:
+    """Write `payload` as one `Content-Length`-framed JSON message to `stream`, flushing immediately.
+
+    See `read_framed_message` for why this is shared beyond `LSPClient` itself.
+    """
+    body = json.dumps(payload).encode("utf-8")
+    header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
+    stream.write(header)
+    stream.write(body)
+    stream.flush()
 
 
 def _message(*, method: str, params: dict[str, Any] | None, msg_id: int | None = None) -> dict[str, Any]:
@@ -87,16 +111,20 @@ def _message(*, method: str, params: dict[str, Any] | None, msg_id: int | None =
 class LSPClient:
     """One child language-server process over Content-Length-framed JSON-RPC via stdio.
 
-    A server-to-client request (carries both `id` and `method`) is
-    silently left unanswered, same as an ordinary notification -- `ty
-    server` has not been observed to block on one. Not thread-safe for
-    concurrent `request()`/`notify()` calls.
+    A server-to-client *request* (carries both `id` and `method`) is
+    silently left unanswered -- `ty server` has not been observed to block
+    on one. A server-to-client *notification* (carries `method` but no
+    `id`, e.g. `textDocument/publishDiagnostics`) is instead handed to
+    `on_notification`, if one was given; with none, it's dropped the same
+    way a request is. Not thread-safe for concurrent `request()`/
+    `notify()` calls.
     """
 
     __slots__ = (
         "_close_called",
         "_connection_lost",
         "_next_id",
+        "_on_notification",
         "_pending",
         "_pending_lock",
         "_process",
@@ -104,7 +132,13 @@ class LSPClient:
         "_stderr_reader",
     )
 
-    def __init__(self, command: Sequence[str], *, cwd: Path) -> None:
+    def __init__(
+        self,
+        command: Sequence[str],
+        *,
+        cwd: Path,
+        on_notification: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> None:
         self._process = subprocess.Popen(  # noqa: S603
             command,
             cwd=cwd,
@@ -115,6 +149,7 @@ class LSPClient:
         self._next_id = 0
         self._pending: dict[int, queue.Queue[dict[str, Any]]] = {}
         self._pending_lock = threading.Lock()
+        self._on_notification = on_notification
         # _close_called alone gates close()'s idempotency; _connection_lost (set by _read_loop) never does.
         self._connection_lost = False
         self._close_called = False
@@ -144,17 +179,25 @@ class LSPClient:
         error: BaseException | None = None
         try:
             while True:
-                message = _read_message(stdout)
+                message = read_framed_message(stdout)
                 if message is None:
                     break
                 msg_id = message.get("id")
+                method = message.get("method")
                 if msg_id is not None and ("result" in message or "error" in message):
                     with self._pending_lock:
                         box = self._pending.get(msg_id)
                     if box is not None:
                         box.put(message)
-                # else: a notification, or a server-to-client request -- see
-                # this class's own docstring for why both are dropped.
+                elif msg_id is None and method is not None and self._on_notification is not None:
+                    try:
+                        self._on_notification(method, message.get("params") or {})
+                    except Exception:
+                        logger.debug("on_notification callback raised", exc_info=True)
+                # else: a server-to-client request (carries both id and
+                # method), or a notification with no on_notification
+                # registered -- see this class's own docstring for why
+                # either is dropped.
         except Exception as caught:
             error = caught
             logger.debug("LSP reader loop failed", exc_info=True)
@@ -200,12 +243,8 @@ class LSPClient:
     def _write(self, payload: dict[str, Any]) -> None:
         stdin = self._process.stdin
         assert stdin is not None  # constructed with stdin=PIPE above
-        body = json.dumps(payload).encode("utf-8")
-        header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
         try:
-            stdin.write(header)
-            stdin.write(body)
-            stdin.flush()
+            write_framed_message(stdin, payload)
         except (BrokenPipeError, OSError) as error:
             msg = f"failed to write to LSP server process: {error!r}"
             raise LSPError(msg) from error

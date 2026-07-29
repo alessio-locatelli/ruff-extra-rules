@@ -109,14 +109,15 @@ paths = ["src", "tests"]
 # (RedundantAssignmentFixData in redundant_assignment/autofix.py,
 # FunctionBehavior in validate_function_name/analysis.py) read only via dict
 # subscript (e.g. fix_data["assign_line"], analysis["is_property"]), never as
-# an attribute. _restore_sigterm_handler, _isolated_session_singleton, and
-# _use_shared_session are autouse pytest fixtures, invoked implicitly for
-# every test in their module rather than referenced by name the way an
-# ordinary fixture is (as a test function's own parameter, which vulture's
-# analysis does see) -- vulture's static analysis can't see any of these four
-# kinds of use. (A vulture `ignore_decorators` entry can't target
-# autouse specifically: vulture's decorator matching strips call arguments,
-# so "@pytest.fixture" and "@pytest.fixture(autouse=True)" are
+# an attribute. _restore_sigterm_handler, _isolated_session_singleton,
+# _use_shared_session, _no_leftover_tri006_daemon_in_this_repo, and
+# _isolate_and_teardown are autouse pytest fixtures, invoked implicitly for
+# every test in their module (or, for the last two, their class) rather than
+# referenced by name the way an ordinary fixture is (as a test function's own
+# parameter, which vulture's analysis does see) -- vulture's static analysis
+# can't see any of these kinds of use. (A vulture `ignore_decorators` entry
+# can't target autouse specifically: vulture's decorator matching strips call
+# arguments, so "@pytest.fixture" and "@pytest.fixture(autouse=True)" are
 # indistinguishable to it.)
 ignore_names = [
   "visit_*",
@@ -148,6 +149,8 @@ ignore_names = [
   "_restore_sigterm_handler",
   "_isolated_session_singleton",
   "_use_shared_session",
+  "_no_leftover_tri006_daemon_in_this_repo",
+  "_isolate_and_teardown",
 ]
 
 # Coverage configuration lives in .coveragerc, not here: coverage.py reads

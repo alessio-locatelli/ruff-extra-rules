@@ -32,7 +32,18 @@ class RedundancySession(Protocol):
 
     def hover(self, filepath: Path, line0: int, char_utf16: int) -> str | None: ...
 
-    def close_file(self, filepath: Path) -> None: ...
+    def finalize(self, filepath: Path, source: str) -> None:
+        """Ends this candidate-analysis pass over `filepath`.
+
+        A short-lived, per-invocation session discards it outright. A
+        persistent session (see ADR-0041) instead re-syncs it back to
+        `source` -- its real, on-disk content, since the per-candidate
+        rewrite-and-diff loop above may have left a synthetic variant open
+        -- and keeps it tracked, so `ty`'s own cross-file dependency
+        tracking keeps seeing it as a dependent of whatever it imports
+        across future, separate invocations sharing that same session.
+        """
+        ...
 
 
 def _open_or_raise(session: RedundancySession, filepath: Path, content: str) -> frozenset[tuple[object, ...]]:
@@ -122,8 +133,10 @@ def decide_candidates(
                 )
             )
     finally:
-        # Closes even on an unexpected raise, or it leaks for the rest of this process-wide session.
-        session.close_file(filepath)
+        # Runs even on an unexpected raise, or a persistent session leaks
+        # this file open (and possibly still mid-rewrite) for the rest of
+        # its own lifetime.
+        session.finalize(filepath, source)
 
     return redundant
 
