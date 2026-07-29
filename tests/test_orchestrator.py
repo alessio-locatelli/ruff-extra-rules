@@ -1231,6 +1231,41 @@ class _OrderDependentDrainingCheck(_AlwaysRerunProbeCheck):
         return []
 
 
+class _StaleThenCleanDrainingCheck(_AlwaysRerunProbeCheck):
+    """Flags `flagged_file` only the first time it's check()-ed, and reports it as a cross-file
+    candidate once `trigger_file` is examined -- proves a re-check that comes back clean replaces (not
+    merely fails to add to) that file's own earlier, now-stale violation instead of leaving it in place.
+    """
+
+    __slots__ = ("flagged_file", "seen", "trigger_file")
+
+    check_id = "stale-then-clean-draining-probe"
+
+    def __init__(self, *, trigger_file: Path, flagged_file: Path, message: str = "probe") -> None:
+        super().__init__(message)
+        self.trigger_file = trigger_file.resolve()
+        self.flagged_file = flagged_file.resolve()
+        self.seen: set[Path] = set()
+
+    def check(self, filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        self.call_count += 1
+        resolved = filepath.resolve()
+        already_seen = resolved in self.seen
+        self.seen.add(resolved)
+        if resolved != self.flagged_file or already_seen:
+            return []
+        return [
+            Violation(
+                check_id=self.check_id, error_code=self.error_code, line=1, col=0, message=self.message, fixable=False
+            )
+        ]
+
+    def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
+        if self.trigger_file in already_processed:
+            return [self.flagged_file]
+        return []
+
+
 class _SelectivelyViolatingDrainingCheck(_DrainingProbeCheck):
     """Only flags a file named `flagged.py` -- unlike `_AlwaysRerunProbeCheck`, which flags every file
     unconditionally, this lets a test drive an extra file through a real, empty (not unprocessable)
@@ -1327,23 +1362,52 @@ def test_drain_cross_file_candidates_stops_at_the_iteration_cap(tmp_path: Path) 
     assert len(orchestrator.unprocessable_files) == _orchestrator._MAX_CROSS_FILE_DRAIN_ITERATIONS
 
 
-def test_drain_cross_file_candidates_recovers_a_dependent_processed_before_its_dependency(tmp_path: Path) -> None:
+def test_drain_cross_file_candidates_recovers_a_dependent_processed_before_its_dependency(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # A caller passed to the same run as its own callee, ordered before it, must still be re-examined
     # once the callee's own later examination reveals it dirty -- not silently suppressed by treating
     # every original input file as permanently "already processed" from the very start of the run
-    # (ADR-0041's own processing-order regression).
-    caller = tmp_path / "caller.py"
+    # (ADR-0041's own processing-order regression). Passed as a relative path (the pre-commit/prek norm)
+    # so a fix that resolves it before re-checking, but reports it under that resolved path instead of
+    # its own original spelling, would also be caught.
+    monkeypatch.chdir(tmp_path)
+    caller = Path("caller.py")
     caller.write_text("x = 1\n")
-    callee = tmp_path / "callee.py"
+    callee = Path("callee.py")
     callee.write_text("y = 2\n")
 
     probe = _OrderDependentDrainingCheck(trigger_file=callee, reported_file=caller)
     orchestrator = CheckOrchestrator(checks=[probe])
 
-    orchestrator.process_files([str(caller), str(callee)])
+    violations = orchestrator.process_files([str(caller), str(callee)])
 
     # caller (direct) + callee (direct) + caller again (re-examined once callee's own drain flagged it).
     assert probe.call_count == 3
+    # Reported under its own original (relative) key, not a second, separately-resolved one, and with
+    # exactly one violation -- the re-check's own result replacing the first, now-stale one rather than
+    # being appended alongside it.
+    assert str(caller.resolve()) not in violations
+    assert len(violations[str(caller)]) == 1
+
+
+def test_drain_cross_file_candidates_clears_a_dependents_stale_violation_once_the_recheck_is_clean(
+    tmp_path: Path,
+) -> None:
+    # The caller's own first examination flags it; once the callee's later examination marks it dirty,
+    # the re-check comes back clean (the underlying issue is now fixed) -- that must replace, not merely
+    # fail to add to, the first, now-stale violation, or it would linger in the report forever.
+    caller = tmp_path / "caller.py"
+    caller.write_text("x = 1\n")
+    callee = tmp_path / "callee.py"
+    callee.write_text("y = 2\n")
+
+    probe = _StaleThenCleanDrainingCheck(trigger_file=callee, flagged_file=caller)
+    orchestrator = CheckOrchestrator(checks=[probe])
+
+    violations = orchestrator.process_files([str(caller), str(callee)])
+
+    assert str(caller) not in violations
 
 
 def test_drain_cross_file_candidates_reports_nothing_for_an_extra_file_with_no_violations(tmp_path: Path) -> None:

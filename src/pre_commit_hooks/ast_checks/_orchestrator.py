@@ -48,6 +48,23 @@ type ViolationKey = tuple[int, int, str]  # (line, col, message)
 _MAX_CROSS_FILE_DRAIN_ITERATIONS = 5
 
 
+def _replace_check_violations(
+    all_violations: dict[str, list[Violation]], key: str, check_id: str, new_violations: list[Violation]
+) -> None:
+    """Replaces whatever `check_id` previously reported for `key` in `all_violations` with
+    `new_violations`, preserving any other check's own violations for that same file (ADR-0041: a
+    drained candidate is re-checked with only the one check that flagged it, never every check, so a
+    stale result must be replaced rather than appended to -- otherwise an unchanged violation would be
+    reported twice, and one that's now clean would still show its own, no-longer-true earlier report).
+    """
+    kept = [violation for violation in all_violations.get(key, []) if violation.check_id != check_id]
+    combined = kept + new_violations
+    if combined:
+        all_violations[key] = combined
+    else:
+        all_violations.pop(key, None)
+
+
 def _fingerprint_default(value: object) -> object:
     """`json.dumps(..., default=...)` handler for the value shapes a check's
     own instance state (see `_instance_state`) can contain but that `json`
@@ -181,6 +198,11 @@ class CheckOrchestrator:
         all_violations: dict[str, list[Violation]] = {}
         queued: set[Path] = set()
         pending: list[tuple[Path, ASTCheck]] = []
+        # Lets a drained file that's also one of this run's own direct inputs report under the same key
+        # it was given here (e.g. a relative path exactly as the caller spelled it), rather than a second,
+        # separately-resolved key -- resolving it the way _collect_cross_file_candidates always does would
+        # otherwise report the same file twice under two different spellings once it's drained (ADR-0041).
+        resolved_to_key = {Path(filepath_str).resolve(): filepath_str for filepath_str in checks_by_file}
 
         for filepath_str, checks in checks_by_file.items():
             filepath = Path(filepath_str)
@@ -200,7 +222,7 @@ class CheckOrchestrator:
             # pass at the very end would otherwise apply to it too.
             self._collect_cross_file_candidates(filepath, queued, pending)
 
-        self._drain_cross_file_candidates(pending, queued, all_violations)
+        self._drain_cross_file_candidates(pending, queued, all_violations, resolved_to_key)
 
         return all_violations
 
@@ -240,11 +262,14 @@ class CheckOrchestrator:
         pending: list[tuple[Path, ASTCheck]],
         queued: set[Path],
         all_violations: dict[str, list[Violation]],
+        resolved_to_key: dict[Path, str],
     ) -> None:
-        """Re-checks every file `_collect_cross_file_candidates` has queued so far, merging the result
-        into `all_violations` — mutated in place — exactly as if pre-commit/prek had passed that file
-        directly, then drains again after each one (a change can itself ripple further: `a.py` affecting
-        `b.py` affecting `c.py`). Repeats until a fixed point or `_MAX_CROSS_FILE_DRAIN_ITERATIONS`.
+        """Re-checks every file `_collect_cross_file_candidates` has queued so far, replacing just that
+        one check's own prior result for the file in `all_violations` — mutated in place, and reported
+        under its original input key if it has one (`resolved_to_key`) rather than a second, resolved-path
+        key — exactly as if pre-commit/prek had passed that file directly. Then drains again after each
+        one (a change can itself ripple further: `a.py` affecting `b.py` affecting `c.py`). Repeats until
+        a fixed point or `_MAX_CROSS_FILE_DRAIN_ITERATIONS`.
 
         Every check today (`BaseCheck`'s own default) returns `[]` from `drain_cross_file_candidates()`
         unconditionally, so this is a no-op for a run with no cross-file-aware check enabled — only
@@ -257,11 +282,12 @@ class CheckOrchestrator:
             current_batch, pending = pending, []
             for extra_file, check in current_batch:
                 violations = self._check_file(extra_file, [check])
-                extra_file_str = str(extra_file)
+                extra_file_str = resolved_to_key.get(extra_file, str(extra_file))
                 if violations is None:
                     self.unprocessable_files.append(extra_file_str)
-                elif violations:
-                    all_violations[extra_file_str] = all_violations.get(extra_file_str, []) + violations
+                    _replace_check_violations(all_violations, extra_file_str, check.check_id, [])
+                else:
+                    _replace_check_violations(all_violations, extra_file_str, check.check_id, violations)
 
                 self._collect_cross_file_candidates(extra_file, queued, pending)
 
