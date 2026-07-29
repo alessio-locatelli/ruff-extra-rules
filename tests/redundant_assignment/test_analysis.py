@@ -19,14 +19,18 @@ from pre_commit_hooks.ast_checks.redundant_assignment.semantic import Aggressive
 from tests.redundant_assignment._helpers import _check
 
 
+def _tracker(source: str) -> VariableTracker:
+    return VariableTracker(source, *classify_comment_lines(source))
+
+
 def _lifecycle_for(source: str, var_name: str) -> VariableLifecycle:
-    tracker = VariableTracker(source)
+    tracker = _tracker(source)
     tracker.visit(ast.parse(source))
     return next(lc for lc in tracker.build_lifecycles() if lc.assignment.var_name == var_name)
 
 
 def _lifecycle_count(source: str, var_name: str) -> int:
-    tracker = VariableTracker(source)
+    tracker = _tracker(source)
     tracker.visit(ast.parse(source))
     return len([lc for lc in tracker.build_lifecycles() if lc.assignment.var_name == var_name])
 
@@ -133,7 +137,7 @@ def func():
     return (x := 1)
 """
     # Must not raise; global walrus targets are silently skipped.
-    VariableTracker(source).visit(ast.parse(source))
+    _tracker(source).visit(ast.parse(source))
 
 
 def test_tuple_unpacking_rebinding_skipped_for_global_variable() -> None:
@@ -146,7 +150,7 @@ def func():
     global x
     x, y = compute()
 """
-    VariableTracker(source).visit(ast.parse(source))
+    _tracker(source).visit(ast.parse(source))
 
 
 def test_starred_tuple_target_recorded_as_rebinding() -> None:
@@ -171,7 +175,7 @@ def func(obj):
     obj.attr, first = compute()
     return first
 """
-    tracker = VariableTracker(source)
+    tracker = _tracker(source)
     tracker.visit(ast.parse(source))
     obj_uses = tracker.uses[next(key for key in tracker.uses if key[1] == "obj")]
     assert any(use.context == "attribute_or_subscript_assignment" for use in obj_uses)
@@ -221,7 +225,7 @@ def outer():
     return 42
 """
     # Must not raise; call-result targets are silently skipped.
-    VariableTracker(source).visit(ast.parse(source))
+    _tracker(source).visit(ast.parse(source))
 
 
 def test_track_attribute_assignment_key_already_in_uses() -> None:
@@ -356,7 +360,7 @@ def outer():
 
 def test_get_source_segment_error_handling() -> None:
     node = ast.Constant(value=1, lineno=-1, col_offset=-1)
-    assert VariableTracker("x = 1")._get_source_segment(node) == ""
+    assert _tracker("x = 1")._get_source_segment(node) == ""
 
 
 # ---------------------------------------------------------------------------

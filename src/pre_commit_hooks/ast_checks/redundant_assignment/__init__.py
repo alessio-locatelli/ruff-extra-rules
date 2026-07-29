@@ -36,7 +36,7 @@ from pre_commit_hooks.ast_checks._base import (
     BaseCheck,
     Violation,
     byte_col_to_char_col,
-    find_ignored_lines,
+    find_ignored_lines_and_classify_comments,
     ignore_pattern_for,
 )
 
@@ -118,9 +118,14 @@ class RedundantAssignmentCheck(BaseCheck):
         return {"level": AggressivenessLevel[args.redundant_assignment_level.upper()]}
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
-        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
+        # Tokenized once and reused for both lookups below, rather than
+        # each independently tokenizing the whole file (see
+        # find_ignored_lines_and_classify_comments).
+        ignored_lines, comment_only_lines, trailing_comment_lines = find_ignored_lines_and_classify_comments(
+            source, IGNORE_PATTERN
+        )
 
-        tracker = VariableTracker(source)
+        tracker = VariableTracker(source, comment_only_lines, trailing_comment_lines)
         tracker.visit(tree)
         lifecycles = tracker.build_lifecycles()
 
