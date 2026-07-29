@@ -169,7 +169,7 @@ class RemoteTySession:
         self._rfile = sock.makefile("rb")
         self._wfile = sock.makefile("wb")
 
-    def _call(self, op: str, **params: Any) -> Any:  # noqa: ANN401 -- a daemon response's own "result" shape varies by op
+    def _call(self, op: str, **params: str | int | list[str]) -> list[Any] | str | None:
         try:
             write_framed_message(self._wfile, {"op": op, **params})
             response = read_framed_message(self._rfile)
@@ -188,11 +188,14 @@ class RemoteTySession:
         return response.get("result")
 
     def open_or_update(self, filepath: Path, content: str) -> frozenset[tuple[Any, ...]]:
-        raw_diagnostics = self._call("open_or_update", filepath=str(filepath), content=content)  # pytriage: TR6
+        raw_diagnostics = self._call("open_or_update", filepath=str(filepath), content=content)
+        assert isinstance(raw_diagnostics, list)
         return frozenset(tuple(item) for item in raw_diagnostics)
 
     def hover(self, filepath: Path, line0: int, char_utf16: int) -> str | None:
-        return self._call("hover", filepath=str(filepath), line0=line0, char_utf16=char_utf16)  # pytriage: TR6
+        hover_text = self._call("hover", filepath=str(filepath), line0=line0, char_utf16=char_utf16)
+        assert not isinstance(hover_text, list)
+        return hover_text
 
     def finalize(self, filepath: Path, source: str) -> None:
         with contextlib.suppress(LSPError):
@@ -200,7 +203,7 @@ class RemoteTySession:
             # (this runs from decide_candidates()'s finally block) -- a
             # lost daemon connection here was already reported by an
             # earlier call in the same candidate loop.
-            self._call("finalize", filepath=str(filepath), source=source)  # pytriage: TR6
+            self._call("finalize", filepath=str(filepath), source=source)
 
     def notify_changed_on_disk(self, filepath: Path, source: str) -> None:
         with contextlib.suppress(LSPError):
@@ -208,13 +211,14 @@ class RemoteTySession:
             # raises" contract -- called from the candidate-less fast path
             # (session.notify_disk_change_if_session_active()), which must
             # not fail a file's whole check over a daemon-connectivity hiccup.
-            self._call("notify_changed_on_disk", filepath=str(filepath), source=source)  # pytriage: TR6
+            self._call("notify_changed_on_disk", filepath=str(filepath), source=source)
 
     def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
         raw_paths = self._call(
             "drain_cross_file_candidates",
-            exclude=[str(path) for path in already_processed],  # pytriage: TR6
+            exclude=[str(path) for path in already_processed],
         )
+        assert isinstance(raw_paths, list)
         return [Path(path) for path in raw_paths]
 
     def close(self) -> None:
