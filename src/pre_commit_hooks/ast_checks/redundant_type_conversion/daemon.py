@@ -33,6 +33,11 @@ logger = logging.getLogger("ast_checks")
 
 _SOCKET_RELATIVE_PATH = Path(".cache/pre_commit_hooks/tri006-daemon.sock")
 _PID_RELATIVE_PATH = Path(".cache/pre_commit_hooks/tri006-daemon.pid")
+# pre-commit/prek run this hook's own file-batches across several parallel worker processes (up to CPU
+# count), each independently trying to connect at roughly the same time -- a backlog of 1 makes connect()
+# fail immediately with EAGAIN once even two of them overlap, indistinguishable from "no daemon" to the
+# caller. This only bounds the OS's pending-connection queue, not concurrent handling (still one at a time).
+_LISTEN_BACKLOG = 64
 _SPAWN_LOCK_TIMEOUT_SECONDS = 15.0
 _SPAWN_LOCK_POLL_INTERVAL_SECONDS = 0.05
 _BUSY_DAEMON_RETRY_TIMEOUT_SECONDS = 15.0
@@ -658,7 +663,7 @@ def _serve(root: Path) -> None:
             pid_path.unlink()  # never bound -- don't leave this process's own pid claiming a dead socket
         print(f"BIND_FAILED: could not bind {socket_path}: {error!r}", flush=True)
         return
-    sock.listen(1)
+    sock.listen(_LISTEN_BACKLOG)
     sock.settimeout(_IDLE_TIMEOUT_SECONDS)
 
     print("READY", flush=True)
