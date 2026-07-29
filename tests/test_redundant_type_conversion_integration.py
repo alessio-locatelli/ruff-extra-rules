@@ -120,7 +120,7 @@ def test_the_real_installed_ty_still_passes_this_checks_own_self_test(
         # The daemon serves one client at a time (ADR-0041): closing this test's own still-open session
         # first frees it up to actually accept shutdown_if_running()'s own connection promptly, rather
         # than that call waiting out the full busy-daemon retry budget for a client that was never closing.
-        if session is not None:  # pragma: no branch -- False only if real_get_session() raised (already failing)
-            session.close()
+        assert session
+        session.close()
         daemon_module.shutdown_if_running(tmp_path)
         session_module._session = None

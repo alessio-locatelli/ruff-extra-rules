@@ -36,11 +36,8 @@ def test_locked_raises_timeout_error_when_already_held(tmp_path: Path) -> None:
         fcntl.flock(blocker_fp, fcntl.LOCK_EX)
 
         start = time.monotonic()
-        with (
-            pytest.raises(TimeoutError, match="Timed out"),
-            locked(lock_path, timeout_seconds=0.2, poll_interval_seconds=0.01),
-        ):
-            pass  # pragma: no cover -- locked() raises during __enter__, so this body is never reached
+        with pytest.raises(TimeoutError, match="Timed out"):
+            locked(lock_path, timeout_seconds=0.2, poll_interval_seconds=0.01).__enter__()
         elapsed = time.monotonic() - start
 
     assert elapsed < 2.0
