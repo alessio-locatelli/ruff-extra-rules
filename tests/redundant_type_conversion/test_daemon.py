@@ -1062,6 +1062,35 @@ def test_serve_binds_prints_ready_and_exits_on_idle_timeout(
     assert not daemon_module._pid_path(tmp_path).exists()
 
 
+def test_serve_prints_failed_when_ty_version_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(
+        daemon_module, "_ty_version", lambda: (_ for _ in ()).throw(OSError("simulated: ty not on PATH"))
+    )
+
+    daemon_module._serve(tmp_path)
+
+    assert "FAILED: simulated: ty not on PATH" in capsys.readouterr().out
+    assert not daemon_module._socket_path(tmp_path).exists()
+
+
+def test_serve_prints_failed_when_the_session_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(daemon_module, "_self_test", lambda: None)
+    monkeypatch.setattr(
+        daemon_module,
+        "TySession",
+        lambda **_kwargs: (_ for _ in ()).throw(CheckUnavailableError("simulated: ty not found")),
+    )
+
+    daemon_module._serve(tmp_path)
+
+    assert f"FAILED: could not start a ty session for {tmp_path}: simulated: ty not found" in capsys.readouterr().out
+    assert not daemon_module._socket_path(tmp_path).exists()
+
+
 def test_serve_prints_failed_when_the_self_test_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1073,7 +1102,7 @@ def test_serve_prints_failed_when_the_self_test_raises(
 
     daemon_module._serve(tmp_path)
 
-    assert "FAILED: simulated self-test failure" in capsys.readouterr().out
+    assert "FAILED: self-test failed: simulated self-test failure" in capsys.readouterr().out
     assert not daemon_module._socket_path(tmp_path).exists()
 
 

@@ -621,11 +621,21 @@ def _serve(root: Path) -> None:
         socket_path.unlink()  # a stale socket left behind by a crashed prior daemon
 
     try:
-        ty_version = _ty_version()  # pytriage: TR5 -- captured once, up front, to compare against every later handshake
+        ty_version = _ty_version()  # pytriage: TR5 -- kept here so failure hits FAILED: below, not a post-READY crash
+    except OSError as error:
+        print(f"FAILED: {error}", flush=True)
+        return
+
+    try:
         _self_test()
+    except (OSError, CheckUnavailableError) as error:
+        print(f"FAILED: self-test failed: {error}", flush=True)
+        return
+
+    try:
         session = TySession(root=root, keep_open=True)
     except (OSError, CheckUnavailableError) as error:
-        print(f"FAILED: {error}", flush=True)
+        print(f"FAILED: could not start a ty session for {root}: {error}", flush=True)
         return
 
     # Claims this repository's daemon identity before ever touching the socket path, not after binding it:
