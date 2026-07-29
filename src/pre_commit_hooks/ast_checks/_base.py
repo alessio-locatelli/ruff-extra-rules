@@ -480,6 +480,41 @@ def classify_comment_lines(source: str) -> tuple[set[int], set[int]]:
     return comment_lines - code_lines, comment_lines & code_lines
 
 
+def find_ignored_lines_and_classify_comments(
+    source: str, *patterns: re.Pattern[str]
+) -> tuple[set[int], set[int], set[int]]:
+    """Tokenize `source` exactly once, returning (ignored_lines,
+    comment_only_lines, trailing_comment_lines) — the same results
+    `find_ignored_lines`/`classify_comment_lines` would each compute from
+    their own separate tokenize pass, fused into one.
+
+    `RedundantAssignmentCheck.check()` needs both, and streams this single
+    combined pass over `tokenize_source`'s lazy `Iterator` (rather than
+    materializing the whole token stream once and feeding it to each
+    helper) so a large file's token count never inflates peak memory — only
+    the resulting line-number sets are retained, one token at a time.
+    """
+    ignored_lines: set[int] = set()
+    comment_lines: set[int] = set()
+    code_lines: set[int] = set()
+
+    try:
+        for tok_type, tok_string, start, end, _ in tokenize_source(source):
+            if tok_type == tokenize.COMMENT:
+                comment_lines.add(start[0])
+                if any(p.search(tok_string) for p in patterns):
+                    ignored_lines.add(start[0])
+            elif tok_type not in _NON_CODE_TOKEN_TYPES:
+                code_lines.update(range(start[0], end[0] + 1))
+    except tokenize.TokenError as token_error:  # pragma: no cover
+        # Defensive: source is already parsed by AST, so tokenizing it can't
+        # realistically fail. If it ever does, treat it as nothing found.
+        logger.debug(repr(token_error))
+        return set(), set(), set()
+
+    return ignored_lines, comment_lines - code_lines, comment_lines & code_lines
+
+
 def mark_fixed(violation: Violation) -> None:
     """The single place that writes the `fix_data["fixed"]` convention —
     previously three independent hand-written sites.

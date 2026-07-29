@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Literal
 
-from pre_commit_hooks.ast_checks._base import classify_comment_lines, fast_get_source_segment, split_lines_like_ast
+from pre_commit_hooks.ast_checks._base import fast_get_source_segment, split_lines_like_ast
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -298,18 +298,21 @@ def _suspension_precedes_use(use: UsageInfo) -> bool:
 class VariableTracker(ast.NodeVisitor):
     """Builds a map of variable lifecycles: where each variable is assigned and where it's used, across scopes."""
 
-    def __init__(self, source: str) -> None:
+    def __init__(self, source: str, comment_only_lines: set[int], trailing_comment_lines: set[int]) -> None:
         self.source = source
         self.source_lines = source.splitlines()
         # For _get_source_segment only: split on the same line boundaries
         # ast's own lineno/end_lineno use, unlike self.source_lines above
         # (see split_lines_like_ast).
         self._ast_lines = split_lines_like_ast(source)
-        # Computed once per file (not per assignment) since it tokenizes
-        # the whole source — see AssignmentInfo.has_comment_above/
-        # has_inline_comment for why a tokenize-based classification is
-        # needed instead of a naive text scan.
-        self._comment_only_lines, self._trailing_comment_lines = classify_comment_lines(source)
+        # Passed in by the caller rather than computed here — see
+        # AssignmentInfo.has_comment_above/has_inline_comment for why a
+        # tokenize-based classification is needed instead of a naive text
+        # scan, and RedundantAssignmentCheck.check() for why it's tokenized
+        # once there (shared with the ignored-lines lookup) instead of
+        # this constructor tokenizing `source` again on its own.
+        self._comment_only_lines = comment_only_lines
+        self._trailing_comment_lines = trailing_comment_lines
 
         self.current_scope_id = 0
         self.scope_stack: list[int] = [0]  # 0 = module scope
