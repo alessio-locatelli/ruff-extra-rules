@@ -666,10 +666,8 @@ class VariableTracker(ast.NodeVisitor):
                 self._record_compound_target_rebindings(elt, stmt_index)
         elif isinstance(target, ast.Starred):
             self._record_compound_target_rebindings(target.value, stmt_index)
-        elif isinstance(target, ast.Attribute | ast.Subscript):  # pragma: no branch
-            # Python's grammar limits an assignment target to exactly these
-            # five shapes, so this dispatch is exhaustive — there's no
-            # "else" case to reach.
+        else:
+            assert isinstance(target, ast.Attribute | ast.Subscript)
             self._track_attribute_or_subscript_base_usage(target, stmt_index)
 
     def _track_attribute_or_subscript_base_usage(self, node: ast.Attribute | ast.Subscript, stmt_index: int) -> None:
