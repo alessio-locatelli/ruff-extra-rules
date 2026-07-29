@@ -152,14 +152,7 @@ class MisplacedCommentCheck(BaseCheck):
         return ["#"]
 
     def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
-        try:
-            tokens = tuple(tokenize.generate_tokens(StringIO(normalize_for_tokenize(source)).readline))
-        # Defensive: source is already parsed by AST, so tokenizing it can't
-        # realistically fail. If it ever does, treat it as no violations.
-        except tokenize.TokenError as token_error:  # pragma: no cover
-            logger.debug(repr(token_error))
-            return []
-
+        tokens = tuple(tokenize.generate_tokens(StringIO(normalize_for_tokenize(source)).readline))
         found = _scan_misplaced_comments(tokens)
         if not found:
             return []
@@ -190,14 +183,7 @@ class MisplacedCommentCheck(BaseCheck):
         _tree: ast.Module,
         encoding: str = "utf-8",
     ) -> bool:
-        try:
-            tokens = tuple(tokenize.generate_tokens(StringIO(normalize_for_tokenize(source)).readline))
-        # Defensive: source is already parsed by AST, so tokenizing it can't
-        # realistically fail. If it ever does, skip fixing rather than crash.
-        except tokenize.TokenError as token_error:  # pragma: no cover
-            logger.debug(repr(token_error))
-            return False
-
+        tokens = tuple(tokenize.generate_tokens(StringIO(normalize_for_tokenize(source)).readline))
         found = _scan_misplaced_comments(tokens)
         if not found:
             return False
