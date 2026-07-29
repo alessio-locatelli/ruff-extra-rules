@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ast
 import io
-import logging
 import os
 import re
 import stat
@@ -17,8 +16,6 @@ from typing import TYPE_CHECKING, Any, Protocol
 if TYPE_CHECKING:
     import argparse
     from collections.abc import Iterable, Iterator
-
-logger = logging.getLogger("ast_checks")
 
 
 @dataclass(slots=True)
@@ -421,13 +418,7 @@ def find_ignored_lines(source: str, *patterns: re.Pattern[str]) -> set[int]:
     source (e.g. redundant-type-conversion's own pragma plus a third-party
     type-checker's `# type: ignore`) tokenizes it only once.
     """
-    try:
-        return ignored_lines_from_tokens(tokenize_source(source), *patterns)
-    except tokenize.TokenError as token_error:  # pragma: no cover
-        # Defensive: source is already parsed by AST, so tokenizing it can't
-        # realistically fail. If it ever does, treat it as no lines ignored.
-        logger.debug(repr(token_error))
-        return set()
+    return ignored_lines_from_tokens(tokenize_source(source), *patterns)
 
 
 _NON_CODE_TOKEN_TYPES = frozenset(
@@ -460,22 +451,16 @@ def classify_comment_lines(source: str) -> tuple[set[int], set[int]]:
     comment_lines: set[int] = set()
     code_lines: set[int] = set()
 
-    try:
-        for tok_type, _tok_string, start, end, _ in tokenize_source(source):
-            if tok_type == tokenize.COMMENT:
-                comment_lines.add(start[0])
-            elif tok_type not in _NON_CODE_TOKEN_TYPES:
-                # A multiline token (a triple-quoted string spanning
-                # several lines) reports only its *start* line in
-                # start[0] — every line up to and including end[0] (e.g.
-                # the closing line, which can carry its own trailing
-                # comment) is just as much "code" as the first.
-                code_lines.update(range(start[0], end[0] + 1))
-    except tokenize.TokenError as token_error:  # pragma: no cover
-        # Defensive: source is already parsed by AST, so tokenizing it can't
-        # realistically fail. If it ever does, treat it as no comments found.
-        logger.debug(repr(token_error))
-        return set(), set()
+    for tok_type, _tok_string, start, end, _ in tokenize_source(source):
+        if tok_type == tokenize.COMMENT:
+            comment_lines.add(start[0])
+        elif tok_type not in _NON_CODE_TOKEN_TYPES:
+            # A multiline token (a triple-quoted string spanning
+            # several lines) reports only its *start* line in
+            # start[0] — every line up to and including end[0] (e.g.
+            # the closing line, which can carry its own trailing
+            # comment) is just as much "code" as the first.
+            code_lines.update(range(start[0], end[0] + 1))
 
     return comment_lines - code_lines, comment_lines & code_lines
 
@@ -498,19 +483,13 @@ def find_ignored_lines_and_classify_comments(
     comment_lines: set[int] = set()
     code_lines: set[int] = set()
 
-    try:
-        for tok_type, tok_string, start, end, _ in tokenize_source(source):
-            if tok_type == tokenize.COMMENT:
-                comment_lines.add(start[0])
-                if any(p.search(tok_string) for p in patterns):
-                    ignored_lines.add(start[0])
-            elif tok_type not in _NON_CODE_TOKEN_TYPES:
-                code_lines.update(range(start[0], end[0] + 1))
-    except tokenize.TokenError as token_error:  # pragma: no cover
-        # Defensive: source is already parsed by AST, so tokenizing it can't
-        # realistically fail. If it ever does, treat it as nothing found.
-        logger.debug(repr(token_error))
-        return set(), set(), set()
+    for tok_type, tok_string, start, end, _ in tokenize_source(source):
+        if tok_type == tokenize.COMMENT:
+            comment_lines.add(start[0])
+            if any(p.search(tok_string) for p in patterns):
+                ignored_lines.add(start[0])
+        elif tok_type not in _NON_CODE_TOKEN_TYPES:
+            code_lines.update(range(start[0], end[0] + 1))
 
     return ignored_lines, comment_lines - code_lines, comment_lines & code_lines
 
