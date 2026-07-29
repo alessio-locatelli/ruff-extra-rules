@@ -41,6 +41,12 @@ _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 # Violation objects, which can never share object identity with it.
 type ViolationKey = tuple[int, int, str]  # (line, col, message)
 
+# Bounds ASTCheck.drain_cross_file_candidates()'s own fixed-point loop (ADR-0041): a change can itself
+# ripple further (a.py affecting b.py affecting c.py), so one drain pass isn't always enough, but walking
+# an unbounded dependency chain isn't either -- this catches a short, realistic chain without risking an
+# unbounded per-run cost blowup from a pathological or cyclic one.
+_MAX_CROSS_FILE_DRAIN_ITERATIONS = 5
+
 
 def _fingerprint_default(value: object) -> object:
     """`json.dumps(..., default=...)` handler for the value shapes a check's
@@ -185,7 +191,52 @@ class CheckOrchestrator:
             elif violations:
                 all_violations[filepath_str] = violations
 
+        self._drain_cross_file_candidates(filepaths, all_violations)
+
         return all_violations
+
+    def _drain_cross_file_candidates(self, filepaths: list[str], all_violations: dict[str, list[Violation]]) -> None:
+        """Asks each still-available check for extra files it privately knows need re-examination (see
+        `ASTCheck.drain_cross_file_candidates`, ADR-0041), runs just that one check against each, and merges
+        the result into `all_violations` — mutated in place — exactly as if pre-commit/prek had passed that
+        file directly. Repeats until a fixed point or `_MAX_CROSS_FILE_DRAIN_ITERATIONS`, since draining one
+        newly re-checked file can itself surface another (a change can ripple through more than one hop).
+
+        Every check today (`BaseCheck`'s own default) returns `[]` here unconditionally, so this is a no-op
+        for a run with no cross-file-aware check enabled — only `redundant-type-conversion` (TR6)
+        implements it as of ADR-0041.
+        """
+        processed = {Path(fp).resolve() for fp in filepaths}
+
+        for _ in range(_MAX_CROSS_FILE_DRAIN_ITERATIONS):
+            pending: list[tuple[Path, ASTCheck]] = []
+            for check in self.checks:
+                if check.check_id in self._unavailable_check_ids:
+                    # Already recorded in unavailable_checks -- see
+                    # _check_file's own matching guard for why this check
+                    # is never worth retrying again this run.
+                    continue
+                try:
+                    extra_files = check.drain_cross_file_candidates(sorted(processed))
+                except Exception:
+                    logger.debug("Check %s failed to drain cross-file candidates", check.check_id, exc_info=True)
+                    continue
+                for extra_file in extra_files:
+                    resolved = extra_file.resolve()
+                    if resolved not in processed:
+                        pending.append((resolved, check))
+
+            if not pending:
+                return
+
+            for extra_file, check in pending:
+                processed.add(extra_file)
+                violations = self._check_file(extra_file, [check])
+                extra_file_str = str(extra_file)
+                if violations is None:
+                    self.unprocessable_files.append(extra_file_str)
+                elif violations:
+                    all_violations[extra_file_str] = all_violations.get(extra_file_str, []) + violations
 
     def _process_single_file(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
         """Runs `checks` against a single file, honoring each check's own

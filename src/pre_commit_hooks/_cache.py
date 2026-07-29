@@ -27,6 +27,8 @@ except ImportError:  # pragma: win32 cover
     # whole package before anything can run.
     fcntl = None  # type: ignore[assignment]
 
+from pre_commit_hooks._filelock import locked
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -118,34 +120,17 @@ class CacheManager:
         same time. Without this lock, a read-modify-write race would let one
         process's write silently clobber another's (lost update).
 
-        Polls with a non-blocking lock attempt instead of a single blocking
-        `LOCK_EX`, so a peer that's still holding the lock past
-        `_LOCK_TIMEOUT_SECONDS` raises `TimeoutError` rather than hanging
-        this process indefinitely. `TimeoutError` is a subclass of
-        `OSError`, so both `get_cached_result` and `set_cached_result`'s
-        existing `except OSError` already treat it the same as any other
-        cache failure — degrade to an uncached result, don't crash.
-
-        Raises:
-            TimeoutError: if the lock can't be acquired within
-                `_LOCK_TIMEOUT_SECONDS`.
+        `TimeoutError` (raised by `_filelock.locked()` if the lock can't be
+        acquired within `_LOCK_TIMEOUT_SECONDS`) is a subclass of `OSError`,
+        so both `get_cached_result` and `set_cached_result`'s existing
+        `except OSError` already treat it the same as any other cache
+        failure — degrade to an uncached result, don't crash.
         """
         lock_file = cache_file.with_suffix(".lock")
-        with lock_file.open("a", encoding="utf-8") as lock_fp:
-            deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
-            while True:
-                try:
-                    fcntl.flock(lock_fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if time.monotonic() >= deadline:
-                        msg = f"Timed out after {_LOCK_TIMEOUT_SECONDS}s waiting for lock on {lock_file}"
-                        raise TimeoutError(msg) from None
-                    time.sleep(_LOCK_POLL_INTERVAL_SECONDS)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock_fp, fcntl.LOCK_UN)
+        with locked(
+            lock_file, timeout_seconds=_LOCK_TIMEOUT_SECONDS, poll_interval_seconds=_LOCK_POLL_INTERVAL_SECONDS
+        ):
+            yield
 
     def _ensure_cache_dir(self) -> None:
         """Best-effort: an unavailable cache directory (permission denied,

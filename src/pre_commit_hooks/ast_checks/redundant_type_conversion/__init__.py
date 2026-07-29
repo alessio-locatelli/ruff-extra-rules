@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pre_commit_hooks.ast_checks._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
@@ -12,12 +13,11 @@ from pre_commit_hooks.ast_checks._base import BaseCheck, Violation, find_ignored
 from .analysis import RedundantConversion, decide_candidates
 from .candidates import find_candidates
 from .confidence import ConfidenceLevel, eligible_constructors, is_exact_match
-from .session import get_session
+from .session import get_session, notify_disk_change_if_session_active, peek_session
 
 if TYPE_CHECKING:
     import argparse
     import ast
-    from pathlib import Path
 
 # Format: # pytriage: TR6
 IGNORE_PATTERN = ignore_pattern_for("TR6")
@@ -67,6 +67,21 @@ class RedundantTypeConversionCheck(BaseCheck):
         return False
 
     def get_prefilter_pattern(self) -> list[str] | None:
+        # Widens to "check every file" once a persistent daemon might already be running (ADR-0041): a
+        # file can be a dependency of an already-tracked one without having any redundant-conversion
+        # candidate of its own -- the narrow, candidate-name-based prefilter below would otherwise skip
+        # that file (and so its check(), and so notify_disk_change_if_session_active()) entirely, silently
+        # reopening the exact cross-file gap this decision exists to close.
+        #
+        # Function-local: a module-level import here would make `daemon.py`
+        # already be a cached submodule by the time `python -m
+        # ...redundant_type_conversion.daemon` tries to run it as `__main__`
+        # (this package's own `__init__.py` runs first), which trips a
+        # `RuntimeWarning` and corrupts its stdout-based startup protocol.
+        from . import daemon  # noqa: PLC0415
+
+        if daemon.socket_exists_for(Path.cwd()):
+            return None
         return [f"{name}(" for name in eligible_constructors(self._level)]
 
     @classmethod
@@ -94,13 +109,19 @@ class RedundantTypeConversionCheck(BaseCheck):
         # before ever tokenizing `source` for ignored_lines (let alone
         # calling get_session(), which starts `ty` on this process's first
         # call) so a file with no syntactic candidates at all never pays
-        # for either.
+        # for either. It still needs notify_disk_change_if_session_active()
+        # below: a pure signature change (this check's own cross-file
+        # headline case, ADR-0041) has no candidate of its own, so this is
+        # the only place such a file's change ever reaches an already-alive
+        # session -- but it must never itself spawn one.
         candidates = find_candidates(tree, eligible_constructors(self._level))
         if not candidates:
+            notify_disk_change_if_session_active(filepath, source)
             return []
 
         ignored_lines = find_ignored_lines(source, IGNORE_PATTERN, THIRD_PARTY_IGNORE_PATTERN)
         if not any(candidate.line not in ignored_lines for candidate in candidates):
+            notify_disk_change_if_session_active(filepath, source)
             return []
 
         redundant = decide_candidates(
@@ -128,3 +149,12 @@ class RedundantTypeConversionCheck(BaseCheck):
         _encoding: str = "utf-8",
     ) -> bool:
         return False
+
+    def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
+        """See ADR-0041. Peeks rather than calling `get_session()`: a run with no real candidate anywhere
+        never created a session at all, and must not spawn one, or a daemon, just to ask it this.
+        """
+        session = peek_session()
+        if session is None:
+            return []
+        return session.drain_cross_file_candidates(already_processed)

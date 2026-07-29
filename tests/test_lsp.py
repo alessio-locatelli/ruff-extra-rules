@@ -8,10 +8,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pre_commit_hooks._lsp import LSPClient, LSPError, LSPTimeoutError, _read_message, byte_col_to_utf16_col
+from pre_commit_hooks._lsp import LSPClient, LSPError, LSPTimeoutError, byte_col_to_utf16_col, read_framed_message
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
+    from typing import Any
 
 # A minimal, dependency-free JSON-RPC/LSP-framed server used to exercise
 # LSPClient's real subprocess/pipe path without depending on `ty` at all —
@@ -79,14 +81,20 @@ _FAKE_SERVER_SCRIPT = textwrap.dedent(
             write_message({"jsonrpc": "2.0", "id": message["id"], "result": message["params"]})
         elif method == "die_immediately":
             break
+        elif method == "send_notification":
+            write_message({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics", "params": message["params"]})
+            write_message({"jsonrpc": "2.0", "id": message["id"], "result": None})
+        elif method == "send_server_request":
+            write_message({"jsonrpc": "2.0", "id": 999, "method": "client/registerCapability", "params": {}})
+            write_message({"jsonrpc": "2.0", "id": message["id"], "result": None})
         elif method == "exit":
             break
     """
 )
 
 
-def _spawn_fake_server(cwd: Path) -> LSPClient:
-    return LSPClient([sys.executable, "-c", _FAKE_SERVER_SCRIPT], cwd=cwd)
+def _spawn_fake_server(cwd: Path, *, on_notification: Callable[[str, dict[str, Any]], None] | None = None) -> LSPClient:
+    return LSPClient([sys.executable, "-c", _FAKE_SERVER_SCRIPT], cwd=cwd, on_notification=on_notification)
 
 
 def test_request_returns_result(tmp_path: Path) -> None:
@@ -217,7 +225,7 @@ def test_request_raises_lsp_error_when_server_exits_without_responding(tmp_path:
 
 def test_reader_loop_marks_connection_lost_on_a_malformed_frame(tmp_path: Path) -> None:
     # A malformed frame from the server (missing Content-Length) makes
-    # _read_message raise inside the reader loop's own try block -- this
+    # read_framed_message raise inside the reader loop's own try block -- this
     # must be caught, not crash the thread silently, and still mark the
     # connection lost so a later request fails fast instead of hanging.
     with _spawn_fake_server(tmp_path) as client:
@@ -225,6 +233,48 @@ def test_reader_loop_marks_connection_lost_on_a_malformed_frame(tmp_path: Path) 
         client._reader.join(timeout=5)
         assert client._reader.is_alive() is False
         assert client._connection_lost is True
+
+
+def test_on_notification_receives_a_server_notification(tmp_path: Path) -> None:
+    received: list[tuple[str, dict[str, Any]]] = []
+    with _spawn_fake_server(
+        tmp_path, on_notification=lambda method, params: received.append((method, params))
+    ) as client:
+        # The fake server's own "send_notification" handler writes the
+        # notification before acknowledging this request -- by the time
+        # request() returns, the reader loop has already processed it.
+        client.request("send_notification", {"uri": "file:///a.py", "items": []})
+
+    assert received == [("textDocument/publishDiagnostics", {"uri": "file:///a.py", "items": []})]
+
+
+def test_missing_on_notification_silently_drops_a_server_notification(tmp_path: Path) -> None:
+    # No on_notification given -- must not raise or hang, same as before this callback existed.
+    with _spawn_fake_server(tmp_path) as client:
+        assert client.request("send_notification", {"uri": "file:///a.py", "items": []}) is None
+
+
+def test_on_notification_is_never_called_for_a_server_to_client_request(tmp_path: Path) -> None:
+    # client/registerCapability carries both id and method -- it must stay
+    # in the "silently unanswered request" path, not be mistaken for a
+    # notification just because it shares the same method-dispatch shape.
+    received: list[tuple[str, dict[str, Any]]] = []
+    with _spawn_fake_server(
+        tmp_path, on_notification=lambda method, params: received.append((method, params))
+    ) as client:
+        client.request("send_server_request", {})
+
+    assert received == []
+
+
+def test_on_notification_callback_raising_does_not_kill_the_reader_thread(tmp_path: Path) -> None:
+    def _boom(_method: str, _params: dict[str, Any]) -> None:
+        raise ValueError("boom")
+
+    with _spawn_fake_server(tmp_path, on_notification=_boom) as client:
+        client.request("send_notification", {"uri": "file:///a.py", "items": []})
+        # The reader loop must survive the callback raising and keep serving requests.
+        assert client.request("echo", {"ok": True}) == {"ok": True}
 
 
 def test_late_response_after_a_timeout_is_silently_dropped(tmp_path: Path) -> None:
@@ -242,7 +292,7 @@ def test_late_response_after_a_timeout_is_silently_dropped(tmp_path: Path) -> No
 
 
 def test_read_message_returns_none_on_clean_eof() -> None:
-    assert _read_message(io.BytesIO(b"")) is None
+    assert read_framed_message(io.BytesIO(b"")) is None
 
 
 @pytest.mark.parametrize(
@@ -256,13 +306,13 @@ def test_read_message_returns_none_on_clean_eof() -> None:
 )
 def test_read_message_raises_on_a_malformed_frame(raw: bytes, match: str) -> None:
     with pytest.raises(LSPError, match=match):
-        _read_message(io.BytesIO(raw))
+        read_framed_message(io.BytesIO(raw))
 
 
 def test_read_message_ignores_unrelated_headers() -> None:
     body = b'{"jsonrpc": "2.0", "id": 1, "result": null}'
     raw = f"Content-Type: application/vscode-jsonrpc\r\nContent-Length: {len(body)}\r\n\r\n".encode() + body
-    assert _read_message(io.BytesIO(raw)) == {"jsonrpc": "2.0", "id": 1, "result": None}
+    assert read_framed_message(io.BytesIO(raw)) == {"jsonrpc": "2.0", "id": 1, "result": None}
 
 
 @pytest.mark.parametrize(

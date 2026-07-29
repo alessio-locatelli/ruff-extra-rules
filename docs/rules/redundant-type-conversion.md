@@ -20,6 +20,8 @@ Run this check with your project's own virtual environment active. `ty` resolves
 
 Also run it from inside the project being checked. `ty` resolves its own workspace root from the current working directory, so invoking this check's CLI directly (rather than through prek/pre-commit, which always runs a hook from the repo it's checking) against a file outside the current directory points `ty` at the wrong project — it won't see that project's own dependencies or configuration, which can change its diagnostics.
 
+This check keeps `ty` running in a small background process, stored under your project's own `.cache/pre_commit_hooks/` directory (see "Cross-file coverage" below for why). If your environment can't run a background process that outlives the current commit — some sandboxed CI runners, for example — this check falls back to a private, per-commit `ty` session automatically; you don't need to configure anything either way.
+
 ## Example
 
 ```python
@@ -66,7 +68,9 @@ This check does not support `--fix` — it only reports.
 
 ## Cross-file coverage
 
-Catching a redundant conversion at a call site whose parameter type is declared in another file needs both files examined together. A normal commit that only touches the file whose signature changed won't catch a conversion that's now redundant at a call site elsewhere, since pre-commit/prek only pass this hook the files that changed. Run this check over the whole project periodically — for example `pre-commit run --all-files`, or as part of CI — to get its full cross-file coverage rather than relying on incremental per-commit runs alone.
+Catching a redundant conversion at a call site whose parameter type is declared in another file needs both files examined together — but not necessarily in the same commit. This check keeps a small background process running between commits specifically for this: once it has seen both the call site and the file whose signature changed at least once, a later commit that only touches the signature still re-examines every call site that depends on it, with no extra configuration needed. The background process is scoped to your project, stops itself automatically after a period of inactivity, and restarts transparently if `ty` itself gets upgraded.
+
+The very first time this check runs in a project, or after the background process has been idle long enough to stop itself, it hasn't seen every file yet — a conversion depending on a file it's never examined won't be caught until that file is checked at least once. Running this check over the whole project once, for example `pre-commit run --all-files`, gives it full cross-file coverage immediately rather than waiting for normal commits to build it up.
 
 ## Suppression
 

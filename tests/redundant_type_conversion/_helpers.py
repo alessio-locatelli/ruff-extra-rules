@@ -43,5 +43,5 @@ class FakeSession:
         self.hover_calls.append((line0, char_utf16))
         return self._hover_by_position.get((line0, char_utf16))
 
-    def close_file(self, filepath: Path) -> None:
+    def finalize(self, filepath: Path, _source: str) -> None:
         self.closed_files.append(filepath)

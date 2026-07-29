@@ -19,8 +19,11 @@ from typing import TYPE_CHECKING
 import pytest
 
 import pre_commit_hooks.ast_checks.redundant_type_conversion as tri006_module
+import pre_commit_hooks.ast_checks.redundant_type_conversion.session as session_module
 from pre_commit_hooks.ast_checks.redundant_type_conversion import RedundantTypeConversionCheck
+from pre_commit_hooks.ast_checks.redundant_type_conversion import daemon as daemon_module
 from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import ConfidenceLevel
+from pre_commit_hooks.ast_checks.redundant_type_conversion.daemon import RemoteTySession
 from pre_commit_hooks.ast_checks.redundant_type_conversion.session import TySession
 from pre_commit_hooks.ast_checks.redundant_type_conversion.session import get_session as real_get_session
 
@@ -28,6 +31,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from pre_commit_hooks.ast_checks._base import Violation
+    from pre_commit_hooks.ast_checks.redundant_type_conversion.session import PersistentSession
 
 FIXTURES_ROOT = Path(__file__).parent / "fixtures" / "redundant_type_conversion"
 BAD_ROOT = FIXTURES_ROOT / "bad"
@@ -101,7 +105,22 @@ def test_suppressed_conversions_are_never_flagged() -> None:
     assert violations == []
 
 
-def test_the_real_installed_ty_still_passes_this_checks_own_self_test() -> None:
+def test_the_real_installed_ty_still_passes_this_checks_own_self_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # Deliberately unmocked: a failed self-test raises CheckUnavailableError, failing this test on its own.
-    session = real_get_session()
-    assert isinstance(session, TySession)
+    # Isolated to tmp_path (ADR-0041): a real ty daemon this may spawn must never touch this repo's own
+    # .cache/ directory, and is explicitly torn down below rather than left running until its own idle timeout.
+    monkeypatch.chdir(tmp_path)
+    session: PersistentSession | None = None
+    try:
+        session = real_get_session()
+        assert isinstance(session, (TySession, RemoteTySession))
+    finally:
+        # The daemon serves one client at a time (ADR-0041): closing this test's own still-open session
+        # first frees it up to actually accept shutdown_if_running()'s own connection promptly, rather
+        # than that call waiting out the full busy-daemon retry budget for a client that was never closing.
+        if session is not None:  # pragma: no branch -- False only if real_get_session() raised (already failing)
+            session.close()
+        daemon_module.shutdown_if_running(tmp_path)
+        session_module._session = None

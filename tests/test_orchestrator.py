@@ -13,6 +13,7 @@ from unittest import mock
 
 import pytest
 
+import pre_commit_hooks.ast_checks.redundant_type_conversion.session as tri006_session_module
 import pre_commit_hooks.ast_checks.validate_function_name as vfn_module
 from pre_commit_hooks._cache import CacheManager
 from pre_commit_hooks.ast_checks import ALL_CHECKS, _cli, _orchestrator
@@ -30,6 +31,7 @@ from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, load_ch
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsCheck, MeaninglessVarsLevel
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
+from pre_commit_hooks.ast_checks.redundant_type_conversion import daemon as tri006_daemon
 from tests._helpers import raises, restricted_permissions
 from tests.factories import ViolationFactory
 
@@ -1131,6 +1133,9 @@ class _AlwaysRerunProbeCheck:
     ) -> bool:
         return False
 
+    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+        return []
+
     @classmethod
     def add_cli_arguments(cls, _parser: argparse.ArgumentParser) -> None:
         return
@@ -1148,6 +1153,147 @@ def test_always_rerun_probe_check_fix_is_a_no_op(tmp_path: Path) -> None:
     # RedundantTypeConversionCheck's own test_fix_never_applies_a_fix).
     probe = _AlwaysRerunProbeCheck()
     assert probe.fix(tmp_path / "module.py", [], "x = 1\n", ast.parse("x = 1\n")) is False
+
+
+class _DrainingProbeCheck(_AlwaysRerunProbeCheck):
+    """An `_AlwaysRerunProbeCheck` that also reports extra cross-file candidates -- exercises
+    `CheckOrchestrator._drain_cross_file_candidates()` (ADR-0041) independent of
+    `redundant-type-conversion`'s own real implementation, which needs a live `ty` process.
+    """
+
+    __slots__ = ("extra_files",)
+
+    check_id = "draining-probe"
+
+    def __init__(self, extra_files: list[Path] | None = None, message: str = "probe") -> None:
+        super().__init__(message)
+        self.extra_files = extra_files or []
+
+    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+        return self.extra_files
+
+
+class _UnavailableDrainingCheck(_DrainingProbeCheck):
+    __slots__ = ()
+
+    check_id = "unavailable-draining-probe"
+
+    def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        raise CheckUnavailableError("simulated: prerequisite missing")
+
+
+class _RaisingDrainingCheck(_AlwaysRerunProbeCheck):
+    __slots__ = ()
+
+    check_id = "raising-draining-probe"
+
+    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+        raise RuntimeError("simulated drain failure")
+
+
+class _NeverConvergingDrainingCheck(_AlwaysRerunProbeCheck):
+    __slots__ = ()
+
+    check_id = "never-converging-probe"
+
+    def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
+        # Always offers a brand-new, never-before-seen path, so the
+        # orchestrator's own fixed-point loop never converges on its own --
+        # exercises the iteration cap (_MAX_CROSS_FILE_DRAIN_ITERATIONS)
+        # rather than the "already converged" early return.
+        return [Path(f"/nonexistent/never_converges_{len(already_processed)}.py")]
+
+
+class _SelectivelyViolatingDrainingCheck(_DrainingProbeCheck):
+    """Only flags a file named `flagged.py` -- unlike `_AlwaysRerunProbeCheck`, which flags every file
+    unconditionally, this lets a test drive an extra file through a real, empty (not unprocessable)
+    violations result.
+    """
+
+    __slots__ = ()
+
+    check_id = "selective-draining-probe"
+
+    def check(self, filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        if filepath.name != "flagged.py":
+            return []
+        return [
+            Violation(check_id=self.check_id, error_code=self.error_code, line=1, col=0, message="probe", fixable=False)
+        ]
+
+
+def test_drain_cross_file_candidates_merges_an_extra_files_violations(tmp_path: Path) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+    extra_file = tmp_path / "extra.py"
+    extra_file.write_text("y = 2\n")
+    another_extra_file = tmp_path / "another_extra.py"
+    another_extra_file.write_text("z = 3\n")
+
+    probe = _DrainingProbeCheck(extra_files=[extra_file, another_extra_file])
+    orchestrator = CheckOrchestrator(checks=[probe])
+
+    violations = orchestrator.process_files([str(main_file)])
+
+    assert str(main_file) in violations
+    assert str(extra_file.resolve()) in violations
+    assert str(another_extra_file.resolve()) in violations
+    assert violations[str(extra_file.resolve())][0].message == "probe"
+
+
+def test_drain_cross_file_candidates_skips_a_check_marked_unavailable_this_run(tmp_path: Path) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+    extra_file = tmp_path / "extra.py"
+    extra_file.write_text("y = 2\n")
+
+    probe = _UnavailableDrainingCheck(extra_files=[extra_file])
+    orchestrator = CheckOrchestrator(checks=[probe])
+
+    violations = orchestrator.process_files([str(main_file)])
+
+    assert violations == {}
+    assert orchestrator.unavailable_checks == [(probe.check_id, "simulated: prerequisite missing")]
+
+
+def test_drain_cross_file_candidates_logs_and_continues_when_a_check_raises(tmp_path: Path) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+
+    orchestrator = CheckOrchestrator(checks=[_RaisingDrainingCheck()])
+
+    violations = orchestrator.process_files([str(main_file)])  # must not raise
+
+    assert str(main_file) in violations
+
+
+def test_drain_cross_file_candidates_stops_at_the_iteration_cap(tmp_path: Path) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+
+    probe = _NeverConvergingDrainingCheck()
+    orchestrator = CheckOrchestrator(checks=[probe])
+
+    orchestrator.process_files([str(main_file)])
+
+    # One new, nonexistent (so unprocessable) extra path per iteration, capped at
+    # _MAX_CROSS_FILE_DRAIN_ITERATIONS -- never unbounded.
+    assert len(orchestrator.unprocessable_files) == _orchestrator._MAX_CROSS_FILE_DRAIN_ITERATIONS
+
+
+def test_drain_cross_file_candidates_reports_nothing_for_an_extra_file_with_no_violations(tmp_path: Path) -> None:
+    flagged_file = tmp_path / "flagged.py"
+    flagged_file.write_text("x = 1\n")
+    clean_extra_file = tmp_path / "clean.py"
+    clean_extra_file.write_text("y = 2\n")
+
+    probe = _SelectivelyViolatingDrainingCheck(extra_files=[clean_extra_file])
+    orchestrator = CheckOrchestrator(checks=[probe])
+
+    violations = orchestrator.process_files([str(flagged_file)])
+
+    assert str(flagged_file) in violations
+    assert str(clean_extra_file.resolve()) not in violations
 
 
 class _CrashingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
@@ -2665,22 +2811,48 @@ _BAD_FIXTURE_PATHS = sorted(_FIXTURES_DIR.glob("**/bad/*.py"))
     _BAD_FIXTURE_PATHS,
     ids=[str(p.relative_to(_FIXTURES_DIR)) for p in _BAD_FIXTURE_PATHS],
 )
-def test_fix_converges_after_one_pass_across_all_checks(fixture_path: Path, tmp_path: Path) -> None:
+def test_fix_converges_after_one_pass_across_all_checks(
+    fixture_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # ch. 10: "MUST ensure that applying the same fix repeatedly converges
     # to a stable result"; "MUST test fix idempotence explicitly". Runs
     # --fix (every check together, matching real pre-commit/prek usage)
     # twice over every existing bad/*.py fixture and asserts the second
     # pass leaves the file exactly as the first pass did.
+    #
+    # load_checks() includes redundant-type-conversion (TR6) unmocked, so
+    # its own session -- and, since ADR-0041, a real daemon subprocess --
+    # is rooted wherever Path.cwd() is; isolated to tmp_path (never this
+    # repo's own working directory) and explicitly torn down below, rather
+    # than left running until its own idle timeout. The module-global
+    # session singleton is also reset per parametrized invocation, or a
+    # later fixture's own (different) tmp_path would silently keep reusing
+    # whichever earlier invocation's session/daemon happened to be first.
+    monkeypatch.chdir(tmp_path)
+    original_session = tri006_session_module._session
+    tri006_session_module._session = None
     target = tmp_path / fixture_path.name
     target.write_text(fixture_path.read_text(encoding="utf-8"), encoding="utf-8")
 
-    CheckOrchestrator(checks=load_checks(), fix_mode=True).process_files([str(target)])
-    first_pass = target.read_text(encoding="utf-8")
+    try:
+        CheckOrchestrator(checks=load_checks(), fix_mode=True).process_files([str(target)])
+        first_pass = target.read_text(encoding="utf-8")
 
-    CheckOrchestrator(checks=load_checks(), fix_mode=True).process_files([str(target)])
-    second_pass = target.read_text(encoding="utf-8")
+        CheckOrchestrator(checks=load_checks(), fix_mode=True).process_files([str(target)])
+        second_pass = target.read_text(encoding="utf-8")
 
-    assert second_pass == first_pass
+        assert second_pass == first_pass
+    finally:
+        # The daemon serves one client at a time (ADR-0041): the two process_files() calls above leave
+        # this test's own session (tri006_session_module._session) open by design -- closing it first
+        # frees the daemon up to actually accept shutdown_if_running()'s own connection, rather than that
+        # call now correctly waiting out the full busy-daemon retry budget for a client that was never
+        # going to close on its own.
+        leftover_session = tri006_session_module.peek_session()
+        if leftover_session is not None:
+            leftover_session.close()
+        tri006_daemon.shutdown_if_running(tmp_path)
+        tri006_session_module._session = original_session
 
 
 def test_main_handles_path_containing_spaces_and_unicode(

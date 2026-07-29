@@ -65,6 +65,19 @@ class ASTCheck(Protocol):
         """
         ...
 
+    def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
+        """Additional files this check privately knows need re-examination as a side effect of state only
+        it tracks, excluding `already_processed` -- the files this run already examined directly.
+
+        Optional: `BaseCheck`'s own default returns `[]`, matching every check's usual "only ever look at
+        the single file you're given" contract (`docs/adding-a-check.md`'s "Incremental-analysis
+        limitations"). Called once by `CheckOrchestrator` after its normal per-file pass completes; any file
+        returned here is re-checked with just this one check and merged into the same run's report, exactly
+        as if pre-commit/prek had passed it directly. `redundant-type-conversion` (TR6) is the only check
+        implementing this today — see `docs/adr/0041-persistent-ty-daemon-for-cross-file-reanalysis.md`.
+        """
+        ...
+
     def get_prefilter_pattern(self) -> list[str] | None:
         """Fixed-string git-grep patterns that identify candidate files for this
         check, combined with OR logic (a file is a candidate if it contains ANY
@@ -142,6 +155,9 @@ class BaseCheck:
     @property
     def cacheable(self) -> bool:
         return True
+
+    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+        return []
 
     @classmethod
     def add_cli_arguments(cls, _parser: argparse.ArgumentParser) -> None:
