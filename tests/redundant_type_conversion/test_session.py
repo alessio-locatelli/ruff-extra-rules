@@ -38,9 +38,12 @@ def _isolated_session_singleton() -> Iterator[None]:
     which relies on getting a genuine session from a clean process state.
     """
     original = session_module._session
+    original_probe_failed = session_module._daemon_probe_failed
     session_module._session = None
+    session_module._daemon_probe_failed = False
     yield
     session_module._session = original
+    session_module._daemon_probe_failed = original_probe_failed
 
 
 def test_diagnostic_key_extracts_stable_identity_fields() -> None:
@@ -259,6 +262,25 @@ def test_notify_disk_change_if_session_active_is_a_no_op_when_no_daemon_is_reach
     monkeypatch.setattr(daemon_module, "try_connect_existing", lambda _root: None)
 
     notify_disk_change_if_session_active(tmp_path / "callee.py", "source\n")  # must not raise
+
+
+def test_notify_disk_change_if_session_active_memoizes_a_failed_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A failed probe (no daemon reachable) must not be repeated for every later candidate-less file in
+    # the same run -- including its own busy-daemon wait (ADR-0041) -- once the first attempt already
+    # answered the only question this run needs answered.
+    probe_calls: list[Path] = []
+
+    def _probe(root: Path) -> None:
+        probe_calls.append(root)
+
+    monkeypatch.setattr(daemon_module, "try_connect_existing", _probe)
+
+    notify_disk_change_if_session_active(tmp_path / "first.py", "source\n")
+    notify_disk_change_if_session_active(tmp_path / "second.py", "source\n")
+
+    assert len(probe_calls) == 1
 
     assert peek_session() is None
 
@@ -669,8 +691,9 @@ def test_drain_cross_file_candidates_serializes_against_a_concurrent_notificatio
     assert {path.as_uri() for path in drained_next} == {late_uri}
 
 
-def test_keep_open_registers_on_notification_with_the_lsp_client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("keep_open", [True, False], ids=["keep-open", "not-keep-open"])
+def test_on_notification_wiring_matches_keep_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, keep_open: bool
 ) -> None:
     captured: dict[str, object] = {}
 
@@ -686,31 +709,9 @@ def test_keep_open_registers_on_notification_with_the_lsp_client(
 
     monkeypatch.setattr(session_module, "LSPClient", _RecordingClient)
 
-    session = TySession(root=tmp_path, keep_open=True)
+    session = TySession(root=tmp_path, keep_open=keep_open)
 
-    assert captured["on_notification"] == session._on_notification
-
-
-def test_not_keep_open_passes_no_on_notification_to_the_lsp_client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    captured: dict[str, object] = {}
-
-    class _RecordingClient:
-        def __init__(self, *_args: object, **kwargs: object) -> None:
-            captured.update(kwargs)
-
-        def request(self, *_args: object, **_kwargs: object) -> dict[str, object]:
-            return {}
-
-        def notify(self, *_args: object, **_kwargs: object) -> None:
-            return
-
-    monkeypatch.setattr(session_module, "LSPClient", _RecordingClient)
-
-    TySession(root=tmp_path, keep_open=False)
-
-    assert captured["on_notification"] is None
+    assert captured["on_notification"] == (session._on_notification if keep_open else None)
 
 
 def test_min_ty_version_matches_pyproject_pin() -> None:

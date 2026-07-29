@@ -384,6 +384,7 @@ def _run_self_test(session: RedundancySession, root: Path) -> None:
 
 _session: PersistentSession | None = None
 _session_lock = threading.Lock()
+_daemon_probe_failed = False
 
 
 def get_session() -> PersistentSession:
@@ -447,11 +448,19 @@ def notify_disk_change_if_session_active(filepath: Path, source: str) -> None:
     for such a file. Deliberately does not spawn a fresh daemon on its own: a repository that has never
     triggered a real candidate (and so never paid `ty`'s own startup cost) shouldn't start paying it just
     because some unrelated, candidate-less file happened to change.
+
+    A failed probe (no daemon reachable, or one confirmed alive but too busy to free up in time) is
+    memoized for the rest of this run, the same way a successful one already is via `_session` itself:
+    without this, every later candidate-less file in the same run would repeat the same probe -- including
+    its own busy-daemon wait (ADR-0041) -- even though the first attempt already answered the only question
+    this run needs answered once.
     """
-    global _session  # noqa: PLW0603
+    global _session, _daemon_probe_failed  # noqa: PLW0603
     with _session_lock:
         if _session is not None:
             _session.notify_changed_on_disk(filepath, source)
+            return
+        if _daemon_probe_failed:
             return
 
         from . import daemon  # noqa: PLC0415 -- see _acquire_session()'s own comment on why this must be local
@@ -461,3 +470,5 @@ def notify_disk_change_if_session_active(filepath: Path, source: str) -> None:
             _session = probed
             atexit.register(_session.close)
             _session.notify_changed_on_disk(filepath, source)
+        else:
+            _daemon_probe_failed = True

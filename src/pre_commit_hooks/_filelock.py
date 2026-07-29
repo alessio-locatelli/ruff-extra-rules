@@ -1,7 +1,8 @@
 """A single, reusable exclusive-advisory-file-lock primitive, shared by
-`_cache.py` (its own per-file cache blob) and `_ty_daemon.py` (its
-spawn-if-absent critical section) rather than each reimplementing the same
-poll-with-timeout logic independently.
+`_cache.py` (its own per-file cache blob) and
+`redundant_type_conversion/daemon.py` (its spawn-if-absent critical section)
+rather than each reimplementing the same poll-with-timeout logic
+independently.
 """
 
 from __future__ import annotations
