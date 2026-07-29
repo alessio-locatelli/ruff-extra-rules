@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 import types
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
@@ -2982,7 +2983,13 @@ def test_fix_converges_after_one_pass_across_all_checks(
         leftover_session = tri006_session_module.peek_session()
         if leftover_session is not None:
             leftover_session.close()
-        tri006_daemon.shutdown_if_running(tmp_path)
+        # shutdown_if_running() is best-effort by design (never raises) --
+        # a couple of unconditional retries absorb a rare, transient
+        # connection hiccup rather than leaving this test's own daemon to
+        # idle out on its own.
+        for _ in range(3):
+            tri006_daemon.shutdown_if_running(tmp_path)
+            time.sleep(0.2)
         tri006_session_module._session = original_session
         tri006_session_module._daemon_probe_failed = original_probe_failed
 
