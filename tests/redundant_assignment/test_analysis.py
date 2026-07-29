@@ -358,7 +358,7 @@ def outer():
     )
 
 
-def test_get_source_segment_error_handling() -> None:
+def test_get_source_segment_returns_empty_string_without_end_position() -> None:
     node = ast.Constant(value=1, lineno=-1, col_offset=-1)
     assert _tracker("x = 1")._get_source_segment(node) == ""
 
