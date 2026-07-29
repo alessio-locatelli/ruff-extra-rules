@@ -5,6 +5,7 @@
   },
   "scripts": {
     "format": "prettier --write --cache --log-level warn .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check --cache .",
+    "check": "prettier --check --cache"
   }
 }

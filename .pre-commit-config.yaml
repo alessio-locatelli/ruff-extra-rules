@@ -7,6 +7,9 @@ ci:
       local-ruff-extra-rules-aggressive,
       # redundant-type-conversion (TRI006) requires Astral's `ty` type checker on PATH
       ruff-extra-rules,
+      # This hook requires a local dependency, so on CI it runs in
+      # `.github/workflows/prettier.yml`.
+      prettier,
     ]
 
 repos:
@@ -93,3 +96,11 @@ repos:
     hooks:
       - id: vulture
         language_version: python3.14
+
+  - repo: local
+    hooks:
+      - id: prettier
+        name: Prettier
+        entry: npm run check --
+        language: system
+        types: [markdown, yaml, json]
