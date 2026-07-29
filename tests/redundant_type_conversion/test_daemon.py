@@ -9,6 +9,7 @@ import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -123,6 +124,16 @@ def test_dispatch_converts_lsp_error_to_an_error_response() -> None:
     response = _dispatch({"op": "open_or_update", "filepath": "f.py", "content": "x"}, session)
     assert "error" in response
     assert "simulated ty crash" in response["error"]
+
+
+def test_dispatch_converts_a_malformed_request_to_an_error_response() -> None:
+    # Client and daemon are always the same, handshake-matched code, so a missing field should never
+    # happen in practice -- but it must not escape as a raw KeyError/TypeError and end this whole
+    # daemon's process (ADR-0041) the way an uncaught exception escaping _accept_loop already would.
+    session = _FakeSession()
+    response = _dispatch({"op": "open_or_update", "content": "x"}, session)  # missing "filepath"
+    assert "error" in response
+    assert "open_or_update" in response["error"]
 
 
 def test_call_raises_lsp_error_when_the_connection_is_already_broken() -> None:
@@ -574,6 +585,35 @@ def test_try_connect_returns_none_when_the_daemon_disconnects_without_answering(
             thread.join(timeout=5)
 
 
+def test_try_connect_returns_none_when_the_handshake_response_is_malformed(tmp_path: Path) -> None:
+    # A truncated/malformed handshake response (a daemon that died mid-write, or a stale socket
+    # answering with garbage) makes read_framed_message() raise LSPError -- as unusable a connection as
+    # an OSError, so it must be treated the same way rather than escaping uncaught and being recorded as
+    # a rule failure instead of falling back to a local session.
+    socket_path = tmp_path / "d.sock"
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    with sock:
+        sock.bind(str(socket_path))
+        sock.listen(1)
+        sock.settimeout(5.0)
+
+        def _server() -> None:
+            conn, _peer = sock.accept()
+            with conn:
+                daemon_module.read_framed_message(conn.makefile("rb"))
+                # Claims a 10-byte body but sends only 5, then disconnects -- read_framed_message() on
+                # the client side raises LSPError once it sees the connection close before the rest
+                # of the promised body ever arrives.
+                conn.sendall(b'Content-Length: 10\r\n\r\n{"a":')
+
+        thread = threading.Thread(target=_server)
+        thread.start()
+        try:
+            assert daemon_module._try_connect(socket_path, "v1") is None
+        finally:
+            thread.join(timeout=5)
+
+
 def test_try_connect_or_departing_converts_version_mismatch_to_a_departing_result(tmp_path: Path) -> None:
     socket_path = tmp_path / "d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -638,14 +678,11 @@ def test_connect_remembers_a_pre_lock_version_mismatch_even_once_the_daemon_has_
             return None  # in-lock: the old daemon has already vanished, socket and all
         return peer_sock  # the attempt right after _spawn_daemon() finds the fresh replacement
 
-    def _fail_if_daemon_alive_checked(_root: Path) -> bool:
-        pytest.fail(  # pragma: no cover -- only reached if the fix under test regresses
-            "must not check daemon liveness for a daemon already known to be departing"
-        )
+    daemon_alive_check = Mock()
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
     monkeypatch.setattr(daemon_module, "_try_connect", _try_connect_side_effect)
-    monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", _fail_if_daemon_alive_checked)
+    monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", daemon_alive_check)
     monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_TIMEOUT_SECONDS", 5.0)
     spawn_calls: list[Path] = []
     monkeypatch.setattr(daemon_module, "_spawn_daemon", spawn_calls.append)
@@ -654,6 +691,7 @@ def test_connect_remembers_a_pre_lock_version_mismatch_even_once_the_daemon_has_
     session = connect(tmp_path)
     elapsed = time.monotonic() - start
 
+    daemon_alive_check.assert_not_called()  # already known to be departing -- must not check liveness at all
     assert spawn_calls == [tmp_path]
     assert session._sock is peer_sock
     assert elapsed < 5.0  # must not wait out the busy-daemon retry budget
@@ -678,8 +716,7 @@ def test_daemon_process_is_alive_is_false_with_no_pidfile(tmp_path: Path) -> Non
 def test_daemon_process_is_alive_is_false_for_a_dead_pid(tmp_path: Path) -> None:
     pid_path = daemon_module._pid_path(tmp_path)
     pid_path.parent.mkdir(parents=True)
-    # PID 1 belongs to init in a real system, but inside this sandboxed test's own PID namespace no
-    # such process exists -- a dead PID either way, which is all this test needs.
+    # Waited on below, so its own PID is already reaped and no longer alive by the time it's recorded.
     dead_process = subprocess.Popen([sys.executable, "-c", "pass"])
     dead_process.wait(timeout=5)
     pid_path.write_text(str(dead_process.pid), encoding="utf-8")
@@ -772,16 +809,12 @@ def test_connect_waits_for_a_busy_daemon_instead_of_spawning_a_competing_one(
     monkeypatch.setattr(daemon_module, "_try_connect", lambda *_a: attempts.pop(0))
     monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", lambda _root: True)
     monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_INTERVAL_SECONDS", 0.01)
-
-    def _fail_if_spawned(_root: Path) -> None:
-        pytest.fail(  # pragma: no cover -- only reached if the fix under test regresses
-            "must not spawn a competing daemon while the existing one is confirmed alive"
-        )
-
-    monkeypatch.setattr(daemon_module, "_spawn_daemon", _fail_if_spawned)
+    spawn_daemon = Mock()
+    monkeypatch.setattr(daemon_module, "_spawn_daemon", spawn_daemon)
 
     session = connect(tmp_path)
 
+    spawn_daemon.assert_not_called()  # existing daemon confirmed alive -- must not spawn a competing one
     assert session._sock is peer_sock
     session.close()
 
@@ -794,16 +827,13 @@ def test_connect_raises_os_error_when_a_busy_daemon_never_frees_up(
     monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", lambda _root: True)
     monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_TIMEOUT_SECONDS", 0.1)
     monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_INTERVAL_SECONDS", 0.02)
-
-    def _fail_if_spawned(_root: Path) -> None:
-        pytest.fail(  # pragma: no cover -- only reached if the fix under test regresses
-            "must not spawn a competing daemon while the existing one is confirmed alive"
-        )
-
-    monkeypatch.setattr(daemon_module, "_spawn_daemon", _fail_if_spawned)
+    spawn_daemon = Mock()
+    monkeypatch.setattr(daemon_module, "_spawn_daemon", spawn_daemon)
 
     with pytest.raises(OSError, match="stayed busy"):
         connect(tmp_path)
+
+    spawn_daemon.assert_not_called()  # existing daemon confirmed alive -- must not spawn a competing one
 
 
 def test_connect_spawns_a_replacement_when_a_busy_daemon_turns_out_to_be_departing_mid_wait(
@@ -851,14 +881,11 @@ def test_connect_spawns_a_fresh_daemon_immediately_after_a_version_mismatch_inst
             raise daemon_module._VersionMismatchError
         return peer_sock  # the attempt right after _spawn_daemon() finds the fresh replacement
 
-    def _fail_if_daemon_alive_checked(_root: Path) -> bool:
-        pytest.fail(  # pragma: no cover -- only reached if the fix under test regresses
-            "must not check daemon liveness for a daemon already known to be departing"
-        )
+    daemon_alive_check = Mock()
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
     monkeypatch.setattr(daemon_module, "_try_connect", _try_connect_side_effect)
-    monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", _fail_if_daemon_alive_checked)
+    monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", daemon_alive_check)
     monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_TIMEOUT_SECONDS", 5.0)
     spawn_calls: list[Path] = []
     monkeypatch.setattr(daemon_module, "_spawn_daemon", spawn_calls.append)
@@ -867,6 +894,7 @@ def test_connect_spawns_a_fresh_daemon_immediately_after_a_version_mismatch_inst
     session = connect(tmp_path)
     elapsed = time.monotonic() - start
 
+    daemon_alive_check.assert_not_called()  # already known to be departing -- must not check liveness at all
     assert spawn_calls == [tmp_path]
     assert session._sock is peer_sock
     assert elapsed < 5.0  # must not wait out the busy-daemon retry budget
@@ -1102,7 +1130,9 @@ class TestRealDaemonEndToEnd:
     def _isolate_and_teardown(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
         monkeypatch.chdir(tmp_path)
         original_session = session_module._session
+        original_probe_failed = session_module._daemon_probe_failed
         session_module._session = None
+        session_module._daemon_probe_failed = False
         yield
         # The daemon serves one client at a time (ADR-0041): a test that established its own session
         # (session_module._session) never closes it, since that's this feature's whole point -- closing it
@@ -1121,6 +1151,7 @@ class TestRealDaemonEndToEnd:
             shutdown_if_running(tmp_path)
             time.sleep(0.2)
         session_module._session = original_session
+        session_module._daemon_probe_failed = original_probe_failed
 
     def test_connect_spawns_once_and_reuses_the_running_daemon(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

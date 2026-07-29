@@ -42,6 +42,7 @@ _KILL_WAIT_TIMEOUT_SECONDS = 5.0
 _CONNECT_TIMEOUT_SECONDS = 5.0
 _IDLE_TIMEOUT_SECONDS = 15 * 60
 _CLIENT_REQUEST_TIMEOUT_SECONDS = 60.0
+_STEADY_STATE_CALL_TIMEOUT_SECONDS = 60.0  # comfortably above the daemon's own ~20s internal ty-request budget
 
 
 class _VersionMismatchError(Exception):
@@ -172,7 +173,10 @@ class RemoteTySession:
         try:
             write_framed_message(self._wfile, {"op": op, **params})
             response = read_framed_message(self._rfile)
-        except OSError as error:
+        except (OSError, ValueError) as error:
+            # ValueError (including json.JSONDecodeError, a subclass) means a malformed response body --
+            # as much a lost, unusable connection as an OSError, so it's reported the same way rather than
+            # escaping as a raw exception type this module's own callers (analysis.py) don't catch.
             msg = f"ty daemon connection failed during {op!r}: {error!r}"
             raise LSPError(msg) from error
         if response is None:
@@ -394,7 +398,12 @@ def _try_connect(socket_path: Path, client_ty_version: str) -> socket.socket | N
         rfile = sock.makefile("rb")
         write_framed_message(sock.makefile("wb"), {"op": "handshake", "ty_version": client_ty_version})
         response = read_framed_message(rfile)
-    except OSError:
+    except OSError, LSPError, ValueError:
+        # LSPError (a truncated/malformed frame -- a daemon that died mid-handshake, or a stale socket
+        # answering with garbage) and ValueError (including json.JSONDecodeError, a subclass) are as
+        # unusable a connection as an OSError -- genuinely ambiguous with "busy" the same way, not a
+        # confirmed rejection, so this must not escape uncaught and be recorded as a rule failure instead
+        # of falling back to a local session the way every other operational connection failure here does.
         logger.debug("Connecting to the ty daemon at %s failed", socket_path, exc_info=True)
         sock.close()
         return None
@@ -404,7 +413,10 @@ def _try_connect(socket_path: Path, client_ty_version: str) -> socket.socket | N
     if response is None:
         sock.close()
         return None
-    sock.settimeout(None)  # steady-state calls rely on TySession's own internal ty-request timeouts instead
+    # Bounds every later call too, not just this handshake: a daemon that's genuinely wedged (not merely
+    # slow on one ty request, which its own internal timeouts already resolve into a normal error response)
+    # would otherwise hang this client forever, with nothing to ever fall back to a local session.
+    sock.settimeout(_STEADY_STATE_CALL_TIMEOUT_SECONDS)
     return sock
 
 
@@ -531,6 +543,12 @@ def _dispatch(message: dict[str, Any], session: PersistentSession) -> dict[str, 
             return {"result": [str(path) for path in drained]}  # pytriage: TR6 -- Path isn't JSON-serializable
     except LSPError as error:
         return {"error": str(error)}  # pytriage: TR6 -- LSPError isn't JSON-serializable
+    except (KeyError, TypeError) as error:
+        # A malformed request (a missing or wrong-typed field) -- client and daemon are always the same,
+        # handshake-matched code, so this should never happen in practice, but it must not escape as a raw
+        # exception either way: that would propagate past _accept_loop's own except clause and end this
+        # whole daemon's process over a single bad request, discarding every file it had been tracking.
+        return {"error": f"malformed request for op {op!r}: {error!r}"}
     return {"error": f"unknown op: {op!r}"}
 
 

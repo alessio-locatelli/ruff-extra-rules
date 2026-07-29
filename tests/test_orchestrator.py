@@ -8,7 +8,7 @@ import subprocess
 import sys
 import types
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
 from unittest import mock
 
 import pytest
@@ -1192,16 +1192,43 @@ class _RaisingDrainingCheck(_AlwaysRerunProbeCheck):
 
 
 class _NeverConvergingDrainingCheck(_AlwaysRerunProbeCheck):
-    __slots__ = ()
+    __slots__ = ("drain_call_count",)
 
     check_id = "never-converging-probe"
 
+    def __init__(self, message: str = "probe") -> None:
+        super().__init__(message)
+        self.drain_call_count = 0
+
+    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+        # Always offers a brand-new, never-before-seen path (keyed off this method's own call count,
+        # not check()'s -- the nonexistent path this returns is never actually check()-able, so
+        # check_count itself would never advance): the orchestrator's own fixed-point loop must never
+        # converge on its own, exercising the iteration cap (_MAX_CROSS_FILE_DRAIN_ITERATIONS) rather
+        # than the "already converged" early return.
+        self.drain_call_count += 1
+        return [Path(f"/nonexistent/never_converges_{self.drain_call_count}.py")]
+
+
+class _OrderDependentDrainingCheck(_AlwaysRerunProbeCheck):
+    """Reports `reported_file` as a cross-file candidate specifically once `trigger_file` has itself been
+    examined -- simulates a caller passed to the same run as its own callee, whose later examination is
+    what actually reveals the caller needs re-checking (ADR-0041's own processing-order regression).
+    """
+
+    __slots__ = ("reported_file", "trigger_file")
+
+    check_id = "order-dependent-draining-probe"
+
+    def __init__(self, *, trigger_file: Path, reported_file: Path, message: str = "probe") -> None:
+        super().__init__(message)
+        self.trigger_file = trigger_file.resolve()
+        self.reported_file = reported_file.resolve()
+
     def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
-        # Always offers a brand-new, never-before-seen path, so the
-        # orchestrator's own fixed-point loop never converges on its own --
-        # exercises the iteration cap (_MAX_CROSS_FILE_DRAIN_ITERATIONS)
-        # rather than the "already converged" early return.
-        return [Path(f"/nonexistent/never_converges_{len(already_processed)}.py")]
+        if self.trigger_file in already_processed:
+            return [self.reported_file]
+        return []
 
 
 class _SelectivelyViolatingDrainingCheck(_DrainingProbeCheck):
@@ -1267,6 +1294,25 @@ def test_drain_cross_file_candidates_logs_and_continues_when_a_check_raises(tmp_
     assert str(main_file) in violations
 
 
+def test_drain_cross_file_candidates_skips_an_unresolvable_extra_path(tmp_path: Path) -> None:
+    # A path-resolution failure for one drained candidate must be isolated to that candidate, the same
+    # way a check's own drain_cross_file_candidates() raising already is above -- not escape and abort
+    # the whole run over one bad path from one check.
+    class _UnresolvablePath(Path):
+        def resolve(self, _strict: bool = False) -> NoReturn:  # noqa: FBT002 -- matches Path.resolve()'s own signature
+            msg = "simulated resolve failure"
+            raise OSError(msg)
+
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+    probe = _DrainingProbeCheck(extra_files=[_UnresolvablePath(tmp_path / "unresolvable.py")])
+    orchestrator = CheckOrchestrator(checks=[probe])
+
+    violations = orchestrator.process_files([str(main_file)])  # must not raise
+
+    assert str(main_file) in violations
+
+
 def test_drain_cross_file_candidates_stops_at_the_iteration_cap(tmp_path: Path) -> None:
     main_file = tmp_path / "main.py"
     main_file.write_text("x = 1\n")
@@ -1279,6 +1325,25 @@ def test_drain_cross_file_candidates_stops_at_the_iteration_cap(tmp_path: Path) 
     # One new, nonexistent (so unprocessable) extra path per iteration, capped at
     # _MAX_CROSS_FILE_DRAIN_ITERATIONS -- never unbounded.
     assert len(orchestrator.unprocessable_files) == _orchestrator._MAX_CROSS_FILE_DRAIN_ITERATIONS
+
+
+def test_drain_cross_file_candidates_recovers_a_dependent_processed_before_its_dependency(tmp_path: Path) -> None:
+    # A caller passed to the same run as its own callee, ordered before it, must still be re-examined
+    # once the callee's own later examination reveals it dirty -- not silently suppressed by treating
+    # every original input file as permanently "already processed" from the very start of the run
+    # (ADR-0041's own processing-order regression).
+    caller = tmp_path / "caller.py"
+    caller.write_text("x = 1\n")
+    callee = tmp_path / "callee.py"
+    callee.write_text("y = 2\n")
+
+    probe = _OrderDependentDrainingCheck(trigger_file=callee, reported_file=caller)
+    orchestrator = CheckOrchestrator(checks=[probe])
+
+    orchestrator.process_files([str(caller), str(callee)])
+
+    # caller (direct) + callee (direct) + caller again (re-examined once callee's own drain flagged it).
+    assert probe.call_count == 3
 
 
 def test_drain_cross_file_candidates_reports_nothing_for_an_extra_file_with_no_violations(tmp_path: Path) -> None:
@@ -2830,7 +2895,9 @@ def test_fix_converges_after_one_pass_across_all_checks(
     # whichever earlier invocation's session/daemon happened to be first.
     monkeypatch.chdir(tmp_path)
     original_session = tri006_session_module._session
+    original_probe_failed = tri006_session_module._daemon_probe_failed
     tri006_session_module._session = None
+    tri006_session_module._daemon_probe_failed = False
     target = tmp_path / fixture_path.name
     target.write_text(fixture_path.read_text(encoding="utf-8"), encoding="utf-8")
 
@@ -2853,6 +2920,7 @@ def test_fix_converges_after_one_pass_across_all_checks(
             leftover_session.close()
         tri006_daemon.shutdown_if_running(tmp_path)
         tri006_session_module._session = original_session
+        tri006_session_module._daemon_probe_failed = original_probe_failed
 
 
 def test_main_handles_path_containing_spaces_and_unicode(
