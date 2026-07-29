@@ -395,15 +395,7 @@ class VariableTracker(ast.NodeVisitor):
         across the whole file, so the difference is O(source size) total
         instead of O(assignments x source size).
         """
-        try:
-            return fast_get_source_segment(self.source, self._ast_lines, node) or ""
-        # Defensive: fast_get_source_segment slices source by byte offset
-        # and decodes it, which could raise (ValueError/UnicodeDecodeError,
-        # or TypeError) if a node's position were ever inconsistent with
-        # this source — not expected for a node resolved against its own
-        # tree.
-        except ValueError, TypeError:  # pragma: no cover
-            return ""
+        return fast_get_source_segment(self.source, self._ast_lines, node) or ""
 
     def _is_simple_name_target(self, target: ast.expr) -> bool:
         return isinstance(target, ast.Name)
