@@ -1065,9 +1065,7 @@ def test_serve_binds_prints_ready_and_exits_on_idle_timeout(
 def test_serve_prints_failed_when_ty_version_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(
-        daemon_module, "_ty_version", lambda: (_ for _ in ()).throw(OSError("simulated: ty not on PATH"))
-    )
+    monkeypatch.setattr(daemon_module, "_ty_version", Mock(side_effect=OSError("simulated: ty not on PATH")))
 
     daemon_module._serve(tmp_path)
 
@@ -1079,11 +1077,7 @@ def test_serve_prints_failed_when_the_session_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(daemon_module, "_self_test", lambda: None)
-    monkeypatch.setattr(
-        daemon_module,
-        "TySession",
-        lambda **_kwargs: (_ for _ in ()).throw(CheckUnavailableError("simulated: ty not found")),
-    )
+    monkeypatch.setattr(daemon_module, "TySession", Mock(side_effect=CheckUnavailableError("simulated: ty not found")))
 
     daemon_module._serve(tmp_path)
 
