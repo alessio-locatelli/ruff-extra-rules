@@ -245,7 +245,7 @@ def test_apply_fix_does_not_rename_unrelated_class_method(tmp_path: Path) -> Non
 
 
 def test_apply_fix_renames_recursive_call(tmp_path: Path) -> None:
-    # Regression: a recursive call inside the renamed function must not be
+    # A recursive call inside the renamed function must not be
     # mistaken for a nested definition that shadows the outer function.
     # Builds the Suggestion directly: this recursive counter doesn't match
     # any of process_file's behavioral heuristics, but apply_fix's own
@@ -271,7 +271,7 @@ def test_apply_fix_renames_recursive_call(tmp_path: Path) -> None:
 
 
 def test_apply_fix_updates_call_site_of_nested_target_function(tmp_path: Path) -> None:
-    # Regression: renaming a *nested* function must update its own call
+    # Renaming a *nested* function must update its own call
     # site within the enclosing function. The enclosing scope legitimately
     # contains a def matching the target's own name (it IS the target),
     # which must not be mistaken for an unrelated shadowing definition
@@ -323,7 +323,7 @@ def test_apply_fix_updates_free_function_call_sites(tmp_path: Path) -> None:
 def test_apply_fix_renames_call_site_on_line_with_non_ascii_text(
     tmp_path: Path,
 ) -> None:
-    # Regression: ast.col_offset is a UTF-8 byte offset, not a character
+    # ast.col_offset is a UTF-8 byte offset, not a character
     # offset. Non-ASCII text earlier on a call site's line must not throw
     # off the position used to rename it.
     test_file = tmp_path / "module.py"

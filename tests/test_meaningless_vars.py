@@ -610,8 +610,8 @@ def test_autofix_no_fixable_violations() -> None:
 
 
 def test_autofix_follows_closure_reference_into_nested_function() -> None:
-    # Regression: renaming only the assignment while leaving a nested
-    # function's free-variable reference untouched used to leave the
+    # Renaming only the assignment while leaving a nested
+    # function's free-variable reference untouched would leave the
     # closure reading a name that no longer exists in its enclosing scope
     # (NameError at call time) — ch. 2: "MUST NOT perform an auto-fix that
     # can change runtime behavior"; "MUST ensure that a fix does not change
@@ -690,7 +690,7 @@ def test_autofix_follows_closure_reference_into_comprehension() -> None:
 
 
 def test_walrus_rebinding_suppresses_suggestion() -> None:
-    # Regression: PEP 572 binds a `:=` target inside a comprehension to the
+    # PEP 572 binds a `:=` target inside a comprehension to the
     # nearest *enclosing* non-comprehension scope, not the comprehension
     # itself — so a walrus target sharing the outer variable's name is the
     # *same* binding, not a shadow of it, and must be renamed along with
@@ -721,7 +721,7 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
     ("source", "expected_snippet"),
     [
         (
-            # Regression: a comprehension's *first* `for` clause's iterable
+            # a comprehension's *first* `for` clause's iterable
             # is evaluated in the enclosing scope, before the
             # comprehension's own for-target ("data" here) starts shadowing
             # anything — must still be renamed even though the
@@ -755,7 +755,7 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
             "{x: payload for x in xs}",
         ),
         (
-            # Regression: a parameter default and a parameter/return
+            # a parameter default and a parameter/return
             # annotation are both evaluated at def-time in the enclosing
             # scope (not the function's own body scope) — must be renamed
             # even though the parameter itself ("data") also shadows the
@@ -922,7 +922,7 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "[data for data in range(3)]",
         ),
         (
-            # Regression: `except E as data:` binds `data` as a plain string
+            # `except E as data:` binds `data` as a plain string
             # (ast.ExceptHandler.name), not an ast.Name node, so it was
             # invisible to the shadow check — `return data` inside the
             # handler was wrongly renamed to `return payload`, silently
@@ -943,7 +943,7 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "except RuntimeError as data:\n            return data",
         ),
         (
-            # Regression: a match `case data:` capture binds via
+            # a match `case data:` capture binds via
             # ast.MatchAs.name, also a plain string, not an ast.Name.
             """def outer(response):
     data: Payload = response.json()
@@ -958,7 +958,7 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "case data:\n                return data",
         ),
         (
-            # Regression: a match `case {**rest}:` mapping-rest capture
+            # a match `case {**rest}:` mapping-rest capture
             # binds via ast.MatchMapping.rest, also a plain string.
             """def outer(response):
     data: Payload = response.json()
@@ -973,7 +973,7 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "case {**data}:\n                return data",
         ),
         (
-            # Regression: a PEP 695 type parameter (`def f[data]():`) binds
+            # a PEP 695 type parameter (`def f[data]():`) binds
             # via ast.TypeVar.name, also a plain string — and, unlike a
             # regular parameter, type params are accessible at runtime
             # inside the function body too.
@@ -988,7 +988,7 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "def inner[data]() -> data:\n        return data",
         ),
         (
-            # Regression: `del data` makes `data` local to the *whole*
+            # `del data` makes `data` local to the *whole*
             # enclosing function (Python's rule for any binding operation,
             # not just assignment) — `del`'s target has ctx=ast.Del, not
             # ast.Store, so the original Store-only check missed it and
@@ -1007,7 +1007,7 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             'del data\n        data = "local value"\n        return data',
         ),
         (
-            # Regression: a dotted `import data.models` (no `as`) binds
+            # a dotted `import data.models` (no `as`) binds
             # only the first component, "data", in the local namespace —
             # ast.alias.name is the full dotted path "data.models", which
             # never equals a bare "data", so the original check missed the
@@ -1120,7 +1120,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        # Regression: `def data(): ...` rebinds the *same* local slot as the
+        # `def data(): ...` rebinds the *same* local slot as the
         # earlier `data: Payload = response.json()` — Python resolves a closure (or
         # any same-scope reference) to whichever binding is current at call
         # time, not definition time. Confirmed against CPython: calling
@@ -1140,7 +1140,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader, data
 """,
-        # Regression: same failure class via `class data: ...` instead of
+        # same failure class via `class data: ...` instead of
         # `def` — ast.ClassDef.name is also a plain string.
         """def outer(response):
     data: Payload = response.json()
@@ -1153,7 +1153,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader, data
 """,
-        # Regression: an `except ... as data:` in the *same* scope as the
+        # an `except ... as data:` in the *same* scope as the
         # assignment (not a nested one) also rebinds the same slot — its
         # name is only bound for the duration of the handler, but Python
         # still treats the whole scope as governed by it for compile-time
@@ -1172,7 +1172,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader
 """,
-        # Regression: a match `case data:` capture in the same scope, also
+        # a match `case data:` capture in the same scope, also
         # a plain-string ast.MatchAs.name.
         """def outer(response, command):
     data: Payload = response.json()
@@ -1186,7 +1186,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader
 """,
-        # Regression: a match `case {**data}:` mapping-rest capture in the
+        # a match `case {**data}:` mapping-rest capture in the
         # same scope, also a plain-string ast.MatchMapping.rest.
         """def outer(response, command):
     data: Payload = response.json()
@@ -1200,7 +1200,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader
 """,
-        # Regression: a dotted `import data.models` in the same scope binds
+        # a dotted `import data.models` in the same scope binds
         # the bare name "data" (ast.alias.name is the full dotted path,
         # never equal to a bare name — this exercises the split-on-dot path).
         """def outer(response):
@@ -1213,7 +1213,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader
 """,
-        # Regression: a non-dotted `from x import data` in the same scope,
+        # a non-dotted `from x import data` in the same scope,
         # distinct branch from the dotted import above.
         """def outer(response):
     data: Payload = response.json()
@@ -1256,16 +1256,16 @@ def test_autofix_never_offered_when_same_scope_rebinds_via_non_name_construct(so
 
 
 def test_autofix_never_offered_for_module_global_read_in_function() -> None:
-    # Regression: a module-level `data` read via `global data` inside a
+    # A module-level `data` read via `global data` inside a
     # function isn't a *new* binding at all — it's the same variable being
-    # renamed. `_binds_name_in_nested_scope` used to treat `global data` as
-    # shadowing (a blanket, conservative rule that was right for the
-    # nonlocal-mutation case but wrong here), so the function's own body
-    # was skipped entirely and `return data` was left referencing a name
-    # that no longer existed after the module-level rename — a NameError
-    # the moment the function is called. Rather than trying to safely
-    # follow the reference (impossible: `global data`'s own "data" is a
-    # plain string, not a rewritable ast.Name), check() now simply never
+    # renamed. `_binds_name_in_nested_scope` must not treat `global data`
+    # as shadowing (that blanket, conservative rule is right for the
+    # nonlocal-mutation case but wrong here) -- doing so would skip the
+    # function's own body entirely and leave `return data` referencing a
+    # name that no longer exists after the module-level rename — a
+    # NameError the moment the function is called. Rather than trying to
+    # safely follow the reference (impossible: `global data`'s own "data"
+    # is a plain string, not a rewritable ast.Name), check() simply never
     # offers a fix for a name mentioned in any `global`/`nonlocal`
     # anywhere in scope (ch. 2: "MUST NOT perform an auto-fix that can
     # change runtime behavior").
@@ -1298,11 +1298,11 @@ def reader():
 
 
 def test_autofix_avoids_cross_scope_suggestion_collision() -> None:
-    # Regression: two *independent* violations in different (but nested,
+    # Two *independent* violations in different (but nested,
     # non-shadowing) scopes that happen to generate the same suggested
-    # name used to both become that name, colliding once the outer one's
-    # rename is followed into the inner scope via closure-following. Here
-    # both `data` and the inner `result` match the same `.json()` autofix
+    # name must not both become that name, once the outer one's rename is
+    # followed into the inner scope via closure-following. Here both
+    # `data` and the inner `result` match the same `.json()` autofix
     # pattern ("payload") — `return data, result` must not become `return
     # payload, payload`, silently making both returned values identical.
     source = """def outer(response):
@@ -1329,10 +1329,10 @@ def test_autofix_avoids_cross_scope_suggestion_collision() -> None:
 
 
 def test_autofix_avoids_suggestion_colliding_with_existing_nested_name() -> None:
-    # Branch coverage / regression: _get_scope_names() now walks the
-    # *entire* subtree (not just the immediate scope) so a suggestion also
-    # avoids an already-existing identifier that lives in a nested scope,
-    # not just a colliding future suggestion.
+    # _get_scope_names() walks the *entire* subtree (not just the
+    # immediate scope) so a suggestion also avoids an already-existing
+    # identifier that lives in a nested scope, not just a colliding future
+    # suggestion.
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1357,7 +1357,7 @@ def test_autofix_avoids_suggestion_colliding_with_existing_nested_name() -> None
 
 
 def test_autofix_avoids_suggestion_colliding_with_nested_parameter_name() -> None:
-    # Regression: _get_scope_names() must also see *parameter* names (never
+    # _get_scope_names() must also see *parameter* names (never
     # `ast.Name` nodes), not just already-bound locals, or a suggestion can
     # collide with a nested function's own parameter and silently rebind a
     # closure read to that parameter instead of the renamed outer variable.
@@ -1384,12 +1384,13 @@ def test_autofix_avoids_suggestion_colliding_with_nested_parameter_name() -> Non
 
 
 def test_autofix_avoids_suggestion_colliding_with_nested_global_declaration() -> None:
-    # Regression: a name declared `global`/`nonlocal` in a nested scope is
+    # A name declared `global`/`nonlocal` in a nested scope is
     # stored as a plain string (`ast.Global.names`), never an `ast.Name`
-    # node, so `_get_scope_names()` didn't see it as reserved. A suggestion
-    # equal to such a name turned what used to be a closure read into a
-    # lookup of the unrelated global/nonlocal binding instead, once the
-    # closure-following rename reached that nested scope.
+    # node, so `_get_scope_names()` must still see it as reserved. A
+    # suggestion equal to such a name would otherwise turn what was a
+    # closure read into a lookup of the unrelated global/nonlocal binding
+    # instead, once the closure-following rename reached that nested
+    # scope.
     source = """payload = "module-level unrelated value"
 
 def outer(response):
@@ -1416,11 +1417,11 @@ def outer(response):
 
 
 def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_scope() -> None:
-    # Regression: `_binds_name_in_nested_scope()` must scan only the nested
+    # `_binds_name_in_nested_scope()` must scan only the nested
     # function's *own* scope, not its `_outer_scope_children()` (decorators,
     # defaults, annotations without type params) — those run in the
-    # *enclosing* scope. A walrus target inside a default value used to be
-    # wrongly treated as a body-level shadow, so the default got renamed
+    # *enclosing* scope. A walrus target inside a default value must not
+    # be treated as a body-level shadow, or the default would get renamed
     # while the body's closure read was left stale, splitting one variable
     # into two and breaking the fixed code at runtime.
     source = """def outer(response):
@@ -1454,13 +1455,14 @@ def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_sco
 
 
 def test_autofix_follows_closure_through_scope_that_itself_contains_a_shadowing_nested_scope() -> None:
-    # Regression: `_binds_name_in_nested_scope()` must not descend into a
+    # `_binds_name_in_nested_scope()` must not descend into a
     # *further*-nested function/lambda/comprehension when checking whether
     # the scope it was actually asked about binds the name. `middle` itself
     # doesn't shadow `data`, but `middle`'s own body contains `deeper`,
-    # which does — `_iter_own_scope_descendants()` used to walk straight
-    # into `deeper`'s body too, wrongly concluding `middle` itself shadows
-    # `data`, and skipping `middle`'s own legitimate closure reference.
+    # which does — `_iter_own_scope_descendants()` must not walk straight
+    # into `deeper`'s body too, or it would wrongly conclude `middle`
+    # itself shadows `data`, and skip `middle`'s own legitimate closure
+    # reference.
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1496,12 +1498,12 @@ def test_autofix_follows_closure_through_scope_that_itself_contains_a_shadowing_
 
 
 def test_autofix_avoids_suggestion_collision_when_nested_closure_precedes_captured_assignment() -> None:
-    # Regression: suggestions used to be assigned in AST visit (textual)
-    # order, so a nested closure defined *before* the outer variable it
+    # Suggestions must not be assigned in AST visit (textual)
+    # order, or a nested closure defined *before* the outer variable it
     # will eventually capture (valid Python — closures resolve names at
-    # call time) got its own, unrelated violation's suggestion chosen
-    # first, unaware of what the outer scope would later pick for the same
-    # RHS pattern. assign_suggestions() now processes violations in
+    # call time) could get its own, unrelated violation's suggestion
+    # chosen first, unaware of what the outer scope would later pick for
+    # the same RHS pattern. assign_suggestions() processes violations in
     # ascending scope-depth order instead, so the outer scope's own
     # violation is always assigned first regardless of source order.
     source = """def outer(response, response2):
@@ -1527,14 +1529,14 @@ def test_autofix_avoids_suggestion_collision_when_nested_closure_precedes_captur
 
 
 def test_autofix_does_not_rename_annotation_under_deferred_annotations() -> None:
-    # Regression: with `from __future__ import annotations` (PEP 563)
+    # With `from __future__ import annotations` (PEP 563)
     # active, every annotation is stored as a string and resolved later
     # against the function's *module* globals, never the enclosing
     # function's locals — unlike a default value, it is never a true
     # closure reference. Renaming an annotation that happens to share a
-    # name with an outer local used to follow it anyway, pointing the
-    # (module-global-resolved) annotation at a name that only exists as a
-    # local, breaking `typing.get_type_hints()` at runtime.
+    # name with an outer local must not follow it anyway — that would
+    # point the (module-global-resolved) annotation at a name that only
+    # exists as a local, breaking `typing.get_type_hints()` at runtime.
     source = """from __future__ import annotations
 
 data = int
@@ -1619,7 +1621,7 @@ def test_autofix_still_follows_annotation_closure_without_deferred_annotations()
 
 
 def test_autofix_never_offered_for_module_scope_name_referenced_in_annotation() -> None:
-    # Regression: under PEP 563, every annotation resolves only against the
+    # under PEP 563, every annotation resolves only against the
     # annotated function's own *module* globals, ignoring any local
     # shadowing along the way — so unlike a nested-local rename (previous
     # two tests), a module-scope rename genuinely *should* propagate into
@@ -1658,7 +1660,7 @@ def f(x: data) -> result:
 
 
 def test_autofix_follows_closure_into_type_parameter_bound_and_default() -> None:
-    # Regression: a PEP 695 type parameter's own `bound`/`default_value`
+    # a PEP 695 type parameter's own `bound`/`default_value`
     # expression is evaluated lazily, but through a real closure over the
     # scope enclosing the `def` — confirmed against CPython to respect
     # ordinary shadowing rules, unlike a deferred annotation (previous
@@ -1708,7 +1710,7 @@ def test_autofix_follows_closure_into_type_parameter_bound_and_default() -> None
 
 
 def test_autofix_does_not_rename_type_parameter_bound_referencing_a_peer_type_parameter() -> None:
-    # Regression: within one `type_params` list, a *later* type parameter's
+    # within one `type_params` list, a *later* type parameter's
     # own bound/default expression can reference an *earlier* type
     # parameter by name — confirmed against CPython that this resolves to
     # the peer type parameter, not to whatever the enclosing scope happens
@@ -1749,7 +1751,7 @@ def test_autofix_does_not_rename_type_parameter_bound_referencing_a_peer_type_pa
 
 
 def test_autofix_does_not_reuse_a_nested_functions_own_mapping_for_its_default() -> None:
-    # Regression: a parameter default is evaluated in the *enclosing* scope,
+    # a parameter default is evaluated in the *enclosing* scope,
     # not the function it belongs to — `_collect_scope_replacements()` (the
     # entry point used when a violation's own enclosing scope is the nested
     # function itself, here `inner`'s body-local `data`) walked every one of
@@ -1794,12 +1796,12 @@ def test_autofix_does_not_reuse_a_nested_functions_own_mapping_for_its_default()
 
 
 def test_autofix_does_not_rename_a_nested_functions_own_type_parameter_bound_via_its_own_scope() -> None:
-    # Regression: same root cause as the test above, but reached through
+    # Same root cause as the test above, but reached through
     # `inner`'s own type parameter bound instead of a default — the
     # violation here is `data`'s reassignment inside `inner`'s own body, so
-    # `_collect_scope_replacements()` is entered directly on `inner`, and its
-    # old unfiltered child walk reached into `inner.type_params` too,
-    # renaming `T`'s bound (which references the peer type parameter `data`,
+    # `_collect_scope_replacements()` is entered directly on `inner`. Its
+    # child walk must not reach into `inner.type_params` too, or it would
+    # rename `T`'s bound (which references the peer type parameter `data`,
     # unaffected by the body-local reassignment) to a name nothing else
     # binds.
     source = """def outer(response):
@@ -1824,13 +1826,13 @@ def test_autofix_does_not_rename_a_nested_functions_own_type_parameter_bound_via
 
 
 def test_autofix_does_not_rename_type_alias_bound_referencing_a_peer_type_parameter() -> None:
-    # Regression: a PEP 695 `type` alias statement (`ast.TypeAlias`) has its
+    # a PEP 695 `type` alias statement (`ast.TypeAlias`) has its
     # own implicit type-parameter scope, exactly like a generic function —
     # confirmed against CPython that a later type parameter's own bound can
     # reference an earlier peer by name, resolving to that peer object, not
     # to the enclosing scope. `ast.TypeAlias` isn't in `_CROSSABLE_SCOPE_NODES`
-    # at all, so before this fix it fell through to the generic recursive
-    # case in `_collect_replacements`, which walked into the alias's
+    # at all, so it must not fall through to the generic recursive case in
+    # `_collect_replacements`, which would walk into the alias's
     # `type_params`/`value` with no peer-name filtering whatsoever.
     source = """def outer(response):
     data: Payload = response.json()
@@ -1909,7 +1911,7 @@ def test_autofix_follows_closure_into_type_alias_value() -> None:
 
 
 def test_autofix_follows_closure_into_generic_functions_own_annotation_despite_body_shadowing() -> None:
-    # Regression: a PEP 695 generic function's parameter/return annotations
+    # a PEP 695 generic function's parameter/return annotations
     # run in the type parameters' own implicit scope, not the function's own
     # body/parameter scope — confirmed against CPython that a body-local
     # reassignment of the annotated name has no effect on what the
@@ -2182,7 +2184,7 @@ def test_repeated_binding_leaves_the_file_unchanged() -> None:
 
 
 def test_autofix_replaces_name_on_line_with_non_ascii_text() -> None:
-    # Regression: ast.col_offset is a UTF-8 byte offset, not a character
+    # ast.col_offset is a UTF-8 byte offset, not a character
     # offset. Non-ASCII text earlier on the same line as the meaningless
     # name must not throw off the position used to locate and replace it.
     source = """import requests
@@ -2211,7 +2213,7 @@ def process():
 
 
 def test_check_reports_character_offset_not_byte_offset_before_multibyte_text() -> None:
-    # Regression: ast.col_offset is a UTF-8 *byte* offset, not a character
+    # ast.col_offset is a UTF-8 *byte* offset, not a character
     # offset -- storing it on Violation.col directly reports a column too
     # far right on any line with non-ASCII text before the violation
     # (ch. 7: "MUST report ... column information accurately"; ch. 20:
@@ -2253,7 +2255,7 @@ def other():
 
     with caplog.at_level("DEBUG"):
         assert check.fix(filepath, violations, source, tree) is False
-    # Regression: the write failure must be attributed to the violations it
+    # the write failure must be attributed to the violations it
     # actually affected, not left indistinguishable from "never attempted"
     # — the orchestrator's own report otherwise misleadingly suggests
     # re-running --fix, which would just fail identically again. A

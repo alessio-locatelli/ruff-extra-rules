@@ -538,11 +538,11 @@ def func(x):
             None,
         ),
         (
-            # Regression: `old`'s assignment, the `self._server_session =
+            # `old`'s assignment, the `self._server_session =
             # ...` reassignment, and `old`'s own use are all nested inside
             # the same top-level `if`, so they share one coarse
             # stmt_index. Bisecting the hazard scan on stmt_index (instead
-            # of line) skipped straight past the reassignment, silently
+            # of line) would skip straight past the reassignment, silently
             # missing this snapshot-before-reassignment hazard.
             """
 def func(self):
@@ -556,10 +556,10 @@ def func(self):
             None,
         ),
         (
-            # Regression: two semicolon-separated statements on one
+            # Two semicolon-separated statements on one
             # physical line have the same `line` but distinct
             # `stmt_index`. Bisecting the hazard scan on line alone (the
-            # fix for the coarse-stmt_index case above) skipped straight
+            # fix for the coarse-stmt_index case above) would skip straight
             # past this same-line reassignment.
             """
 def func(x):
@@ -687,10 +687,10 @@ async def func(obj, cond):
         ),
         (
             # Same hazard as the two cases above, but semicolon-separated
-            # onto one physical line — assignment, await, and use now tie
-            # on *both* line and stmt_index, which used to make the bisect
-            # boundary skip the await point entirely (it looked identical
-            # to the assignment's own position).
+            # onto one physical line — assignment, await, and use tie on
+            # *both* line and stmt_index, so the bisect boundary must not
+            # skip the await point just because it looks identical to the
+            # assignment's own position.
             """
 async def func(obj, cond):
     if cond:
@@ -909,11 +909,11 @@ def test_evaluation_order_children_assign_yields_value_before_targets() -> None:
     ("source", "var_name", "expected"),
     [
         (
-            # Regression (2nd P1 in issue #22's fix): the evaluation-order
-            # check must be AST-based, not line/column-text-based — a
-            # text heuristic sees an empty same-line prefix for `x` here
-            # and wrongly calls it safe, even though side_effect() (on the
-            # previous physical line, same statement) already ran first.
+            # The evaluation-order check must be AST-based, not
+            # line/column-text-based — a text heuristic sees an empty
+            # same-line prefix for `x` here and wrongly calls it safe, even
+            # though side_effect() (on the previous physical line, same
+            # statement) already ran first.
             """
 def f():
     x = make()
@@ -1111,18 +1111,18 @@ def test_is_preceded_by_call_defaults_to_true_for_unknown_container() -> None:
         ('x = "test#test"  # real comment', True),  # String with `#` followed by a real comment.
         ('x = "test # not a comment"', False),  # Only a string containing `#`.
         ('x = ""  # comment', True),  # Empty string then comment.
-        # Regression: a single-quote inside a double-quoted string (e.g.
+        # A single-quote inside a double-quoted string (e.g.
         # "it's") must not be mistaken for a comment delimiter.
         ('x = "it\'s fine"', False),
         ('x = "it\'s fine"  # comment', True),
-        # Regression: a naive single-char-lookback escape check used to
-        # treat this closing quote as itself escaped (only the immediately
-        # preceding backslash was checked, not the full run), leaving the
-        # scanner stuck "inside" the string through the rest of the line —
-        # silently hiding a real trailing comment, which --fix would then
-        # have deleted along with the assignment it decorated.
+        # A naive single-char-lookback escape check would treat this
+        # closing quote as itself escaped (only the immediately preceding
+        # backslash checked, not the full run), leaving the scanner stuck
+        # "inside" the string through the rest of the line — silently
+        # hiding a real trailing comment, which --fix would then delete
+        # along with the assignment it decorated.
         ('x = "\\\\"  # comment', True),
-        # Regression: an embedded, unescaped quote inside a triple-quoted
+        # An embedded, unescaped quote inside a triple-quoted
         # string desyncs a single-quote-at-a-time toggle from the real
         # triple-quote delimiter, again hiding a real trailing comment.
         ('x = """a"b"""  # comment', True),

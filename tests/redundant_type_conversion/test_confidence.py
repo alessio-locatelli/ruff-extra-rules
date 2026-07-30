@@ -126,7 +126,7 @@ def test_conservative_accepts_a_flow_narrowed_literal_of_the_same_scalar(hover_t
     ],
 )
 def test_conservative_rejects_a_literal_of_a_different_scalar(hover_text: str, constructor: str) -> None:
-    # Regression guard: bool is an int subclass at runtime, so a naive
+    # Bool is an int subclass at runtime, so a naive
     # "Literal[...] always matches" rule would let int(some_bool) through
     # as if it were a no-op, even though it genuinely changes the runtime
     # type from bool to plain int.
@@ -161,7 +161,7 @@ def test_permissive_rejects_a_union_with_a_non_matching_member(hover_text: str, 
     ids=["union-in-generic-arg", "union-in-mapping-value", "union-in-callable-arg"],
 )
 def test_permissive_does_not_split_a_union_nested_inside_brackets(hover_text: str) -> None:
-    # Regression: a " | " nested inside a generic's own brackets isn't a top-level union.
+    # A " | " nested inside a generic's own brackets isn't a top-level union.
     assert hover_passes_gate(hover_text, ConfidenceLevel.PERMISSIVE, "list") is True
 
 

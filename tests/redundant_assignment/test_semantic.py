@@ -183,13 +183,13 @@ def test_should_autofix_allows_simple_zero_arg_call() -> None:
 
 @pytest.mark.parametrize("rhs_source", ["get_value()", "obj.attr"], ids=["call", "attribute"])
 def test_should_autofix_rejects_non_immediate_attribute_or_call_use(rhs_source: str) -> None:
-    # Regression (code review of issue #76): Attribute/Call RHS can run
-    # arbitrary code when evaluated, so inlining one is only safe when the
-    # use is the very next statement — otherwise an intervening
-    # statement's own effects could end up reordered relative to it, e.g.
-    # `result = pop(queue); queue.clear(); return result` must not become
-    # `queue.clear(); return pop(queue)`, which pops after clearing
-    # instead of before. A Constant/Name RHS has no such hazard (see
+    # Attribute/Call RHS can run arbitrary code when evaluated, so inlining
+    # one is only safe when the use is the very next statement —
+    # otherwise an intervening statement's own effects could end up
+    # reordered relative to it, e.g. `result = pop(queue); queue.clear();
+    # return result` must not become `queue.clear(); return pop(queue)`,
+    # which pops after clearing instead of before. A Constant/Name RHS has
+    # no such hazard (see
     # test_should_autofix_returns_true_for_single_use_constant_rhs), so
     # this restriction is specific to Attribute/Call.
     lifecycle = _lifecycle_with_use_node(rhs_source, use_stmt_index=4)
@@ -209,11 +209,9 @@ def test_should_autofix_returns_false_for_multiline_rhs() -> None:
 
 
 def test_should_autofix_allows_long_var_name_when_line_length_is_fine() -> None:
-    # Issue #76: the old var-name-length > 10 guard was only ever a crude
-    # proxy for "inlining might push the line too long" — now superseded
-    # entirely by the real line-length check below (with the actual use
-    # line, or the RHS-length estimate as a fallback), so a long name on
-    # its own is no longer disqualifying.
+    # A long variable name on its own must not disqualify autofix — only
+    # the real line-length check (using the actual use line, or the
+    # RHS-length estimate as a fallback) may reject it.
     rhs_node = ast.parse("something1", mode="eval").body
     lifecycle = _make_single_use_lifecycle("something1", rhs_node, var_name="myvariablex")
     assert should_autofix(lifecycle) is True
@@ -244,8 +242,7 @@ def test_should_autofix_allows_zero_arg_call() -> None:
 
 
 def test_should_autofix_rejects_zero_arg_call_preceded_by_a_call() -> None:
-    # Regression test (P1 caught in review of issue #22's fix): a
-    # zero-arg call must not be inlined when a sibling expression
+    # A zero-arg call must not be inlined when a sibling expression
     # evaluates before it within the same statement, or inlining reverses
     # the original execution order. Example: `value = next_value();
     # sink(side_effect(), value)` must not become `sink(side_effect(),
@@ -257,11 +254,10 @@ def test_should_autofix_rejects_zero_arg_call_preceded_by_a_call() -> None:
 
 
 def test_should_autofix_allows_call_with_one_arg() -> None:
-    # Issue #76: autofix eligibility is no longer pattern-dependent — a
-    # call with a single simple argument used to be rejected whenever the
-    # pattern was IMMEDIATE_SINGLE_USE/LITERAL_IDENTITY (only a bare
-    # zero-arg carve-out was allowed there); the same ≤2-arg allowance
-    # SINGLE_USE already had now applies uniformly.
+    # Autofix eligibility for a call RHS must not depend on the violation
+    # pattern -- a call with a single simple argument must be allowed the
+    # same ≤2-arg allowance regardless of whether the pattern is
+    # IMMEDIATE_SINGLE_USE, LITERAL_IDENTITY, or SINGLE_USE.
     rhs_node = ast.parse("make_check(1)", mode="eval").body
     lifecycle = _make_single_use_lifecycle("make_check(1)", rhs_node, var_name="check")
     assert should_autofix(lifecycle) is True

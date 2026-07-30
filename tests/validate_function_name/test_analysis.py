@@ -58,8 +58,8 @@ def test_attach_parents_handles_deeply_nested_source_without_recursion_error() -
     ("source", "func_name", "flags"),
     [
         (
-            # Regression case from .cache/bug_report.md: get_or_create
-            # updating a module-level cache must not be flagged as mutation.
+            # get_or_create updating a module-level cache must not be
+            # flagged as mutation.
             """
 import structlog
 from structlog.typing import FilteringBoundLogger

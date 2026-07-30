@@ -121,11 +121,11 @@ def test_decide_candidates_hovers_the_arguments_own_last_character() -> None:
 
 
 def test_decide_candidates_handles_a_multibyte_final_character_in_the_argument() -> None:
-    # Regression: the hover position used to be computed by subtracting 1
-    # directly in UTF-8 *byte* space from the argument's own end offset.
-    # That offset is only a valid boundary when the argument's own last
-    # character is single-byte in UTF-8 -- for a multi-byte final
-    # character (e.g. 'é', 2 bytes), it landed mid-character and raised
+    # The hover position must not be computed by subtracting 1 directly in
+    # UTF-8 *byte* space from the argument's own end offset -- that offset
+    # is only a valid boundary when the argument's own last character is
+    # single-byte in UTF-8. For a multi-byte final character (e.g. 'é', 2
+    # bytes), subtracting a raw byte would land mid-character and raise
     # UnicodeDecodeError on otherwise ordinary, valid Python source.
     source = "y = str(é)\n"
     redundant, session = _decide(
@@ -151,13 +151,13 @@ def test_decide_candidates_conservative_excludes_mutable_constructors() -> None:
 
 
 def test_decide_candidates_restores_pristine_source_before_each_candidates_hover() -> None:
-    # Regression: hover used to run against whatever the *previous*
-    # candidate's own synthetic rewrite left the in-memory document as,
-    # rather than the file's real, unmodified content -- with two
-    # candidates, the second one's hover would see the first candidate's
-    # rewrite still in place instead of the original source. The recorded
-    # open_or_update() sequence is the direct evidence: `source` must be
-    # reopened before candidate 2's own hover, not left at `modified_1`.
+    # Hover must run against the file's real, unmodified content, not
+    # whatever the *previous* candidate's own synthetic rewrite left the
+    # in-memory document as -- with two candidates, the second one's hover
+    # would otherwise see the first candidate's rewrite still in place
+    # instead of the original source. The recorded open_or_update()
+    # sequence is the direct evidence: `source` must be reopened before
+    # candidate 2's own hover, not left at `modified_1`.
     source = "a = str(x)\nb = int(y)\n"
     modified_1 = "a = x\nb = int(y)\n"
     modified_2 = "a = str(x)\nb = y\n"

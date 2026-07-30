@@ -135,10 +135,11 @@ def test_fix_is_noop_when_nothing_to_fix(source: str, tmp_path: Path) -> None:
     ids=["inline-placement", "preceding-placement"],
 )
 def test_fix_preserves_crlf_on_touched_lines(source: str, fixed_source: str, tmp_path: Path) -> None:
-    # Regression: fix() used to hardcode "\n" when rewriting the expression
-    # and bracket lines, silently converting a CRLF file's touched lines to
-    # LF (ch. 3: "MUST preserve the intended newline convention"; ch. 21:
-    # "MUST NOT unexpectedly reformat unrelated code").
+    # fix() must not hardcode "\n" when rewriting the expression
+    # and bracket lines -- that would silently convert a CRLF file's
+    # touched lines to LF (ch. 3: "MUST preserve the intended newline
+    # convention"; ch. 21: "MUST NOT unexpectedly reformat unrelated
+    # code").
     test_file = tmp_path / "test.py"
     test_file.write_bytes(source.encode())
     tree = ast.parse(source)
@@ -150,11 +151,12 @@ def test_fix_preserves_crlf_on_touched_lines(source: str, fixed_source: str, tmp
 
 
 def test_check_and_fix_detect_comment_on_cr_only_source(tmp_path: Path) -> None:
-    # Regression: tokenize couldn't see a COMMENT token at all on an
-    # old-Mac-style CR-only file (io.StringIO.readline() doesn't split on a
-    # lone \r), so the violation went completely undetected — not just
-    # misplaced, invisible. Also confirms the fix preserves the CR-only
-    # convention on the lines it touches, same as the CRLF case above.
+    # tokenize can't see a COMMENT token at all on an old-Mac-style
+    # CR-only file (io.StringIO.readline() doesn't split on a lone \r), so
+    # the violation must still be detected here rather than going
+    # completely undetected — not just misplaced, invisible. Also confirms
+    # the fix preserves the CR-only convention on the lines it touches,
+    # same as the CRLF case above.
     source = "foo(\r    bar,\r)  # comment\r"
     test_file = tmp_path / "test.py"
     test_file.write_bytes(source.encode())
@@ -168,8 +170,9 @@ def test_check_and_fix_detect_comment_on_cr_only_source(tmp_path: Path) -> None:
 
 
 def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    # Regression: fix() used to let atomic_write_text()'s OSError propagate
-    # uncaught instead of returning False like every other check's fix().
+    # fix() must catch atomic_write_text()'s OSError and return False,
+    # like every other check's fix(), instead of letting it propagate
+    # uncaught.
     source = "result = func(\n    arg\n)  # Comment here\n"
 
     # Point at a path inside a directory that doesn't exist so the
@@ -182,7 +185,7 @@ def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptu
 
     with caplog.at_level("DEBUG"):
         assert check.fix(filepath, violations, source, tree) is False
-    # Regression: the write failure must be attributed to the violations it
+    # The write failure must be attributed to the violations it
     # actually affected, not left indistinguishable from "never attempted"
     # — the orchestrator's own report otherwise misleadingly suggests
     # re-running --fix, which would just fail identically again.

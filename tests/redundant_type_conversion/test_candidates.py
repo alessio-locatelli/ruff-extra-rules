@@ -129,11 +129,10 @@ def test_ignores_a_call_missing_its_own_end_position(null_out: Callable[[ast.Cal
     ],
 )
 def test_ignores_a_call_whose_constructor_name_is_shadowed(shadowing_statement: str) -> None:
-    # Regression: a bare `str(x)` call was previously always treated as
-    # the builtin constructor, even when `str` itself was rebound
-    # somewhere in the module -- removing the "conversion" in that case
-    # calls a *different*, user-defined callable, which can change
-    # behavior rather than being a safe no-op.
+    # A bare `str(x)` call must not be treated as the builtin constructor
+    # when `str` itself is rebound somewhere in the module -- removing the
+    # "conversion" in that case calls a *different*, user-defined callable,
+    # which can change behavior rather than being a safe no-op.
     source = f"{shadowing_statement}func(str(x))\n"
     assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
 
@@ -163,7 +162,7 @@ def test_shadowing_one_constructor_does_not_affect_an_unrelated_one() -> None:
     ids=["before-the-candidate", "after-the-candidate", "nested-in-an-unrelated-function"],
 )
 def test_ignores_every_candidate_when_a_wildcard_import_is_present(source: str) -> None:
-    # Regression: `from module import *` can bind any name at all,
+    # `from module import *` can bind any name at all,
     # including a builtin constructor's own name (e.g. a compatibility
     # shim exporting its own `str`), without _scan()'s shadowed-name
     # tracking ever seeing that specific binding -- a wildcard import
@@ -365,7 +364,7 @@ def test_shadowing_an_unrelated_name_does_not_disable_the_equality_marker() -> N
     ids=["single-import", "multiple-purepath-imports"],
 )
 def test_importing_path_from_pathlib_itself_does_not_disable_the_equality_marker(import_statement: str) -> None:
-    # Regression: an ordinary, correct `from pathlib import Path` must not
+    # An ordinary, correct `from pathlib import Path` must not
     # be treated as shadowing pathlib's own class -- that's the overwhelmingly
     # common case this whole exclusion exists for.
     source = f"{import_statement}y = matches == [str(x)]\n"
