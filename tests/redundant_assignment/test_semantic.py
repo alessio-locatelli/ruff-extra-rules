@@ -254,10 +254,8 @@ def test_should_autofix_rejects_zero_arg_call_preceded_by_a_call() -> None:
 
 
 def test_should_autofix_allows_call_with_one_arg() -> None:
-    # Autofix eligibility for a call RHS must not depend on the violation
-    # pattern -- a call with a single simple argument must be allowed the
-    # same ≤2-arg allowance regardless of whether the pattern is
-    # IMMEDIATE_SINGLE_USE, LITERAL_IDENTITY, or SINGLE_USE.
+    # A call with a single simple argument must be allowed the same
+    # ≤2-arg allowance as a zero-arg call.
     rhs_node = ast.parse("make_check(1)", mode="eval").body
     lifecycle = _make_single_use_lifecycle("make_check(1)", rhs_node, var_name="check")
     assert should_autofix(lifecycle) is True

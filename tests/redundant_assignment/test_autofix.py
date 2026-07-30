@@ -830,13 +830,14 @@ def test_autofix_declines_fstring_splice_with_unpaired_surrogate(tmp_path: Path)
 def test_autofix_declines_fstring_splice_when_value_unencodable_in_declared_encoding(
     tmp_path: Path,
 ) -> None:
-    # a PEP 263 file can declare a narrower encoding (e.g.
-    # ASCII) than UTF-8. "\xe9" ('é') is a perfectly safe splice target
-    # under UTF-8 (should_autofix's check()-time guess, which never learns
-    # the real declared encoding), but writing it back into an
-    # ASCII-declared file would raise UnicodeEncodeError — apply_fixes must
-    # re-check against the *real* encoding it was actually given and
-    # decline rather than crash.
+    # A file's own declared encoding (detected upstream via a PEP 263
+    # coding line, and passed in here as encoding="ascii" to isolate this
+    # check from that detection step) can be narrower than UTF-8. "\xe9"
+    # ('é') is a perfectly safe splice target under UTF-8 (should_autofix's
+    # check()-time guess, which never learns the real declared encoding),
+    # but writing it back into an ASCII-declared file would raise
+    # UnicodeEncodeError — apply_fixes must re-check against the *real*
+    # encoding it was actually given and decline rather than crash.
     source = 'def f():\n    label = "\\xe9"\n    return f"<{label}>"\n'
     filepath = tmp_path / "source.py"
     filepath.write_bytes(source.encode("ascii"))
