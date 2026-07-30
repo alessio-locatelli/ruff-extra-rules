@@ -20,6 +20,7 @@ import pre_commit_hooks.ast_checks.validate_function_name as vfn_module
 from pre_commit_hooks import ruff_extra_rules, ruff_extra_rules_ty
 from pre_commit_hooks._cache import CacheManager
 from pre_commit_hooks._filelock import locked
+from pre_commit_hooks._lsp import LSPError
 from pre_commit_hooks.ast_checks import ALL_CHECKS, _cli, _orchestrator
 from pre_commit_hooks.ast_checks._base import (
     CheckUnavailableError,
@@ -1192,7 +1193,7 @@ class _RaisingDrainingCheck(_AlwaysRerunProbeCheck):
     check_id = "raising-draining-probe"
 
     def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
-        raise RuntimeError("simulated drain failure")
+        raise LSPError("simulated daemon disconnect")
 
 
 class _NeverConvergingDrainingCheck(_AlwaysRerunProbeCheck):
@@ -1322,15 +1323,16 @@ def test_drain_cross_file_candidates_skips_a_check_marked_unavailable_this_run(t
     assert orchestrator.unavailable_checks == [(probe.check_id, "simulated: prerequisite missing")]
 
 
-def test_drain_cross_file_candidates_logs_and_continues_when_a_check_raises(tmp_path: Path) -> None:
+def test_drain_cross_file_candidates_records_rule_failure_when_a_check_raises(tmp_path: Path) -> None:
     main_file = tmp_path / "main.py"
     main_file.write_text("x = 1\n")
 
     orchestrator = CheckOrchestrator(checks=[_RaisingDrainingCheck()])
 
-    violations = orchestrator.process_files([str(main_file)])  # must not raise
+    violations = orchestrator.process_files([str(main_file)])
 
     assert str(main_file) in violations
+    assert orchestrator.rule_failures == [(str(main_file), "raising-draining-probe")]
 
 
 def test_drain_cross_file_candidates_skips_an_unresolvable_extra_path(tmp_path: Path) -> None:
