@@ -560,7 +560,10 @@ def test_try_connect_existing_returns_none_when_ty_version_is_unavailable(
     monkeypatch.setattr(
         daemon_module, "_ty_version", lambda: (_ for _ in ()).throw(OSError("simulated: ty not on PATH"))
     )
-    assert try_connect_existing(tmp_path) is None
+    probe = daemon_module.probe_existing(tmp_path)
+
+    assert probe.session is None
+    assert probe.terminal_failure
 
 
 def test_try_connect_existing_cleans_up_a_crashed_daemons_stale_socket(

@@ -19,7 +19,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from pre_commit_hooks._filelock import locked, locking_is_available
 from pre_commit_hooks._lsp import LSPError, read_framed_message, write_framed_message
@@ -247,6 +247,11 @@ class RemoteTySession:
             self._sock.close()
 
 
+class ExistingDaemonProbe(NamedTuple):
+    session: RemoteTySession | None
+    terminal_failure: bool = False
+
+
 def connect(root: Path) -> RemoteTySession:
     """A session backed by a persistent per-repository daemon, spawning one if none is currently reachable.
 
@@ -345,7 +350,7 @@ def _wait_for_busy_daemon(socket_path: Path, client_ty_version: str) -> tuple[so
     return None, False
 
 
-def try_connect_existing(root: Path) -> RemoteTySession | None:
+def probe_existing(root: Path) -> ExistingDaemonProbe:
     """Non-spawning: connects only if a daemon is already running and reachable for `root`.
 
     Used by `session.notify_disk_change_if_session_active()` for the cheap "tell it about a disk change"
@@ -361,18 +366,18 @@ def try_connect_existing(root: Path) -> RemoteTySession | None:
     notification for the entire run -- exactly the gap ADR-0041 exists to close.
     """
     if not socket_exists_for(root):
-        return None
+        return ExistingDaemonProbe(None)
     try:
         client_ty_version = _ty_version()
     except OSError:
-        return None
+        return ExistingDaemonProbe(None, terminal_failure=True)
     socket_path = _socket_path(root)
     sock, departing = _try_connect_or_departing(socket_path, client_ty_version)
     if sock is not None:
-        return RemoteTySession(sock)
+        return ExistingDaemonProbe(RemoteTySession(sock))
     if not departing and _daemon_process_is_alive(root):
         sock, _departing = _wait_for_busy_daemon(socket_path, client_ty_version)
-        return RemoteTySession(sock) if sock is not None else None
+        return ExistingDaemonProbe(RemoteTySession(sock) if sock is not None else None)
     if not departing:
         # A crashed daemon's own socket, confirmed by its pidfile's own process being gone -- not a
         # departing-but-still-alive one (that daemon's own belated cleanup, ADR-0041, already handles
@@ -380,7 +385,11 @@ def try_connect_existing(root: Path) -> RemoteTySession | None:
         # file" fallback (ADR-0041) indefinitely, in a repository where no future candidate-containing
         # commit ever runs connect() to notice and replace it.
         _cleanup_confirmed_dead_daemon(root)
-    return None
+    return ExistingDaemonProbe(None)
+
+
+def try_connect_existing(root: Path) -> RemoteTySession | None:
+    return probe_existing(root).session
 
 
 def shutdown_if_running(root: Path) -> None:
