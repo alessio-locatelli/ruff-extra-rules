@@ -1420,10 +1420,11 @@ def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_sco
     # `_binds_name_in_nested_scope()` must scan only the nested
     # function's *own* scope, not its `_outer_scope_children()` (decorators,
     # defaults, annotations without type params) — those run in the
-    # *enclosing* scope. A walrus target inside a default value must not
-    # be treated as a body-level shadow, or the default would get renamed
-    # while the body's closure read was left stale, splitting one variable
-    # into two and breaking the fixed code at runtime.
+    # *enclosing* scope (see ADR 0023 for this rename-safety scope model).
+    # A walrus target inside a default value must not be treated as a
+    # body-level shadow, or the default would get renamed while the
+    # body's closure read was left stale, splitting one variable into two
+    # and breaking the fixed code at runtime.
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1796,14 +1797,12 @@ def test_autofix_does_not_reuse_a_nested_functions_own_mapping_for_its_default()
 
 
 def test_autofix_does_not_rename_a_nested_functions_own_type_parameter_bound_via_its_own_scope() -> None:
-    # Same root cause as the test above, but reached through
-    # `inner`'s own type parameter bound instead of a default — the
-    # violation here is `data`'s reassignment inside `inner`'s own body, so
-    # `_collect_scope_replacements()` is entered directly on `inner`. Its
-    # child walk must not reach into `inner.type_params` too, or it would
-    # rename `T`'s bound (which references the peer type parameter `data`,
-    # unaffected by the body-local reassignment) to a name nothing else
-    # binds.
+    # `data`'s reassignment inside `inner`'s own body causes
+    # `_collect_scope_replacements()` to be entered directly on `inner`.
+    # Its child walk must not reach into `inner.type_params` too, or it
+    # would rename `T`'s bound (which references the peer type parameter
+    # `data`, unaffected by the body-local reassignment) to a name nothing
+    # else binds.
     source = """def outer(response):
     def inner[data, T: data](response2):
         data = response2.json()
