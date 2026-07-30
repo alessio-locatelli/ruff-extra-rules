@@ -8,7 +8,6 @@ long-lived `ty server` process across separate, later commits.
 from __future__ import annotations
 
 import contextlib
-import functools
 import logging
 import os
 import select
@@ -81,25 +80,12 @@ def _socket_path(root: Path) -> Path:
 
 
 def repository_root(root: Path) -> Path:
-    return _repository_root(root.resolve())
-
-
-@functools.cache
-def _repository_root(root: Path) -> Path:
-    for parent in (root, *root.parents):
+    resolved_root = root.resolve()
+    for parent in (resolved_root, *resolved_root.parents):
         if not (parent / ".git").exists():
             continue
-        try:
-            completed_process = subprocess.run(  # noqa: S603
-                ["git", "-C", str(parent), "rev-parse", "--show-toplevel"],  # noqa: S607
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-        except OSError, subprocess.CalledProcessError:
-            break
-        return Path(completed_process.stdout.strip()).resolve()
-    return root
+        return parent
+    return resolved_root
 
 
 def socket_exists_for(root: Path) -> bool:
