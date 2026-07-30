@@ -257,9 +257,8 @@ class ExcessiveBlankLinesCheck(BaseCheck):
         if any(fv.anchor_line in ignored_lines for fv in file_violations):
             return False
 
+        fixed_content = fix_file_content(source, tree)
         try:
-            fixed_content = fix_file_content(source, tree)
-
             atomic_write_text(filepath, fixed_content, encoding)
         except OSError:
             # Debug-only: mark_fix_failed() below already reports this
