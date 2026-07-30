@@ -5,13 +5,16 @@ files, caching their results, and applying fixes.
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import logging
 import sys
+import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pre_commit_hooks._cache import CacheManager
+from pre_commit_hooks._filelock import locked, locking_is_available
 from pre_commit_hooks._prefilter import batch_filter_files
 
 from . import ALL_CHECKS
@@ -30,6 +33,9 @@ from ._base import (
     read_source_with_encoding,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 logger = logging.getLogger("ast_checks")
 
 # src/pre_commit_hooks/ — the tree CacheManager.compute_tree_hash() hashes to
@@ -46,6 +52,15 @@ type ViolationKey = tuple[int, int, str]  # (line, col, message)
 # an unbounded dependency chain isn't either -- this catches a short, realistic chain without risking an
 # unbounded per-run cost blowup from a pathological or cyclic one.
 _MAX_CROSS_FILE_DRAIN_ITERATIONS = 5
+
+_FIX_LOCK_TIMEOUT_SECONDS = 30.0
+_FIX_LOCK_POLL_INTERVAL_SECONDS = 0.05
+
+
+def _fix_lock_path(filepath: Path) -> Path:
+    file_hash = hashlib.sha1(str(filepath.resolve()).encode(), usedforsecurity=False).hexdigest()
+    lock_dir = Path(tempfile.gettempdir()).resolve() / "ruff-extra-rules" / "fix-locks" / file_hash[:2]
+    return lock_dir / f"{file_hash}.lock"
 
 
 def _replace_check_violations(
@@ -477,6 +492,31 @@ class CheckOrchestrator:
             return None
 
     def _check_file(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
+        if not self.fix_mode or not locking_is_available():
+            return self._check_file_locked(filepath, checks)
+
+        try:
+            lock_path = _fix_lock_path(filepath)
+            lock_path.parent.mkdir(parents=True, exist_ok=True)
+            with locked(
+                lock_path,
+                timeout_seconds=_FIX_LOCK_TIMEOUT_SECONDS,
+                poll_interval_seconds=_FIX_LOCK_POLL_INTERVAL_SECONDS,
+            ):
+                return self._check_file_locked(filepath, checks)
+        except TimeoutError:
+            logger.debug(
+                "Could not acquire the fix lock for %s within %ss -- another process may be fixing it",
+                filepath,
+                _FIX_LOCK_TIMEOUT_SECONDS,
+                exc_info=True,
+            )
+            return None
+        except OSError:
+            logger.debug("Could not acquire the fix lock for %s", filepath, exc_info=True)
+            return None
+
+    def _check_file_locked(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
         read_result = self._read_source(filepath)
         if read_result is None:
             return None
@@ -808,6 +848,7 @@ def load_checks(
     select: set[str] | None = None,
     ignore: set[str] | None = None,
     check_args: dict[str, Any] | None = None,
+    check_classes: Sequence[type[ASTCheck]] | None = None,
 ) -> list[ASTCheck]:
     """Mirrors `ruff check --select`/`--ignore`: `select` narrows the
     candidate set (None = all checks), and `ignore` always subtracts from
@@ -818,7 +859,7 @@ def load_checks(
 
     checks: list[ASTCheck] = []
 
-    for check_class in ALL_CHECKS:
+    for check_class in ALL_CHECKS if check_classes is None else check_classes:
         try:
             check = check_class()
         except Exception:

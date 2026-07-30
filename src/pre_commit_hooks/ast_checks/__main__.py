@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from ._cli import main
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from types import FrameType
 
 logger = logging.getLogger("ast_checks")
@@ -45,7 +46,7 @@ def _install_sigterm_handler() -> None:
         logger.debug("Could not install a SIGTERM handler; continuing without one.")
 
 
-def run(argv: list[str] | None = None) -> int:
+def run(argv: list[str] | None = None, *, entrypoint: Callable[[list[str] | None], int] | None = None) -> int:
     """Process-level wrapper around `main()`.
 
     Installs graceful SIGTERM handling and turns a cancellation (Ctrl-C or
@@ -64,7 +65,7 @@ def run(argv: list[str] | None = None) -> int:
     """
     _install_sigterm_handler()
     try:
-        return main(argv)
+        return (main if entrypoint is None else entrypoint)(argv)
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
         return 1

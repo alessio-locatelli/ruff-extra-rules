@@ -5,6 +5,8 @@ ci:
       # Using `uv` requires a custom workflow (not https://pre-commit.ci/).
       local-ruff-extra-rules-default,
       local-ruff-extra-rules-aggressive,
+      local-ruff-extra-rules-ty,
+      local-ruff-extra-rules-ty-aggressive,
       # redundant-type-conversion (TRI006) requires Astral's `ty` type checker on PATH
       ruff-extra-rules,
       # This hook requires a local dependency, so on CI it runs in
@@ -43,13 +45,13 @@ repos:
     hooks:
       - id: local-ruff-extra-rules-default
         name: Extra Python rule checks (self-check with default values + auto-fix)
-        description: Run our own AST-based checks against src/ and tests/
+        description: Run our own AST-based checks against src/ and tests/, except redundant-type-conversion (see local-ruff-extra-rules-ty)
         # `uv run` resolves this project's own managed venv regardless of
         # the ambient shell's PATH, since `language: system` hooks run
         # outside any pre-commit-managed environment (a plain `git commit`,
         # not wrapped in `uv run`, would otherwise use whatever `python` is
         # on PATH, which won't have this src-layout package installed).
-        entry: uv run python -m pre_commit_hooks.ast_checks
+        entry: uv run python -m pre_commit_hooks.ruff_extra_rules
         language: system
         types: [python]
         files: ^(src|tests)/
@@ -59,8 +61,8 @@ repos:
         args: [--fix]
       - id: local-ruff-extra-rules-aggressive
         name: Extra Python rule checks (self-check with the strictest config)
-        description: Run our own AST-based checks against src/ and tests/
-        entry: uv run python -m pre_commit_hooks.ast_checks
+        description: Run our own AST-based checks against src/ and tests/, except redundant-type-conversion (see local-ruff-extra-rules-ty)
+        entry: uv run python -m pre_commit_hooks.ruff_extra_rules
         language: system
         types: [python]
         files: ^(src|tests)/
@@ -70,8 +72,35 @@ repos:
             "--fix",
             "--meaningless-vars-level=permissive",
             "--redundant-assignment-level=permissive",
-            "--redundant-type-conversion-level=permissive",
           ]
+      - id: local-ruff-extra-rules-ty
+        name: Extra Python rule checks (redundant-type-conversion, serial)
+        description: >-
+          Runs redundant-type-conversion (TR6) alone, as a single serial process: it's the only check
+          sharing a persistent ty daemon across files (ADR-0041), so running it inside the parallel-batched
+          hooks above would make pre-commit/prek's own parallel workers contend with themselves over that
+          one shared daemon instead of running independently.
+        entry: uv run python -m pre_commit_hooks.ruff_extra_rules_ty
+        language: system
+        types: [python]
+        files: ^(src|tests)/
+        exclude: ^tests/fixtures/
+        require_serial: true
+        args: ["--fix"]
+      - id: local-ruff-extra-rules-ty-aggressive
+        name: Extra Python rule checks (redundant-type-conversion, serial, strictest config)
+        description: >-
+          Same as local-ruff-extra-rules-ty, at permissive confidence -- kept as its own hook (like
+          local-ruff-extra-rules-aggressive) rather than folded into the one above: permissive considers
+          far more candidate conversions, each needing its own ty query, making it roughly an order of
+          magnitude slower than conservative on this repository -- too slow to be every commit's own default.
+        entry: uv run python -m pre_commit_hooks.ruff_extra_rules_ty
+        language: system
+        types: [python]
+        files: ^(src|tests)/
+        exclude: ^tests/fixtures/
+        require_serial: true
+        args: ["--fix", "--redundant-type-conversion-level=permissive"]
 
   - repo: https://github.com/alessio-locatelli/ruff-extra-rules
     rev: v0.0.41
