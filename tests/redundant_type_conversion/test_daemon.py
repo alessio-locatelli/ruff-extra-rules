@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -547,6 +548,26 @@ def test_accept_loop_serializes_concurrent_calls_into_the_shared_session(tmp_pat
 
 def test_try_connect_existing_returns_none_when_nothing_is_listening(tmp_path: Path) -> None:
     assert try_connect_existing(tmp_path) is None
+
+
+def test_repository_root_reuses_a_daemon_path_from_subdirectories_and_path_aliases(tmp_path: Path) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    subprocess.run([git, "init", "-q", str(repository)], check=True)  # noqa: S603
+    nested = repository / "nested"
+    nested.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(repository, target_is_directory=True)
+    socket_path = daemon_module._socket_path(repository.resolve())
+    socket_path.parent.mkdir(parents=True)
+    socket_path.touch()
+
+    assert daemon_module.repository_root(nested) == repository.resolve()
+    assert daemon_module.repository_root(alias / "nested") == repository.resolve()
+    assert daemon_module.socket_exists_for(nested)
+    assert daemon_module.socket_exists_for(alias / "nested")
 
 
 def test_try_connect_existing_returns_none_when_ty_version_is_unavailable(
