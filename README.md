@@ -41,7 +41,7 @@ repos:
       - id: ruff-extra-rules-ty # optional: adds redundant-type-conversion (TR6), see below
 ```
 
-`ruff-extra-rules-ty` runs [redundant-type-conversion](docs/rules/redundant-type-conversion.md) by itself, as a single serial process, instead of alongside every other check. That check shares one persistent `ty` session across files to catch cross-file cases the rest of `ruff-extra-rules` can't — so it's kept out of the main, parallel-batched hook to avoid several parallel workers contending over that one shared session. It's optional and requires [`ty`](https://github.com/astral-sh/ty) on `PATH`.
+`ruff-extra-rules-ty` runs [redundant-type-conversion](docs/rules/redundant-type-conversion.md) by itself. It's optional and requires [`ty`](https://github.com/astral-sh/ty) on `PATH`.
 
 `ruff-extra-rules` always excludes `redundant-type-conversion`, and `ruff-extra-rules-ty` always runs only that check. Both accept shared options such as `--fix`; check-selection options are not supported by these hooks.
 
