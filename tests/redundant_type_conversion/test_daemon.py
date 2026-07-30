@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import os
 import shutil
 import socket
@@ -93,6 +94,9 @@ class _FakeSession:
         if self.hover_delay_seconds:
             time.sleep(self.hover_delay_seconds)
         return self.hover_result
+
+    def analysis_transaction(self) -> contextlib.AbstractContextManager[None]:
+        return contextlib.nullcontext()
 
     def finalize(self, _filepath: Path, _source: str) -> None:
         return
@@ -255,6 +259,60 @@ def test_handle_connection_serves_a_real_round_trip_over_a_background_thread() -
     finally:
         server_thread.join(timeout=5)
         assert not server_thread.is_alive()
+
+
+def test_handle_connection_keeps_the_session_lock_through_an_analysis_transaction() -> None:
+    server_sock, client_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    session_lock = Mock()
+
+    def run_server() -> None:
+        with server_sock:
+            _handle_connection(server_sock, _FakeSession(), ty_version="v1", session_lock=session_lock)
+
+    server_thread = threading.Thread(target=run_server)
+    server_thread.start()
+    client = RemoteTySession(client_sock)
+    try:
+        daemon_module.write_framed_message(client._wfile, {"op": "handshake", "ty_version": "v1"})
+        assert daemon_module.read_framed_message(client._rfile) == {"result": "ok"}
+
+        with client.analysis_transaction():
+            client.open_or_update(Path("f.py"), "x = 1\n")
+            client.finalize(Path("f.py"), "x = 1\n")
+            session_lock.release.assert_not_called()
+            with pytest.raises(LSPError, match="analysis transaction already active"):
+                client._call("begin_analysis")
+
+        session_lock.acquire.assert_called_once_with()
+        session_lock.release.assert_called_once_with()
+    finally:
+        client.close()
+        server_thread.join(timeout=5)
+        assert not server_thread.is_alive()
+
+
+def test_handle_connection_releases_an_abandoned_analysis_transaction() -> None:
+    server_sock, client_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    session_lock = Mock()
+
+    def run_server() -> None:
+        with server_sock:
+            _handle_connection(server_sock, _FakeSession(), ty_version="v1", session_lock=session_lock)
+
+    server_thread = threading.Thread(target=run_server)
+    server_thread.start()
+    client = RemoteTySession(client_sock)
+    try:
+        daemon_module.write_framed_message(client._wfile, {"op": "handshake", "ty_version": "v1"})
+        assert daemon_module.read_framed_message(client._rfile) == {"result": "ok"}
+        client._call("begin_analysis")
+    finally:
+        client.close()
+        server_thread.join(timeout=5)
+
+    session_lock.acquire.assert_called_once_with()
+    session_lock.release.assert_called_once_with()
+    assert not server_thread.is_alive()
 
 
 def test_handle_connection_returns_when_the_client_disconnects_before_handshake() -> None:

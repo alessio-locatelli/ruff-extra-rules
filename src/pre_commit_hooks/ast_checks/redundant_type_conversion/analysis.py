@@ -13,6 +13,7 @@ from pre_commit_hooks.ast_checks._base import CheckUnavailableError, byte_col_to
 from .confidence import hover_passes_gate, is_exact_match, is_purepath_hover
 
 if TYPE_CHECKING:
+    import contextlib
     from pathlib import Path
 
     from .candidates import Candidate
@@ -31,6 +32,8 @@ class RedundancySession(Protocol):
     def open_or_update(self, filepath: Path, content: str) -> frozenset[tuple[object, ...]]: ...
 
     def hover(self, filepath: Path, line0: int, char_utf16: int) -> str | None: ...
+
+    def analysis_transaction(self) -> contextlib.AbstractContextManager[None]: ...
 
     def finalize(self, filepath: Path, source: str) -> None:
         """Ends this candidate-analysis pass over `filepath`.
@@ -92,51 +95,52 @@ def decide_candidates(
     source_lines = split_lines_like_ast(source)
 
     redundant: list[RedundantConversion] = []
-    try:
-        for candidate in candidates:
-            # Restores the pristine source before every hover: a previous
-            # candidate's own rewrite below would otherwise still be open,
-            # which can change what this candidate's own hover reports. Also
-            # doubles as this candidate's own recheck baseline.
-            baseline = _open_or_raise(session, filepath, source)
-            line_text = source_lines[candidate.line - 1]
-            # One character before the argument's own end, in char (not byte)
-            # space first -- arg_end_col - 1 in byte space can land mid-
-            # character for a multi-byte final character (e.g. `str(é)`).
-            arg_end_char = byte_col_to_char_col(line_text, candidate.arg_end_col)
-            hover_char = len(line_text[: arg_end_char - 1].encode("utf-16-le")) // 2
-            hover_text = session.hover(filepath, candidate.line - 1, hover_char)
-            if not hover_passes_gate(hover_text, level, candidate.constructor):
-                continue
-            assert hover_text is not None  # hover_passes_gate() already rejected None/empty above
+    with session.analysis_transaction():
+        try:
+            for candidate in candidates:
+                # Restores the pristine source before every hover: a previous
+                # candidate's own rewrite below would otherwise still be open,
+                # which can change what this candidate's own hover reports. Also
+                # doubles as this candidate's own recheck baseline.
+                baseline = _open_or_raise(session, filepath, source)
+                line_text = source_lines[candidate.line - 1]
+                # One character before the argument's own end, in char (not byte)
+                # space first -- arg_end_col - 1 in byte space can land mid-
+                # character for a multi-byte final character (e.g. `str(é)`).
+                arg_end_char = byte_col_to_char_col(line_text, candidate.arg_end_col)
+                hover_char = len(line_text[: arg_end_char - 1].encode("utf-16-le")) // 2
+                hover_text = session.hover(filepath, candidate.line - 1, hover_char)
+                if not hover_passes_gate(hover_text, level, candidate.constructor):
+                    continue
+                assert hover_text is not None  # hover_passes_gate() already rejected None/empty above
 
-            if candidate.wrapped_in_len and not is_exact_match(hover_text, candidate.constructor):
-                # See ADR-0035's `len()` sink exclusion.
-                continue
+                if candidate.wrapped_in_len and not is_exact_match(hover_text, candidate.constructor):
+                    # See ADR-0035's `len()` sink exclusion.
+                    continue
 
-            if candidate.in_equality_comparison and is_purepath_hover(hover_text):
-                # See ADR-0035's Path-vs-str comparison exclusion.
-                continue
+                if candidate.in_equality_comparison and is_purepath_hover(hover_text):
+                    # See ADR-0035's Path-vs-str comparison exclusion.
+                    continue
 
-            modified_text = _build_modified_text(source_lines, candidate)
-            after = _open_or_raise(session, filepath, modified_text)
-            if after - baseline:
-                # Removing the conversion introduced a diagnostic that wasn't there before.
-                continue
+                modified_text = _build_modified_text(source_lines, candidate)
+                after = _open_or_raise(session, filepath, modified_text)
+                if after - baseline:
+                    # Removing the conversion introduced a diagnostic that wasn't there before.
+                    continue
 
-            redundant.append(
-                RedundantConversion(
-                    candidate=candidate,
-                    line=candidate.line,
-                    col=byte_col_to_char_col(line_text, candidate.call_start_col),
-                    argument_type=hover_text,
+                redundant.append(
+                    RedundantConversion(
+                        candidate=candidate,
+                        line=candidate.line,
+                        col=byte_col_to_char_col(line_text, candidate.call_start_col),
+                        argument_type=hover_text,
+                    )
                 )
-            )
-    finally:
-        # Runs even on an unexpected raise, or a persistent session leaks
-        # this file open (and possibly still mid-rewrite) for the rest of
-        # its own lifetime.
-        session.finalize(filepath, source)
+        finally:
+            # Runs even on an unexpected raise, or a persistent session leaks
+            # this file open (and possibly still mid-rewrite) for the rest of
+            # its own lifetime.
+            session.finalize(filepath, source)
 
     return redundant
 
