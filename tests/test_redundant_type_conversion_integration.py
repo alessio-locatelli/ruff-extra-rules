@@ -13,6 +13,7 @@ recordings on every CI run, per issue #108's own testing decisions.
 from __future__ import annotations
 
 import ast
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 from unittest.mock import Mock
@@ -123,6 +124,10 @@ def _run_ty_self_test(tmp_path: Path, get_session: Callable[[], PersistentSessio
         session_module._session = None
 
 
+def _raise_unavailable(error: CheckUnavailableError) -> PersistentSession:
+    raise error
+
+
 def test_the_real_installed_ty_still_passes_this_checks_own_self_test(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -134,11 +139,8 @@ def test_the_real_installed_ty_still_passes_this_checks_own_self_test(
 def test_ty_self_test_cleanup_preserves_a_session_failure(tmp_path: Path) -> None:
     error = CheckUnavailableError("simulated unavailable ty")
 
-    def raise_unavailable() -> PersistentSession:
-        raise error
-
     with pytest.raises(CheckUnavailableError) as raised:
-        _run_ty_self_test(tmp_path, raise_unavailable)
+        _run_ty_self_test(tmp_path, partial(_raise_unavailable, error))
 
     assert raised.value is error
 
