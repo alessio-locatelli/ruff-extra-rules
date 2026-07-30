@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import contextlib
 import os
 import shutil
 import socket
@@ -94,9 +93,6 @@ class _FakeSession:
         if self.hover_delay_seconds:
             time.sleep(self.hover_delay_seconds)
         return self.hover_result
-
-    def analysis_transaction(self) -> contextlib.AbstractContextManager[None]:
-        return contextlib.nullcontext()
 
     def finalize(self, _filepath: Path, _source: str) -> None:
         return
