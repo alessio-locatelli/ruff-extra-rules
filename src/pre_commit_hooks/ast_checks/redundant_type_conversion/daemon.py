@@ -8,6 +8,7 @@ long-lived `ty server` process across separate, later commits.
 from __future__ import annotations
 
 import contextlib
+import functools
 import logging
 import os
 import select
@@ -79,6 +80,28 @@ def _socket_path(root: Path) -> Path:
     return root / _SOCKET_RELATIVE_PATH
 
 
+def repository_root(root: Path) -> Path:
+    return _repository_root(root.resolve())
+
+
+@functools.cache
+def _repository_root(root: Path) -> Path:
+    for parent in (root, *root.parents):
+        if not (parent / ".git").exists():
+            continue
+        try:
+            completed_process = subprocess.run(  # noqa: S603
+                ["git", "-C", str(parent), "rev-parse", "--show-toplevel"],  # noqa: S607
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+        except OSError, subprocess.CalledProcessError:
+            break
+        return Path(completed_process.stdout.strip()).resolve()
+    return root
+
+
 def socket_exists_for(root: Path) -> bool:
     """Whether a daemon *might* already be running for `root`, checked with a plain `Path.exists()` -- no
     connection attempt.
@@ -90,7 +113,7 @@ def socket_exists_for(root: Path) -> bool:
     benefit, but self-correcting the moment something spawns a fresh daemon and cleans the stale file up;
     never a correctness problem, only a possible one-run performance blip.
     """
-    return _socket_path(root).exists()
+    return _socket_path(repository_root(root)).exists()
 
 
 def _pid_path(root: Path) -> Path:
@@ -261,6 +284,7 @@ def connect(root: Path) -> RemoteTySession:
         OSError: the daemon couldn't be reached or spawned for an operational reason (no socket support,
             spawn timeout, ...) -- the caller should fall back to a private, non-persistent `TySession`.
     """
+    root = repository_root(root)
     socket_path = _socket_path(root)
     client_ty_version = _ty_version()
 
@@ -365,7 +389,8 @@ def probe_existing(root: Path) -> ExistingDaemonProbe:
     singleton), so giving up here on the first overlapping hook invocation would silently drop a disk-change
     notification for the entire run -- exactly the gap ADR-0041 exists to close.
     """
-    if not socket_exists_for(root):
+    root = repository_root(root)
+    if not _socket_path(root).exists():
         return ExistingDaemonProbe(None)
     try:
         client_ty_version = _ty_version()
@@ -408,6 +433,7 @@ def shutdown_if_running(root: Path) -> None:
     `_cleanup_if_still_owned()`'s own socket removal -- run just before the daemon's process actually ends
     -- is what gives a caller an accurate "it's gone" rather than one that's merely about to be.
     """
+    root = repository_root(root)
     session = try_connect_existing(root)
     if session is None:
         return
