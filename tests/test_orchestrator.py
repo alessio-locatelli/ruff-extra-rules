@@ -1397,6 +1397,27 @@ def test_drain_cross_file_candidates_skips_an_unresolvable_extra_path(tmp_path: 
     assert str(main_file) in violations
 
 
+def test_drain_cross_file_candidates_skips_an_unresolvable_direct_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+    probe = _DrainingProbeCheck(extra_files=[])
+    orchestrator = CheckOrchestrator(checks=[probe])
+    monkeypatch.setattr(CheckOrchestrator, "_process_single_file", lambda *_args: [])
+    real_resolve = Path.resolve
+
+    def resolve(filepath: Path, strict: bool = False) -> Path:  # noqa: FBT002
+        if filepath == main_file:
+            msg = "simulated resolve failure"
+            raise OSError(msg)
+        return real_resolve(filepath, strict=strict)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+
+    assert orchestrator.process_files([str(main_file)]) == {}
+
+
 def test_drain_cross_file_candidates_stops_at_the_iteration_cap(tmp_path: Path) -> None:
     main_file = tmp_path / "main.py"
     main_file.write_text("x = 1\n")

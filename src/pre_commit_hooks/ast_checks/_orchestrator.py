@@ -217,7 +217,12 @@ class CheckOrchestrator:
         # it was given here (e.g. a relative path exactly as the caller spelled it), rather than a second,
         # separately-resolved key -- resolving it the way _collect_cross_file_candidates always does would
         # otherwise report the same file twice under two different spellings once it's drained (ADR-0041).
-        resolved_to_key = {Path(filepath_str).resolve(): filepath_str for filepath_str in checks_by_file}
+        resolved_to_key: dict[Path, str] = {}
+        for filepath_str in checks_by_file:
+            try:
+                resolved_to_key[Path(filepath_str).resolve()] = filepath_str
+            except OSError:
+                logger.debug("Could not resolve input path %s", filepath_str, exc_info=True)
 
         for filepath_str, checks in checks_by_file.items():
             filepath = Path(filepath_str)
@@ -254,7 +259,11 @@ class CheckOrchestrator:
         `just_processed` itself -- its own routine self-notification from being examined at all, not a
         genuine cross-file signal about some other file.
         """
-        resolved = just_processed.resolve()
+        try:
+            resolved = just_processed.resolve()
+        except OSError:
+            logger.debug("Could not resolve processed path %s", just_processed, exc_info=True)
+            return
         for check in self.checks:
             if check.check_id in self._unavailable_check_ids:
                 # Already recorded in unavailable_checks -- see
