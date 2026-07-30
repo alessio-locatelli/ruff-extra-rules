@@ -20,6 +20,7 @@ import pytest
 
 import pre_commit_hooks.ast_checks.redundant_type_conversion as tri006_module
 import pre_commit_hooks.ast_checks.redundant_type_conversion.session as session_module
+from pre_commit_hooks.ast_checks._base import CheckUnavailableError
 from pre_commit_hooks.ast_checks.redundant_type_conversion import RedundantTypeConversionCheck
 from pre_commit_hooks.ast_checks.redundant_type_conversion import daemon as daemon_module
 from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import ConfidenceLevel
@@ -28,7 +29,7 @@ from pre_commit_hooks.ast_checks.redundant_type_conversion.session import TySess
 from pre_commit_hooks.ast_checks.redundant_type_conversion.session import get_session as real_get_session
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
     from pre_commit_hooks.ast_checks._base import Violation
     from pre_commit_hooks.ast_checks.redundant_type_conversion.session import PersistentSession
@@ -105,19 +106,33 @@ def test_suppressed_conversions_are_never_flagged() -> None:
     assert violations == []
 
 
-def test_the_real_installed_ty_still_passes_this_checks_own_self_test(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # Deliberately unmocked: a failed self-test raises CheckUnavailableError, failing this test on its own.
-    # Isolated to tmp_path (ADR-0041): a real ty daemon this may spawn must never touch this repo's own
-    # .cache/ directory, and is explicitly torn down below rather than left running until its own idle timeout.
-    monkeypatch.chdir(tmp_path)
+def _run_ty_self_test(tmp_path: Path, get_session: Callable[[], PersistentSession]) -> None:
     session: PersistentSession | None = None
     try:
-        session = real_get_session()
+        session = get_session()
         assert isinstance(session, (TySession, RemoteTySession))
     finally:
         if session is not None:
             session.close()
         daemon_module.shutdown_if_running(tmp_path)
         session_module._session = None
+
+
+def test_the_real_installed_ty_still_passes_this_checks_own_self_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    _run_ty_self_test(tmp_path, real_get_session)
+
+
+def test_ty_self_test_cleanup_preserves_a_session_failure(tmp_path: Path) -> None:
+    error = CheckUnavailableError("simulated unavailable ty")
+
+    def raise_unavailable() -> PersistentSession:
+        raise error
+
+    with pytest.raises(CheckUnavailableError) as raised:
+        _run_ty_self_test(tmp_path, raise_unavailable)
+
+    assert raised.value is error
