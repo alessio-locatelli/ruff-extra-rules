@@ -211,7 +211,7 @@ class CheckOrchestrator:
         # _generate_cache_key()) already gates staleness — no separate
         # per-file cache_key needed here.
         all_violations: dict[str, list[Violation]] = {}
-        queued: set[Path] = set()
+        queued: set[tuple[Path, ASTCheck]] = set()
         pending: list[tuple[Path, ASTCheck]] = []
         # Lets a drained file that's also one of this run's own direct inputs report under the same key
         # it was given here (e.g. a relative path exactly as the caller spelled it), rather than a second,
@@ -241,8 +241,12 @@ class CheckOrchestrator:
 
         return all_violations
 
+    def _record_unavailable_check(self, check: ASTCheck, error: CheckUnavailableError) -> None:
+        self._unavailable_check_ids.add(check.check_id)
+        self.unavailable_checks.append((check.check_id, str(error)))
+
     def _collect_cross_file_candidates(
-        self, just_processed: Path, queued: set[Path], pending: list[tuple[Path, ASTCheck]]
+        self, just_processed: Path, queued: set[tuple[Path, ASTCheck]], pending: list[tuple[Path, ASTCheck]]
     ) -> None:
         """Asks each still-available check what it privately knows needs re-examination as a side effect
         of `just_processed`'s own check() just now (`ASTCheck.drain_cross_file_candidates`, ADR-0041),
@@ -259,6 +263,10 @@ class CheckOrchestrator:
                 continue
             try:
                 extra_files = check.drain_cross_file_candidates([resolved])
+            except CheckUnavailableError as error:
+                logger.debug("Check %s is unavailable: %s", check.check_id, error, exc_info=True)
+                self._record_unavailable_check(check, error)
+                continue
             except Exception:
                 logger.debug("Check %s failed to drain cross-file candidates", check.check_id, exc_info=True)
                 self.rule_failures.append((str(just_processed), check.check_id))
@@ -269,14 +277,15 @@ class CheckOrchestrator:
                 except Exception:
                     logger.debug("Check %s drained an unresolvable path %s", check.check_id, extra_file, exc_info=True)
                     continue
-                if extra_resolved != resolved and extra_resolved not in queued:
-                    queued.add(extra_resolved)
+                queued_candidate = (extra_resolved, check)
+                if extra_resolved != resolved and queued_candidate not in queued:
+                    queued.add(queued_candidate)
                     pending.append((extra_resolved, check))
 
     def _drain_cross_file_candidates(
         self,
         pending: list[tuple[Path, ASTCheck]],
-        queued: set[Path],
+        queued: set[tuple[Path, ASTCheck]],
         all_violations: dict[str, list[Violation]],
         resolved_to_key: dict[Path, str],
     ) -> None:
@@ -548,8 +557,7 @@ class CheckOrchestrator:
                 # not abort every other check's results for the rest of
                 # this run.
                 logger.debug("Check %s is unavailable: %s", check.check_id, error, exc_info=True)
-                self._unavailable_check_ids.add(check.check_id)
-                self.unavailable_checks.append((check.check_id, str(error)))
+                self._record_unavailable_check(check, error)
             except Exception:
                 # Debug-only: reported cleanly via rule_failures below — see
                 # _read_source's own docstring for why ERROR-level
