@@ -40,6 +40,16 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
+@pytest.fixture
+def socketpair_peer() -> Iterator[socket.socket]:
+    peer_sock, unused_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        yield peer_sock
+    finally:
+        peer_sock.close()
+        unused_sock.close()
+
+
 class _FakeSession:
     """A `PersistentSession`-conforming stub for `_dispatch`/`_handle_connection` unit tests."""
 
@@ -628,7 +638,7 @@ def test_try_connect_existing_leaves_a_departing_but_still_alive_daemons_socket_
 
 
 def test_try_connect_existing_waits_for_a_busy_daemon_and_succeeds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
     # A daemon confirmed alive but too busy to answer must be waited for here too, not treated as
     # unreachable: this call's own result is cached and reused for the rest of the run (see ADR-0041),
@@ -637,7 +647,7 @@ def test_try_connect_existing_waits_for_a_busy_daemon_and_succeeds(
     socket_path = daemon_module._socket_path(tmp_path)
     socket_path.parent.mkdir(parents=True)
     socket_path.touch()
-    peer_sock, _unused = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    peer_sock = socketpair_peer
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
     monkeypatch.setattr(daemon_module, "_try_connect", lambda *_a: None)
@@ -790,11 +800,11 @@ def test_try_connect_or_departing_converts_version_mismatch_to_a_departing_resul
 
 
 def test_connect_reuses_a_daemon_spawned_by_a_peer_while_waiting_for_the_lock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
     # Simulates another process spawning a daemon in the window between this
     # process's own first _try_connect attempt and acquiring the spawn lock.
-    peer_sock, _unused = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    peer_sock = socketpair_peer
     attempts: list[socket.socket | None] = [None, peer_sock]  # pytriage: TR5 -- mutated by pop() on every call below
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
@@ -810,14 +820,14 @@ def test_connect_reuses_a_daemon_spawned_by_a_peer_while_waiting_for_the_lock(
 
 
 def test_connect_remembers_a_pre_lock_version_mismatch_even_once_the_daemon_has_vanished(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
     # The pre-lock attempt can observe an explicit version-mismatch rejection, but by the time this
     # process acquires the spawn lock the old daemon may have already removed its own socket entirely --
     # at that point the in-lock attempt alone sees a plain "nothing answered," indistinguishable from
     # busy, unless the earlier mismatch is carried forward: it must still count as departing rather than
     # triggering the busy-daemon wait for a daemon that already confirmed it's not coming back.
-    peer_sock, _unused = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    peer_sock = socketpair_peer
     call_count = 0
 
     def _try_connect_side_effect(_socket_path: Path, _client_ty_version: str) -> socket.socket | None:
@@ -951,9 +961,9 @@ def test_cleanup_if_still_owned_leaves_a_replacement_daemons_files_alone(tmp_pat
 
 
 def test_connect_waits_for_a_busy_daemon_instead_of_spawning_a_competing_one(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
-    peer_sock, _unused = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    peer_sock = socketpair_peer
     attempts: list[socket.socket | None] = [None, None, None, peer_sock]
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
@@ -988,12 +998,12 @@ def test_connect_raises_os_error_when_a_busy_daemon_never_frees_up(
 
 
 def test_connect_spawns_a_replacement_when_a_busy_daemon_turns_out_to_be_departing_mid_wait(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
     # A daemon confirmed alive and busy at first can still turn out to be departing (a version mismatch
     # discovered partway through the busy-wait, see _wait_for_busy_daemon()) -- this must spawn its
     # replacement immediately rather than reporting a misleading "stayed busy" failure and falling back.
-    peer_sock, _unused = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    peer_sock = socketpair_peer
     call_count = 0
 
     def _try_connect_side_effect(_socket_path: Path, _client_ty_version: str) -> socket.socket | None:
@@ -1017,12 +1027,12 @@ def test_connect_spawns_a_replacement_when_a_busy_daemon_turns_out_to_be_departi
 
 
 def test_connect_spawns_a_fresh_daemon_immediately_after_a_version_mismatch_instead_of_waiting(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
     # A version-mismatched daemon is already shutting itself down, not merely busy -- waiting for it the
     # way connect() waits for a busy one would burn the full busy-daemon retry budget on an answer that
     # was never coming, instead of spawning its replacement right away (see ADR-0041).
-    peer_sock, _unused = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
+    peer_sock = socketpair_peer
     call_count = 0
 
     def _try_connect_side_effect(_socket_path: Path, _client_ty_version: str) -> socket.socket | None:
