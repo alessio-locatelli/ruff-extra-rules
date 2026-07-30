@@ -10,6 +10,7 @@ import logging
 import re
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -303,6 +304,8 @@ def _run_self_test(session: RedundancySession, root: Path) -> None:
 _session: PersistentSession | None = None
 _session_lock = threading.Lock()
 _daemon_probe_failed = False
+_daemon_probe_next_retry_at = 0.0
+_DAEMON_PROBE_RETRY_INTERVAL_SECONDS = 0.5
 
 
 def get_session() -> PersistentSession:
@@ -340,20 +343,25 @@ def peek_session() -> PersistentSession | None:
 
 
 def notify_disk_change_if_session_active(filepath: Path, source: str) -> None:
-    global _session, _daemon_probe_failed  # noqa: PLW0603
+    global _daemon_probe_failed, _daemon_probe_next_retry_at, _session  # noqa: PLW0603
     with _session_lock:
         if _session is not None:
             _session.notify_changed_on_disk(filepath, source)
             return
         if _daemon_probe_failed:
             return
+        now = time.monotonic()
+        if now < _daemon_probe_next_retry_at:
+            return
 
         from . import daemon  # noqa: PLC0415
 
-        probed = daemon.try_connect_existing(Path.cwd())
-        if probed is not None:
-            _session = probed
+        probe = daemon.probe_existing(Path.cwd())
+        if probe.session is not None:
+            _session = probe.session
             atexit.register(_session.close)
             _session.notify_changed_on_disk(filepath, source)
-        else:
+        elif probe.terminal_failure:
             _daemon_probe_failed = True
+        else:
+            _daemon_probe_next_retry_at = now + _DAEMON_PROBE_RETRY_INTERVAL_SECONDS

@@ -5,7 +5,7 @@ import threading
 import time
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 
@@ -39,11 +39,14 @@ def _isolated_session_singleton() -> Iterator[None]:
     """
     original = session_module._session
     original_probe_failed = session_module._daemon_probe_failed
+    original_probe_next_retry_at = session_module._daemon_probe_next_retry_at
     session_module._session = None
     session_module._daemon_probe_failed = False
+    session_module._daemon_probe_next_retry_at = 0.0
     yield
     session_module._session = original
     session_module._daemon_probe_failed = original_probe_failed
+    session_module._daemon_probe_next_retry_at = original_probe_next_retry_at
 
 
 def test_diagnostic_key_extracts_stable_identity_fields() -> None:
@@ -244,7 +247,11 @@ def test_notify_disk_change_if_session_active_promotes_a_probed_daemon(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = _FakeNotifiableSession()
-    monkeypatch.setattr(daemon_module, "try_connect_existing", lambda _root: fake)
+    monkeypatch.setattr(
+        daemon_module,
+        "probe_existing",
+        lambda _root: daemon_module.ExistingDaemonProbe(cast("daemon_module.RemoteTySession", fake)),
+    )
     filepath = tmp_path / "callee.py"
 
     notify_disk_change_if_session_active(filepath, "source\n")
@@ -259,30 +266,51 @@ def test_notify_disk_change_if_session_active_promotes_a_probed_daemon(
 def test_notify_disk_change_if_session_active_is_a_no_op_when_no_daemon_is_reachable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(daemon_module, "try_connect_existing", lambda _root: None)
+    monkeypatch.setattr(daemon_module, "probe_existing", lambda _root: daemon_module.ExistingDaemonProbe(None))
 
     notify_disk_change_if_session_active(tmp_path / "callee.py", "source\n")  # must not raise
 
 
-def test_notify_disk_change_if_session_active_memoizes_a_failed_probe(
+def test_notify_disk_change_if_session_active_retries_a_transient_probe_after_backoff(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A failed probe (no daemon reachable) must not be repeated for every later candidate-less file in
-    # the same run -- including its own busy-daemon wait (ADR-0041) -- once the first attempt already
-    # answered the only question this run needs answered.
+    probe_calls: list[Path] = []
+    now = 0.0
+    fake = _FakeNotifiableSession()
+
+    def _probe(root: Path) -> daemon_module.ExistingDaemonProbe:
+        probe_calls.append(root)
+        if len(probe_calls) == 1:
+            return daemon_module.ExistingDaemonProbe(None)
+        return daemon_module.ExistingDaemonProbe(cast("daemon_module.RemoteTySession", fake))
+
+    monkeypatch.setattr(daemon_module, "probe_existing", _probe)
+    monkeypatch.setattr(session_module.time, "monotonic", lambda: now)
+
+    notify_disk_change_if_session_active(tmp_path / "first.py", "source\n")
+    notify_disk_change_if_session_active(tmp_path / "second.py", "source\n")
+    now = session_module._DAEMON_PROBE_RETRY_INTERVAL_SECONDS
+    notify_disk_change_if_session_active(tmp_path / "third.py", "source\n")
+
+    assert len(probe_calls) == 2
+    assert fake.notified == [(tmp_path / "third.py", "source\n")]
+
+
+def test_notify_disk_change_if_session_active_memoizes_a_terminal_probe_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     probe_calls: list[Path] = []
 
-    def _probe(root: Path) -> None:
+    def _probe(root: Path) -> daemon_module.ExistingDaemonProbe:
         probe_calls.append(root)
+        return daemon_module.ExistingDaemonProbe(None, terminal_failure=True)
 
-    monkeypatch.setattr(daemon_module, "try_connect_existing", _probe)
+    monkeypatch.setattr(daemon_module, "probe_existing", _probe)
 
     notify_disk_change_if_session_active(tmp_path / "first.py", "source\n")
     notify_disk_change_if_session_active(tmp_path / "second.py", "source\n")
 
     assert len(probe_calls) == 1
-
-    assert peek_session() is None
 
 
 class _StubLSPClient:
