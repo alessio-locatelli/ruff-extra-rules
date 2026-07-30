@@ -7,15 +7,31 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from . import ALL_CHECKS
 from ._diagnostics import report
 from ._discovery import expand_directories, filter_excluded_files
 from ._orchestrator import CheckOrchestrator, load_checks
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
-def main(argv: list[str] | None = None) -> int:
+    from ._base import ASTCheck
+
+
+def _parse_check_ids(values: list[str] | None) -> set[str] | None:
+    if values is None:
+        return None
+    return {check_id.strip() for value in values for check_id in value.split(",") if check_id.strip()}
+
+
+def main(
+    argv: list[str] | None = None,
+    *,
+    check_classes: Sequence[type[ASTCheck]] | None = None,
+    allow_check_selection: bool = True,
+) -> int:
     """Main entry point for grouped AST checks.
 
     Args:
@@ -50,14 +66,17 @@ def main(argv: list[str] | None = None) -> int:
         description="Run multiple AST-based checks in a single pass",
     )
     parser.add_argument("filenames", nargs="*", help="Python files to check")
-    parser.add_argument(
-        "--select",
-        help="Comma-separated list of checks to restrict to (default: all)",
-    )
-    parser.add_argument(
-        "--ignore",
-        help="Comma-separated list of checks to exclude",
-    )
+    if allow_check_selection:
+        parser.add_argument(
+            "--select",
+            action="append",
+            help="Comma-separated list of checks to restrict to (default: all); may be repeated",
+        )
+        parser.add_argument(
+            "--ignore",
+            action="append",
+            help="Comma-separated list of checks to exclude; may be repeated",
+        )
     parser.add_argument(
         "--fix",
         action="store_true",
@@ -83,7 +102,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
-    for check_class in ALL_CHECKS:
+    enabled_check_classes = ALL_CHECKS if check_classes is None else check_classes
+
+    for check_class in enabled_check_classes:
         check_class.add_cli_arguments(parser)
 
     args = parser.parse_args(argv)
@@ -98,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.list_checks:
         print("Available checks:")
-        instances = sorted((cls() for cls in ALL_CHECKS), key=lambda c: c.check_id)
+        instances = sorted((cls() for cls in enabled_check_classes), key=lambda c: c.check_id)
         for check in instances:
             print(f"  - {check.check_id}: {check.error_code}")
         return 0
@@ -121,10 +142,10 @@ def main(argv: list[str] | None = None) -> int:
     if not filenames:
         return 0
 
-    select = {c.strip() for c in args.select.split(",") if c.strip()} if args.select else None
-    ignore = {c.strip() for c in args.ignore.split(",") if c.strip()} if args.ignore else None
+    select = _parse_check_ids(args.select) if allow_check_selection else None
+    ignore = _parse_check_ids(args.ignore) if allow_check_selection else None
 
-    all_check_ids = {cls().check_id for cls in ALL_CHECKS}
+    all_check_ids = {cls().check_id for cls in enabled_check_classes}
     for flag_name, check_ids in (("--select", select), ("--ignore", ignore)):
         if check_ids:
             invalid = check_ids - all_check_ids
@@ -135,12 +156,17 @@ def main(argv: list[str] | None = None) -> int:
 
     # Each check translates its own parsed CLI args into its own __init__ kwargs, if any.
     check_args: dict[str, dict[str, Any]] = {}
-    for check_class in ALL_CHECKS:
+    for check_class in enabled_check_classes:
         kwargs = check_class.cli_kwargs_from_args(args)
         if kwargs:
             check_args[check_class().check_id] = kwargs
 
-    checks = load_checks(select=select, ignore=ignore, check_args=check_args)
+    checks = load_checks(
+        select=select,
+        ignore=ignore,
+        check_args=check_args,
+        check_classes=enabled_check_classes,
+    )
 
     if not checks:
         print("Error: No checks enabled", file=sys.stderr)

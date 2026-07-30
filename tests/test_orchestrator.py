@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import types
 from pathlib import Path
@@ -16,7 +17,9 @@ import pytest
 
 import pre_commit_hooks.ast_checks.redundant_type_conversion.session as tri006_session_module
 import pre_commit_hooks.ast_checks.validate_function_name as vfn_module
+from pre_commit_hooks import ruff_extra_rules, ruff_extra_rules_ty
 from pre_commit_hooks._cache import CacheManager
+from pre_commit_hooks._filelock import locked
 from pre_commit_hooks.ast_checks import ALL_CHECKS, _cli, _orchestrator
 from pre_commit_hooks.ast_checks._base import (
     CheckUnavailableError,
@@ -1426,6 +1429,117 @@ def test_drain_cross_file_candidates_reports_nothing_for_an_extra_file_with_no_v
     assert str(clean_extra_file.resolve()) not in violations
 
 
+class _AppendingFixCheck(_AlwaysRerunProbeCheck):
+    """A `fix()` that appends its own `marker` line to the file, optionally sleeping between reading
+    `source` and writing it back to widen a concurrent-fix race window -- proves `_check_file`'s own
+    per-file lock (`_fix_lock_path`) actually serializes two would-be-concurrent writers (e.g. two
+    separate `CheckOrchestrator` instances, simulating two separate pre-commit/prek worker processes)
+    rather than letting one silently clobber the other's already-applied fix.
+    """
+
+    __slots__ = ("marker", "write_delay_seconds")
+
+    check_id = "appending-fix-probe"
+    error_code = "ZZZ003"
+
+    def __init__(self, marker: str, *, write_delay_seconds: float = 0.0) -> None:
+        super().__init__()
+        self.marker = marker
+        self.write_delay_seconds = write_delay_seconds
+
+    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+        if f"# {self.marker}" in source:
+            return []
+        return [
+            Violation(check_id=self.check_id, error_code=self.error_code, line=1, col=0, message="probe", fixable=True)
+        ]
+
+    def fix(
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+    ) -> bool:
+        if self.write_delay_seconds:
+            time.sleep(self.write_delay_seconds)
+        atomic_write_text(filepath, f"{source}# {self.marker}\n", encoding)
+        return True
+
+
+def test_check_file_serializes_concurrent_fixes_to_the_same_file_across_orchestrators(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Simulates two separate CheckOrchestrator instances (standing in for two separate pre-commit/prek
+    # worker processes, e.g. two overlapping hook configurations, or a future check implementing
+    # drain_cross_file_candidates() while also being fixable -- redundant-type-conversion's own drain
+    # can't trigger this today, since that check never writes) both fixing the same file at once. Without
+    # _check_file's own per-file lock, whichever write lands last would silently discard the other's
+    # already-applied fix (a classic lost update), since both would read the same pre-fix content.
+    monkeypatch.chdir(tmp_path)
+    shared_file = tmp_path / "shared.py"
+    shared_file.write_text("x = 1\n")
+
+    slow_check = _AppendingFixCheck("marker_a", write_delay_seconds=0.3)
+    fast_check = _AppendingFixCheck("marker_b")
+    slow_orchestrator = CheckOrchestrator(checks=[slow_check], fix_mode=True)
+    fast_orchestrator = CheckOrchestrator(checks=[fast_check], fix_mode=True)
+
+    thread = threading.Thread(target=slow_orchestrator._check_file, args=(shared_file, [slow_check]))
+    thread.start()
+    time.sleep(0.1)  # lets the slow orchestrator acquire the lock and start its own (slow) fix first
+    fast_orchestrator._check_file(shared_file, [fast_check])
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+
+    final_content = shared_file.read_text()
+    assert "# marker_a" in final_content
+    assert "# marker_b" in final_content
+
+
+def test_check_file_returns_none_when_the_fix_lock_times_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(_orchestrator, "_FIX_LOCK_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(_orchestrator, "_FIX_LOCK_POLL_INTERVAL_SECONDS", 0.02)
+    target = tmp_path / "target.py"
+    target.write_text("x = 1\n")
+    check = _AlwaysRerunProbeCheck()
+    orchestrator = CheckOrchestrator(checks=[check], fix_mode=True)
+    lock_path = _orchestrator._fix_lock_path(target)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with locked(lock_path, timeout_seconds=5.0, poll_interval_seconds=0.02):
+        lock_result = orchestrator._check_file(target, [check])
+
+    assert lock_result is None
+
+
+def test_check_file_returns_none_when_the_fix_lock_directory_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "target.py"
+    target.write_text("x = 1\n")
+    unavailable_parent = tmp_path / "not-a-directory"
+    unavailable_parent.write_text("unavailable\n")
+    monkeypatch.setattr(_orchestrator, "_fix_lock_path", lambda _filepath: unavailable_parent / "lock")
+    check = _AlwaysRerunProbeCheck()
+    orchestrator = CheckOrchestrator(checks=[check], fix_mode=True)
+
+    assert orchestrator._check_file(target, [check]) is None
+
+
+def test_fix_lock_path_is_independent_of_the_callers_working_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "target.py"
+    target.write_text("x = 1\n")
+    nested_directory = tmp_path / "nested"
+    nested_directory.mkdir()
+
+    monkeypatch.chdir(tmp_path)
+    root_lock_path = _orchestrator._fix_lock_path(target)
+    monkeypatch.chdir(nested_directory)
+    nested_lock_path = _orchestrator._fix_lock_path(target)
+
+    assert nested_lock_path == root_lock_path
+
+
 class _CrashingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
     __slots__ = ()
 
@@ -2254,6 +2368,46 @@ def test_main_list_checks(capsys: pytest.CaptureFixture[str]) -> None:
     assert "meaningless-vars: TR1" in out
 
 
+@pytest.mark.parametrize(
+    ("entrypoint", "expected_check", "unexpected_check"),
+    [
+        (ruff_extra_rules.main, "meaningless-vars: TR1", "redundant-type-conversion: TR6"),
+        (ruff_extra_rules_ty.main, "redundant-type-conversion: TR6", "meaningless-vars: TR1"),
+    ],
+    ids=["default", "ty"],
+)
+def test_fixed_hook_entrypoints_list_only_their_own_checks(
+    capsys: pytest.CaptureFixture[str],
+    entrypoint: Callable[[list[str] | None], int],
+    expected_check: str,
+    unexpected_check: str,
+) -> None:
+    assert entrypoint(["--list-checks"]) == 0
+
+    out = capsys.readouterr().out
+    assert expected_check in out
+    assert unexpected_check not in out
+
+
+@pytest.mark.parametrize(
+    ("entrypoint", "flag"),
+    [
+        (entrypoint, flag)
+        for entrypoint in (ruff_extra_rules.main, ruff_extra_rules_ty.main)
+        for flag in ("--select=meaningless-vars", "--ignore=meaningless-vars")
+    ],
+    ids=["default-select", "default-ignore", "ty-select", "ty-ignore"],
+)
+def test_fixed_hook_entrypoints_reject_check_selection_arguments(
+    capsys: pytest.CaptureFixture[str], entrypoint: Callable[[list[str] | None], int], flag: str
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        entrypoint([flag])
+
+    assert exc_info.value.code == 2
+    assert f"unrecognized arguments: {flag}" in capsys.readouterr().err
+
+
 def test_main_no_filenames_returns_zero() -> None:
     assert main([]) == 0
 
@@ -2917,6 +3071,44 @@ def test_main_select_and_ignore_compose(tmp_path: Path, capsys: pytest.CaptureFi
     assert exit_code == 0
 
     assert "TR1" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("flag", "expected_codes"),
+    [
+        ("--select", {"TR1", "TR3"}),
+        ("--ignore", set()),
+    ],
+    ids=["select", "ignore"],
+)
+def test_main_accumulates_repeated_check_selection_arguments(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str, expected_codes: set[str]
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "data = 1\n\n"
+        "class Base:\n"
+        "    def __init__(self):\n"
+        "        pass\n\n"
+        "class Child(Base):\n"
+        "    def __init__(self, **kwargs):\n"
+        "        super().__init__(**kwargs)\n"
+    )
+
+    exit_code = main(
+        [
+            str(filepath),
+            flag,
+            "meaningless-vars",
+            flag,
+            "redundant-super-init",
+            "--meaningless-vars-level=permissive",
+        ]
+    )
+
+    err = capsys.readouterr().err
+    assert {code for code in ("TR1", "TR3") if code in err} == expected_codes
+    assert exit_code == (1 if expected_codes else 0)
 
 
 def test_main_malformed_cli_argument_exits_via_argparse(capsys: pytest.CaptureFixture[str]) -> None:

@@ -42,16 +42,22 @@ if TYPE_CHECKING:
 class _FakeSession:
     """A `PersistentSession`-conforming stub for `_dispatch`/`_handle_connection` unit tests."""
 
-    __slots__ = ("close_calls", "drained", "hover_result", "notified", "raises")
+    __slots__ = ("close_calls", "drained", "hover_delay_seconds", "hover_result", "notified", "raises")
 
     def __init__(
-        self, *, hover_result: str | None = None, drained: list[Path] | None = None, raises: bool = False
+        self,
+        *,
+        hover_result: str | None = None,
+        drained: list[Path] | None = None,
+        raises: bool = False,
+        hover_delay_seconds: float = 0.0,
     ) -> None:
         self.hover_result = hover_result
         self.drained = drained or []
         self.notified: list[Path] = []
         self.close_calls = 0
         self.raises = raises
+        self.hover_delay_seconds = hover_delay_seconds
 
     def open_or_update(self, _filepath: Path, _content: str) -> frozenset[tuple[Any, ...]]:
         if self.raises:
@@ -59,6 +65,8 @@ class _FakeSession:
         return frozenset({("code", "msg", 1, 1)})
 
     def hover(self, _filepath: Path, _line0: int, _char_utf16: int) -> str | None:
+        if self.hover_delay_seconds:
+            time.sleep(self.hover_delay_seconds)
         return self.hover_result
 
     def finalize(self, _filepath: Path, _source: str) -> None:
@@ -193,7 +201,7 @@ def test_handle_connection_rejects_a_version_mismatch() -> None:
         daemon_module.write_framed_message(client._wfile, {"op": "handshake", "ty_version": "old-version"})
 
         with pytest.raises(_VersionMismatchError):
-            _handle_connection(server_sock, _FakeSession(), ty_version="new-version")
+            _handle_connection(server_sock, _FakeSession(), ty_version="new-version", session_lock=threading.Lock())
 
         response = daemon_module.read_framed_message(client._rfile)
         assert response == {"error": "version_mismatch"}
@@ -205,7 +213,7 @@ def test_handle_connection_serves_a_real_round_trip_over_a_background_thread() -
 
     def _run_server() -> None:
         with server_sock, pytest.raises(_ShutdownRequestedError):
-            _handle_connection(server_sock, session, ty_version="v1")
+            _handle_connection(server_sock, session, ty_version="v1", session_lock=threading.Lock())
 
     server_thread = threading.Thread(target=_run_server)
     server_thread.start()
@@ -229,7 +237,13 @@ def test_handle_connection_returns_when_the_client_disconnects_before_handshake(
     client_sock.close()  # disconnect immediately, before ever sending a handshake
 
     with server_sock:
-        _handle_connection(server_sock, _FakeSession(), ty_version="v1")  # must return, not raise
+        _handle_connection(
+            # must return, not raise
+            server_sock,
+            _FakeSession(),
+            ty_version="v1",
+            session_lock=threading.Lock(),
+        )
 
 
 def test_handle_connection_returns_when_the_client_disconnects_mid_session() -> None:
@@ -239,7 +253,13 @@ def test_handle_connection_returns_when_the_client_disconnects_mid_session() -> 
 
     def _server() -> None:
         with server_sock:
-            _handle_connection(server_sock, _FakeSession(), ty_version="v1")  # must return, not raise
+            _handle_connection(
+                # must return, not raise
+                server_sock,
+                _FakeSession(),
+                ty_version="v1",
+                session_lock=threading.Lock(),
+            )
 
     thread = threading.Thread(target=_server)
     thread.start()
@@ -256,7 +276,6 @@ def test_accept_loop_ends_when_a_served_connection_requests_shutdown(tmp_path: P
     with sock:
         sock.bind(str(socket_path))
         sock.listen(1)
-        sock.settimeout(5.0)
 
         def _client() -> None:
             client_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -280,7 +299,6 @@ def test_accept_loop_ends_on_a_version_mismatch(tmp_path: Path) -> None:
     with sock:
         sock.bind(str(socket_path))
         sock.listen(1)
-        sock.settimeout(5.0)
 
         def _client() -> None:
             client_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -300,14 +318,17 @@ def test_accept_loop_ends_on_a_version_mismatch(tmp_path: Path) -> None:
         assert not thread.is_alive()
 
 
-def test_accept_loop_returns_on_idle_timeout(tmp_path: Path) -> None:
+def test_accept_loop_returns_on_idle_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # _accept_loop now owns sock's own timeout itself (min(_ACCEPT_POLL_INTERVAL_SECONDS,
+    # _IDLE_TIMEOUT_SECONDS)), so shortening _IDLE_TIMEOUT_SECONDS -- not sock.settimeout() directly -- is
+    # what makes this test return promptly.
+    monkeypatch.setattr(daemon_module, "_IDLE_TIMEOUT_SECONDS", 0.2)
     socket_path = tmp_path / "d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     session = _FakeSession()
     with sock:
         sock.bind(str(socket_path))
         sock.listen(1)
-        sock.settimeout(0.2)
 
         _accept_loop(sock, session, ty_version="v1")  # must return promptly, not hang
 
@@ -328,7 +349,6 @@ def test_accept_loop_drops_a_stalled_connection_and_still_serves_the_next_one(
     with sock:
         sock.bind(str(socket_path))
         sock.listen(2)
-        sock.settimeout(5.0)
 
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stalled_sock:
             stalled_sock.connect(str(socket_path))  # connects, then never sends a single byte
@@ -364,7 +384,6 @@ def test_accept_loop_drops_a_connection_with_a_truncated_frame_and_still_serves_
     with sock:
         sock.bind(str(socket_path))
         sock.listen(2)
-        sock.settimeout(5.0)
 
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as truncated_sock:
             truncated_sock.connect(str(socket_path))
@@ -401,7 +420,6 @@ def test_accept_loop_drops_a_connection_whose_reply_write_fails_and_still_serves
     with sock:
         sock.bind(str(socket_path))
         sock.listen(2)
-        sock.settimeout(5.0)
 
         def _rude_client() -> None:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as rude_sock:
@@ -430,6 +448,101 @@ def test_accept_loop_drops_a_connection_whose_reply_write_fails_and_still_serves
 
         thread.join(timeout=5)
         assert not thread.is_alive()
+
+
+def test_accept_loop_serves_a_new_connections_handshake_while_another_is_mid_request(tmp_path: Path) -> None:
+    # Proves connections are handled concurrently (ADR-0041), not one at a time: a second client's own
+    # handshake must not wait behind a first client's own slow, in-flight request -- only the actual calls
+    # into `session` are serialized (`session_lock`), never the accept loop or framing.
+    socket_path = tmp_path / "d.sock"
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    session = _FakeSession(hover_result="int", hover_delay_seconds=1.0)
+    with sock:
+        sock.bind(str(socket_path))
+        sock.listen(2)
+
+        server_thread = threading.Thread(target=_accept_loop, args=(sock, session, "v1"))
+        server_thread.start()
+
+        def _slow_client() -> None:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client_sock:
+                client_sock.connect(str(socket_path))
+                client = RemoteTySession(client_sock)
+                daemon_module.write_framed_message(client._wfile, {"op": "handshake", "ty_version": "v1"})
+                daemon_module.read_framed_message(client._rfile)
+                assert client.hover(Path("f.py"), 0, 0) == "int"
+                client._call("shutdown")
+
+        slow_thread = threading.Thread(target=_slow_client)
+        slow_thread.start()
+        time.sleep(0.2)  # lets the slow client's own hover() request actually start (and hold the lock)
+
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as fast_client_sock:
+            start = time.monotonic()
+            fast_client_sock.connect(str(socket_path))
+            daemon_module.write_framed_message(fast_client_sock.makefile("wb"), {"op": "handshake", "ty_version": "v1"})
+            response = daemon_module.read_framed_message(fast_client_sock.makefile("rb"))
+            handshake_elapsed = time.monotonic() - start
+
+        assert response == {"result": "ok"}
+        assert handshake_elapsed < 0.5  # well under the slow client's own 1s hold -- proves concurrency
+
+        slow_thread.join(timeout=5)
+        assert not slow_thread.is_alive()
+        server_thread.join(timeout=5)
+        assert not server_thread.is_alive()
+
+
+def test_accept_loop_serializes_concurrent_calls_into_the_shared_session(tmp_path: Path) -> None:
+    # Proves the other half of ADR-0041's own design: even though connections are handled concurrently,
+    # `_lsp.LSPClient` is documented as not thread-safe for concurrent request()/notify() calls, so no two
+    # calls into the shared `session` may ever actually overlap.
+    socket_path = tmp_path / "d.sock"
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    concurrent_calls = 0
+    max_concurrent_calls = 0
+    calls_lock = threading.Lock()
+
+    class _ConcurrencyTrackingSession(_FakeSession):
+        __slots__ = ()
+
+        def hover(self, filepath: Path, line0: int, char_utf16: int) -> str | None:
+            nonlocal concurrent_calls, max_concurrent_calls
+            with calls_lock:
+                concurrent_calls += 1
+                max_concurrent_calls = max(max_concurrent_calls, concurrent_calls)
+            try:
+                return super().hover(filepath, line0, char_utf16)
+            finally:
+                with calls_lock:
+                    concurrent_calls -= 1
+
+    session = _ConcurrencyTrackingSession(hover_result="int", hover_delay_seconds=0.2)
+    with sock:
+        sock.bind(str(socket_path))
+        sock.listen(4)
+
+        def _client() -> None:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client_sock:
+                client_sock.connect(str(socket_path))
+                client = RemoteTySession(client_sock)
+                daemon_module.write_framed_message(client._wfile, {"op": "handshake", "ty_version": "v1"})
+                daemon_module.read_framed_message(client._rfile)
+                assert client.hover(Path("f.py"), 0, 0) == "int"
+                client._call("shutdown")
+
+        threads = [threading.Thread(target=_client) for _ in range(3)]
+        for thread in threads:
+            thread.start()
+            time.sleep(0.05)  # stagger connects so all three overlap mid-request, not just mid-accept
+
+        _accept_loop(sock, session, ty_version="v1")
+
+        for thread in threads:
+            thread.join(timeout=5)
+            assert not thread.is_alive()
+
+    assert max_concurrent_calls == 1
 
 
 def test_try_connect_existing_returns_none_when_nothing_is_listening(tmp_path: Path) -> None:
@@ -1157,11 +1270,12 @@ class TestRealDaemonEndToEnd:
         session_module._session = None
         session_module._daemon_probe_failed = False
         yield
-        # The daemon serves one client at a time (ADR-0041): a test that established its own session
-        # (session_module._session) never closes it, since that's this feature's whole point -- closing it
-        # here first frees the daemon up to actually accept shutdown_if_running()'s own connection, rather
-        # than that call now correctly waiting out the full busy-daemon retry budget for a client that was
-        # never going to close on its own.
+        # A test that established its own session (session_module._session) never closes it, since that's
+        # this feature's whole point -- closing it here first matters because _accept_loop's own graceful
+        # shutdown (ADR-0041) joins every still-in-flight connection's own worker thread before the daemon's
+        # process actually ends: a leftover, still-open-but-idle connection's own thread wouldn't return on
+        # its own until its full per-connection timeout, so shutdown_if_running() below would otherwise wait
+        # out that same budget instead of the daemon actually exiting promptly.
         leftover_session = session_module.peek_session()
         if leftover_session is not None:
             leftover_session.close()
@@ -1187,9 +1301,8 @@ class TestRealDaemonEndToEnd:
             original_spawn(root)
 
         monkeypatch.setattr(daemon_module, "_spawn_daemon", _counting_spawn)
-        # The daemon serves one connected client at a time (ADR-0041) --
-        # each connection must close before the next "hook invocation"
-        # connects, exactly like two separate commits never overlap.
+        # Each connection closes before the next "hook invocation" connects, matching real usage -- one
+        # connection per hook invocation, never held open across separate commits.
         first = connect(tmp_path)
         first.close()
         connect(tmp_path).close()

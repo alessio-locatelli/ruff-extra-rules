@@ -13,7 +13,7 @@ Extra Python rule checks and fixups that run as a pre-commit/prek hook alongside
 
 ## Available Checks
 
-Individual checks are toggled with `--select`/`--ignore`, and `--fix` applies whatever each check's own fix logic considers safe — mirroring `ruff check`'s own `--select`/`--ignore`/`--fix` flags:
+When invoking `python -m pre_commit_hooks.ast_checks` directly, individual checks are toggled with `--select`/`--ignore`, and `--fix` applies whatever each check's own fix logic considers safe — mirroring `ruff check`'s own `--select`/`--ignore`/`--fix` flags:
 
 - `--select=<id>,<id>` restricts the hook to **only** the listed check(s).
 - `--ignore=<id>,<id>` excludes the listed check(s) — it composes with `--select` rather than replacing it, just like `ruff check --select`/`--ignore`.
@@ -38,7 +38,12 @@ repos:
     rev: <tag-or-commit-sha> # pin a specific tag or commit; see the repo's tags for available versions
     hooks:
       - id: ruff-extra-rules
+      - id: ruff-extra-rules-ty # optional: adds redundant-type-conversion (TR6), see below
 ```
+
+`ruff-extra-rules-ty` runs [redundant-type-conversion](docs/rules/redundant-type-conversion.md) by itself, as a single serial process, instead of alongside every other check. That check shares one persistent `ty` session across files to catch cross-file cases the rest of `ruff-extra-rules` can't — so it's kept out of the main, parallel-batched hook to avoid several parallel workers contending over that one shared session. It's optional and requires [`ty`](https://github.com/astral-sh/ty) on `PATH`.
+
+`ruff-extra-rules` always excludes `redundant-type-conversion`, and `ruff-extra-rules-ty` always runs only that check. Both accept shared options such as `--fix`; check-selection options are not supported by these hooks.
 
 ## Configuration
 

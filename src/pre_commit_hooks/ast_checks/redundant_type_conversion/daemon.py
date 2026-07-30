@@ -16,6 +16,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -34,9 +35,9 @@ logger = logging.getLogger("ast_checks")
 _SOCKET_RELATIVE_PATH = Path(".cache/pre_commit_hooks/tri006-daemon.sock")
 _PID_RELATIVE_PATH = Path(".cache/pre_commit_hooks/tri006-daemon.pid")
 # pre-commit/prek run this hook's own file-batches across several parallel worker processes (up to CPU
-# count), each independently trying to connect at roughly the same time -- a backlog of 1 makes connect()
-# fail immediately with EAGAIN once even two of them overlap, indistinguishable from "no daemon" to the
-# caller. This only bounds the OS's pending-connection queue, not concurrent handling (still one at a time).
+# count), each independently trying to connect at roughly the same time -- a backlog of 1 made connect()
+# fail immediately with EAGAIN once even two of them overlapped, indistinguishable from "no daemon" to the
+# caller.
 _LISTEN_BACKLOG = 64
 _SPAWN_LOCK_TIMEOUT_SECONDS = 15.0
 _SPAWN_LOCK_POLL_INTERVAL_SECONDS = 0.05
@@ -44,6 +45,16 @@ _BUSY_DAEMON_RETRY_TIMEOUT_SECONDS = 15.0
 _BUSY_DAEMON_RETRY_INTERVAL_SECONDS = 0.5
 _SPAWN_WAIT_TIMEOUT_SECONDS = 30.0  # covers ty server's own cold start plus the self-test
 _KILL_WAIT_TIMEOUT_SECONDS = 5.0
+# How often _accept_loop's own accept() wakes up to notice a shutdown/version-mismatch signaled by one of
+# its own worker threads, and to re-check whether _IDLE_TIMEOUT_SECONDS has genuinely elapsed -- both would
+# otherwise only be noticed at the next new connection, up to _IDLE_TIMEOUT_SECONDS away.
+_ACCEPT_POLL_INTERVAL_SECONDS = 0.1
+# shutdown_if_running()'s own bound on waiting for the daemon's socket file to actually disappear after
+# asking it to stop: the accept loop notices shutdown_requested (and _cleanup_if_still_owned() removes the
+# socket) up to _ACCEPT_POLL_INTERVAL_SECONDS after the "shutting_down" reply this call already waited
+# for, not synchronously with it now that connections are handled concurrently (see ADR-0041).
+_SHUTDOWN_CONFIRM_TIMEOUT_SECONDS = 5.0
+_SHUTDOWN_CONFIRM_POLL_INTERVAL_SECONDS = 0.02
 _CONNECT_TIMEOUT_SECONDS = 5.0
 _IDLE_TIMEOUT_SECONDS = 15 * 60
 _CLIENT_REQUEST_TIMEOUT_SECONDS = 60.0
@@ -95,11 +106,12 @@ def _read_recorded_pid(root: Path) -> int | None:
 
 def _daemon_process_is_alive(root: Path) -> bool:
     """Whether the process recorded in this repository's own pidfile is still running -- distinct from
-    `socket_exists_for()`/`_try_connect()`, which can't tell "no daemon" apart from "a live daemon that's
-    simply too busy serving another client to answer a handshake within `_CONNECT_TIMEOUT_SECONDS`" (this
-    daemon serves one client at a time, see ADR-0041). `connect()` uses this to avoid spawning a second,
-    competing daemon in that case -- both would otherwise unlink the same socket path out from under each
-    other on their own startup/shutdown, leaving one or both unreachable.
+    `socket_exists_for()`/`_try_connect()`, which can't tell "no daemon" apart from "a live daemon that
+    briefly couldn't accept and hand off this one connection within `_CONNECT_TIMEOUT_SECONDS`" (see
+    ADR-0041; connections are handled concurrently, so this is rare, but not impossible under a large
+    enough burst). `connect()` uses this to avoid spawning a second, competing daemon in that case -- both
+    would otherwise unlink the same socket path out from under each other on their own startup/shutdown,
+    leaving one or both unreachable.
 
     A PID no longer belonging to this daemon (reused by an unrelated process after a crash) is a real, if
     rare, inherent risk of any PID-based liveness check -- not specific to this one, and not defended
@@ -274,11 +286,12 @@ def connect(root: Path) -> RemoteTySession:
         daemon_is_departing = daemon_is_departing or already_confirmed_departing
 
         if not daemon_is_departing and _daemon_process_is_alive(root):
-            # A live daemon exists but was too busy serving another client to answer the handshake
-            # within _CONNECT_TIMEOUT_SECONDS -- it serves one client at a time (see ADR-0041).
-            # Spawning a second daemon here would unlink its socket out from under it (and it could
-            # later do the same to the new one on its own exit), leaving one or both unreachable.
-            # Waiting for it to free up instead of racing to replace it avoids that entirely.
+            # A live daemon exists but couldn't accept and hand off this one connection within
+            # _CONNECT_TIMEOUT_SECONDS -- connections are handled concurrently (see ADR-0041), so this is
+            # rare, but a large enough simultaneous burst can still exceed it. Spawning a second daemon
+            # here would unlink its socket out from under it (and it could later do the same to the new
+            # one on its own exit), leaving one or both unreachable. Waiting for it to catch up instead of
+            # racing to replace it avoids that entirely.
             sock, daemon_is_departing = _wait_for_busy_daemon(socket_path, client_ty_version)
             if sock is not None:
                 return RemoteTySession(sock)
@@ -371,12 +384,20 @@ def try_connect_existing(root: Path) -> RemoteTySession | None:
 
 
 def shutdown_if_running(root: Path) -> None:
-    """Best-effort explicit teardown: asks a daemon already running for `root` to stop, if one is reachable.
+    """Best-effort explicit teardown: asks a daemon already running for `root` to stop, if one is
+    reachable, and waits (bounded) for its own socket file to actually disappear before returning.
 
     Never raises. Not part of this check's own normal operation (a daemon otherwise stops on its own, via
     the idle timeout or a version mismatch) -- this is the deliberate "teardown" ADR-0041 calls for, used
     directly by tests that spawn a real daemon and need it gone before the test ends, rather than waiting
     out its idle timeout.
+
+    The "shutting_down" reply this waits for below only confirms the daemon's own accept loop has been
+    told to stop, not that it already has: connections are handled concurrently (ADR-0041), so the thread
+    that answered this request signals the accept loop rather than exiting it directly, and that loop
+    notices asynchronously, up to `_ACCEPT_POLL_INTERVAL_SECONDS` later. Waiting here for
+    `_cleanup_if_still_owned()`'s own socket removal -- run just before the daemon's process actually ends
+    -- is what gives a caller an accurate "it's gone" rather than one that's merely about to be.
     """
     session = try_connect_existing(root)
     if session is None:
@@ -384,6 +405,10 @@ def shutdown_if_running(root: Path) -> None:
     with contextlib.suppress(LSPError):
         session._call("shutdown")  # noqa: SLF001 -- same module, not a real encapsulation boundary
     session.close()
+
+    deadline = time.monotonic() + _SHUTDOWN_CONFIRM_TIMEOUT_SECONDS
+    while socket_exists_for(root) and time.monotonic() < deadline:
+        time.sleep(_SHUTDOWN_CONFIRM_POLL_INTERVAL_SECONDS)
 
 
 def _try_connect(socket_path: Path, client_ty_version: str) -> socket.socket | None:
@@ -561,10 +586,13 @@ def _dispatch(message: dict[str, Any], session: PersistentSession) -> dict[str, 
     return {"error": f"unknown op: {op!r}"}
 
 
-def _handle_connection(conn: socket.socket, session: PersistentSession, ty_version: str) -> None:
+def _handle_connection(
+    conn: socket.socket, session: PersistentSession, ty_version: str, session_lock: threading.Lock
+) -> None:
     # Closed explicitly (not left for GC) so a write that failed mid-flight -- e.g. the broken-pipe case
-    # _accept_loop's own except clause already handles -- doesn't leave buffered data behind for a later
-    # finalizer to retry flushing on its own, which Python can only report as an unraisable warning by then.
+    # _serve_connection's own except clause already handles -- doesn't leave buffered data behind for a
+    # later finalizer to retry flushing on its own, which Python can only report as an unraisable warning
+    # by then.
     with conn.makefile("rb") as rfile, conn.makefile("wb") as wfile:
         handshake = read_framed_message(rfile)
         if handshake is None:
@@ -581,35 +609,93 @@ def _handle_connection(conn: socket.socket, session: PersistentSession, ty_versi
             if message.get("op") == "shutdown":
                 write_framed_message(wfile, {"result": "shutting_down"})
                 raise _ShutdownRequestedError
-            write_framed_message(wfile, _dispatch(message, session))
+            # Only the actual ty-touching call is serialized, not the whole connection: `_lsp.LSPClient`
+            # is documented as not thread-safe for concurrent request()/notify() calls, but framing and
+            # the handshake above don't touch it at all, so multiple connections can be accepted and
+            # read/written concurrently (see ADR-0041) while still only ever calling into `session` one
+            # thread at a time.
+            with session_lock:
+                response = _dispatch(message, session)
+            write_framed_message(wfile, response)
+
+
+def _serve_connection(
+    conn: socket.socket,
+    session: PersistentSession,
+    ty_version: str,
+    session_lock: threading.Lock,
+    shutdown_requested: threading.Event,
+) -> None:
+    """Runs on its own thread, one per accepted connection (see `_accept_loop`): bounds this one
+    connection's own read/write against `_CLIENT_REQUEST_TIMEOUT_SECONDS` so a peer that connects and
+    stalls mid-request -- never sending a complete message -- leaks neither this thread nor its socket
+    forever, without blocking any other, concurrently accepted connection the way a stall used to when
+    everything ran on the single accept-loop thread.
+    """
+    conn.settimeout(_CLIENT_REQUEST_TIMEOUT_SECONDS)
+    try:
+        with conn:
+            _handle_connection(conn, session, ty_version, session_lock)
+    except _VersionMismatchError, _ShutdownRequestedError:
+        # Ends this whole daemon's process (see their own docstrings), not just this one connection:
+        # signals the accept loop via shutdown_requested rather than returning directly, since this runs
+        # on its own thread now, not the accept loop's own.
+        shutdown_requested.set()
+    except TimeoutError:
+        logger.debug("ty daemon dropped a client connection that stalled mid-request")
+    except LSPError, OSError, ValueError:
+        # A truncated/malformed frame (LSPError, ValueError -- the latter covers a malformed JSON
+        # body), a reset connection, or a broken pipe replying to a client that already disconnected
+        # (OSError) -- an ordinary client-side failure, not this daemon's own. Dropping just this one
+        # connection must not cost every other tracked file's own cross-file state (ADR-0041) the way an
+        # uncaught exception escaping this whole daemon's process would.
+        logger.debug("ty daemon dropped a client connection due to a connection-level error", exc_info=True)
 
 
 def _accept_loop(sock: socket.socket, session: PersistentSession, ty_version: str) -> None:
-    while True:
+    """Accepts connections concurrently, one worker thread each (`_serve_connection`), rather than serving
+    them one at a time: pre-commit/prek run this hook's own file-batches across several parallel worker
+    processes, each opening its own connection, so serving them serially here would force work that used
+    to be parallel (each worker's own file batch) through one connection at a time instead (see ADR-0041).
+    Only the actual calls into `session` are still serialized (`session_lock`, held in `_handle_connection`),
+    matching `_lsp.LSPClient`'s own not-thread-safe-for-concurrent-request()/notify() contract.
+
+    `sock`'s own accept() timeout is kept short (`_ACCEPT_POLL_INTERVAL_SECONDS`, or `_IDLE_TIMEOUT_SECONDS`
+    itself if that's shorter) so this loop notices a shutdown/version-mismatch signaled by one of its own
+    worker threads promptly, rather than only at the next new connection -- up to the real, much longer
+    `_IDLE_TIMEOUT_SECONDS` away. Idle time is tracked across these short polls via a wall-clock deadline,
+    reset on every accepted connection, so genuinely idle-timing-out still takes the full
+    `_IDLE_TIMEOUT_SECONDS`, not just one short poll's worth.
+    """
+    session_lock = threading.Lock()
+    shutdown_requested = threading.Event()
+    workers: list[threading.Thread] = []
+    sock.settimeout(min(_ACCEPT_POLL_INTERVAL_SECONDS, _IDLE_TIMEOUT_SECONDS))
+    idle_deadline = time.monotonic() + _IDLE_TIMEOUT_SECONDS
+
+    while not shutdown_requested.is_set():
         try:
             conn, _peer = sock.accept()
         except TimeoutError:
-            return  # idle timeout elapsed with no client -- exit; the next client respawns a fresh daemon
-        # Bounds every read/write against this one connection: this daemon serves one client at a time
-        # (see ADR-0041), so a peer that connects and then stalls mid-request -- never sending a complete
-        # message -- would otherwise block here forever, never returning to accept() for the next, healthy
-        # client. Distinct from `_IDLE_TIMEOUT_SECONDS` above, which only bounds waiting for a connection
-        # to arrive at all, not a connection that already arrived and went silent.
-        conn.settimeout(_CLIENT_REQUEST_TIMEOUT_SECONDS)
-        try:
-            with conn:
-                _handle_connection(conn, session, ty_version)
-        except _VersionMismatchError, _ShutdownRequestedError:
-            return
-        except TimeoutError:
-            logger.debug("ty daemon dropped a client connection that stalled mid-request")
-        except LSPError, OSError, ValueError:
-            # A truncated/malformed frame (LSPError, ValueError -- the latter covers a malformed JSON
-            # body), a reset connection, or a broken pipe replying to a client that already disconnected
-            # (OSError) -- an ordinary client-side failure, not this daemon's own. Dropping just this one
-            # connection and returning to accept() must not cost every other tracked file's own cross-file
-            # state (ADR-0041) the way an uncaught exception escaping this whole loop would.
-            logger.debug("ty daemon dropped a client connection due to a connection-level error", exc_info=True)
+            workers = [worker for worker in workers if worker.is_alive()]
+            if not workers and time.monotonic() >= idle_deadline:
+                # Idle timeout elapsed with no client and nothing in flight -- exit; the next client
+                # respawns a fresh daemon.
+                return
+            continue
+        idle_deadline = time.monotonic() + _IDLE_TIMEOUT_SECONDS
+        workers = [worker for worker in workers if worker.is_alive()]
+        worker = threading.Thread(
+            target=_serve_connection, args=(conn, session, ty_version, session_lock, shutdown_requested), daemon=True
+        )
+        worker.start()
+        workers.append(worker)
+
+    # A worker signaled shutdown_requested (version mismatch or an explicit shutdown request) -- let every
+    # already-accepted, already-handshake-matched connection finish its own in-flight work before this
+    # daemon's own process actually ends, rather than severing them mid-request.
+    for worker in workers:
+        worker.join()
 
 
 def _serve(root: Path) -> None:
@@ -664,7 +750,6 @@ def _serve(root: Path) -> None:
         print(f"BIND_FAILED: could not bind {socket_path}: {error!r}", flush=True)
         return
     sock.listen(_LISTEN_BACKLOG)
-    sock.settimeout(_IDLE_TIMEOUT_SECONDS)
 
     print("READY", flush=True)
     _detach_stdio()
