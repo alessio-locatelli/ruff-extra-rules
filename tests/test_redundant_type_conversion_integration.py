@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from pre_commit_hooks.ast_checks._base import Violation
-    from pre_commit_hooks.ast_checks.redundant_type_conversion.session import PersistentSession
+    from pre_commit_hooks.ast_checks.redundant_type_conversion.session import CandidateSession, PersistentSession
 
 FIXTURES_ROOT = Path(__file__).parent / "fixtures" / "redundant_type_conversion"
 BAD_ROOT = FIXTURES_ROOT / "bad"
@@ -147,7 +147,7 @@ def test_ty_self_test_cleanup_preserves_a_session_failure(tmp_path: Path) -> Non
 
 def test_ty_self_test_isolates_the_session_singleton(tmp_path: Path) -> None:
     previous_session = Mock()
-    session_module._session = cast("PersistentSession", previous_session)
+    session_module._session = cast("CandidateSession", previous_session)
     error = CheckUnavailableError("simulated unavailable ty")
 
     with pytest.raises(CheckUnavailableError):

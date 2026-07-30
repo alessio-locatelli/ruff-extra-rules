@@ -31,8 +31,6 @@ class PersistentSession(Protocol):
 
     def hover(self, filepath: Path, line0: int, char_utf16: int) -> str | None: ...
 
-    def analysis_transaction(self) -> contextlib.AbstractContextManager[None]: ...
-
     def finalize(self, filepath: Path, source: str) -> None: ...
 
     def notify_changed_on_disk(self, filepath: Path, source: str) -> None: ...
@@ -40,6 +38,10 @@ class PersistentSession(Protocol):
     def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]: ...
 
     def close(self) -> None: ...
+
+
+class CandidateSession(PersistentSession, Protocol):
+    def analysis_transaction(self) -> contextlib.AbstractContextManager[None]: ...
 
 
 _TY_COMMAND = ("ty", "server")
@@ -307,14 +309,14 @@ def _run_self_test(session: RedundancySession, root: Path) -> None:
         raise CheckUnavailableError(_SELF_TEST_FAILED_HINT) from error
 
 
-_session: PersistentSession | None = None
+_session: CandidateSession | None = None
 _session_lock = threading.Lock()
 _daemon_probe_failed = False
 _daemon_probe_next_retry_at = 0.0
 _DAEMON_PROBE_RETRY_INTERVAL_SECONDS = 0.5
 
 
-def get_session() -> PersistentSession:
+def get_session() -> CandidateSession:
     global _session  # noqa: PLW0603 -- the documented, deliberate one-session-per-process singleton this whole module exists for
     with _session_lock:
         if _session is None:
@@ -323,7 +325,7 @@ def get_session() -> PersistentSession:
         return _session
 
 
-def _acquire_session() -> PersistentSession:
+def _acquire_session() -> CandidateSession:
     from . import daemon  # noqa: PLC0415
 
     try:
