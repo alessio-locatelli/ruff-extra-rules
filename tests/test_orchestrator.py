@@ -1187,6 +1187,21 @@ class _UnavailableDrainingCheck(_DrainingProbeCheck):
         raise CheckUnavailableError("simulated: prerequisite missing")
 
 
+class _OtherDrainingProbeCheck(_DrainingProbeCheck):
+    __slots__ = ()
+
+    check_id = "other-draining-probe"
+
+
+class _DrainUnavailableCheck(_AlwaysRerunProbeCheck):
+    __slots__ = ()
+
+    check_id = "drain-unavailable-probe"
+
+    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+        raise CheckUnavailableError("simulated: daemon unavailable")
+
+
 class _RaisingDrainingCheck(_AlwaysRerunProbeCheck):
     __slots__ = ()
 
@@ -1321,6 +1336,34 @@ def test_drain_cross_file_candidates_skips_a_check_marked_unavailable_this_run(t
 
     assert violations == {}
     assert orchestrator.unavailable_checks == [(probe.check_id, "simulated: prerequisite missing")]
+
+
+def test_drain_cross_file_candidates_queues_the_same_file_once_per_check(tmp_path: Path) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+    extra_file = tmp_path / "extra.py"
+    extra_file.write_text("y = 2\n")
+    first = _DrainingProbeCheck(extra_files=[extra_file])
+    second = _OtherDrainingProbeCheck(extra_files=[extra_file])
+
+    violations = CheckOrchestrator(checks=[first, second]).process_files([str(main_file)])
+
+    assert {violation.check_id for violation in violations[str(extra_file.resolve())]} == {
+        first.check_id,
+        second.check_id,
+    }
+
+
+def test_drain_cross_file_candidates_records_an_unavailable_check(tmp_path: Path) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+    probe = _DrainUnavailableCheck()
+    orchestrator = CheckOrchestrator(checks=[probe])
+
+    orchestrator.process_files([str(main_file)])
+
+    assert orchestrator.rule_failures == []
+    assert orchestrator.unavailable_checks == [(probe.check_id, "simulated: daemon unavailable")]
 
 
 def test_drain_cross_file_candidates_records_rule_failure_when_a_check_raises(tmp_path: Path) -> None:
