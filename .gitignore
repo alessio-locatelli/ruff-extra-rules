@@ -50,3 +50,6 @@ Thumbs.db
 .cache
 
 node_modules
+
+skills-lock.json
+.agents/skills
