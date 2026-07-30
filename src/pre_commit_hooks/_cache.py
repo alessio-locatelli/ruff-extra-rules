@@ -17,17 +17,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-try:
-    import fcntl
-except ImportError:  # pragma: win32 cover
-    # fcntl is POSIX-only; Windows has no equivalent module. CacheManager
-    # disables caching entirely on such a platform (with a one-time
-    # warning, see __init__) rather than running the cache unlocked, so
-    # this import failing degrades gracefully instead of crashing the
-    # whole package before anything can run.
-    fcntl = None  # type: ignore[assignment]
-
-from pre_commit_hooks._filelock import locked
+from pre_commit_hooks._filelock import locked, locking_is_available
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -94,17 +84,10 @@ class CacheManager:
         # (and log another warning) on every single file for the rest of
         # this run — one warning at construction is enough.
         self._cache_dir_unavailable = False
-        # fcntl is None on platforms without it (Windows). _locked() exists
-        # specifically to stop two processes from racing on the same
-        # deterministic cache/temp-file path (its own docstring); without
-        # it, running "unlocked" would reintroduce exactly that race rather
-        # than degrade safely, so the whole cache is disabled here instead —
-        # checked once, for the same "one warning, not one per file" reason
-        # as _cache_dir_unavailable above.
-        self._locking_unavailable = fcntl is None
+        self._locking_unavailable = not locking_is_available()
         if self._locking_unavailable:
             logger.warning(
-                "fcntl is unavailable on this platform (os.name=%r); running without a cache, since "
+                "File locking is unavailable on this platform (os.name=%r); running without a cache, since "
                 "concurrent hook runs could otherwise corrupt or lose cache entries without cross-process "
                 "locking.",
                 os.name,
