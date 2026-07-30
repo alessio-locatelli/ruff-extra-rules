@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+from unittest.mock import Mock
 
 import pytest
 
@@ -107,6 +108,10 @@ def test_suppressed_conversions_are_never_flagged() -> None:
 
 
 def _run_ty_self_test(tmp_path: Path, get_session: Callable[[], PersistentSession]) -> None:
+    previous_session = session_module._session
+    session_module._session = None
+    if previous_session is not None:
+        previous_session.close()
     session: PersistentSession | None = None
     try:
         session = get_session()
@@ -136,3 +141,15 @@ def test_ty_self_test_cleanup_preserves_a_session_failure(tmp_path: Path) -> Non
         _run_ty_self_test(tmp_path, raise_unavailable)
 
     assert raised.value is error
+
+
+def test_ty_self_test_isolates_the_session_singleton(tmp_path: Path) -> None:
+    previous_session = Mock()
+    session_module._session = cast("PersistentSession", previous_session)
+    error = CheckUnavailableError("simulated unavailable ty")
+
+    with pytest.raises(CheckUnavailableError):
+        _run_ty_self_test(tmp_path, Mock(side_effect=error))
+
+    previous_session.close.assert_called_once_with()
+    assert session_module._session is None
