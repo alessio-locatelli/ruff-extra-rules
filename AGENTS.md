@@ -35,6 +35,7 @@ See [docs/adding-a-check.md](docs/adding-a-check.md) for the full walkthrough of
 - Use `@pytest.mark.parametrize` when the same test logic should be run against multiple input/output cases. Prefer it over duplicating nearly identical test functions.
 - Setup, teardown, or cleanup logic should be placed outside the test function itself. For example, a fixture can yield an object and perform cleanup.
 - Tests should not duplicate the same code (e.g., `try`/`finally` blocks or inner functions). Extract and reuse such logic instead.
+- Do not write tests for impossible scenarios solely to achieve 100% code coverage. If code is unused in production, delete it immediately—do not mask it with mocking or patching in tests.
 
 ### Docstrings and code comments
 
