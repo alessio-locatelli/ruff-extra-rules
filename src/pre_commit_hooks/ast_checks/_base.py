@@ -71,10 +71,11 @@ class ASTCheck(Protocol):
 
         Optional: `BaseCheck`'s own default returns `[]`, matching every check's usual "only ever look at
         the single file you're given" contract (`docs/adding-a-check.md`'s "Incremental-analysis
-        limitations"). Called once by `CheckOrchestrator` after its normal per-file pass completes; any file
-        returned here is re-checked with just this one check and merged into the same run's report, exactly
-        as if pre-commit/prek had passed it directly. `redundant-type-conversion` (TR6) is the only check
-        implementing this today — see `docs/adr/0041-persistent-ty-daemon-for-cross-file-reanalysis.md`.
+        limitations"). `CheckOrchestrator` calls this once after each directly processed or drained file,
+        immediately after that file's `check()` pass. Any returned file is re-checked with just this one
+        check and merged into the same run's report, exactly as if pre-commit/prek had passed it directly.
+        `redundant-type-conversion` (TR6) is the only check implementing this today — see
+        `docs/adr/0041-persistent-ty-daemon-for-cross-file-reanalysis.md`.
         """
         ...
 
