@@ -261,6 +261,7 @@ class CheckOrchestrator:
                 extra_files = check.drain_cross_file_candidates([resolved])
             except Exception:
                 logger.debug("Check %s failed to drain cross-file candidates", check.check_id, exc_info=True)
+                self.rule_failures.append((str(just_processed), check.check_id))
                 continue
             for extra_file in extra_files:
                 try:
