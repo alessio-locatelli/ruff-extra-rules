@@ -397,7 +397,6 @@ class CheckOrchestrator:
                 continue
             try:
                 violations = check.check(filepath, tree, source)
-                all_violations.extend(violations)
             except CheckUnavailableError as error:
                 # Recorded once here rather than per file: see
                 # CheckUnavailableError's own docstring for why this must
@@ -412,6 +411,8 @@ class CheckOrchestrator:
                 # .exception() logging here would just be redundant noise.
                 logger.debug("Check %s failed on %s", check.check_id, filepath, exc_info=True)
                 self.rule_failures.append((str(filepath), check.check_id))
+            else:
+                all_violations.extend(violations)
 
         if self.fix_mode and all_violations:
             self._apply_fixes(filepath, all_violations)
