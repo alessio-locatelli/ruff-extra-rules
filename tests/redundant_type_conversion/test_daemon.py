@@ -714,6 +714,36 @@ def test_try_connect_closes_the_handshake_writer(tmp_path: Path, monkeypatch: py
     wfile.close.assert_called_once_with()
 
 
+def test_remote_session_canonicalizes_file_paths_for_daemon_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    filepath = tmp_path / "package" / "module.py"
+    filepath.parent.mkdir()
+    filepath.write_text("x = 1\n")
+    calls: list[tuple[str, dict[str, str | int | list[str]]]] = []
+
+    def call(_self: RemoteTySession, op: str, **params: str | int | list[str]) -> list[object] | None:
+        calls.append((op, params))
+        if op in {"open_or_update", "drain_cross_file_candidates"}:
+            return []
+        return None
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(RemoteTySession, "_call", call)
+    session = object.__new__(RemoteTySession)
+    relative_path = Path("package/module.py")
+
+    assert session.open_or_update(relative_path, "x = 1\n") == frozenset()
+    assert session.hover(relative_path, 0, 0) is None
+    session.finalize(relative_path, "x = 1\n")
+    session.notify_changed_on_disk(relative_path, "x = 1\n")
+    assert session.drain_cross_file_candidates([relative_path]) == []
+
+    canonical_path = str(filepath.resolve())
+    assert [params.get("filepath") for _op, params in calls[:-1]] == [canonical_path] * 4
+    assert calls[-1] == ("drain_cross_file_candidates", {"exclude": [canonical_path]})
+
+
 def test_try_connect_raises_version_mismatch_on_a_handshake_error_response(tmp_path: Path) -> None:
     socket_path = tmp_path / "d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
