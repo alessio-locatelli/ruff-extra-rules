@@ -42,7 +42,7 @@ from tests.factories import ViolationFactory
 
 if TYPE_CHECKING:
     import argparse
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
     from pre_commit_hooks.ast_checks import ASTCheck
     from pre_commit_hooks.ast_checks.validate_function_name.analysis import Suggestion
@@ -3173,62 +3173,50 @@ _FIXTURES_DIR = Path(__file__).parent / "fixtures"
 _BAD_FIXTURE_PATHS = sorted(_FIXTURES_DIR.glob("**/bad/*.py"))
 
 
-@pytest.mark.parametrize(
-    "fixture_path",
-    _BAD_FIXTURE_PATHS,
-    ids=[str(p.relative_to(_FIXTURES_DIR)) for p in _BAD_FIXTURE_PATHS],
-)
-def test_fix_converges_after_one_pass_across_all_checks(
-    fixture_path: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # ch. 10: "MUST ensure that applying the same fix repeatedly converges
-    # to a stable result"; "MUST test fix idempotence explicitly". Runs
-    # --fix (every check together, matching real pre-commit/prek usage)
-    # twice over every existing bad/*.py fixture and asserts the second
-    # pass leaves the file exactly as the first pass did.
-    #
-    # load_checks() includes redundant-type-conversion (TR6) unmocked, so
-    # its own session -- and, since ADR-0041, a real daemon subprocess --
-    # is rooted wherever Path.cwd() is; isolated to tmp_path (never this
-    # repo's own working directory) and explicitly torn down below, rather
-    # than left running until its own idle timeout. The module-global
-    # session singleton is also reset per parametrized invocation, or a
-    # later fixture's own (different) tmp_path would silently keep reusing
-    # whichever earlier invocation's session/daemon happened to be first.
+@pytest.fixture
+def isolated_tri006_daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.chdir(tmp_path)
     original_session = tri006_session_module._session
     original_probe_failed = tri006_session_module._daemon_probe_failed
+    original_probe_next_retry_at = tri006_session_module._daemon_probe_next_retry_at
     tri006_session_module._session = None
     tri006_session_module._daemon_probe_failed = False
-    target = tmp_path / fixture_path.name
-    target.write_text(fixture_path.read_text(encoding="utf-8"), encoding="utf-8")
-
+    tri006_session_module._daemon_probe_next_retry_at = 0.0
     try:
-        CheckOrchestrator(checks=load_checks(), fix_mode=True).process_files([str(target)])
-        first_pass = target.read_text(encoding="utf-8")
-
-        CheckOrchestrator(checks=load_checks(), fix_mode=True).process_files([str(target)])
-        second_pass = target.read_text(encoding="utf-8")
-
-        assert second_pass == first_pass
+        yield tmp_path
     finally:
-        # The daemon serves one client at a time (ADR-0041): the two process_files() calls above leave
-        # this test's own session (tri006_session_module._session) open by design -- closing it first
-        # frees the daemon up to actually accept shutdown_if_running()'s own connection, rather than that
-        # call now correctly waiting out the full busy-daemon retry budget for a client that was never
-        # going to close on its own.
         leftover_session = tri006_session_module.peek_session()
         if leftover_session is not None:
             leftover_session.close()
-        # shutdown_if_running() is best-effort by design (never raises) --
-        # a couple of unconditional retries absorb a rare, transient
-        # connection hiccup rather than leaving this test's own daemon to
-        # idle out on its own.
         for _ in range(3):
             tri006_daemon.shutdown_if_running(tmp_path)
             time.sleep(0.2)
         tri006_session_module._session = original_session
         tri006_session_module._daemon_probe_failed = original_probe_failed
+        tri006_session_module._daemon_probe_next_retry_at = original_probe_next_retry_at
+
+
+@pytest.mark.parametrize(
+    "fixture_path",
+    _BAD_FIXTURE_PATHS,
+    ids=[str(p.relative_to(_FIXTURES_DIR)) for p in _BAD_FIXTURE_PATHS],
+)
+def test_fix_converges_after_one_pass_across_all_checks(fixture_path: Path, isolated_tri006_daemon: Path) -> None:
+    # ch. 10: "MUST ensure that applying the same fix repeatedly converges
+    # to a stable result"; "MUST test fix idempotence explicitly". Runs
+    # --fix (every check together, matching real pre-commit/prek usage)
+    # twice over every existing bad/*.py fixture and asserts the second
+    # pass leaves the file exactly as the first pass did.
+    target = isolated_tri006_daemon / fixture_path.name
+    target.write_text(fixture_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+    CheckOrchestrator(checks=load_checks(), fix_mode=True).process_files([str(target)])
+    first_pass = target.read_text(encoding="utf-8")
+
+    CheckOrchestrator(checks=load_checks(), fix_mode=True).process_files([str(target)])
+    second_pass = target.read_text(encoding="utf-8")
+
+    assert second_pass == first_pass
 
 
 def test_main_handles_path_containing_spaces_and_unicode(
