@@ -28,6 +28,7 @@ from pre_commit_hooks.ast_checks._base import CheckUnavailableError
 from .session import PersistentSession, TySession, _run_self_test
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from typing import IO
 
 logger = logging.getLogger("ast_checks")
@@ -222,6 +223,15 @@ class RemoteTySession:
         hover_text = self._call("hover", filepath=_canonical_rpc_path(filepath), line0=line0, char_utf16=char_utf16)
         assert not isinstance(hover_text, list)
         return hover_text
+
+    @contextlib.contextmanager
+    def analysis_transaction(self) -> Iterator[None]:
+        self._call("begin_analysis")
+        try:
+            yield
+        finally:
+            with contextlib.suppress(LSPError):
+                self._call("end_analysis")
 
     def finalize(self, filepath: Path, source: str) -> None:
         with contextlib.suppress(LSPError):
@@ -622,30 +632,46 @@ def _handle_connection(
     # _serve_connection's own except clause already handles -- doesn't leave buffered data behind for a
     # later finalizer to retry flushing on its own, which Python can only report as an unraisable warning
     # by then.
-    with conn.makefile("rb") as rfile, conn.makefile("wb") as wfile:
-        handshake = read_framed_message(rfile)
-        if handshake is None:
-            return
-        if handshake.get("op") != "handshake" or handshake.get("ty_version") != ty_version:
-            write_framed_message(wfile, {"error": "version_mismatch"})
-            raise _VersionMismatchError
-        write_framed_message(wfile, {"result": "ok"})
-
-        while True:
-            message = read_framed_message(rfile)
-            if message is None:
+    transaction_active = False
+    try:
+        with conn.makefile("rb") as rfile, conn.makefile("wb") as wfile:
+            handshake = read_framed_message(rfile)
+            if handshake is None:
                 return
-            if message.get("op") == "shutdown":
-                write_framed_message(wfile, {"result": "shutting_down"})
-                raise _ShutdownRequestedError
-            # Only the actual ty-touching call is serialized, not the whole connection: `_lsp.LSPClient`
-            # is documented as not thread-safe for concurrent request()/notify() calls, but framing and
-            # the handshake above don't touch it at all, so multiple connections can be accepted and
-            # read/written concurrently (see ADR-0041) while still only ever calling into `session` one
-            # thread at a time.
-            with session_lock:
-                response = _dispatch(message, session)
-            write_framed_message(wfile, response)
+            if handshake.get("op") != "handshake" or handshake.get("ty_version") != ty_version:
+                write_framed_message(wfile, {"error": "version_mismatch"})
+                raise _VersionMismatchError
+            write_framed_message(wfile, {"result": "ok"})
+
+            while True:
+                message = read_framed_message(rfile)
+                if message is None:
+                    return
+                if message.get("op") == "shutdown":
+                    write_framed_message(wfile, {"result": "shutting_down"})
+                    raise _ShutdownRequestedError
+                if message.get("op") == "begin_analysis":
+                    if transaction_active:
+                        write_framed_message(wfile, {"error": "analysis transaction already active"})
+                        continue
+                    session_lock.acquire()
+                    transaction_active = True
+                    write_framed_message(wfile, {"result": None})
+                    continue
+                if message.get("op") == "end_analysis" and transaction_active:
+                    session_lock.release()
+                    transaction_active = False
+                    write_framed_message(wfile, {"result": None})
+                    continue
+                if transaction_active:
+                    response = _dispatch(message, session)
+                else:
+                    with session_lock:
+                        response = _dispatch(message, session)
+                write_framed_message(wfile, response)
+    finally:
+        if transaction_active:
+            session_lock.release()
 
 
 def _serve_connection(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -42,6 +43,9 @@ class FakeSession:
     def hover(self, _filepath: Path, line0: int, char_utf16: int) -> str | None:
         self.hover_calls.append((line0, char_utf16))
         return self._hover_by_position.get((line0, char_utf16))
+
+    def analysis_transaction(self) -> contextlib.AbstractContextManager[None]:
+        return contextlib.nullcontext()
 
     def finalize(self, filepath: Path, _source: str) -> None:
         self.closed_files.append(filepath)

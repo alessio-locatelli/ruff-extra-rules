@@ -6,6 +6,7 @@ docs/audits/type-checker-selection-for-redundant-type-conversion.md for why
 from __future__ import annotations
 
 import atexit
+import contextlib
 import logging
 import re
 import tempfile
@@ -29,6 +30,8 @@ class PersistentSession(Protocol):
     def open_or_update(self, filepath: Path, content: str) -> frozenset[tuple[Any, ...]]: ...
 
     def hover(self, filepath: Path, line0: int, char_utf16: int) -> str | None: ...
+
+    def analysis_transaction(self) -> contextlib.AbstractContextManager[None]: ...
 
     def finalize(self, filepath: Path, source: str) -> None: ...
 
@@ -200,6 +203,9 @@ class TySession:
             return None
         match = _HOVER_DOC_SEPARATOR.search(value)
         return value[: match.start()] if match else value
+
+    def analysis_transaction(self) -> contextlib.AbstractContextManager[None]:
+        return contextlib.nullcontext()
 
     def close_file(self, filepath: Path) -> None:
         """Discards `filepath`'s in-memory document; never raises since it runs from a `finally` block."""
