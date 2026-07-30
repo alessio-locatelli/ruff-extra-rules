@@ -37,7 +37,7 @@ from pre_commit_hooks.ast_checks.redundant_type_conversion.daemon import (
 from tests._helpers import restricted_permissions
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 
 @pytest.fixture
@@ -48,6 +48,20 @@ def socketpair_peer() -> Iterator[socket.socket]:
     finally:
         peer_sock.close()
         unused_sock.close()
+
+
+def _scripted_try_connect(
+    responses: list[socket.socket | Exception | None],
+) -> Callable[[Path, str], socket.socket | None]:
+    remaining = iter(responses)
+
+    def try_connect(_socket_path: Path, _client_ty_version: str) -> socket.socket | None:
+        response = next(remaining)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    return try_connect
 
 
 class _FakeSession:
@@ -828,21 +842,15 @@ def test_connect_remembers_a_pre_lock_version_mismatch_even_once_the_daemon_has_
     # busy, unless the earlier mismatch is carried forward: it must still count as departing rather than
     # triggering the busy-daemon wait for a daemon that already confirmed it's not coming back.
     peer_sock = socketpair_peer
-    call_count = 0
-
-    def _try_connect_side_effect(_socket_path: Path, _client_ty_version: str) -> socket.socket | None:
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise daemon_module._VersionMismatchError  # pre-lock: explicit rejection
-        if call_count == 2:
-            return None  # in-lock: the old daemon has already vanished, socket and all
-        return peer_sock  # the attempt right after _spawn_daemon() finds the fresh replacement
 
     daemon_alive_check = Mock()
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
-    monkeypatch.setattr(daemon_module, "_try_connect", _try_connect_side_effect)
+    monkeypatch.setattr(
+        daemon_module,
+        "_try_connect",
+        _scripted_try_connect([daemon_module._VersionMismatchError(), None, peer_sock]),
+    )
     monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", daemon_alive_check)
     monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_TIMEOUT_SECONDS", 5.0)
     spawn_calls: list[Path] = []
@@ -1004,16 +1012,9 @@ def test_connect_spawns_a_replacement_when_a_busy_daemon_turns_out_to_be_departi
     # discovered partway through the busy-wait, see _wait_for_busy_daemon()) -- this must spawn its
     # replacement immediately rather than reporting a misleading "stayed busy" failure and falling back.
     peer_sock = socketpair_peer
-    call_count = 0
-
-    def _try_connect_side_effect(_socket_path: Path, _client_ty_version: str) -> socket.socket | None:
-        nonlocal call_count
-        call_count += 1
-        # Calls 1-2 are the pre-lock and in-lock attempts, both plainly busy (not yet known departing).
-        return peer_sock if call_count >= 3 else None
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
-    monkeypatch.setattr(daemon_module, "_try_connect", _try_connect_side_effect)
+    monkeypatch.setattr(daemon_module, "_try_connect", _scripted_try_connect([None, None, peer_sock]))
     monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", lambda _root: True)
     monkeypatch.setattr(daemon_module, "_wait_for_busy_daemon", lambda *_a: (None, True))
     spawn_calls: list[Path] = []
@@ -1033,19 +1034,17 @@ def test_connect_spawns_a_fresh_daemon_immediately_after_a_version_mismatch_inst
     # way connect() waits for a busy one would burn the full busy-daemon retry budget on an answer that
     # was never coming, instead of spawning its replacement right away (see ADR-0041).
     peer_sock = socketpair_peer
-    call_count = 0
-
-    def _try_connect_side_effect(_socket_path: Path, _client_ty_version: str) -> socket.socket | None:
-        nonlocal call_count
-        call_count += 1
-        if call_count <= 2:  # the pre-lock and in-lock attempts both find the departing daemon
-            raise daemon_module._VersionMismatchError
-        return peer_sock  # the attempt right after _spawn_daemon() finds the fresh replacement
 
     daemon_alive_check = Mock()
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
-    monkeypatch.setattr(daemon_module, "_try_connect", _try_connect_side_effect)
+    monkeypatch.setattr(
+        daemon_module,
+        "_try_connect",
+        _scripted_try_connect(
+            [daemon_module._VersionMismatchError(), daemon_module._VersionMismatchError(), peer_sock]
+        ),
+    )
     monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", daemon_alive_check)
     monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_TIMEOUT_SECONDS", 5.0)
     spawn_calls: list[Path] = []
