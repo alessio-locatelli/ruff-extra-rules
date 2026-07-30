@@ -676,6 +676,20 @@ def test_try_connect_returns_none_when_the_socket_path_is_stale(tmp_path: Path) 
     assert daemon_module._try_connect(socket_path, "v1") is None
 
 
+def test_try_connect_closes_the_handshake_writer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    socket_path = tmp_path / "d.sock"
+    socket_path.touch()
+    sock = Mock()
+    wfile = Mock()
+    sock.makefile.side_effect = [Mock(), wfile]
+    monkeypatch.setattr(daemon_module.socket, "socket", Mock(return_value=sock))
+    monkeypatch.setattr(daemon_module, "read_framed_message", Mock(return_value={"result": "ok"}))
+
+    assert daemon_module._try_connect(socket_path, "v1") is sock
+
+    wfile.close.assert_called_once_with()
+
+
 def test_try_connect_raises_version_mismatch_on_a_handshake_error_response(tmp_path: Path) -> None:
     socket_path = tmp_path / "d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

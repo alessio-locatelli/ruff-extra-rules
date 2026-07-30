@@ -465,7 +465,11 @@ def _try_connect(socket_path: Path, client_ty_version: str) -> socket.socket | N
         sock.settimeout(_CONNECT_TIMEOUT_SECONDS)
         sock.connect(str(socket_path))
         rfile = sock.makefile("rb")
-        write_framed_message(sock.makefile("wb"), {"op": "handshake", "ty_version": client_ty_version})
+        wfile = sock.makefile("wb")
+        try:
+            write_framed_message(wfile, {"op": "handshake", "ty_version": client_ty_version})
+        finally:
+            wfile.close()
         response = read_framed_message(rfile)
     except OSError, LSPError, ValueError:
         # LSPError (a truncated/malformed frame -- a daemon that died mid-handshake, or a stale socket
