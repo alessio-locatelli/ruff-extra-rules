@@ -1402,6 +1402,8 @@ def test_drain_cross_file_candidates_skips_an_unresolvable_direct_path(
 ) -> None:
     main_file = tmp_path / "main.py"
     main_file.write_text("x = 1\n")
+    other_file = tmp_path / "other.py"
+    other_file.write_text("y = 1\n")
     probe = _DrainingProbeCheck(extra_files=[])
     orchestrator = CheckOrchestrator(checks=[probe])
     monkeypatch.setattr(CheckOrchestrator, "_process_single_file", lambda *_args: [])
@@ -1415,7 +1417,7 @@ def test_drain_cross_file_candidates_skips_an_unresolvable_direct_path(
 
     monkeypatch.setattr(Path, "resolve", resolve)
 
-    assert orchestrator.process_files([str(main_file)]) == {}
+    assert orchestrator.process_files([str(main_file), str(other_file)]) == {}
 
 
 def test_drain_cross_file_candidates_stops_at_the_iteration_cap(tmp_path: Path) -> None:
