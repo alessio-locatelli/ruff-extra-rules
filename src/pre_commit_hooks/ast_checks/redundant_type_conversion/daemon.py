@@ -214,12 +214,12 @@ class RemoteTySession:
         return response.get("result")
 
     def open_or_update(self, filepath: Path, content: str) -> frozenset[tuple[Any, ...]]:
-        raw_diagnostics = self._call("open_or_update", filepath=str(filepath), content=content)
+        raw_diagnostics = self._call("open_or_update", filepath=_canonical_rpc_path(filepath), content=content)
         assert isinstance(raw_diagnostics, list)
         return frozenset(tuple(item) for item in raw_diagnostics)
 
     def hover(self, filepath: Path, line0: int, char_utf16: int) -> str | None:
-        hover_text = self._call("hover", filepath=str(filepath), line0=line0, char_utf16=char_utf16)
+        hover_text = self._call("hover", filepath=_canonical_rpc_path(filepath), line0=line0, char_utf16=char_utf16)
         assert not isinstance(hover_text, list)
         return hover_text
 
@@ -229,7 +229,7 @@ class RemoteTySession:
             # (this runs from decide_candidates()'s finally block) -- a
             # lost daemon connection here was already reported by an
             # earlier call in the same candidate loop.
-            self._call("finalize", filepath=str(filepath), source=source)
+            self._call("finalize", filepath=_canonical_rpc_path(filepath), source=source)
 
     def notify_changed_on_disk(self, filepath: Path, source: str) -> None:
         with contextlib.suppress(LSPError):
@@ -237,12 +237,12 @@ class RemoteTySession:
             # raises" contract -- called from the candidate-less fast path
             # (session.notify_disk_change_if_session_active()), which must
             # not fail a file's whole check over a daemon-connectivity hiccup.
-            self._call("notify_changed_on_disk", filepath=str(filepath), source=source)
+            self._call("notify_changed_on_disk", filepath=_canonical_rpc_path(filepath), source=source)
 
     def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
         raw_paths = self._call(
             "drain_cross_file_candidates",
-            exclude=[str(path) for path in already_processed],
+            exclude=[_canonical_rpc_path(path) for path in already_processed],
         )
         assert isinstance(raw_paths, list)
         return [Path(path) for path in raw_paths]
@@ -254,6 +254,10 @@ class RemoteTySession:
             self._wfile.close()
         with contextlib.suppress(OSError):
             self._sock.close()
+
+
+def _canonical_rpc_path(filepath: Path) -> str:
+    return str(filepath.resolve())
 
 
 class ExistingDaemonProbe(NamedTuple):
