@@ -77,13 +77,12 @@ def test_cross_file_call_site_conversion_is_not_flagged_at_conservative() -> Non
 
 
 def test_redundant_conversion_is_still_flagged_despite_an_unrelated_error_shifting_on_the_same_line() -> None:
-    # Regression: an unrelated, pre-existing diagnostic later on the same
+    # An unrelated, pre-existing diagnostic later on the same
     # line (here, a genuinely wrong second call argument) keeps its exact
     # code/message after the conversion is spliced out, but its own
     # column position shifts left by however many characters were
-    # removed. Treating that shift as "a new diagnostic" used to make
-    # this candidate's own genuinely redundant conversion look unsafe to
-    # flag.
+    # removed. Treating that shift as "a new diagnostic" would make this
+    # candidate's own genuinely redundant conversion look unsafe to flag.
     violations = _check(BAD_ROOT / "unrelated_diagnostic_shifts_on_same_line.py")
 
     assert len(violations) == 1

@@ -53,7 +53,7 @@ def test_diagnostic_key_tolerates_a_missing_range() -> None:
 
 
 def test_diagnostic_key_ignores_a_character_column_shift() -> None:
-    # Regression: a same-line synthetic rewrite shifts every *other*
+    # A same-line synthetic rewrite shifts every *other*
     # diagnostic's own column positions on that line without changing the
     # diagnostic itself -- confirmed empirically against real ty (an
     # untouched invalid-argument-type diagnostic's range shifted left by
@@ -141,11 +141,11 @@ def test_spawn_raises_check_unavailable_error_when_ty_is_not_on_path(
 def test_spawn_raises_check_unavailable_error_when_ty_exists_but_is_not_executable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression: _spawn only caught FileNotFoundError, so `ty` resolving
+    # _spawn must catch more than just FileNotFoundError -- `ty` resolving
     # on PATH but failing to actually launch (missing execute permission
-    # here; a corrupt/wrong-format binary raises the same way) surfaced as
-    # an uncaught PermissionError instead of this check's own actionable
-    # CheckUnavailableError.
+    # here; a corrupt/wrong-format binary raises the same way) must raise
+    # this check's own actionable CheckUnavailableError, not an uncaught
+    # PermissionError.
     not_executable = tmp_path / "not-really-ty"
     not_executable.write_text("#!/bin/sh\necho fake ty\n")
     not_executable.chmod(0o644)

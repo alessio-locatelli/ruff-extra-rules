@@ -97,13 +97,13 @@ def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None
 
 
 def test_git_grep_filter_includes_permission_denied_tracked_file(tmp_path: Path) -> None:
-    # Regression: `git grep` reports a permission-denied file only as an
+    # `git grep` reports a permission-denied file only as an
     # "error: failed to stat" line on stderr -- it still exits 0 (if
     # another requested file matched) or 1 (if none did), the same exit
-    # codes as an ordinary match/non-match. The old code only ever looked
-    # at stdout, so this file silently vanished from the candidate list:
-    # never checked, never reported, and the whole run could exit 0 as if
-    # it had never existed.
+    # codes as an ordinary match/non-match. Looking only at stdout would
+    # silently vanish this file from the candidate list: never checked,
+    # never reported, and the whole run could exit 0 as if it had never
+    # existed.
     git = shutil.which("git")
     assert git is not None
 
@@ -121,13 +121,14 @@ def test_git_grep_filter_includes_permission_denied_tracked_file(tmp_path: Path)
 
 
 def test_git_grep_filter_includes_file_deleted_since_discovery(tmp_path: Path) -> None:
-    # Regression: a file that's vanished between the caller's file list
+    # A file that's vanished between the caller's file list
     # being built and this call (e.g. deleted after pre-commit computed
     # the changed-file list but before this hook ran) produces *no*
     # signal from `git grep` at all -- exit code 1, empty stdout, empty
     # stderr, indistinguishable from "pattern genuinely absent from an
-    # existing file". The old code trusted that silence as proof of "no
-    # match" and dropped the file with no trace.
+    # existing file". That silence must not be trusted as proof of "no
+    # match" -- the file must still be kept as a candidate rather than
+    # dropped with no trace.
     git = shutil.which("git")
     assert git is not None
 
@@ -142,11 +143,11 @@ def test_git_grep_filter_includes_file_deleted_since_discovery(tmp_path: Path) -
 
 
 def test_git_grep_filter_includes_untracked_file(tmp_path: Path) -> None:
-    # Regression: a file that exists, is readable, and was passed
+    # A file that exists, is readable, and was passed
     # explicitly, but was never `git add`ed, is invisible to a plain `git
     # grep` -- it exits 1 with empty stdout *and* empty stderr, identical
-    # to "searched and found no match". The old code trusted that as proof
-    # of "no match" and silently dropped the file, so a brand-new file
+    # to "searched and found no match". That must not be trusted as proof
+    # of "no match" and silently dropped -- otherwise a brand-new file
     # linted directly via the CLI (before `git add`) could report zero
     # violations for content that was never actually examined.
     git = shutil.which("git")
@@ -165,7 +166,7 @@ def test_git_grep_filter_includes_untracked_file(tmp_path: Path) -> None:
 
 
 def test_git_grep_filter_includes_gitignored_file(tmp_path: Path) -> None:
-    # Regression: same root cause as the untracked case above, but for a
+    # The same root cause as the untracked case above, but for a
     # file matched by .gitignore -- explicitly naming a file on this hook's
     # own CLI must still check it, regardless of VCS ignore status.
     git = shutil.which("git")
@@ -184,8 +185,8 @@ def test_git_grep_filter_includes_gitignored_file(tmp_path: Path) -> None:
 
 
 def test_git_grep_filter_match_order_is_independent_of_hash_seed(tmp_path: Path) -> None:
-    # Regression: matches used to come from iterating an unordered `set` of
-    # git's own output paths, so the return order depended on
+    # Matches must not come from iterating an unordered `set` of
+    # git's own output paths -- that would make the return order depend on
     # PYTHONHASHSEED -- randomized per process by default -- rather than on
     # the input file order (ch. 9: "MUST NOT allow hash-table ... order to
     # affect the result"). Spawns real subprocesses with different explicit
@@ -291,11 +292,11 @@ def test_python_fallback_includes_unreadable_files(tmp_path: Path, caplog: pytes
         # Unreadable files are kept in; the hook itself surfaces the read error.
         assert str(file2) in matches
 
-    # Regression: both the git-unavailable fallback and this file's own
+    # Both the git-unavailable fallback and this file's own
     # unreadable-file fallback are self-healing (the caller already keeps
     # the file in as a candidate and the actual hook cleanly reports the
     # read failure downstream) -- logging them at ERROR/.exception() level
-    # used to leak a raw traceback onto the user's stderr by default
+    # would leak a raw traceback onto the user's stderr by default
     # (nothing in this codebase configures logging, so Python's own
     # lastResort handler prints WARNING+ straight to stderr), duplicating
     # and cluttering the clean diagnostic the hook already prints.

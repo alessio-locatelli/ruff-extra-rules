@@ -50,7 +50,7 @@ def test_ignore_fixtures_are_not_flagged(fixture_path: Path) -> None:
 @pytest.mark.parametrize(
     ("source", "flagged"),
     [
-        # Regression: raw/byte-prefixed docstrings must be detected via the
+        # Raw/byte-prefixed docstrings must be detected via the
         # AST — a raw-text quote-prefix scan misses the r/b prefix entirely
         # and would treat the whole file as one giant docstring.
         ('r"""Raw docstring."""\n\n\n\nimport os\n', True),
@@ -143,7 +143,7 @@ def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptu
     violations = check.check(test_file, tree, bad_source)
     with caplog.at_level("DEBUG"):
         assert check.fix(test_file, violations, bad_source, tree) is False
-    # Regression: the write failure must be attributed to the violations it
+    # The write failure must be attributed to the violations it
     # actually affected, not left indistinguishable from "never attempted"
     # — the orchestrator's own report otherwise misleadingly suggests
     # re-running --fix, which would just fail identically again.

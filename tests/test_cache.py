@@ -114,12 +114,12 @@ def test_cache_version_mismatch(temp_cache_dir: Path, sample_file: Path) -> None
 
 def test_cache_version_mismatch_recovers_on_rewrite(temp_cache_dir: Path, sample_file: Path) -> None:
     # A version bump must not pin a file to permanent cache misses.
-    # set_cached_result() used to load the on-disk blob (still tagged with
-    # the old version) and only patch individual keys, leaving the stale
-    # version tag in place forever — so every later run would keep missing
-    # and rewriting under the same never-updated old tag. Writing a fresh
-    # result under the new version must actually persist that version, so
-    # the immediately following read is a hit.
+    # set_cached_result() must not load the on-disk blob (still tagged
+    # with the old version) and only patch individual keys, leaving the
+    # stale version tag in place forever — every later run would then keep
+    # missing and rewriting under the same never-updated old tag. Writing
+    # a fresh result under the new version must actually persist that
+    # version, so the immediately following read is a hit.
     cache_v1 = CacheManager(cache_dir=temp_cache_dir, cache_version="1.0.0")
     cache_v1.set_cached_result(sample_file, "test-hook", {"violations": ["old"]})
 
@@ -189,11 +189,11 @@ def test_cache_write_errors_do_not_crash(cache_manager: CacheManager, sample_fil
 
 
 def test_construction_does_not_crash_when_cache_dir_is_unavailable(tmp_path: Path, sample_file: Path) -> None:
-    # Regression: CacheManager.__init__ used to let mkdir()'s PermissionError
+    # CacheManager.__init__ must not let mkdir()'s PermissionError
     # (or any other OSError creating/tagging the cache dir) propagate
-    # uncaught, crashing the whole hook instead of degrading to uncached
-    # execution. A read-only parent directory means the cache dir itself can
-    # never be created.
+    # uncaught and crash the whole hook -- it must degrade to uncached
+    # execution instead. A read-only parent directory means the cache dir
+    # itself can never be created.
     readonly_parent = tmp_path / "readonly_parent"
     readonly_parent.mkdir()
 
@@ -206,11 +206,11 @@ def test_construction_does_not_crash_when_cache_dir_is_unavailable(tmp_path: Pat
 
 
 def test_construction_detects_pre_existing_read_only_cache_dir(tmp_path: Path) -> None:
-    # Regression: a cache dir that already exists (from a prior run) with
+    # A cache dir that already exists (from a prior run) with
     # its CACHEDIR.TAG already written makes both mkdir(exist_ok=True) and
     # the "if not tag_file.exists()" write-skip succeed without ever
     # attempting a write, so a directory later chmodded read-only (or
-    # mounted read-only) looked exactly like an available one -- the
+    # mounted read-only) looks exactly like an available one -- the
     # os.access(W_OK) check exists specifically to catch this case, which
     # neither a raised OSError nor a first write attempt would.
     existing_cache_dir = tmp_path / "cache"
@@ -224,11 +224,11 @@ def test_construction_detects_pre_existing_read_only_cache_dir(tmp_path: Path) -
 def test_unavailable_cache_dir_short_circuits_without_touching_filesystem(
     temp_cache_dir: Path, sample_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression: once the cache directory is known unavailable, later calls
+    # Once the cache directory is known unavailable, later calls
     # must not repeat the doomed mkdir() attempt (and its warning) per file
-    # -- set_cached_result() used to hash the file's full content before
-    # even reaching the failing mkdir(), wasted work on every processed file
-    # for the rest of the run.
+    # -- set_cached_result() must not hash the file's full content before
+    # even reaching the (failing) mkdir() check, which would waste work on
+    # every processed file for the rest of the run.
     cache = CacheManager(cache_dir=temp_cache_dir, hook_name="test-hook", cache_version="1")
     cache._cache_dir_unavailable = True
 
@@ -260,14 +260,14 @@ def test_write_cache_cleans_up_temp_file_on_write_error(
 def test_write_cache_does_not_follow_a_symlink_planted_at_the_old_predictable_temp_name(
     cache_manager: CacheManager, tmp_path: Path
 ) -> None:
-    # Regression: _write_cache() used to write through a fixed
-    # `<hash>.tmp` sibling (`cache_file.with_suffix(".tmp")`), predictable
-    # from the cache file's own name alone. Anyone able to write to
-    # cache_dir could pre-plant a symlink at that exact path pointing at a
-    # file the running user can write but doesn't intend to touch; a plain
+    # _write_cache() must not write through a fixed `<hash>.tmp` sibling
+    # (`cache_file.with_suffix(".tmp")`), predictable from the cache
+    # file's own name alone. Anyone able to write to cache_dir could
+    # pre-plant a symlink at that exact path pointing at a file the
+    # running user can write but doesn't intend to touch; a plain
     # `open(..., "w")` follows a symlink, so the write would land on the
-    # symlink's target instead of a fresh file. Now that the temp file
-    # comes from `tempfile.mkstemp()`, a pre-planted symlink at the old
+    # symlink's target instead of a fresh file. Sourcing the temp file
+    # from `tempfile.mkstemp()` instead means a pre-planted symlink at a
     # fixed name is simply never used.
     cache_file = cache_manager.cache_dir / "some_hash.json"
     victim = tmp_path / "victim.txt"
@@ -351,7 +351,7 @@ def test_construction_warns_and_continues_when_fcntl_unavailable(
     temp_cache_dir: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     # Windows has no fcntl module at all. `import fcntl` at module import
-    # time used to make the whole package fail to import there before any
+    # time must not make the whole package fail to import there before any
     # warning could even be printed (ch. 14: "MUST NOT hard-crash merely
     # because an optional platform feature is unavailable"). Simulated here
     # by monkeypatching the already-imported module-level name, the same
@@ -391,9 +391,9 @@ def test_concurrent_writers_do_not_lose_updates(cache_manager: CacheManager, sam
     # Concurrent set_cached_result calls for different hook names on the
     # same file must not clobber each other's entries.
     #
-    # Regression: the read-modify-write of the shared per-file cache blob
-    # was unsynchronized, so under prek's parallel hook execution one
-    # writer's update could silently overwrite another's (lost update).
+    # The read-modify-write of the shared per-file cache blob must be
+    # synchronized, or under prek's parallel hook execution one writer's
+    # update could silently overwrite another's (lost update).
     hook_names = [f"hook-{i}" for i in range(20)]
 
     with ThreadPoolExecutor(max_workers=len(hook_names)) as executor:

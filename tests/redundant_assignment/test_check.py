@@ -28,7 +28,7 @@ def test_prefilter_pattern() -> None:
 
 
 def test_check_reports_character_offset_not_byte_offset_before_multibyte_text() -> None:
-    # Regression: ast.col_offset is a UTF-8 *byte* offset, not a character
+    # ast.col_offset is a UTF-8 *byte* offset, not a character
     # offset -- storing it on Violation.col directly reports a column too
     # far right on any line with non-ASCII text before the violation
     # (ch. 7: "MUST report ... column information accurately"; ch. 20:
@@ -582,8 +582,8 @@ def get_cache_file(cache):
             "redirects_file",
         ),
         (
-            # Regression: the linter used to remove a variable that was
-            # modified via nonlocal in a nested function.
+            # A variable modified via `nonlocal` in a nested function must
+            # not be treated as a candidate for removal.
             """
 async def test_websocket():
     cancelled = False
@@ -1047,7 +1047,7 @@ def check_warning(conn):
             "'warning'",
         ),
         (
-            # Regression: a single "private" (underscore-prefixed),
+            # A single "private" (underscore-prefixed),
             # SCREAMING_SNAKE_CASE module-level string constant used only
             # once elsewhere in the file reads as a deliberate, reusable
             # declaration (Rule 12), even though it's genuinely single-use.
@@ -1111,10 +1111,10 @@ def func():
     ("source", "excluded_names"),
     [
         (
-            # Regression: a tuple-unpacking target (`user, passwd =
-            # parse_userinfo(...)`) wasn't tracked as a reassignment, so
-            # `--fix` blanked `user = None` and inlined `None` at the
-            # return statement, discarding the real value.
+            # A tuple-unpacking target (`user, passwd =
+            # parse_userinfo(...)`) must be tracked as a reassignment —
+            # otherwise `--fix` would blank `user = None` and inline `None`
+            # at the return statement, discarding the real value.
             """
 def parse(host_part):
     user = None
@@ -1204,11 +1204,10 @@ def test_untracked_rebinding_not_flagged_as_redundant(source: str, excluded_name
 def test_ignore_marker_inside_string_literal_does_not_suppress_violation() -> None:
     # A string literal that merely contains the suppression-marker text is
     # not a real suppression comment and must not hide a violation on that
-    # line. Regression: line-based ignore detection used a plain text
-    # search over raw source lines, so a string literal containing '#
-    # pytriage: TR5' text was indistinguishable from an actual comment.
-    # Ignore detection must be tokenize-based so it only matches genuine
-    # COMMENT tokens.
+    # line. Ignore detection must be tokenize-based, matching only genuine
+    # COMMENT tokens — a plain text search over raw source lines can't
+    # distinguish a string literal containing '# pytriage: TR5' text from
+    # an actual comment.
     source = """
 def call_it():
     x = "foo"; note = "# pytriage: TR5"
@@ -1414,8 +1413,6 @@ def f():
     ids=["multiline-rhs", "complex-call-args", "long-use-line"],
 )
 def test_check_does_not_mark_unfixable_violation_fixable(source: str, message_filter: str) -> None:
-    # Regression test: violations used to be marked [FIXABLE] even when
-    # --fix couldn't actually fix them.
     matching = [v for v in _check(source) if message_filter in v.message]
     assert matching
     assert all(not v.fixable for v in matching)

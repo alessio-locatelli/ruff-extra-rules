@@ -77,15 +77,15 @@ def test_expand_directories_globs_python_files_outside_a_git_repo(tmp_path: Path
 
 
 def test_expand_directories_uses_git_ls_files_inside_a_git_repo(tmp_path: Path) -> None:
-    # Regression: a directory argument (e.g. `ruff-extra-rules src/`, the
-    # form this project's own dev docs use — see AGENTS.md) used to reach
-    # CheckOrchestrator.process_files() as a single unexpanded path. Inside
-    # a git repo, git grep's own directory pathspec support made it recurse
-    # and match files *inside* that directory, but those resolved paths
-    # never matched the literal directory path in git_grep_filter's own
-    # input map, so every result was silently discarded as unresolvable —
-    # the run reported zero violations, exit code 0, having checked
-    # nothing.
+    # A directory argument (e.g. `ruff-extra-rules src/`, the
+    # form this project's own dev docs use — see AGENTS.md) must not reach
+    # CheckOrchestrator.process_files() as a single unexpanded path.
+    # Inside a git repo, git grep's own directory pathspec support makes
+    # it recurse and match files *inside* that directory, but those
+    # resolved paths never match the literal directory path in
+    # git_grep_filter's own input map, so every result would be silently
+    # discarded as unresolvable — the run would report zero violations,
+    # exit code 0, having checked nothing.
     git = shutil.which("git")
     assert git is not None
 
@@ -100,10 +100,10 @@ def test_expand_directories_uses_git_ls_files_inside_a_git_repo(tmp_path: Path) 
 
 
 def test_expand_directories_includes_untracked_file_inside_a_git_repo(tmp_path: Path) -> None:
-    # Regression (#67): a brand-new file that hasn't been `git add`ed yet
-    # used to be silently dropped from a directory-argument expansion, even
-    # though git_grep_filter already always searches that same file when
-    # it's named explicitly on the CLI instead (ADR 0024's
+    # A brand-new file that hasn't been `git add`ed yet must not be
+    # silently dropped from a directory-argument expansion, even though
+    # git_grep_filter already always searches that same file when it's
+    # named explicitly on the CLI instead (ADR 0024's
     # `--untracked --no-exclude-standard`) — naming the containing
     # directory must not produce a different, false-clean result for the
     # identical file.
@@ -175,11 +175,11 @@ def test_expand_directories_warns_about_an_ignored_directory_with_an_unrecognize
 def test_expand_directories_does_not_warn_about_known_non_source_directories(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # Regression (ADR 0029): __pycache__/, *.egg-info/, and .cache/ get
-    # created by this project's own routine `pytest`/`build`/`uv sync`
-    # commands, so warning about them unconditionally fired on essentially
-    # every directory-argument run -- none of them is ever used for
-    # hand-written source, so all are excluded from this warning.
+    # __pycache__/, *.egg-info/, and .cache/ get created by this
+    # project's own routine `pytest`/`build`/`uv sync` commands (see ADR
+    # 0029), so warning about them unconditionally would fire on
+    # essentially every directory-argument run -- none of them is ever
+    # used for hand-written source, so all are excluded from this warning.
     git = shutil.which("git")
     assert git is not None
 
@@ -210,7 +210,7 @@ def test_expand_directories_does_not_warn_about_known_non_source_directories(
 def test_expand_directories_does_not_warn_about_ruff_cache_even_though_its_own_gitignore_is_nested(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # Regression (ADR 0029): unlike __pycache__/.cache/etc., `.ruff_cache`
+    # Unlike __pycache__/.cache/etc. (see ADR 0029), `.ruff_cache`
     # isn't named in a top-level .gitignore at all -- ruff writes its own
     # nested `.ruff_cache/.gitignore` containing `*`, which is what makes
     # `git status --ignored` collapse the directory to a single ignored-
@@ -238,7 +238,7 @@ def test_expand_directories_does_not_warn_about_ruff_cache_even_though_its_own_g
 def test_expand_directories_warns_about_ignored_file_regardless_of_status_showuntrackedfiles_config(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # Regression: `git status`'s own `--ignored` reporting is otherwise
+    # `git status`'s own `--ignored` reporting is otherwise
     # governed by the ambient `status.showUntrackedFiles` config -- "no"
     # suppresses every `!!` record, silently defeating this warning's whole
     # purpose for a user who's set that (a real, documented git setting),
@@ -264,7 +264,7 @@ def test_expand_directories_warns_about_ignored_file_regardless_of_status_showun
 def test_expand_directories_caps_gitignore_warning_at_a_bounded_number_of_paths(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # Regression: a directory that isn't *entirely* ignored (e.g. a
+    # A directory that isn't *entirely* ignored (e.g. a
     # generated/ subtree with one tracked file alongside many individually
     # -ignored `.py` outputs) can't collapse to a single git-status line --
     # each ignored path is reported separately. The warning must stay
@@ -340,7 +340,7 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
 
 
 def test_expand_directories_skips_tracked_file_deleted_from_working_tree(tmp_path: Path) -> None:
-    # Regression: `git ls-files` reports the *index*, not the working tree
+    # `git ls-files` reports the *index*, not the working tree
     # -- a tracked file removed from disk with a plain `rm` (not `git rm`)
     # still shows up in its output even though it no longer exists. A
     # directory scan isn't asking about that specific file by name, so a
@@ -375,8 +375,8 @@ def test_expand_directories_falls_back_when_git_ls_files_fails(
         matches = expand_directories([str(tmp_path)])
 
     assert matches == [str(py_file.resolve())]
-    # Regression: this is self-healing (falls back to an equivalent glob
-    # scan), so an ERROR-level .exception() call here used to leak a raw
+    # This is self-healing (falls back to an equivalent glob
+    # scan), so an ERROR-level .exception() call here would leak a raw
     # traceback onto the user's stderr by default (nothing in this codebase
     # configures logging, so Python's own lastResort handler prints
     # WARNING+ straight to stderr) for a condition nothing actually failed
@@ -385,7 +385,7 @@ def test_expand_directories_falls_back_when_git_ls_files_fails(
 
 
 def test_expand_directories_includes_a_file_with_a_non_utf8_name(tmp_path: Path) -> None:
-    # Regression: `git ls-files -z`'s stdout is decoded via `text=True`. A
+    # `git ls-files -z`'s stdout is decoded via `text=True`. A
     # filename that's a valid path on Linux (paths are just bytes, never
     # required to be valid UTF-8) but isn't decodable as UTF-8 must not
     # crash a directory scan that contains it -- `errors="surrogateescape"`
@@ -433,10 +433,9 @@ def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: 
 def test_main_directory_argument_matches_explicit_file_argument_for_untracked_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # Regression (#67): reproduces the issue's own repro exactly — an
-    # untracked file's violation must be reported the same way whether it's
-    # named explicitly or reached by expanding its containing directory.
-    # Before the fix, only the explicit-file run below caught it.
+    # An untracked file's violation must be reported the same way whether
+    # it's named explicitly or reached by expanding its containing
+    # directory.
     git = shutil.which("git")
     assert git is not None
 
@@ -454,7 +453,7 @@ def test_main_directory_argument_matches_explicit_file_argument_for_untracked_fi
 
 
 def test_main_directory_scan_does_not_crash_on_a_file_with_a_non_utf8_name(tmp_path: Path) -> None:
-    # Regression: expand_directories() safely includes a file whose name
+    # expand_directories() safely includes a file whose name
     # isn't valid UTF-8 (see test_expand_directories_includes_a_file_with_a_
     # non_utf8_name), but that file still has to survive _prefilter.py's own
     # git_grep_filter() call once meaningless-vars' prefilter pattern runs against
@@ -540,7 +539,7 @@ def test_apply_fixes_recomputes_stale_positions(tmp_path: Path) -> None:
 
 
 def test_apply_fixes_refreshes_non_fixable_checks_position_too(tmp_path: Path) -> None:
-    # Regression: only checks that themselves had a fixable violation this
+    # only checks that themselves had a fixable violation this
     # run got their positions recomputed against the file's post-fix state.
     # redundant-super-init is never fixable (RedundantSuperInitCheck.fix()
     # always returns False), so it never participated in that loop -- its
@@ -579,7 +578,7 @@ def test_apply_fixes_refreshes_non_fixable_checks_position_too(tmp_path: Path) -
 
 
 def test_apply_fixes_refreshes_a_participating_checks_own_left_open_violation(tmp_path: Path) -> None:
-    # Regression: a check that *did* participate in the fix loop (it had
+    # a check that *did* participate in the fix loop (it had
     # some fixable violation this run) only had its own positions
     # recomputed once, immediately before its own fix() call -- a violation
     # it left open that call (e.g. validate-function-name's should_autofix
@@ -630,7 +629,7 @@ def test_apply_fixes_refreshes_a_participating_checks_own_left_open_violation(tm
 def test_refresh_stale_positions_never_drops_an_unrelated_open_violation_sharing_a_check_id_with_a_terminal_one(
     tmp_path: Path,
 ) -> None:
-    # Regression: a check_id with a rejected/errored/failed entry must be
+    # a check_id with a rejected/errored/failed entry must be
     # skipped entirely by the reconciliation pass, not just have that one
     # terminal entry protected -- a fresh check() call has no reliable way
     # to distinguish "this is the same still-present violation as the
@@ -781,16 +780,16 @@ def test_process_files_no_candidates_after_prefilter_returns_empty(
 
 
 def test_process_files_none_pattern_check_still_sees_a_file_other_checks_patterns_miss(tmp_path: Path) -> None:
-    # Regression (#46): combining every enabled check's own prefilter
-    # pattern into one OR'd filter before running any check dropped a file
-    # for every check whenever it failed to match ANY enabled check's
-    # pattern -- including excessive-blank-lines, whose own
-    # get_prefilter_pattern() returns None (see
-    # test_process_files_no_prefilter_pattern_checks_all_files) precisely so
-    # it sees every file regardless of what else is enabled. This file has a
-    # real excessive-blank-lines violation but contains none of meaningless-vars'
-    # own patterns ("data"/"result"), so the old combined filter dropped it
-    # before it was ever parsed.
+    # Each enabled check's own prefilter pattern must gate that check
+    # individually -- combining them into one OR'd filter before running
+    # any check would drop a file for every check whenever it failed to
+    # match ANY enabled check's pattern, including excessive-blank-lines,
+    # whose own get_prefilter_pattern() returns None (see
+    # test_process_files_no_prefilter_pattern_checks_all_files) precisely
+    # so it sees every file regardless of what else is enabled. This file
+    # has a real excessive-blank-lines violation but contains none of
+    # meaningless-vars' own patterns ("data"/"result"), so a combined
+    # filter would drop it before it was ever parsed.
     filepath = tmp_path / "module.py"
     filepath.write_text('"""Doc."""\n\n\n\nclass Foo:\n    pass\n')
 
@@ -803,7 +802,7 @@ def test_process_files_none_pattern_check_still_sees_a_file_other_checks_pattern
 def test_process_files_applies_each_checks_prefilter_independently(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression (#46): a file must only run through a check whose own
+    # A file must only run through a check whose own
     # prefilter pattern it actually matches -- not through every enabled
     # check merely because some *other* check's pattern matched. This file
     # contains meaningless-vars' own pattern ("data") but not
@@ -847,11 +846,11 @@ def test_process_files_unreadable_file_is_skipped(tmp_path: Path, write_file: Ca
 
 
 def test_process_files_records_unprocessable_file(tmp_path: Path) -> None:
-    # Regression: a file _check_file() can't parse used to vanish from the
-    # result with no trace at all — indistinguishable from a clean file with
-    # zero violations. ExcessiveBlankLinesCheck has no prefilter pattern (see
-    # its get_prefilter_pattern()), so the file reaches _check_file()
-    # regardless of its content.
+    # A file _check_file() can't parse must not vanish from the
+    # result with no trace at all — that would be indistinguishable from a
+    # clean file with zero violations. ExcessiveBlankLinesCheck has no
+    # prefilter pattern (see its get_prefilter_pattern()), so the file
+    # reaches _check_file() regardless of its content.
     filepath = tmp_path / "module.py"
     filepath.write_text("def foo(:\n")
 
@@ -941,10 +940,9 @@ def test_process_files_different_check_set_forces_recheck(tmp_path: Path) -> Non
 
 
 def test_generate_cache_key_changes_when_source_tree_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Regression: replaces the hand-bumped CACHE_VERSION that a developer
-    # had to remember to update whenever a check's own code changed
-    # (commit 0e3efba). The cache key must change on its own when the
-    # hashed source tree changes, without anyone bumping anything.
+    # The cache key must change on its own when the hashed source tree
+    # changes, without a developer having to remember to hand-bump
+    # CACHE_VERSION whenever a check's own code changes.
     fake_root = tmp_path / "pre_commit_hooks"
     fake_root.mkdir()
     (fake_root / "module.py").write_text("x = 1\n")
@@ -1020,10 +1018,11 @@ def test_process_files_check_exception_is_logged_and_skipped(tmp_path: Path, mon
 
 
 def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Regression: a check whose check() raises used to leave no trace at all
-    # outside a debug log line — indistinguishable from that check having
-    # run cleanly and found nothing. If it's the only check enabled, this
-    # used to make the whole file (and the whole run) look completely clean.
+    # A check whose check() raises must not leave no trace at all outside
+    # a debug log line — that would be indistinguishable from that check
+    # having run cleanly and found nothing. If it's the only check
+    # enabled, that would make the whole file (and the whole run) look
+    # completely clean.
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
@@ -1163,9 +1162,9 @@ class _CrashingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
 def test_process_files_a_non_cacheable_checks_own_crash_does_not_block_caching_a_cacheable_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression: a combined had_rule_failure flag used to gate caching on
-    # whether *any* check in this call crashed, cacheable or not -- so an
-    # always-rerun check's own crash silently disabled caching for an
+    # A combined had_rule_failure flag must not gate caching on whether
+    # *any* check in this call crashed, cacheable or not -- that would let
+    # an always-rerun check's own crash silently disable caching for an
     # unrelated, successfully-completed cacheable check sharing the same
     # file, forcing it to be needlessly recomputed on every future run.
     filepath = tmp_path / "module.py"
@@ -1430,13 +1429,13 @@ def test_apply_fixes_skips_check_with_no_fixable_violations(tmp_path: Path) -> N
 
 
 def test_apply_fixes_does_not_mark_fixed_a_violation_fix_left_untouched(tmp_path: Path) -> None:
-    # Regression: validate-function-name's fix() loops over violations and
+    # validate-function-name's fix() loops over violations and
     # can skip some (should_autofix refuses to rename methods) while fixing
-    # others in the same call. _apply_fixes used to mark every violation of
-    # a check as fixed whenever fix() returned True at all, regardless of
-    # whether that specific violation was actually touched — a rename that
-    # should_autofix skipped was reported [FIXED] even though the file
-    # still had the old name.
+    # others in the same call. _apply_fixes must not mark every violation
+    # of a check as fixed just because fix() returned True at all,
+    # regardless of whether that specific violation was actually touched —
+    # a rename that should_autofix skips must not be reported [FIXED]
+    # while the file still has the old name.
     filepath = tmp_path / "module.py"
     filepath.write_text(
         "import json\n\n\n"
@@ -1467,7 +1466,7 @@ def test_apply_fixes_does_not_mark_fixed_a_violation_fix_left_untouched(tmp_path
 
 
 def test_apply_fixes_distinguishes_violations_with_identical_messages(tmp_path: Path) -> None:
-    # Regression: a free function and an unrelated method can produce
+    # a free function and an unrelated method can produce
     # byte-identical violation messages (same func_name, same suggested
     # name, same reason). Marking "fixed" by message text alone would lose
     # their identity — after the free function is renamed, its own old
@@ -1575,7 +1574,7 @@ def test_apply_fixes_marks_violation_errored_when_fix_raises_unexpectedly(
 def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression: a check that writes more than once per fix() call
+    # a check that writes more than once per fix() call
     # (looping over violations individually, like validate_function_name)
     # can commit some violations before a later write raises. Marking every
     # violation in the batch [FIX ERRORED] regardless would misreport an
@@ -1633,7 +1632,7 @@ def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
 def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everything(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression: if fix() commits every requested edit successfully and
+    # if fix() commits every requested edit successfully and
     # then raises afterwards (e.g. during unrelated cleanup), every
     # violation ends up correctly marked [FIXED] and none are left to mark
     # [FIX ERRORED] — but the exception itself must still be recorded
@@ -1717,7 +1716,7 @@ def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
 def test_apply_fixes_marks_errored_violation_of_a_multi_write_check_when_apply_fix_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression: validate-function-name's own fix() already catches any
+    # validate-function-name's own fix() already catches any
     # exception apply_fix() raises other than FixValidationError internally
     # (logging it and moving on to the next violation), so it never
     # propagates to CheckOrchestrator._apply_fixes' own [FIX ERRORED]
@@ -1904,9 +1903,9 @@ def test_load_checks_ignore_set_skips_matching_check() -> None:
 
 
 def test_load_checks_ignore_composes_with_select() -> None:
-    # Regression: `select` used to make `ignore` a no-op entirely (an
-    # `elif` instead of two independent checks), so `--select`+`--ignore`
-    # couldn't be combined the way `ruff check --select`/`--ignore` can.
+    # `select` must not make `ignore` a no-op entirely (an
+    # `elif` instead of two independent checks) -- `--select`+`--ignore`
+    # must be composable, the way `ruff check --select`/`--ignore` can be.
     checks = load_checks(select={"meaningless-vars", "redundant-super-init"}, ignore={"meaningless-vars"})
     assert {c.check_id for c in checks} == {"redundant-super-init"}
 
@@ -2005,11 +2004,11 @@ def test_main_verbose_flag_does_not_change_a_clean_runs_exit_code(tmp_path: Path
 def test_main_unparseable_file_returns_one(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
-    # Regression: an unparseable file used to be silently dropped with exit
-    # code 0 — indistinguishable from a clean run with nothing to report.
-    # Content includes "data" so the file clears every check's prefilter
-    # pattern and actually reaches parsing rather than being dropped as a
-    # non-candidate beforehand.
+    # An unparseable file must not be silently dropped with exit
+    # code 0 — that would be indistinguishable from a clean run with
+    # nothing to report. Content includes "data" so the file clears every
+    # check's prefilter pattern and actually reaches parsing rather than
+    # being dropped as a non-candidate beforehand.
     filepath = tmp_path / "broken.py"
     filepath.write_text("data = foo(:\n")
 
@@ -2026,16 +2025,17 @@ def test_main_unparseable_file_returns_one(
 def test_main_permission_denied_file_returns_one_inside_git_repo(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
-    # Regression: inside a real git repo, the prefilter's `git grep`
+    # Inside a real git repo, the prefilter's `git grep`
     # subprocess (not the Python-only fallback the other tmp_path-based
-    # tests exercise, since they aren't git repos) used to report a
+    # tests exercise, since they aren't git repos) reports a
     # permission-denied file only via a "failed to stat" line on its own
     # stderr, without changing its exit code for the files it *could*
-    # read. main() never inspected that stderr, so the file was silently
-    # dropped before ever reaching _check_file — the whole run reported
-    # exit code 0, as if the file never existed. MeaninglessVarsCheck has a
-    # prefilter pattern ("data" is one of its meaningless names), so this
-    # only reproduces via the check that actually calls into git grep.
+    # read. main() must inspect that stderr — otherwise the file would be
+    # silently dropped before ever reaching _check_file, and the whole run
+    # would report exit code 0, as if the file never existed.
+    # MeaninglessVarsCheck has a prefilter pattern ("data" is one of its
+    # meaningless names), so this only exercises the check that actually
+    # calls into git grep.
     git = shutil.which("git")
     assert git is not None
 
@@ -2061,9 +2061,9 @@ def test_main_permission_denied_file_returns_one_inside_git_repo(
 def test_main_check_crash_returns_one_and_reports_check_and_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # Regression: a check that crashes on every file it sees used to make
-    # the whole run look clean (exit code 0, nothing printed) whenever no
-    # other check reported a violation for the same files.
+    # A check that crashes on every file it sees must not make the whole
+    # run look clean (exit code 0, nothing printed) just because no other
+    # check reported a violation for the same files.
     monkeypatch.setattr(MeaninglessVarsCheck, "check", raises(ValueError, "simulated check failure"))
 
     filepath = tmp_path / "module.py"
@@ -2099,11 +2099,11 @@ def test_main_reports_non_fixable_violation(tmp_path: Path, capsys: pytest.Captu
 
 def test_main_reports_column_alongside_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     # Violation.col is computed accurately (meaningless-vars reports the assigned
-    # name's own ast.col_offset, converted to a character offset) but
-    # main()'s printed line used to drop it entirely, reporting only the
-    # line -- ch. 7: "MUST report line and column information accurately
-    # when available". "data" starts at the 0-indexed character offset 4;
-    # main() reports the conventional 1-based column, 5.
+    # name's own ast.col_offset, converted to a character offset), and
+    # main()'s printed line must include it, not just the line -- ch. 7:
+    # "MUST report line and column information accurately when available".
+    # "data" starts at the 0-indexed character offset 4; main() reports
+    # the conventional 1-based column, 5.
     filepath = tmp_path / "module.py"
     filepath.write_text("def process():\n    data = requests.get(url)\n    return data\n")
 
@@ -2262,12 +2262,12 @@ def test_main_fix_flag_reports_failed_fix(
 def test_main_reports_rule_failure_when_reread_fails_mid_fix_loop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Regression: _apply_fixes() re-reads the file before recomputing each
+    # _apply_fixes() re-reads the file before recomputing each
     # check's fresh violations (a previous check's fix in the same loop may
-    # have already modified it). If that re-read itself fails, the loop used
-    # to just `continue` with zero signal anywhere -- the stale violation
-    # was left unmarked and reported as an ordinary [FIXABLE], as if --fix
-    # had never even been attempted for it.
+    # have already modified it). If that re-read itself fails, the loop
+    # must not just `continue` with zero signal anywhere -- otherwise the
+    # stale violation would be left unmarked and reported as an ordinary
+    # [FIXABLE], as if --fix had never even been attempted for it.
     original_read_source = CheckOrchestrator._read_source
     calls = 0
 
@@ -2314,12 +2314,13 @@ def test_main_reports_rule_failure_when_recompute_raises_mid_fix_loop(
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    # Regression: _apply_fixes() recomputes fresh violations via check.check()
+    # _apply_fixes() recomputes fresh violations via check.check()
     # against the current file state before calling check.fix(). If that
-    # recompute itself raises, only the broad outer `except Exception` used
-    # to catch it -- logging the exception but never recording a
-    # rule_failure or marking any violation, so the run could look
-    # completely clean depending on what else was reported for the file.
+    # recompute itself raises, it must not be left to only the broad outer
+    # `except Exception` to catch -- that would log the exception but
+    # never record a rule_failure or mark any violation, so the run could
+    # look completely clean depending on what else was reported for the
+    # file.
     original_check = MeaninglessVarsCheck.check
     calls = 0
 
@@ -2373,7 +2374,7 @@ def test_main_reports_rule_failure_when_fix_raises_after_resolving_everything(
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    # Regression: fix() can commit every requested edit and then raise
+    # fix() can commit every requested edit and then raise
     # afterwards (e.g. during unrelated cleanup) — every violation ends up
     # correctly reported [FIXED], but the exception itself must still
     # surface in the run's own output, or a genuine internal failure would
@@ -2589,13 +2590,13 @@ def test_main_ignoring_all_checks_returns_one(tmp_path: Path, capsys: pytest.Cap
 def test_main_trailing_comma_does_not_report_blank_unknown_check(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str, meaningless_vars_runs: bool
 ) -> None:
-    # Regression: a trailing comma left an empty string in the parsed set,
+    # A trailing comma must not leave an empty string in the parsed set,
     # reported as a confusing blank "Unknown checks: " instead of being
-    # tolerated like --exclude's own comma list already is. Asserting on the
-    # TR1 violation itself (not just the exit code) is what actually
-    # proves meaningless-vars was recognized: both the fixed and the reverted
-    # behavior exit 1 for --select (a real violation vs. the old bogus
-    # "Unknown checks" error), so the exit code alone can't tell them apart.
+    # tolerated like --exclude's own comma list already is. Asserting on
+    # the TR1 violation itself (not just the exit code) is what actually
+    # proves meaningless-vars was recognized: a bogus "Unknown checks"
+    # error would also exit 1 for --select (masking a real violation), so
+    # the exit code alone can't tell the two apart.
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
@@ -2622,7 +2623,7 @@ def test_main_select_only_commas_reports_no_checks_enabled(tmp_path: Path, capsy
 
 
 def test_main_select_and_ignore_compose(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    # Regression: `--select`+`--ignore` together used to behave like
+    # `--select`+`--ignore` together must not behave like
     # `--select` alone, silently dropping `--ignore` (see
     # `test_load_checks_ignore_composes_with_select`).
     filepath = tmp_path / "module.py"
@@ -2669,10 +2670,7 @@ def test_fix_converges_after_one_pass_across_all_checks(fixture_path: Path, tmp_
     # to a stable result"; "MUST test fix idempotence explicitly". Runs
     # --fix (every check together, matching real pre-commit/prek usage)
     # twice over every existing bad/*.py fixture and asserts the second
-    # pass leaves the file exactly as the first pass did. Previously this
-    # was only ever verified once, ad hoc, by docs/audits/0002's own manual
-    # spot-check script -- never as a committed regression test that would
-    # actually catch a future fix-cycle regression.
+    # pass leaves the file exactly as the first pass did.
     target = tmp_path / fixture_path.name
     target.write_text(fixture_path.read_text(encoding="utf-8"), encoding="utf-8")
 
@@ -2696,12 +2694,11 @@ def test_main_handles_path_containing_spaces_and_unicode(
     # other test in this file uses it) makes `git grep` error out and
     # silently fall back to the Python-only path instead, which has no
     # subprocess argument-passing to prove safe in the first place, and would
-    # still produce the same passing result -- hiding exactly the regression
-    # this test exists to catch. Spies on the real subprocess.run (still
-    # executed for real, never mocked out) to confirm git grep itself
-    # actually received and matched this path rather than silently falling
-    # back. Only ever verified ad hoc before this (prose in
-    # docs/audits/0006), never as a committed regression test.
+    # still produce the same passing result -- silently masking exactly
+    # the bug this test exists to catch. Spies on the real subprocess.run
+    # (still executed for real, never mocked out) to confirm git grep
+    # itself actually received and matched this path rather than silently
+    # falling back.
     git = shutil.which("git")
     assert git is not None
 
@@ -2753,14 +2750,10 @@ def test_main_handles_path_containing_spaces_and_unicode(
 
 
 def test_process_files_handles_a_large_file(tmp_path: Path) -> None:
-    # ch. 31: "MUST test large files." The only prior evidence this pipeline
-    # behaves correctly on a large file was an ad hoc manual benchmark
-    # recorded as prose in docs/audits/0004 (a 2000-function/120KB file) --
-    # never committed as a regression test. This is a correctness check, not
-    # a performance benchmark (ch. 24/30's own concern, already covered by
-    # 0004's fix and its unit-level regression tests) -- it only proves every
-    # violation in a large file is still found and fixed correctly, with
-    # nothing dropped, corrupted, or left unprocessed.
+    # ch. 31: "MUST test large files." This is a correctness check, not a
+    # performance benchmark (ch. 24/30's own concern) -- it only proves
+    # every violation in a large file is still found and fixed correctly,
+    # with nothing dropped, corrupted, or left unprocessed.
     function_count = 300
     source = "import requests\n\n" + "\n\n".join(
         f"def func_{i}():\n    data = requests.get(url)\n    return data.status_code" for i in range(function_count)

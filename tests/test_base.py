@@ -140,11 +140,11 @@ def test_classify_comment_lines(source: str, comment_only: set[int], trailing: s
 
 
 def test_classify_comment_lines_multiline_string_closing_line_is_code() -> None:
-    # Regression: tokenize reports a multiline STRING token's line as only
+    # tokenize reports a multiline STRING token's line as only
     # its *start* line, not every line it spans — so a comment trailing the
-    # closing `"""` (on a later line) used to be misclassified as
-    # comment-only instead of trailing, since that later line was never
-    # recorded as containing code at all.
+    # closing `"""` (on a later line) must not be misclassified as
+    # comment-only instead of trailing, even though that later line is
+    # never recorded as containing code at all.
     source = 'x = """\nmulti\nline\n"""  # trailing comment\ny = 5\n'
     comment_only, trailing = classify_comment_lines(source)
     assert trailing == {4}
@@ -166,13 +166,12 @@ def test_normalize_for_tokenize(source: str, expected: str) -> None:
 
 
 def test_classify_comment_lines_on_cr_only_source() -> None:
-    # Regression: io.StringIO.readline() (unlike ast.parse(), which treats
+    # io.StringIO.readline() (unlike ast.parse(), which treats
     # a bare \r as a line boundary the same as \n/\r\n) doesn't split on a
-    # lone \r at all, so tokenize used to see an old-Mac-style CR-only file
-    # as one giant physical line and never emit a COMMENT token on the
-    # line that actually has one — silently hiding a real trailing comment
-    # the same way the pre-tokenize naive heuristic did, just for files
-    # using a different newline convention.
+    # lone \r at all, so tokenize must not see an old-Mac-style CR-only
+    # file as one giant physical line and skip emitting a COMMENT token on
+    # the line that actually has one — that would silently hide a real
+    # trailing comment on any file using this newline convention.
     source = 'x = 1\rsep = "\\\\"  # trailing comment\rprint(x, sep)\r'
     _comment_only, trailing = classify_comment_lines(source)
     assert trailing == {2}

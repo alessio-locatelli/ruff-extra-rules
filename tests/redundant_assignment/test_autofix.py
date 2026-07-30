@@ -15,7 +15,7 @@ from pre_commit_hooks.ast_checks.redundant_assignment.autofix import (
 from tests.factories import ViolationFactory
 
 # ---------------------------------------------------------------------------
-# fix() / apply_fixes(): file-mutation regression tests
+# fix() / apply_fixes(): file-mutation tests
 # ---------------------------------------------------------------------------
 
 
@@ -44,7 +44,7 @@ def test_fix_method_with_fixable_violations(tmp_path: Path) -> None:
 
 
 def test_fix_two_assignments_used_on_the_same_line(tmp_path: Path) -> None:
-    # Regression: two independently-fixable assignments whose single uses
+    # Two independently-fixable assignments whose single uses
     # land on the same line must both be inlined, even when the
     # replacement text is a different length than the variable it
     # replaces (which shifts the column of whichever use is processed
@@ -72,9 +72,9 @@ def test_fix_two_assignments_used_on_the_same_line(tmp_path: Path) -> None:
 def test_fix_chained_assignment_where_use_line_is_another_assign_line(
     tmp_path: Path,
 ) -> None:
-    # Regression: x's only use is on the same line as y's assignment (`y
-    # = x`). Applying y's fix first blanks that whole line, so x's own fix
-    # must skip cleanly instead of crashing when its use is gone.
+    # `x`'s only use is on the same line as `y`'s assignment (`y
+    # = x`). Applying `y`'s fix first blanks that whole line, so `x`'s own
+    # fix must skip cleanly instead of crashing when its use is gone.
     source = """def f():
     x = 1
     y = x
@@ -95,9 +95,9 @@ def test_fix_chained_assignment_where_use_line_is_another_assign_line(
 
 
 def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    # Regression: apply_fixes() used to let atomic_write_text()'s OSError
-    # propagate uncaught instead of returning False like every other check's
-    # fix().
+    # apply_fixes() must catch atomic_write_text()'s OSError and return
+    # False, like every other check's fix(), instead of letting it
+    # propagate uncaught.
     source = """def func_scope():
     x = "foo"
     func(x=x)
@@ -112,7 +112,7 @@ def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptu
 
     with caplog.at_level("DEBUG"):
         assert check.fix(filepath, violations, source, tree) is False
-    # Regression: the write failure must be attributed to the violations it
+    # The write failure must be attributed to the violations it
     # actually affected, not left indistinguishable from "never attempted"
     # — the orchestrator's own report otherwise misleadingly suggests
     # re-running --fix, which would just fail identically again.
@@ -384,11 +384,11 @@ def func():
 
 
 def test_zero_arg_call_immediate_single_use_is_fixable(tmp_path: Path) -> None:
-    # Regression test (issue #22): IMMEDIATE_SINGLE_USE never allowed a
-    # Call RHS, even trivial zero-arg ones, so idiomatic test code like
-    # `check = MeaninglessVarsCheck(); check.check(...)` was never auto-fixed.
     # A zero-arg call has no operands whose evaluation order inlining
-    # could disturb, so it's safe to allow as a narrow carve-out.
+    # could disturb, so IMMEDIATE_SINGLE_USE allows it as a narrow
+    # carve-out even though it's a Call RHS -- idiomatic test code like
+    # `check = MeaninglessVarsCheck(); check.check(...)` must be
+    # auto-fixable.
     source = """def test_something():
     check = MeaninglessVarsCheck()
     violations = check.check(Path("test.py"), tree, source)
@@ -414,9 +414,9 @@ def test_zero_arg_call_immediate_single_use_is_fixable(tmp_path: Path) -> None:
 def test_augmented_assignment_use_not_flagged_for_zero_arg_call(
     tmp_path: Path,
 ) -> None:
-    # Regression test: the issue #22 zero-arg-call carve-out for
-    # IMMEDIATE_SINGLE_USE must not make `x = Box(); x += 1` fixable —
-    # inlining would produce invalid syntax (`Box() += 1`).
+    # The zero-arg-call carve-out for IMMEDIATE_SINGLE_USE must not make
+    # `x = Box(); x += 1` fixable — inlining would produce invalid syntax
+    # (`Box() += 1`).
     source = """def f():
     x = Box()
     x += 1
@@ -570,8 +570,8 @@ def test_call_rhs_across_await_in_same_statement_not_reported(tmp_path: Path) ->
 
 
 def test_autofix_preserves_blank_lines_across_file(tmp_path: Path) -> None:
-    # Regression: autofix used to delete blank lines across the entire
-    # file, not just around the removed assignment.
+    # autofix must not delete blank lines across the entire
+    # file, only around the removed assignment.
     source = """class FirstClass:
     def method_one(self):
         pass
@@ -673,13 +673,14 @@ def test_cleanup_blank_lines_only_excess_above() -> None:
 
 
 def test_fix_preserves_trailing_comment_on_string_ending_in_escaped_backslash(tmp_path: Path) -> None:
-    # Regression: the old naive comment-detection heuristic missed the
+    # A naive comment-detection heuristic would miss the
     # trailing comment on a line like `sep = "\\"  # comment` (an escaped
     # backslash right before the closing quote), so should_report_violation
-    # never applied its "skip if there's an inline comment" rule and --fix
-    # silently deleted the comment along with the assignment it decorated
-    # (ch. 2: "MUST preserve comments unless the rule explicitly owns the
-    # relevant comment"; ch. 21: "MUST preserve comments where possible").
+    # must still apply its "skip if there's an inline comment" rule rather
+    # than letting --fix silently delete the comment along with the
+    # assignment it decorated (ch. 2: "MUST preserve comments unless the
+    # rule explicitly owns the relevant comment"; ch. 21: "MUST preserve
+    # comments where possible").
     source = 'def get_sep() -> str:\n    sep = "\\\\"  # Windows path separator\n    return sep\n'
     filepath = tmp_path / "source.py"
     filepath.write_text(source)
@@ -692,7 +693,7 @@ def test_fix_preserves_trailing_comment_on_string_ending_in_escaped_backslash(tm
 
 
 def test_check_reports_assignment_after_multiline_string_with_trailing_comment(tmp_path: Path) -> None:
-    # Regression: tokenize reports a multiline STRING token's line as only
+    # tokenize reports a multiline STRING token's line as only
     # its start line, not every line it spans, so a comment trailing the
     # closing `"""` on a later line was misclassified as comment-only —
     # wrongly making has_comment_above() true for the *next* line and
@@ -709,10 +710,10 @@ def test_check_reports_assignment_after_multiline_string_with_trailing_comment(t
 
 
 def test_autofix_splices_string_literal_into_fstring_field(tmp_path: Path) -> None:
-    # Regression (issue #72): inlining a string-literal variable into an
-    # f-string replacement field used to re-quote it inside the braces
-    # (`f"...{"requests-cache"}..."`) instead of splicing the literal's
-    # raw text directly into the surrounding string.
+    # Inlining a string-literal variable into an f-string replacement
+    # field must splice the literal's raw text directly into the
+    # surrounding string, not re-quote it inside the braces (which would
+    # produce `f"...{"requests-cache"}..."`).
     source = """def f():
     org = "requests-cache"
     return f"https://github.com/{org}/requests-cache"
@@ -759,7 +760,7 @@ def test_autofix_declines_fstring_splice_with_unsafe_characters(tmp_path: Path) 
 
 
 def test_autofix_declines_fstring_splice_with_control_character(tmp_path: Path) -> None:
-    # Regression: "\x1b[0m" (an ANSI reset code) is a valid, non-newline,
+    # "\x1b[0m" (an ANSI reset code) is a valid, non-newline,
     # non-NUL string literal, so it passed every prior unsafe-character
     # check. Splicing it as a raw byte is syntactically fine but renders
     # invisibly (the ESC[0m sequence produces no visible glyph), making a
@@ -784,7 +785,7 @@ def test_autofix_declines_fstring_splice_with_control_character(tmp_path: Path) 
 
 
 def test_autofix_declines_fstring_splice_with_nul_byte(tmp_path: Path) -> None:
-    # Regression: `"\x00"` is a perfectly valid string literal, but Python's
+    # `"\x00"` is a perfectly valid string literal, but Python's
     # tokenizer rejects any *source file* containing a raw NUL byte —
     # splicing it as literal text would turn a fixable file into an
     # unparsable one.
@@ -805,7 +806,7 @@ def test_autofix_declines_fstring_splice_with_nul_byte(tmp_path: Path) -> None:
 
 
 def test_autofix_declines_fstring_splice_with_unpaired_surrogate(tmp_path: Path) -> None:
-    # Regression: a str object can legally hold an unpaired surrogate (e.g.
+    # a str object can legally hold an unpaired surrogate (e.g.
     # from a "\ud800" escape) even though no real text encoding can
     # represent one — splicing it as raw source text would make
     # atomic_write_text's compile()/write() crash with an uncaught
@@ -829,7 +830,7 @@ def test_autofix_declines_fstring_splice_with_unpaired_surrogate(tmp_path: Path)
 def test_autofix_declines_fstring_splice_when_value_unencodable_in_declared_encoding(
     tmp_path: Path,
 ) -> None:
-    # Regression: a PEP 263 file can declare a narrower encoding (e.g.
+    # a PEP 263 file can declare a narrower encoding (e.g.
     # ASCII) than UTF-8. "\xe9" ('é') is a perfectly safe splice target
     # under UTF-8 (should_autofix's check()-time guess, which never learns
     # the real declared encoding), but writing it back into an
@@ -901,9 +902,9 @@ def test_autofix_declines_fstring_splice_for_nested_expression(tmp_path: Path) -
 
 
 def test_autofix_fstring_field_unaffected_for_non_string_rhs(tmp_path: Path) -> None:
-    # Regression guard: a non-string RHS (e.g. a number) was never buggy —
-    # `f"{5}"` is fine as-is, no quotes involved — so the new f-string
-    # handling must not change this existing, already-correct behavior.
+    # A non-string RHS (e.g. a number) needs no re-quoting — `f"{5}"` is
+    # fine as-is, no quotes involved — so the f-string splice handling
+    # must leave this path unaffected.
     source = """def f():
     n = 5
     return f"Total: {n}"
@@ -924,11 +925,11 @@ def test_autofix_fstring_field_unaffected_for_non_string_rhs(tmp_path: Path) -> 
 
 
 def test_autofix_fstring_field_unaffected_for_name_rhs(tmp_path: Path) -> None:
-    # Regression guard: a Name RHS used as a whole f-string field (e.g.
-    # `x = obj; f"{x}"`) was never buggy either — `rhs_source` isn't a
-    # string-literal expression at all here, so the new splice path must
-    # recognize that (via ast.literal_eval raising) and fall through to the
-    # ordinary inlining path unchanged.
+    # A Name RHS used as a whole f-string field (e.g. `x = obj; f"{x}"`)
+    # isn't a string-literal expression, so `rhs_source` isn't eligible
+    # for splicing — the splice path must recognize that (via
+    # ast.literal_eval raising) and fall through to the ordinary inlining
+    # path unchanged.
     source = """def f(obj):
     x = obj
     return f"value: {x}"
@@ -949,7 +950,7 @@ def test_autofix_fstring_field_unaffected_for_name_rhs(tmp_path: Path) -> None:
 
 
 def test_autofix_fstring_splice_declines_when_earlier_fix_lengthens_line(tmp_path: Path) -> None:
-    # Regression: same-line violations are applied rightmost-first, so a
+    # same-line violations are applied rightmost-first, so a
     # fix processed before this one can lengthen the line beyond what
     # should_autofix saw at check() time (see exceeds_line_length_when_inlined's
     # docstring on why both call sites must independently re-check the
@@ -983,7 +984,7 @@ def test_autofix_fstring_splice_declines_when_earlier_fix_lengthens_line(tmp_pat
 
 
 def test_fix_inlines_use_on_line_with_non_ascii_text(tmp_path: Path) -> None:
-    # Regression: ast.col_offset is a UTF-8 byte offset, not a character
+    # ast.col_offset is a UTF-8 byte offset, not a character
     # offset. A non-ASCII character earlier on the use's line must not
     # throw off the position used to locate the variable for inlining.
     # `data`'s use must stay on the very next statement (issue #76 requires
