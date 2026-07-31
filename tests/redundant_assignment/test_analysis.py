@@ -126,6 +126,26 @@ def example():
     assert len(lifecycle.uses) == 2
 
 
+def test_try_star_assignment_is_protected_from_redundancy_reporting() -> None:
+    source = """
+def f():
+    try:
+        value = load()
+    except* ValueError:
+        pass
+
+    try:
+        use(value)
+    except ValueError:
+        pass
+"""
+    lifecycle = _lifecycle_for(source, "value")
+
+    assert lifecycle.assignment.in_try is True
+    assert lifecycle.assignment.in_control_flow is True
+    assert _check(source, level=AggressivenessLevel.PERMISSIVE) == []
+
+
 def test_named_expr_rebinding_skipped_for_global_variable() -> None:
     # Branch coverage: a walrus target declared `global` in this scope
     # must not be tracked as a rebinding use here — matching

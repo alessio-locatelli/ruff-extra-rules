@@ -481,12 +481,14 @@ class VariableTracker(ast.NodeVisitor):
         self.control_flow_depth -= 1
         self.parent_stack.pop()
 
-    def visit_Try(self, node: ast.Try) -> None:
+    def visit_Try(self, node: ast.Try | ast.TryStar) -> None:
         self.control_flow_depth += 1
         self.try_depth += 1
         self.generic_visit(node)
         self.try_depth -= 1
         self.control_flow_depth -= 1
+
+    visit_TryStar = visit_Try  # noqa: N815
 
     def visit_With(self, node: ast.With | ast.AsyncWith) -> None:
         # Each item's optional_vars (`as target`) rebinds on entry, same
