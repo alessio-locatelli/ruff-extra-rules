@@ -224,7 +224,7 @@ def test_function_defaults_are_visited_in_the_enclosing_try_context() -> None:
 def outer():
     try:
         value = source()
-        def inner(argument=value):
+        def inner(*, required, argument=value):
             return argument
     except ValueError:
         pass
