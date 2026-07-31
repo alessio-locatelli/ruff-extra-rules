@@ -415,19 +415,28 @@ class VariableTracker(ast.NodeVisitor):
             self.nonlocal_vars.add((scope_id, name))
         self.generic_visit(node)
 
+    def _visit_defaults(self, arguments: ast.arguments) -> None:
+        for default in (*arguments.defaults, *arguments.kw_defaults):
+            if default is not None:
+                self.visit(default)
+
     def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         """Decorators are evaluated in the outer (enclosing) scope before the
         function body, so they must be visited before entering the new scope.
         """
         for decorator in node.decorator_list:
             self.visit(decorator)
+        self._visit_defaults(node.args)
 
         self._enter_scope()
+        try_depth = self.try_depth
+        self.try_depth = 0
 
         for stmt in node.body:
             self.visit(stmt)
             self._increment_stmt_index()
 
+        self.try_depth = try_depth
         self._exit_scope()
 
     visit_AsyncFunctionDef = visit_FunctionDef  # noqa: N815
@@ -482,11 +491,22 @@ class VariableTracker(ast.NodeVisitor):
         self.parent_stack.pop()
 
     def visit_Try(self, node: ast.Try | ast.TryStar) -> None:
+        self.parent_stack.append(node)
         self.control_flow_depth += 1
         self.try_depth += 1
-        self.generic_visit(node)
+        for stmt in node.body:
+            self.visit(stmt)
         self.try_depth -= 1
+
+        for handler in node.handlers:
+            self.visit(handler)
+        for stmt in node.orelse:
+            self.visit(stmt)
+        for stmt in node.finalbody:
+            self.visit(stmt)
+
         self.control_flow_depth -= 1
+        self.parent_stack.pop()
 
     visit_TryStar = visit_Try  # noqa: N815
 

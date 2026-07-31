@@ -146,6 +146,94 @@ def f():
     assert _check(source, level=AggressivenessLevel.PERMISSIVE) == []
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        """
+def f():
+    try:
+        pass
+    except ValueError:
+        value = load()
+        return value
+""",
+        """
+def f():
+    try:
+        pass
+    except ValueError:
+        pass
+    else:
+        value = load()
+        return value
+""",
+        """
+def f():
+    try:
+        pass
+    except ValueError:
+        pass
+    finally:
+        value = load()
+        return value
+""",
+    ],
+)
+def test_try_depth_does_not_include_non_body_clauses(source: str) -> None:
+    lifecycle = _lifecycle_for(source, "value")
+
+    assert lifecycle.assignment.in_try is False
+    assert lifecycle.assignment.in_control_flow is True
+    assert len(_check(source, level=AggressivenessLevel.PERMISSIVE)) == 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        """
+def outer():
+    try:
+        def inner():
+            value = load()
+            return value
+    except ValueError:
+        pass
+""",
+        """
+def outer():
+    try:
+        class Inner:
+            def method(self):
+                value = load()
+                return value
+    except ValueError:
+        pass
+""",
+    ],
+)
+def test_try_depth_does_not_include_deferred_function_bodies(source: str) -> None:
+    lifecycle = _lifecycle_for(source, "value")
+
+    assert lifecycle.assignment.in_try is False
+    assert lifecycle.assignment.in_control_flow is True
+    assert len(_check(source, level=AggressivenessLevel.PERMISSIVE)) == 1
+
+
+def test_function_defaults_are_visited_in_the_enclosing_try_context() -> None:
+    source = """
+def outer():
+    try:
+        value = source()
+        def inner(argument=value):
+            return argument
+    except ValueError:
+        pass
+"""
+    lifecycle = _lifecycle_for(source, "value")
+
+    assert len(lifecycle.uses) == 1
+
+
 def test_named_expr_rebinding_skipped_for_global_variable() -> None:
     # Branch coverage: a walrus target declared `global` in this scope
     # must not be tracked as a rebinding use here — matching
