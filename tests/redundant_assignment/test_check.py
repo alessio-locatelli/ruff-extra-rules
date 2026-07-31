@@ -67,7 +67,19 @@ def start_daemon():
         print(f"FAILED: {error}", flush=True)
         return
 
-    return ty_version
+        return ty_version
+""",
+        """
+def load_config():
+    try:
+        config: dict[str, str] = read_config()
+    except OSError:
+        return None
+
+    try:
+        return config["name"]
+    except KeyError:
+        return None
 """,
     ],
 )
