@@ -42,6 +42,39 @@ def test_check_reports_character_offset_not_byte_offset_before_multibyte_text() 
     assert violations[0].col == 10
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        """
+def is_directory_change(command):
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+
+    try:
+        target = tokens[1]
+    except IndexError:
+        return False
+
+    return target.startswith("/")
+""",
+        """
+def start_daemon():
+    try:
+        ty_version = _ty_version()
+    except OSError as error:
+        print(f"FAILED: {error}", flush=True)
+        return
+
+    return ty_version
+""",
+    ],
+)
+def test_check_does_not_report_assignments_protected_by_try_handlers(source: str) -> None:
+    assert _check(source, level=AggressivenessLevel.PERMISSIVE) == []
+
+
 # ---------------------------------------------------------------------------
 # check(): reports no violations at all
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ class AssignmentInfo:
     has_type_annotation: bool = False
     in_loop: bool = False
     in_control_flow: bool = False
+    in_try: bool = False
     in_global_scope: bool = False
     has_comment_above: bool = False
     has_inline_comment: bool = False
@@ -334,6 +335,8 @@ class VariableTracker(ast.NodeVisitor):
         # if/try/with/match — excludes loops, tracked separately above.
         self.control_flow_depth = 0
 
+        self.try_depth = 0
+
         self.comprehension_depth = 0
 
         # A use inside a lambda body executes later (and possibly
@@ -480,7 +483,9 @@ class VariableTracker(ast.NodeVisitor):
 
     def visit_Try(self, node: ast.Try) -> None:
         self.control_flow_depth += 1
+        self.try_depth += 1
         self.generic_visit(node)
+        self.try_depth -= 1
         self.control_flow_depth -= 1
 
     def visit_With(self, node: ast.With | ast.AsyncWith) -> None:
@@ -613,6 +618,7 @@ class VariableTracker(ast.NodeVisitor):
                     has_type_annotation=False,
                     in_loop=self.loop_depth > 0,
                     in_control_flow=self.control_flow_depth > 0,
+                    in_try=self.try_depth > 0,
                     in_global_scope=(scope_id == 0),
                     has_comment_above=(node.lineno - 1) in self._comment_only_lines,
                     has_inline_comment=node.lineno in self._trailing_comment_lines,
@@ -725,6 +731,7 @@ class VariableTracker(ast.NodeVisitor):
                 has_type_annotation=True,
                 in_loop=self.loop_depth > 0,
                 in_control_flow=self.control_flow_depth > 0,
+                in_try=self.try_depth > 0,
                 in_global_scope=(scope_id == 0),
                 has_comment_above=(node.lineno - 1) in self._comment_only_lines,
                 has_inline_comment=node.lineno in self._trailing_comment_lines,
