@@ -224,6 +224,7 @@ def test_function_defaults_are_visited_in_the_enclosing_try_context() -> None:
 def outer():
     try:
         value = source()
+        @decorate(value)
         def inner(*, required, argument=value):
             return argument
     except ValueError:
@@ -231,7 +232,7 @@ def outer():
 """
     lifecycle = _lifecycle_for(source, "value")
 
-    assert len(lifecycle.uses) == 1
+    assert len(lifecycle.uses) == 2
 
 
 def test_named_expr_rebinding_skipped_for_global_variable() -> None:
