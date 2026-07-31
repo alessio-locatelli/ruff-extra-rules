@@ -551,6 +551,9 @@ def should_report_violation(
     if assignment.in_loop:
         return False
 
+    if assignment.in_try:
+        return False
+
     # Skip if there's a comment right above the assignment (any scope)
     # Comments above variables indicate documentation/explanation intent
     if assignment.has_comment_above:
