@@ -57,7 +57,7 @@ Each decision was correct within its own audit's scope: #33 predates #43 and del
 
 Reproduced against the current code: with `src/tracked.py` staged (`data = 1`) and `src/untracked.py` not staged (`result = 2`) in a fresh git repository —
 
-```
+```bash
 $ uv run python -m pre_commit_hooks.ast_checks --select=meaningless-vars src/untracked.py
 src/untracked.py:1:1: TRI001: Meaningless variable name 'result' found. ...
 (exit 1)
