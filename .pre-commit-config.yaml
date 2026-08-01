@@ -130,6 +130,7 @@ repos:
     hooks:
       - id: prettier
         name: Prettier
-        entry: npm run check --
+        entry: npm run format:check --
         language: system
+        pass_filenames: false
         types: [markdown, yaml, json]
