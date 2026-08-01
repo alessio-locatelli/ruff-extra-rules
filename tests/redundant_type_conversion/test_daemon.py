@@ -67,7 +67,7 @@ def _scripted_try_connect(
 class _FakeSession:
     """A `PersistentSession`-conforming stub for `_dispatch`/`_handle_connection` unit tests."""
 
-    __slots__ = ("close_calls", "drained", "hover_delay_seconds", "hover_result", "notified", "raises")
+    __slots__ = ("close_calls", "direct_inputs", "drained", "hover_delay_seconds", "hover_result", "raises")
 
     def __init__(
         self,
@@ -79,7 +79,7 @@ class _FakeSession:
     ) -> None:
         self.hover_result = hover_result
         self.drained = drained or []
-        self.notified: list[Path] = []
+        self.direct_inputs: list[Path] = []
         self.close_calls = 0
         self.raises = raises
         self.hover_delay_seconds = hover_delay_seconds
@@ -97,10 +97,10 @@ class _FakeSession:
     def finalize(self, _filepath: Path, _source: str) -> None:
         return
 
-    def notify_changed_on_disk(self, filepath: Path, _source: str) -> None:
-        self.notified.append(filepath)
+    def record_direct_input(self, filepath: Path, _source: str) -> None:
+        self.direct_inputs.append(filepath)
 
-    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self) -> list[Path]:
         return self.drained
 
     def close(self) -> None:
@@ -141,11 +141,11 @@ def test_ty_version_normalizes_any_failure_to_os_error(monkeypatch: pytest.Monke
         ),
         ({"op": "hover", "filepath": "f.py", "line0": 0, "char_utf16": 0}, {"result": "str"}),
         ({"op": "finalize", "filepath": "f.py", "source": "x"}, {"result": None}),
-        ({"op": "notify_changed_on_disk", "filepath": "f.py", "source": "x"}, {"result": None}),
-        ({"op": "drain_cross_file_candidates", "exclude": []}, {"result": []}),
+        ({"op": "record_direct_input", "filepath": "f.py", "source": "x"}, {"result": None}),
+        ({"op": "reconcile_direct_inputs"}, {"result": []}),
         ({"op": "bogus"}, {"error": "unknown op: 'bogus'"}),
     ],
-    ids=["open_or_update", "hover", "finalize", "notify_changed_on_disk", "drain_cross_file_candidates", "unknown-op"],
+    ids=["open_or_update", "hover", "finalize", "record_direct_input", "reconcile_direct_inputs", "unknown-op"],
 )
 def test_dispatch_routes_known_ops(message: dict[str, Any], expected: dict[str, Any]) -> None:
     session = _FakeSession(hover_result="str")
@@ -250,7 +250,7 @@ def test_handle_connection_serves_a_real_round_trip_over_a_background_thread() -
             assert handshake_response == {"result": "ok"}
 
             assert client.hover(Path("f.py"), 0, 0) == "int"
-            assert client.drain_cross_file_candidates([]) == []
+            assert client.reconcile_direct_inputs() == []
             client._call("shutdown")
     finally:
         server_thread.join(timeout=5)
@@ -778,7 +778,7 @@ def test_remote_session_canonicalizes_file_paths_for_daemon_requests(
 
     def call(_self: RemoteTySession, op: str, **params: str | int | list[str]) -> list[object] | None:
         calls.append((op, params))
-        if op in {"open_or_update", "drain_cross_file_candidates"}:
+        if op in {"open_or_update", "reconcile_direct_inputs"}:
             return []
         return None
 
@@ -790,12 +790,12 @@ def test_remote_session_canonicalizes_file_paths_for_daemon_requests(
     assert session.open_or_update(relative_path, "x = 1\n") == frozenset()
     assert session.hover(relative_path, 0, 0) is None
     session.finalize(relative_path, "x = 1\n")
-    session.notify_changed_on_disk(relative_path, "x = 1\n")
-    assert session.drain_cross_file_candidates([relative_path]) == []
+    session.record_direct_input(relative_path, "x = 1\n")
+    assert session.reconcile_direct_inputs() == []
 
     canonical_path = str(filepath.resolve())
     assert [params.get("filepath") for _op, params in calls[:-1]] == [canonical_path] * 4
-    assert calls[-1] == ("drain_cross_file_candidates", {"exclude": [canonical_path]})
+    assert calls[-1] == ("reconcile_direct_inputs", {})
 
 
 def test_try_connect_raises_version_mismatch_on_a_handshake_error_response(tmp_path: Path) -> None:
@@ -1286,9 +1286,12 @@ def test_spawn_daemon_raises_os_error_on_an_unexpected_startup_line(
         _spawn_daemon(tmp_path)
 
 
-def test_self_test_passes_with_the_real_installed_ty() -> None:
-    # Deliberately unmocked: a failed self-test raises CheckUnavailableError, failing this test on its own.
-    daemon_module._self_test()
+def test_self_test_passes_with_the_real_installed_ty(tmp_path: Path) -> None:
+    session = session_module.TySession(root=tmp_path, keep_open=True)
+    try:
+        daemon_module._self_test(session, tmp_path)
+    finally:
+        session.close()
 
 
 def test_serve_binds_prints_ready_and_exits_on_idle_timeout(
@@ -1320,7 +1323,7 @@ def test_serve_prints_failed_when_ty_version_raises(
 def test_serve_prints_failed_when_the_session_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(daemon_module, "_self_test", lambda: None)
+    monkeypatch.setattr(daemon_module, "_self_test", lambda *_args: None)
     monkeypatch.setattr(daemon_module, "TySession", Mock(side_effect=CheckUnavailableError("simulated: ty not found")))
 
     daemon_module._serve(tmp_path)
@@ -1335,7 +1338,7 @@ def test_serve_prints_failed_when_the_self_test_raises(
     monkeypatch.setattr(
         daemon_module,
         "_self_test",
-        lambda: (_ for _ in ()).throw(CheckUnavailableError("simulated self-test failure")),
+        lambda *_args: (_ for _ in ()).throw(CheckUnavailableError("simulated self-test failure")),
     )
 
     daemon_module._serve(tmp_path)
@@ -1460,9 +1463,10 @@ class TestRealDaemonEndToEnd:
         second_check = RedundantTypeConversionCheck(level=ConfidenceLevel.PERMISSIVE)
         callee_source = callee.read_text()
         assert second_check.check(callee, ast.parse(callee_source), callee_source) == []
+        second_check.record_direct_input(callee, callee_source)
 
         third_check = RedundantTypeConversionCheck(level=ConfidenceLevel.PERMISSIVE)
-        extra_files = third_check.drain_cross_file_candidates([callee])
+        extra_files = third_check.reconcile_direct_inputs([callee])
         assert caller.resolve() in extra_files
 
         redundant_now = third_check.check(caller, ast.parse(caller_source), caller_source)

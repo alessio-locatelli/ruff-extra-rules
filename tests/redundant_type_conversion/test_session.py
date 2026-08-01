@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 import threading
-import time
 import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -19,8 +18,8 @@ from pre_commit_hooks.ast_checks.redundant_type_conversion.session import (
     _run_self_test,
     _spawn,
     get_session,
-    notify_disk_change_if_session_active,
     peek_session,
+    record_direct_input_if_session_active,
 )
 
 from ._helpers import FakeSession
@@ -179,6 +178,9 @@ def test_spawn_raises_check_unavailable_error_when_initialize_fails(
         def close(self) -> None:
             return
 
+        def close_file(self, _filepath: Path) -> None:
+            return
+
     monkeypatch.setattr(session_module, "LSPClient", _BrokenClient)
     with pytest.raises(CheckUnavailableError, match="requires Astral's `ty`"):
         _spawn(tmp_path)
@@ -194,6 +196,9 @@ def test_get_session_returns_the_same_instance_across_calls(monkeypatch: pytest.
         def close(self) -> None:
             return
 
+        def close_file(self, _filepath: Path) -> None:
+            return
+
     def _raise_os_error(_root: Path) -> None:
         msg = "simulated: no daemon reachable"
         raise OSError(msg)
@@ -203,22 +208,17 @@ def test_get_session_returns_the_same_instance_across_calls(monkeypatch: pytest.
     monkeypatch.setattr(session_module, "TySession", _FakeTySession)
 
     assert get_session() is get_session()
-    # Exactly two TySession constructions total, both from the *first*
-    # get_session() call: one throwaway scratch session for the self-test,
-    # one long-lived real session handed back to callers. The second
-    # get_session() call must construct neither -- that's the whole point
-    # of the singleton.
-    assert sentinel_calls == [1, 1]
+    assert sentinel_calls == [1]
 
 
 class _FakeNotifiableSession:
-    __slots__ = ("notified",)
+    __slots__ = ("direct_inputs",)
 
     def __init__(self) -> None:
-        self.notified: list[tuple[Path, str]] = []
+        self.direct_inputs: list[tuple[Path, str]] = []
 
-    def notify_changed_on_disk(self, filepath: Path, source: str) -> None:
-        self.notified.append((filepath, source))
+    def record_direct_input(self, filepath: Path, source: str) -> None:
+        self.direct_inputs.append((filepath, source))
 
     def close(self) -> None:
         return
@@ -233,17 +233,17 @@ def test_peek_session_returns_the_active_session() -> None:
     assert peek_session() is session_module._session
 
 
-def test_notify_disk_change_if_session_active_uses_the_existing_session(tmp_path: Path) -> None:
+def test_record_direct_input_if_session_active_uses_the_existing_session(tmp_path: Path) -> None:
     fake = _FakeNotifiableSession()
     session_module._session = fake  # type: ignore[assignment]
     filepath = tmp_path / "callee.py"
 
-    notify_disk_change_if_session_active(filepath, "source\n")
+    record_direct_input_if_session_active(filepath, "source\n")
 
-    assert fake.notified == [(filepath, "source\n")]
+    assert fake.direct_inputs == [(filepath, "source\n")]
 
 
-def test_notify_disk_change_if_session_active_promotes_a_probed_daemon(
+def test_record_direct_input_if_session_active_promotes_a_probed_daemon(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake = _FakeNotifiableSession()
@@ -254,24 +254,24 @@ def test_notify_disk_change_if_session_active_promotes_a_probed_daemon(
     )
     filepath = tmp_path / "callee.py"
 
-    notify_disk_change_if_session_active(filepath, "source\n")
+    record_direct_input_if_session_active(filepath, "source\n")
 
     # fake having recorded the notification is itself proof it became the active session --
     # comparing identity directly against a `_FakeNotifiableSession` (not a full `PersistentSession`)
     # is a mypy non-overlapping-identity error, not just redundant.
-    assert fake.notified == [(filepath, "source\n")]
+    assert fake.direct_inputs == [(filepath, "source\n")]
     fake.close()  # atexit.register(_session.close) only stores the reference; this proves it's callable
 
 
-def test_notify_disk_change_if_session_active_is_a_no_op_when_no_daemon_is_reachable(
+def test_record_direct_input_if_session_active_is_a_no_op_when_no_daemon_is_reachable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(daemon_module, "probe_existing", lambda _root: daemon_module.ExistingDaemonProbe(None))
 
-    notify_disk_change_if_session_active(tmp_path / "callee.py", "source\n")  # must not raise
+    record_direct_input_if_session_active(tmp_path / "callee.py", "source\n")
 
 
-def test_notify_disk_change_if_session_active_retries_a_transient_probe_after_backoff(
+def test_record_direct_input_if_session_active_retries_a_transient_probe_after_backoff(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     probe_calls: list[Path] = []
@@ -287,16 +287,16 @@ def test_notify_disk_change_if_session_active_retries_a_transient_probe_after_ba
     monkeypatch.setattr(daemon_module, "probe_existing", _probe)
     monkeypatch.setattr(session_module.time, "monotonic", lambda: now)
 
-    notify_disk_change_if_session_active(tmp_path / "first.py", "source\n")
-    notify_disk_change_if_session_active(tmp_path / "second.py", "source\n")
+    record_direct_input_if_session_active(tmp_path / "first.py", "source\n")
+    record_direct_input_if_session_active(tmp_path / "second.py", "source\n")
     now = session_module._DAEMON_PROBE_RETRY_INTERVAL_SECONDS
-    notify_disk_change_if_session_active(tmp_path / "third.py", "source\n")
+    record_direct_input_if_session_active(tmp_path / "third.py", "source\n")
 
     assert len(probe_calls) == 2
-    assert fake.notified == [(tmp_path / "third.py", "source\n")]
+    assert fake.direct_inputs == [(tmp_path / "third.py", "source\n")]
 
 
-def test_notify_disk_change_if_session_active_memoizes_a_terminal_probe_failure(
+def test_record_direct_input_if_session_active_memoizes_a_terminal_probe_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     probe_calls: list[Path] = []
@@ -307,8 +307,8 @@ def test_notify_disk_change_if_session_active_memoizes_a_terminal_probe_failure(
 
     monkeypatch.setattr(daemon_module, "probe_existing", _probe)
 
-    notify_disk_change_if_session_active(tmp_path / "first.py", "source\n")
-    notify_disk_change_if_session_active(tmp_path / "second.py", "source\n")
+    record_direct_input_if_session_active(tmp_path / "first.py", "source\n")
+    record_direct_input_if_session_active(tmp_path / "second.py", "source\n")
 
     assert len(probe_calls) == 1
 
@@ -321,12 +321,13 @@ class _StubLSPClient:
     `TySession` drives).
     """
 
-    __slots__ = ("hover_raises", "hover_result", "notify_calls", "notify_raises")
+    __slots__ = ("hover_raises", "hover_result", "notify_calls", "notify_hook", "notify_raises")
 
     def __init__(self, *, hover_result: object = None, hover_raises: bool = False, notify_raises: bool = False) -> None:
         self.hover_result = hover_result
         self.hover_raises = hover_raises
         self.notify_raises = notify_raises
+        self.notify_hook: Any = None
         self.notify_calls: list[tuple[str, dict[str, object]]] = []
 
     def request(self, _method: str, _params: dict[str, object], *, timeout: float = 10.0) -> object:  # noqa: ARG002
@@ -340,6 +341,8 @@ class _StubLSPClient:
             msg = "simulated notify failure"
             raise LSPError(msg)
         self.notify_calls.append((method, params))
+        if self.notify_hook is not None:
+            self.notify_hook(method, params)
 
 
 def _session_with_stub_client(
@@ -348,10 +351,12 @@ def _session_with_stub_client(
     session = TySession.__new__(TySession)
     session._root = (root or Path.cwd()).resolve()
     session._client = client  # type: ignore[assignment]
+    session._direct_input_digests = {}
     session._open_versions = {}
     session._dirty_uris = set()
     session._dirty_uris_lock = threading.Lock()
     session._keep_open = keep_open
+    session._last_reconciled_digests = {}
     return session
 
 
@@ -481,77 +486,70 @@ def test_close_file_forgets_the_file_even_when_the_didclose_notification_fails(t
     assert uri not in session._open_versions
 
 
-def test_notify_changed_on_disk_is_a_no_op_for_a_file_outside_root(tmp_path: Path) -> None:
-    # A stray CLI invocation naming a path elsewhere on disk must never involve `ty` at all here -- this
-    # session's own cross-file awareness is scoped to its own root (ADR-0041), and reaching outside it
-    # would only be work spent on a file this session was never meant to track in the first place.
+def test_record_direct_input_ignores_a_file_outside_root(tmp_path: Path) -> None:
     client = _StubLSPClient()
-    session = _session_with_stub_client(client, root=tmp_path / "repo")
+    session = _session_with_stub_client(client, keep_open=True, root=tmp_path / "repo")
     outside_root = tmp_path / "elsewhere.py"
 
-    session.notify_changed_on_disk(outside_root, "pristine source\n")
+    session.record_direct_input(outside_root, "pristine source\n")
 
+    assert session._direct_input_digests == {}
     assert client.notify_calls == []
 
 
-def test_notify_changed_on_disk_sends_did_change_watched_files(tmp_path: Path) -> None:
+def test_reconcile_direct_inputs_batches_changed_files_and_returns_dirty_open_files(tmp_path: Path) -> None:
     client = _StubLSPClient()
-    session = _session_with_stub_client(client, root=tmp_path)
-    filepath = tmp_path / "callee.py"
+    session = _session_with_stub_client(client, keep_open=True, root=tmp_path)
+    first = tmp_path / "first.py"
+    second = tmp_path / "second.py"
+    caller = tmp_path / "caller.py"
+    caller_uri = caller.resolve().as_uri()
+    session._open_versions[caller_uri] = 1
 
-    session.notify_changed_on_disk(filepath, "pristine source\n")
+    def record_diagnostics(method: str, _params: dict[str, object]) -> None:
+        if method == "workspace/didChangeWatchedFiles":
+            session._on_notification("textDocument/publishDiagnostics", {"uri": caller_uri})
 
-    # Not already tracked, so no resync; nothing else tracked either, so no barrier pull.
-    assert client.notify_calls == [
-        ("workspace/didChangeWatchedFiles", {"changes": [{"uri": filepath.resolve().as_uri(), "type": 2}]})
-    ]
+    client.notify_hook = record_diagnostics
+    session.record_direct_input(second, "second\n")
+    session.record_direct_input(first, "first\n")
 
-
-def test_notify_changed_on_disk_resyncs_and_barrier_pulls_when_already_tracked(tmp_path: Path) -> None:
-    client = _StubLSPClient(hover_result={"items": []})
-    session = _session_with_stub_client(client, root=tmp_path)
-    filepath = tmp_path / "callee.py"
-    uri = filepath.resolve().as_uri()
-    session._open_versions[uri] = 1
-
-    session.notify_changed_on_disk(filepath, "pristine source\n")
+    assert session.reconcile_direct_inputs() == [caller.resolve()]
 
     assert client.notify_calls == [
         (
-            "textDocument/didChange",
-            {"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": "pristine source\n"}]},
-        ),
-        ("workspace/didChangeWatchedFiles", {"changes": [{"uri": uri, "type": 2}]}),
+            "workspace/didChangeWatchedFiles",
+            {
+                "changes": [
+                    {"uri": first.resolve().as_uri(), "type": 2},
+                    {"uri": second.resolve().as_uri(), "type": 2},
+                ]
+            },
+        )
     ]
 
 
-def test_notify_changed_on_disk_never_raises_when_the_server_fails(tmp_path: Path) -> None:
-    client = _StubLSPClient(notify_raises=True)
-    session = _session_with_stub_client(client, root=tmp_path)
-
-    session.notify_changed_on_disk(tmp_path / "callee.py", "pristine source\n")  # must not raise
-
-
-def test_notify_changed_on_disk_never_raises_when_the_resync_fails(tmp_path: Path) -> None:
-    client = _StubLSPClient(notify_raises=True)
-    session = _session_with_stub_client(client, root=tmp_path)
+def test_reconcile_direct_inputs_skips_unchanged_content(tmp_path: Path) -> None:
+    client = _StubLSPClient(hover_result={"items": []})
+    session = _session_with_stub_client(client, keep_open=True, root=tmp_path)
     filepath = tmp_path / "callee.py"
-    session._open_versions[filepath.resolve().as_uri()] = 1
+    session.record_direct_input(filepath, "source\n")
+    assert session.reconcile_direct_inputs() == []
+    session.record_direct_input(filepath, "source\n")
+    assert session.reconcile_direct_inputs() == []
 
-    session.notify_changed_on_disk(filepath, "pristine source\n")  # must not raise
+    assert len(client.notify_calls) == 1
 
 
-def test_notify_changed_on_disk_swallows_a_failed_barrier_pull(tmp_path: Path) -> None:
-    # filepath itself is deliberately not already tracked, so notify_changed_on_disk skips straight to
-    # didChangeWatchedFiles (a notify, unaffected by hover_raises) and then the barrier pull (a request,
-    # which hover_raises does affect) against the one other file that is already tracked.
-    client = _StubLSPClient(hover_raises=True)
-    session = _session_with_stub_client(client, root=tmp_path)
-    already_tracked = tmp_path / "other.py"
-    session._open_versions[already_tracked.resolve().as_uri()] = 1
+def test_reconcile_direct_inputs_retains_failed_notifications_for_retry(tmp_path: Path) -> None:
+    client = _StubLSPClient(notify_raises=True)
+    session = _session_with_stub_client(client, keep_open=True, root=tmp_path)
     filepath = tmp_path / "callee.py"
 
-    session.notify_changed_on_disk(filepath, "pristine source\n")  # must not raise
+    session.record_direct_input(filepath, "source\n")
+
+    assert session.reconcile_direct_inputs() == []
+    assert filepath.resolve().as_uri() in session._direct_input_digests
 
 
 def test_finalize_discards_when_not_persistent(tmp_path: Path) -> None:
@@ -570,7 +568,7 @@ def test_finalize_discards_when_not_persistent(tmp_path: Path) -> None:
 def test_finalize_discards_a_file_outside_root_even_when_persistent(tmp_path: Path) -> None:
     # A daemon (keep_open=True) must never adopt a file outside its own root into its own persistent
     # state (ADR-0041) -- treated exactly like a non-persistent session instead: closed, not kept open,
-    # so it can never resurface via drain_cross_file_candidates() in some later, unrelated run.
+    # so it can never resurface in some later, unrelated run.
     client = _StubLSPClient()
     session = _session_with_stub_client(client, keep_open=True, root=tmp_path / "repo")
     outside_root = tmp_path / "elsewhere.py"
@@ -598,7 +596,6 @@ def test_finalize_resyncs_and_keeps_open_when_persistent(tmp_path: Path) -> None
             "textDocument/didChange",
             {"textDocument": {"uri": uri, "version": 2}, "contentChanges": [{"text": "pristine source\n"}]},
         ),
-        ("workspace/didChangeWatchedFiles", {"changes": [{"uri": uri, "type": 2}]}),
     ]
 
 
@@ -640,83 +637,25 @@ def test_on_notification_ignores_an_unrelated_method() -> None:
     assert session._dirty_uris == set()
 
 
-def test_drain_cross_file_candidates_excludes_given_paths_and_requires_the_file_still_tracked(
-    tmp_path: Path,
-) -> None:
-    session = _session_with_stub_client(_StubLSPClient(), keep_open=True)
-    still_open = tmp_path / "caller.py"
-    already_given = tmp_path / "callee.py"
-    no_longer_tracked = tmp_path / "closed.py"
-    session._open_versions[still_open.resolve().as_uri()] = 1
-    session._open_versions[already_given.resolve().as_uri()] = 1
-    session._dirty_uris = {
-        still_open.resolve().as_uri(),
-        already_given.resolve().as_uri(),
-        no_longer_tracked.resolve().as_uri(),
-    }
-
-    drained = session.drain_cross_file_candidates([already_given])
-
-    assert drained == [still_open.resolve()]
-    assert session._dirty_uris == set()  # drained -- a second call returns nothing new
-
-
-def test_drain_cross_file_candidates_is_empty_when_nothing_is_dirty() -> None:
-    session = _session_with_stub_client(_StubLSPClient(), keep_open=True)
-
-    assert session.drain_cross_file_candidates([]) == []
-
-
-def test_drain_cross_file_candidates_serializes_against_a_concurrent_notification() -> None:
-    # _on_notification() runs on LSPClient's own background reader thread while
-    # drain_cross_file_candidates() runs on the caller's thread; without _dirty_uris_lock serializing the
-    # two, a notification landing between the read and the clear() could be wiped without ever being
-    # returned, silently dropping a cross-file reanalysis candidate. Forces the interleaving deterministically
-    # (a real race's timing can't be relied on to reproduce it) via a set subclass whose own clear() pauses
-    # mid-call, standing in for the exact window between the read and the real clear().
+def test_reconcile_direct_inputs_returns_only_open_dirty_files(tmp_path: Path) -> None:
     client = _StubLSPClient()
-    session = _session_with_stub_client(client, keep_open=True)
-    early_uri = "file:///early.py"
-    late_uri = "file:///late.py"
-    session._open_versions[early_uri] = 1
-    session._open_versions[late_uri] = 1
+    session = _session_with_stub_client(client, keep_open=True, root=tmp_path)
+    direct = tmp_path / "direct.py"
+    still_open = tmp_path / "caller.py"
+    no_longer_open = tmp_path / "closed.py"
+    still_open_uri = still_open.resolve().as_uri()
+    session._open_versions[still_open_uri] = 1
 
-    entered_critical_section = threading.Event()
-    release_critical_section = threading.Event()
+    def record_diagnostics(method: str, _params: dict[str, object]) -> None:
+        if method == "workspace/didChangeWatchedFiles":
+            session._on_notification("textDocument/publishDiagnostics", {"uri": still_open_uri})
+            session._on_notification("textDocument/publishDiagnostics", {"uri": no_longer_open.resolve().as_uri()})
 
-    class _SlowClearSet(set[str]):
-        def clear(self) -> None:
-            entered_critical_section.set()
-            release_critical_section.wait(timeout=5)
-            super().clear()
+    client.notify_hook = record_diagnostics
+    session.record_direct_input(direct, "source\n")
 
-    session._dirty_uris = _SlowClearSet({early_uri})
-
-    drained: list[Path] = []
-    drain_thread = threading.Thread(target=lambda: drained.extend(session.drain_cross_file_candidates([])))
-    drain_thread.start()
-    assert entered_critical_section.wait(timeout=5)  # now inside the locked section, mid-clear()
-
-    # Attempts to add a notification while drain is mid-critical-section -- must block on the same lock
-    # rather than interleaving with the read-then-clear, or this add would be silently wiped by clear().
-    notify_thread = threading.Thread(
-        target=session._on_notification, args=("textDocument/publishDiagnostics", {"uri": late_uri})
-    )
-    notify_thread.start()
-    time.sleep(0.05)  # gives the notifier every chance to (wrongly) interleave, if it weren't locked out
-    assert notify_thread.is_alive()  # correctly blocked on _dirty_uris_lock, not lost
-
-    release_critical_section.set()
-    drain_thread.join(timeout=5)
-    notify_thread.join(timeout=5)
-
-    assert not drain_thread.is_alive()
-    assert not notify_thread.is_alive()
-    assert {path.as_uri() for path in drained} == {early_uri}  # late_uri arrived after this drain -- not in it
-    assert session._dirty_uris == {late_uri}  # ...but wasn't lost either, still there for the next drain
-
-    drained_next = session.drain_cross_file_candidates([])
-    assert {path.as_uri() for path in drained_next} == {late_uri}
+    assert session.reconcile_direct_inputs() == [still_open.resolve()]
+    assert session._dirty_uris == set()
 
 
 @pytest.mark.parametrize("keep_open", [True, False], ids=["keep-open", "not-keep-open"])

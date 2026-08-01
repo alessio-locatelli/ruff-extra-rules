@@ -13,7 +13,7 @@ from pre_commit_hooks.ast_checks._base import BaseCheck, Violation, find_ignored
 from .analysis import RedundantConversion, decide_candidates
 from .candidates import find_candidates
 from .confidence import ConfidenceLevel, eligible_constructors, is_exact_match
-from .session import get_session, notify_disk_change_if_session_active, peek_session
+from .session import get_session, peek_session, record_direct_input_if_session_active
 
 if TYPE_CHECKING:
     import argparse
@@ -70,7 +70,7 @@ class RedundantTypeConversionCheck(BaseCheck):
         # Widens to "check every file" once a persistent daemon might already be running (ADR-0041): a
         # file can be a dependency of an already-tracked one without having any redundant-conversion
         # candidate of its own -- the narrow, candidate-name-based prefilter below would otherwise skip
-        # that file (and so its check(), and so notify_disk_change_if_session_active()) entirely, silently
+        # that file and its direct-input lifecycle entirely, silently
         # reopening the exact cross-file gap this decision exists to close.
         #
         # Function-local: a module-level import here would make `daemon.py`
@@ -105,23 +105,12 @@ class RedundantTypeConversionCheck(BaseCheck):
         return {"level": ConfidenceLevel[args.redundant_type_conversion_level.upper()]}
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
-        # A prefilter match doesn't guarantee a real candidate: computed
-        # before ever tokenizing `source` for ignored_lines (let alone
-        # calling get_session(), which starts `ty` on this process's first
-        # call) so a file with no syntactic candidates at all never pays
-        # for either. It still needs notify_disk_change_if_session_active()
-        # below: a pure signature change (this check's own cross-file
-        # headline case, ADR-0041) has no candidate of its own, so this is
-        # the only place such a file's change ever reaches an already-alive
-        # session -- but it must never itself spawn one.
         candidates = find_candidates(tree, eligible_constructors(self._level))
         if not candidates:
-            notify_disk_change_if_session_active(filepath, source)
             return []
 
         ignored_lines = find_ignored_lines(source, IGNORE_PATTERN, THIRD_PARTY_IGNORE_PATTERN)
         if not any(candidate.line not in ignored_lines for candidate in candidates):
-            notify_disk_change_if_session_active(filepath, source)
             return []
 
         redundant = decide_candidates(
@@ -140,6 +129,9 @@ class RedundantTypeConversionCheck(BaseCheck):
             for item in redundant
         ]
 
+    def record_direct_input(self, filepath: Path, source: str) -> None:
+        record_direct_input_if_session_active(filepath, source)
+
     def fix(
         self,
         _filepath: Path,
@@ -150,11 +142,8 @@ class RedundantTypeConversionCheck(BaseCheck):
     ) -> bool:
         return False
 
-    def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
-        """See ADR-0041. Peeks rather than calling `get_session()`: a run with no real candidate anywhere
-        never created a session at all, and must not spawn one, or a daemon, just to ask it this.
-        """
+    def reconcile_direct_inputs(self, _direct_inputs: list[Path]) -> list[Path]:
         session = peek_session()
         if session is None:
             return []
-        return session.drain_cross_file_candidates(already_processed)
+        return session.reconcile_direct_inputs()
