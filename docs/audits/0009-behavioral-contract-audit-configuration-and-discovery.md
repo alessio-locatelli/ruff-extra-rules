@@ -23,6 +23,6 @@ Most items were already satisfied: `--select`/`--ignore` are validated against t
 
 ## Consequences
 
-- `_cli.py`'s `--select`/`--ignore` parsing now filters blank comma-separated tokens, matching `--exclude`'s pre-existing behavior; a value that resolves to no real check now reports `Error: No checks enabled` instead of a blank `Error: Unknown checks:`.
+- `_cli.py`'s `--select`/`--ignore` parsing now filters blank comma-separated tokens, matching `--exclude`'s pre-existing behavior. After filtering, `--select` values containing only blank tokens, such as `--select=,,,`, produce `Error: No checks enabled`; an empty `--ignore` keeps all checks enabled, while non-blank unknown identifiers retain the flag-specific `Error: Unknown checks in --select: X` or `Error: Unknown checks in --ignore: X` error.
 - Both "unknown check" error paths are now one loop over `(flag_name, check_ids)` instead of two near-duplicate `if` blocks, and the printed message now names `--select`/`--ignore` explicitly.
 - README's `## Configuration` section gains a "Cache Location" note stating that `.cache/pre_commit_hooks/` is resolved relative to the process's cwd, not an independently discovered project root, and that `prek`/`pre-commit` already guarantee the one location that matters (the repository root) for the hook's own supported entry point.
