@@ -1,0 +1,6 @@
+{
+  "globs": ["docs/**/*.md", "README.md", "AGENTS.md"],
+  "config": {
+    "line-length": false,
+  },
+}
