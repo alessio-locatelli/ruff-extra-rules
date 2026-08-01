@@ -60,7 +60,9 @@ _CONNECT_TIMEOUT_SECONDS = 5.0
 _IDLE_TIMEOUT_SECONDS = 15 * 60
 _CLIENT_REQUEST_TIMEOUT_SECONDS = 60.0
 _STEADY_STATE_CALL_TIMEOUT_SECONDS = 60.0  # comfortably above the daemon's own ~20s internal ty-request budget
-_PROTOCOL_VERSION = "2"
+_PROTOCOL_VERSION = "4"
+
+type RPCParameter = str | int | list[str] | list[tuple[str, int, int, str]]
 
 
 class _VersionMismatchError(Exception):
@@ -198,7 +200,7 @@ class RemoteTySession:
         self._rfile = sock.makefile("rb")
         self._wfile = sock.makefile("wb")
 
-    def _call(self, op: str, **params: str | int | list[str]) -> list[Any] | str | None:
+    def _call(self, op: str, **params: RPCParameter) -> list[Any] | str | None:
         try:
             write_framed_message(self._wfile, {"op": op, **params})
             response = read_framed_message(self._rfile)
@@ -242,6 +244,29 @@ class RemoteTySession:
             # lost daemon connection here was already reported by an
             # earlier call in the same candidate loop.
             self._call("finalize", filepath=_canonical_rpc_path(filepath), source=source)
+
+    def cached_redundancies(
+        self, filepath: Path, source: str, cache_key: str
+    ) -> list[tuple[str, int, int, str]] | None:
+        cached = self._call(
+            "cached_redundancies", filepath=_canonical_rpc_path(filepath), source=source, cache_key=cache_key
+        )
+        if cached is None:
+            return None
+        assert isinstance(cached, list)
+        return [tuple(item) for item in cached]
+
+    def cache_redundancies(
+        self, filepath: Path, source: str, cache_key: str, redundancies: list[tuple[str, int, int, str]]
+    ) -> None:
+        with contextlib.suppress(LSPError):
+            self._call(
+                "cache_redundancies",
+                filepath=_canonical_rpc_path(filepath),
+                source=source,
+                cache_key=cache_key,
+                redundancies=redundancies,
+            )
 
     def record_direct_input(self, filepath: Path, source: str) -> None:
         with contextlib.suppress(LSPError):
@@ -601,6 +626,14 @@ def _dispatch(message: dict[str, Any], session: PersistentSession) -> dict[str, 
             return {"result": hover_text}
         if op == "finalize":
             session.finalize(Path(message["filepath"]), message["source"])
+            return {"result": None}
+        if op == "cached_redundancies":
+            cached = session.cached_redundancies(Path(message["filepath"]), message["source"], message["cache_key"])
+            return {"result": cached}
+        if op == "cache_redundancies":
+            session.cache_redundancies(
+                Path(message["filepath"]), message["source"], message["cache_key"], message["redundancies"]
+            )
             return {"result": None}
         if op == "record_direct_input":
             session.record_direct_input(Path(message["filepath"]), message["source"])

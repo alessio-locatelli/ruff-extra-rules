@@ -178,9 +178,6 @@ def test_spawn_raises_check_unavailable_error_when_initialize_fails(
         def close(self) -> None:
             return
 
-        def close_file(self, _filepath: Path) -> None:
-            return
-
     monkeypatch.setattr(session_module, "LSPClient", _BrokenClient)
     with pytest.raises(CheckUnavailableError, match="requires Astral's `ty`"):
         _spawn(tmp_path)
@@ -207,8 +204,36 @@ def test_get_session_returns_the_same_instance_across_calls(monkeypatch: pytest.
     monkeypatch.setattr(session_module, "_run_self_test", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(session_module, "TySession", _FakeTySession)
 
-    assert get_session() is get_session()
+    session = get_session()
+    assert session is get_session()
+    session.close()
     assert sentinel_calls == [1]
+
+
+def test_local_session_closes_when_its_self_test_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    closed: list[bool] = []
+
+    class _FakeTySession:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def close(self) -> None:
+            closed.append(True)
+
+        def close_file(self, _filepath: Path) -> None:
+            pass
+
+    def fail_self_test(*_args: object, **_kwargs: object) -> None:
+        raise CheckUnavailableError("simulated: self-test failure")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(session_module, "TySession", _FakeTySession)
+    monkeypatch.setattr(session_module, "_run_self_test", fail_self_test)
+
+    with pytest.raises(CheckUnavailableError, match="self-test failure"):
+        session_module._local_session()
+
+    assert closed == [True]
 
 
 class _FakeNotifiableSession:
@@ -351,6 +376,7 @@ def _session_with_stub_client(
     session = TySession.__new__(TySession)
     session._root = (root or Path.cwd()).resolve()
     session._client = client  # type: ignore[assignment]
+    session._cached_redundancies = {}
     session._direct_input_digests = {}
     session._open_versions = {}
     session._dirty_uris = set()
@@ -497,6 +523,55 @@ def test_record_direct_input_ignores_a_file_outside_root(tmp_path: Path) -> None
     assert client.notify_calls == []
 
 
+def test_cached_redundancies_require_matching_source_within_a_persistent_root(tmp_path: Path) -> None:
+    session = _session_with_stub_client(_StubLSPClient(), keep_open=True, root=tmp_path)
+    filepath = tmp_path / "module.py"
+    redundancies = [("str", 1, 4, "str")]
+
+    session.cache_redundancies(filepath, "value = str(name)\n", "strict", redundancies)
+
+    assert session.cached_redundancies(filepath, "value = str(name)\n", "strict") == redundancies
+    assert session.cached_redundancies(filepath, "value = str(name)\n", "permissive") is None
+    assert session.cached_redundancies(filepath, "value = str(other)\n", "strict") is None
+
+
+def test_reconcile_direct_inputs_invalidates_dirty_redundancies(tmp_path: Path) -> None:
+    client = _StubLSPClient()
+    session = _session_with_stub_client(client, keep_open=True, root=tmp_path)
+    direct = tmp_path / "direct.py"
+    dependent = tmp_path / "dependent.py"
+    unaffected = tmp_path / "unaffected.py"
+    dependent_uri = dependent.resolve().as_uri()
+    session._open_versions[dependent_uri] = 1
+    session.cache_redundancies(dependent, "value = str(name)\n", "strict", [("str", 1, 8, "str")])
+    session.cache_redundancies(unaffected, "value = str(name)\n", "strict", [("str", 1, 8, "str")])
+
+    def record_diagnostics(method: str, _params: dict[str, object]) -> None:
+        if method == "workspace/didChangeWatchedFiles":
+            session._on_notification("textDocument/publishDiagnostics", {"uri": dependent_uri})
+
+    client.notify_hook = record_diagnostics
+    record_diagnostics("unrelated", {})
+    session.record_direct_input(direct, "source\n")
+
+    assert session.reconcile_direct_inputs() == [dependent.resolve()]
+    assert session.cached_redundancies(dependent, "value = str(name)\n", "strict") is None
+    assert session.cached_redundancies(unaffected, "value = str(name)\n", "strict") is not None
+
+
+def test_reconcile_direct_inputs_is_a_no_op_for_nonpersistent_sessions(tmp_path: Path) -> None:
+    session = _session_with_stub_client(_StubLSPClient(), keep_open=False, root=tmp_path)
+
+    assert session.reconcile_direct_inputs() == []
+
+
+def test_await_ty_catching_up_ignores_a_failed_barrier_pull(tmp_path: Path) -> None:
+    session = _session_with_stub_client(_StubLSPClient(hover_raises=True), keep_open=True, root=tmp_path)
+    session._open_versions[(tmp_path / "opened.py").resolve().as_uri()] = 1
+
+    session._await_ty_catching_up()
+
+
 def test_reconcile_direct_inputs_batches_changed_files_and_returns_dirty_open_files(tmp_path: Path) -> None:
     client = _StubLSPClient()
     session = _session_with_stub_client(client, keep_open=True, root=tmp_path)
@@ -511,6 +586,7 @@ def test_reconcile_direct_inputs_batches_changed_files_and_returns_dirty_open_fi
             session._on_notification("textDocument/publishDiagnostics", {"uri": caller_uri})
 
     client.notify_hook = record_diagnostics
+    record_diagnostics("unrelated", {})
     session.record_direct_input(second, "second\n")
     session.record_direct_input(first, "first\n")
 
@@ -652,6 +728,7 @@ def test_reconcile_direct_inputs_returns_only_open_dirty_files(tmp_path: Path) -
             session._on_notification("textDocument/publishDiagnostics", {"uri": no_longer_open.resolve().as_uri()})
 
     client.notify_hook = record_diagnostics
+    record_diagnostics("unrelated", {})
     session.record_direct_input(direct, "source\n")
 
     assert session.reconcile_direct_inputs() == [still_open.resolve()]

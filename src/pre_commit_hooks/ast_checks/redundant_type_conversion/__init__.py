@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from pre_commit_hooks.ast_checks._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
 
-from .analysis import RedundantConversion, decide_candidates
+from .analysis import decide_candidates
 from .candidates import find_candidates
 from .confidence import ConfidenceLevel, eligible_constructors, is_exact_match
 from .session import get_session, peek_session, record_direct_input_if_session_active
@@ -29,11 +29,10 @@ ERROR_CODE = "TR6"
 CHECK_ID = "redundant-type-conversion"
 
 
-def _format_message(item: RedundantConversion) -> str:
-    constructor = item.candidate.constructor
-    if is_exact_match(item.argument_type, constructor):
+def _format_message(constructor: str, argument_type: str) -> str:
+    if is_exact_match(argument_type, constructor):
         return (
-            f"Redundant `{constructor}(...)` conversion: the argument is already `{item.argument_type}`, so "
+            f"Redundant `{constructor}(...)` conversion: the argument is already `{argument_type}`, so "
             f"wrapping it in `{constructor}()` has no effect. Or add '# pytriage: {ERROR_CODE}' to suppress."
         )
     # Not a real type match -- `ty` just didn't distinguish the two here
@@ -42,7 +41,7 @@ def _format_message(item: RedundantConversion) -> str:
     # false when X (here `item.argument_type`) isn't actually `constructor`.
     return (
         f"Redundant `{constructor}(...)` conversion: `ty` sees no difference with or without this wrap here, "
-        f"though the argument's own type is `{item.argument_type}`, not `{constructor}` -- verify before removing. "
+        f"though the argument's own type is `{argument_type}`, not `{constructor}` -- verify before removing. "
         f"Or add '# pytriage: {ERROR_CODE}' to suppress."
     )
 
@@ -113,20 +112,26 @@ class RedundantTypeConversionCheck(BaseCheck):
         if not any(candidate.line not in ignored_lines for candidate in candidates):
             return []
 
-        redundant = decide_candidates(
-            get_session(), filepath, candidates, source, level=self._level, ignored_lines=ignored_lines
-        )
+        session = get_session()
+        cache_key = self._level.name
+        redundancies = session.cached_redundancies(filepath, source, cache_key)
+        if redundancies is None:
+            redundant = decide_candidates(
+                session, filepath, candidates, source, level=self._level, ignored_lines=ignored_lines
+            )
+            redundancies = [(item.candidate.constructor, item.line, item.col, item.argument_type) for item in redundant]
+            session.cache_redundancies(filepath, source, cache_key, redundancies)
 
         return [
             Violation(
                 check_id=CHECK_ID,
                 error_code=ERROR_CODE,
-                line=item.line,
-                col=item.col,
-                message=_format_message(item),
+                line=line,
+                col=col,
+                message=_format_message(constructor, argument_type),
                 fixable=False,
             )
-            for item in redundant
+            for constructor, line, col, argument_type in redundancies
         ]
 
     def record_direct_input(self, filepath: Path, source: str) -> None:

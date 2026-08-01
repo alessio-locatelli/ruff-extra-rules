@@ -19,6 +19,7 @@ class FakeSession:
     __slots__ = (
         "_diagnostics_by_content",
         "_hover_by_position",
+        "_redundancies_by_content",
         "closed_files",
         "hover_calls",
         "opened_content",
@@ -32,6 +33,7 @@ class FakeSession:
     ) -> None:
         self._diagnostics_by_content = diagnostics_by_content
         self._hover_by_position = hover_by_position
+        self._redundancies_by_content: dict[tuple[str, str], list[tuple[str, int, int, str]]] = {}
         self.opened_content: list[str] = []
         self.hover_calls: list[tuple[int, int]] = []
         self.closed_files: list[Path] = []
@@ -49,3 +51,13 @@ class FakeSession:
 
     def finalize(self, filepath: Path, _source: str) -> None:
         self.closed_files.append(filepath)
+
+    def cached_redundancies(
+        self, _filepath: Path, source: str, cache_key: str
+    ) -> list[tuple[str, int, int, str]] | None:
+        return self._redundancies_by_content.get((source, cache_key))
+
+    def cache_redundancies(
+        self, _filepath: Path, source: str, cache_key: str, redundancies: list[tuple[str, int, int, str]]
+    ) -> None:
+        self._redundancies_by_content[(source, cache_key)] = redundancies
