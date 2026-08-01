@@ -60,6 +60,7 @@ _CONNECT_TIMEOUT_SECONDS = 5.0
 _IDLE_TIMEOUT_SECONDS = 15 * 60
 _CLIENT_REQUEST_TIMEOUT_SECONDS = 60.0
 _STEADY_STATE_CALL_TIMEOUT_SECONDS = 60.0  # comfortably above the daemon's own ~20s internal ty-request budget
+_PROTOCOL_VERSION = "2"
 
 
 class _VersionMismatchError(Exception):
@@ -180,14 +181,15 @@ def _ty_version() -> str:
     return completed_process.stdout.strip()
 
 
+def _daemon_identity() -> str:
+    return f"{_ty_version()}|tri006-protocol-{_PROTOCOL_VERSION}"
+
+
 # ---- client side ----
 
 
 class RemoteTySession:
-    """Talks to a `daemon` process over its Unix socket, implementing the same surface `TySession` does for
-    `analysis.decide_candidates()`, plus `drain_cross_file_candidates()` -- meaningful here specifically
-    because the daemon's own session was constructed with `keep_open=True`.
-    """
+    """Talks to a `daemon` process over its Unix socket."""
 
     __slots__ = ("_rfile", "_sock", "_wfile")
 
@@ -241,19 +243,12 @@ class RemoteTySession:
             # earlier call in the same candidate loop.
             self._call("finalize", filepath=_canonical_rpc_path(filepath), source=source)
 
-    def notify_changed_on_disk(self, filepath: Path, source: str) -> None:
+    def record_direct_input(self, filepath: Path, source: str) -> None:
         with contextlib.suppress(LSPError):
-            # Mirrors TySession.notify_changed_on_disk()'s own "never
-            # raises" contract -- called from the candidate-less fast path
-            # (session.notify_disk_change_if_session_active()), which must
-            # not fail a file's whole check over a daemon-connectivity hiccup.
-            self._call("notify_changed_on_disk", filepath=_canonical_rpc_path(filepath), source=source)
+            self._call("record_direct_input", filepath=_canonical_rpc_path(filepath), source=source)
 
-    def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
-        raw_paths = self._call(
-            "drain_cross_file_candidates",
-            exclude=[_canonical_rpc_path(path) for path in already_processed],
-        )
+    def reconcile_direct_inputs(self) -> list[Path]:
+        raw_paths = self._call("reconcile_direct_inputs")
         assert isinstance(raw_paths, list)
         return [Path(path) for path in raw_paths]
 
@@ -286,7 +281,7 @@ def connect(root: Path) -> RemoteTySession:
     """
     root = repository_root(root)
     socket_path = _socket_path(root)
-    client_ty_version = _ty_version()
+    client_ty_version = _daemon_identity()
 
     sock, already_confirmed_departing = _try_connect_or_departing(socket_path, client_ty_version)
     if sock is not None:
@@ -377,14 +372,14 @@ def _wait_for_busy_daemon(socket_path: Path, client_ty_version: str) -> tuple[so
 def probe_existing(root: Path) -> ExistingDaemonProbe:
     """Non-spawning: connects only if a daemon is already running and reachable for `root`.
 
-    Used by `session.notify_disk_change_if_session_active()` for the cheap "tell it about a disk change"
-    path -- never spawns one itself, and never raises, since a mere notification about a candidate-less file
+    Used by `session.record_direct_input_if_session_active()` for direct inputs -- never spawns one itself,
+    and never raises, since recording a candidate-less file
     must not fail this check for an unrelated daemon-connectivity reason. Checks `socket_exists_for()` (a
     plain `Path.exists()`) before ever resolving `ty --version`: a repository that has never had a daemon
     must not pay a real subprocess spawn on every single candidate-less file just to learn that, again.
 
     Waits out the same busy-daemon budget `connect()` does (`_wait_for_busy_daemon()`) for a daemon
-    confirmed alive but too busy to answer, rather than treating it as unreachable: `notify_disk_change_
+    confirmed alive but too busy to answer, rather than treating it as unreachable: `record_direct_input_
     if_session_active()` caches whatever this returns for the rest of the run (session.py's own `_session`
     singleton), so giving up here on the first overlapping hook invocation would silently drop a disk-change
     notification for the entire run -- exactly the gap ADR-0041 exists to close.
@@ -393,7 +388,7 @@ def probe_existing(root: Path) -> ExistingDaemonProbe:
     if not _socket_path(root).exists():
         return ExistingDaemonProbe(None)
     try:
-        client_ty_version = _ty_version()
+        client_ty_version = _daemon_identity()
     except OSError:
         return ExistingDaemonProbe(None, terminal_failure=True)
     socket_path = _socket_path(root)
@@ -563,14 +558,14 @@ def _readline_with_timeout(stream: IO[bytes], timeout: float) -> bytes | None:
 # ---- server side ----
 
 
-def _self_test() -> None:
-    with tempfile.TemporaryDirectory(prefix="ruff-extra-rules-tri006-daemon-selftest-") as scratch_dir:
+def _self_test(session: TySession, root: Path) -> None:
+    with tempfile.TemporaryDirectory(dir=root, prefix=".ruff-extra-rules-tri006-selftest-") as scratch_dir:
         scratch_root = Path(scratch_dir)
-        self_test_session = TySession(root=scratch_root)
         try:
-            _run_self_test(self_test_session, scratch_root)
+            _run_self_test(session, scratch_root)
         finally:
-            self_test_session.close()
+            session.close_file(scratch_root / "redundant_control.py")
+            session.close_file(scratch_root / "necessary_control.py")
 
 
 def _detach_stdio() -> None:
@@ -607,12 +602,11 @@ def _dispatch(message: dict[str, Any], session: PersistentSession) -> dict[str, 
         if op == "finalize":
             session.finalize(Path(message["filepath"]), message["source"])
             return {"result": None}
-        if op == "notify_changed_on_disk":
-            session.notify_changed_on_disk(Path(message["filepath"]), message["source"])
+        if op == "record_direct_input":
+            session.record_direct_input(Path(message["filepath"]), message["source"])
             return {"result": None}
-        if op == "drain_cross_file_candidates":
-            already_processed = [Path(path) for path in message["exclude"]]
-            drained = session.drain_cross_file_candidates(already_processed)
+        if op == "reconcile_direct_inputs":
+            drained = session.reconcile_direct_inputs()
             return {"result": [str(path) for path in drained]}  # pytriage: TR6 -- Path isn't JSON-serializable
     except LSPError as error:
         return {"error": str(error)}  # pytriage: TR6 -- LSPError isn't JSON-serializable
@@ -771,21 +765,22 @@ def _serve(root: Path) -> None:
         socket_path.unlink()  # a stale socket left behind by a crashed prior daemon
 
     try:
-        ty_version = _ty_version()  # pytriage: TR5 -- kept here so failure hits FAILED: below, not a post-READY crash
+        ty_version = _daemon_identity()  # pytriage: TR5
     except OSError as error:
         print(f"FAILED: {error}", flush=True)
-        return
-
-    try:
-        _self_test()
-    except (OSError, CheckUnavailableError) as error:
-        print(f"FAILED: self-test failed: {error}", flush=True)
         return
 
     try:
         session = TySession(root=root, keep_open=True)
     except (OSError, CheckUnavailableError) as error:
         print(f"FAILED: could not start a ty session for {root}: {error}", flush=True)
+        return
+
+    try:
+        _self_test(session, root)
+    except (OSError, CheckUnavailableError) as error:
+        session.close()
+        print(f"FAILED: self-test failed: {error}", flush=True)
         return
 
     # Claims this repository's daemon identity before ever touching the socket path, not after binding it:

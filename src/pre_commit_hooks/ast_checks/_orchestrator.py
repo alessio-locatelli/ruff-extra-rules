@@ -47,12 +47,6 @@ _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 # Violation objects, which can never share object identity with it.
 type ViolationKey = tuple[int, int, str]  # (line, col, message)
 
-# Bounds ASTCheck.drain_cross_file_candidates()'s own fixed-point loop (ADR-0041): a change can itself
-# ripple further (a.py affecting b.py affecting c.py), so one drain pass isn't always enough, but walking
-# an unbounded dependency chain isn't either -- this catches a short, realistic chain without risking an
-# unbounded per-run cost blowup from a pathological or cyclic one.
-_MAX_CROSS_FILE_DRAIN_ITERATIONS = 5
-
 _FIX_LOCK_TIMEOUT_SECONDS = 30.0
 _FIX_LOCK_POLL_INTERVAL_SECONDS = 0.05
 
@@ -211,12 +205,7 @@ class CheckOrchestrator:
         # _generate_cache_key()) already gates staleness — no separate
         # per-file cache_key needed here.
         all_violations: dict[str, list[Violation]] = {}
-        queued: set[tuple[Path, ASTCheck]] = set()
-        pending: list[tuple[Path, ASTCheck]] = []
-        # Lets a drained file that's also one of this run's own direct inputs report under the same key
-        # it was given here (e.g. a relative path exactly as the caller spelled it), rather than a second,
-        # separately-resolved key -- resolving it the way _collect_cross_file_candidates always does would
-        # otherwise report the same file twice under two different spellings once it's drained (ADR-0041).
+        # Lets a reconciled file that is also a direct input retain the caller's original key.
         resolved_to_key: dict[Path, str] = {}
         for filepath_str in checks_by_file:
             try:
@@ -235,14 +224,7 @@ class CheckOrchestrator:
             elif violations:
                 all_violations[filepath_str] = violations
 
-            # Drained right after this one file, excluding only itself -- not every file this run has
-            # ever touched (ADR-0041): a dependent examined earlier in this same run, before its own
-            # dependency's later change here, must still surface as dirty now instead of being silently
-            # suppressed by a blanket "already an input file" exclusion that a single, whole-run drain
-            # pass at the very end would otherwise apply to it too.
-            self._collect_cross_file_candidates(filepath, queued, pending)
-
-        self._drain_cross_file_candidates(pending, queued, all_violations, resolved_to_key)
+        self._reconcile_direct_inputs(list(resolved_to_key), all_violations, resolved_to_key)
 
         return all_violations
 
@@ -250,80 +232,39 @@ class CheckOrchestrator:
         self._unavailable_check_ids.add(check.check_id)
         self.unavailable_checks.append((check.check_id, str(error)))
 
-    def _collect_cross_file_candidates(
-        self, just_processed: Path, queued: set[tuple[Path, ASTCheck]], pending: list[tuple[Path, ASTCheck]]
+    def _reconcile_direct_inputs(
+        self,
+        direct_inputs: list[Path],
+        all_violations: dict[str, list[Violation]],
+        resolved_to_key: dict[Path, str],
     ) -> None:
-        """Asks each still-available check what it privately knows needs re-examination as a side effect
-        of `just_processed`'s own check() just now (`ASTCheck.drain_cross_file_candidates`, ADR-0041),
-        appending any new one to `pending` (and `queued`, so it's never appended twice). Excludes only
-        `just_processed` itself -- its own routine self-notification from being examined at all, not a
-        genuine cross-file signal about some other file.
-        """
-        try:
-            resolved = just_processed.resolve()
-        except OSError:
-            logger.debug("Could not resolve processed path %s", just_processed, exc_info=True)
-            return
         for check in self.checks:
             if check.check_id in self._unavailable_check_ids:
-                # Already recorded in unavailable_checks -- see
-                # _check_file's own matching guard for why this check
-                # is never worth retrying again this run.
                 continue
             try:
-                extra_files = check.drain_cross_file_candidates([resolved])
+                extra_files = check.reconcile_direct_inputs(direct_inputs)
             except CheckUnavailableError as error:
                 logger.debug("Check %s is unavailable: %s", check.check_id, error, exc_info=True)
                 self._record_unavailable_check(check, error)
                 continue
             except Exception:
-                logger.debug("Check %s failed to drain cross-file candidates", check.check_id, exc_info=True)
-                self.rule_failures.append((str(just_processed), check.check_id))
+                logger.debug("Check %s failed to reconcile cross-file candidates", check.check_id, exc_info=True)
+                if direct_inputs:
+                    self.rule_failures.append((str(direct_inputs[0]), check.check_id))
                 continue
-            for extra_file in extra_files:
+            for extra_file in sorted(extra_files):
                 try:
                     extra_resolved = extra_file.resolve()
-                except Exception:
-                    logger.debug("Check %s drained an unresolvable path %s", check.check_id, extra_file, exc_info=True)
+                except OSError:
+                    logger.debug("Check %s returned an unresolvable path %s", check.check_id, extra_file, exc_info=True)
                     continue
-                queued_candidate = (extra_resolved, check)
-                if extra_resolved != resolved and queued_candidate not in queued:
-                    queued.add(queued_candidate)
-                    pending.append((extra_resolved, check))
-
-    def _drain_cross_file_candidates(
-        self,
-        pending: list[tuple[Path, ASTCheck]],
-        queued: set[tuple[Path, ASTCheck]],
-        all_violations: dict[str, list[Violation]],
-        resolved_to_key: dict[Path, str],
-    ) -> None:
-        """Re-checks every file `_collect_cross_file_candidates` has queued so far, replacing just that
-        one check's own prior result for the file in `all_violations` — mutated in place, and reported
-        under its original input key if it has one (`resolved_to_key`) rather than a second, resolved-path
-        key — exactly as if pre-commit/prek had passed that file directly. Then drains again after each
-        one (a change can itself ripple further: `a.py` affecting `b.py` affecting `c.py`). Repeats until
-        a fixed point or `_MAX_CROSS_FILE_DRAIN_ITERATIONS`.
-
-        Every check today (`BaseCheck`'s own default) returns `[]` from `drain_cross_file_candidates()`
-        unconditionally, so this is a no-op for a run with no cross-file-aware check enabled — only
-        `redundant-type-conversion` (TR6) implements it as of ADR-0041.
-        """
-        for _ in range(_MAX_CROSS_FILE_DRAIN_ITERATIONS):
-            if not pending:
-                return
-
-            current_batch, pending = pending, []
-            for extra_file, check in current_batch:
-                violations = self._check_file(extra_file, [check])
-                extra_file_str = resolved_to_key.get(extra_file, str(extra_file))
+                violations = self._check_derived_file(extra_resolved, [check])
+                extra_file_str = resolved_to_key.get(extra_resolved, str(extra_resolved))
                 if violations is None:
                     self.unprocessable_files.append(extra_file_str)
                     _replace_check_violations(all_violations, extra_file_str, check.check_id, [])
                 else:
                     _replace_check_violations(all_violations, extra_file_str, check.check_id, violations)
-
-                self._collect_cross_file_candidates(extra_file, queued, pending)
 
     def _process_single_file(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
         """Runs `checks` against a single file, honoring each check's own
@@ -511,8 +452,16 @@ class CheckOrchestrator:
             return None
 
     def _check_file(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
+        return self._check_file_with_lifecycle(filepath, checks, direct=True)
+
+    def _check_derived_file(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
+        return self._check_file_with_lifecycle(filepath, checks, direct=False)
+
+    def _check_file_with_lifecycle(
+        self, filepath: Path, checks: list[ASTCheck], *, direct: bool
+    ) -> list[Violation] | None:
         if not self.fix_mode or not locking_is_available():
-            return self._check_file_locked(filepath, checks)
+            return self._check_file_locked(filepath, checks, direct=direct)
 
         try:
             lock_path = _fix_lock_path(filepath)
@@ -522,7 +471,7 @@ class CheckOrchestrator:
                 timeout_seconds=_FIX_LOCK_TIMEOUT_SECONDS,
                 poll_interval_seconds=_FIX_LOCK_POLL_INTERVAL_SECONDS,
             ):
-                return self._check_file_locked(filepath, checks)
+                return self._check_file_locked(filepath, checks, direct=direct)
         except TimeoutError:
             logger.debug(
                 "Could not acquire the fix lock for %s within %ss -- another process may be fixing it",
@@ -535,7 +484,7 @@ class CheckOrchestrator:
             logger.debug("Could not acquire the fix lock for %s", filepath, exc_info=True)
             return None
 
-    def _check_file_locked(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
+    def _check_file_locked(self, filepath: Path, checks: list[ASTCheck], *, direct: bool) -> list[Violation] | None:
         read_result = self._read_source(filepath)
         if read_result is None:
             return None
@@ -575,6 +524,17 @@ class CheckOrchestrator:
                 self.rule_failures.append((str(filepath), check.check_id))
             else:
                 all_violations.extend(violations)
+                if direct:
+                    try:
+                        check.record_direct_input(filepath, source)
+                    except CheckUnavailableError as error:
+                        logger.debug("Check %s is unavailable: %s", check.check_id, error, exc_info=True)
+                        self._record_unavailable_check(check, error)
+                    except Exception:
+                        logger.debug(
+                            "Check %s failed to record direct input %s", check.check_id, filepath, exc_info=True
+                        )
+                        self.rule_failures.append((str(filepath), check.check_id))
 
         if self.fix_mode and all_violations:
             self._apply_fixes(filepath, all_violations)

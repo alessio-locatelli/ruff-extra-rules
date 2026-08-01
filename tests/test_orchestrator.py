@@ -1138,8 +1138,11 @@ class _AlwaysRerunProbeCheck:
     ) -> bool:
         return False
 
-    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
         return []
+
+    def record_direct_input(self, _filepath: Path, _source: str) -> None:
+        return
 
     @classmethod
     def add_cli_arguments(cls, _parser: argparse.ArgumentParser) -> None:
@@ -1162,19 +1165,23 @@ def test_always_rerun_probe_check_fix_is_a_no_op(tmp_path: Path) -> None:
 
 class _DrainingProbeCheck(_AlwaysRerunProbeCheck):
     """An `_AlwaysRerunProbeCheck` that also reports extra cross-file candidates -- exercises
-    `CheckOrchestrator._drain_cross_file_candidates()` (ADR-0041) independent of
+    `CheckOrchestrator._reconcile_direct_inputs()` (ADR-0041) independent of
     `redundant-type-conversion`'s own real implementation, which needs a live `ty` process.
     """
 
-    __slots__ = ("extra_files",)
+    __slots__ = ("direct_inputs", "extra_files")
 
     check_id = "draining-probe"
 
     def __init__(self, extra_files: list[Path] | None = None, message: str = "probe") -> None:
         super().__init__(message)
+        self.direct_inputs: list[Path] = []
         self.extra_files = extra_files or []
 
-    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+    def record_direct_input(self, filepath: Path, _source: str) -> None:
+        self.direct_inputs.append(filepath.resolve())
+
+    def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
         return self.extra_files
 
 
@@ -1198,7 +1205,7 @@ class _DrainUnavailableCheck(_AlwaysRerunProbeCheck):
 
     check_id = "drain-unavailable-probe"
 
-    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
         raise CheckUnavailableError("simulated: daemon unavailable")
 
 
@@ -1207,7 +1214,7 @@ class _RaisingDrainingCheck(_AlwaysRerunProbeCheck):
 
     check_id = "raising-draining-probe"
 
-    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
         raise LSPError("simulated daemon disconnect")
 
 
@@ -1220,7 +1227,7 @@ class _NeverConvergingDrainingCheck(_AlwaysRerunProbeCheck):
         super().__init__(message)
         self.drain_call_count = 0
 
-    def drain_cross_file_candidates(self, _already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
         # Always offers a brand-new, never-before-seen path (keyed off this method's own call count,
         # not check()'s -- the nonexistent path this returns is never actually check()-able, so
         # check_count itself would never advance): the orchestrator's own fixed-point loop must never
@@ -1245,7 +1252,7 @@ class _OrderDependentDrainingCheck(_AlwaysRerunProbeCheck):
         self.trigger_file = trigger_file.resolve()
         self.reported_file = reported_file.resolve()
 
-    def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, already_processed: list[Path]) -> list[Path]:
         if self.trigger_file in already_processed:
             return [self.reported_file]
         return []
@@ -1280,7 +1287,7 @@ class _StaleThenCleanDrainingCheck(_AlwaysRerunProbeCheck):
             )
         ]
 
-    def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, already_processed: list[Path]) -> list[Path]:
         if self.trigger_file in already_processed:
             return [self.flagged_file]
         return []
@@ -1420,7 +1427,7 @@ def test_drain_cross_file_candidates_skips_an_unresolvable_direct_path(
     assert orchestrator.process_files([str(main_file), str(other_file)]) == {}
 
 
-def test_drain_cross_file_candidates_stops_at_the_iteration_cap(tmp_path: Path) -> None:
+def test_drain_cross_file_candidates_reconciles_one_snapshot_without_recursion(tmp_path: Path) -> None:
     main_file = tmp_path / "main.py"
     main_file.write_text("x = 1\n")
 
@@ -1429,9 +1436,20 @@ def test_drain_cross_file_candidates_stops_at_the_iteration_cap(tmp_path: Path) 
 
     orchestrator.process_files([str(main_file)])
 
-    # One new, nonexistent (so unprocessable) extra path per iteration, capped at
-    # _MAX_CROSS_FILE_DRAIN_ITERATIONS -- never unbounded.
-    assert len(orchestrator.unprocessable_files) == _orchestrator._MAX_CROSS_FILE_DRAIN_ITERATIONS
+    assert probe.drain_call_count == 1
+    assert len(orchestrator.unprocessable_files) == 1
+
+
+def test_drain_cross_file_candidates_does_not_record_derived_rechecks_as_direct_inputs(tmp_path: Path) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+    derived_file = tmp_path / "derived.py"
+    derived_file.write_text("y = 2\n")
+    probe = _DrainingProbeCheck(extra_files=[derived_file])
+
+    CheckOrchestrator(checks=[probe]).process_files([str(main_file)])
+
+    assert probe.direct_inputs == [main_file.resolve()]
 
 
 def test_drain_cross_file_candidates_recovers_a_dependent_processed_before_its_dependency(

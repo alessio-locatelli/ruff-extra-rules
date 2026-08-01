@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import atexit
 import contextlib
+import hashlib
 import logging
 import re
 import tempfile
@@ -33,9 +34,9 @@ class PersistentSession(Protocol):
 
     def finalize(self, filepath: Path, source: str) -> None: ...
 
-    def notify_changed_on_disk(self, filepath: Path, source: str) -> None: ...
+    def record_direct_input(self, filepath: Path, source: str) -> None: ...
 
-    def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]: ...
+    def reconcile_direct_inputs(self) -> list[Path]: ...
 
     def close(self) -> None: ...
 
@@ -137,13 +138,24 @@ def _diagnostic_key(diagnostic: dict[str, Any]) -> tuple[Any, ...]:
 
 
 class TySession:
-    __slots__ = ("_client", "_dirty_uris", "_dirty_uris_lock", "_keep_open", "_open_versions", "_root")
+    __slots__ = (
+        "_client",
+        "_direct_input_digests",
+        "_dirty_uris",
+        "_dirty_uris_lock",
+        "_keep_open",
+        "_last_reconciled_digests",
+        "_open_versions",
+        "_root",
+    )
 
     def __init__(self, *, root: Path, keep_open: bool = False) -> None:
         self._root = root.resolve()
         self._keep_open = keep_open
+        self._direct_input_digests: dict[str, bytes] = {}
         self._dirty_uris: set[str] = set()
         self._dirty_uris_lock = threading.Lock()
+        self._last_reconciled_digests: dict[str, bytes] = {}
         self._client = _spawn(root, on_notification=self._on_notification if keep_open else None)
         self._open_versions: dict[str, int] = {}
 
@@ -219,22 +231,41 @@ class TySession:
                 logger.debug("TR6 close_file failed for %s", filepath, exc_info=True)
             del self._open_versions[uri]
 
-    def notify_changed_on_disk(self, filepath: Path, source: str) -> None:
-        if not self._is_within_root(filepath):
+    def record_direct_input(self, filepath: Path, source: str) -> None:
+        if not self._keep_open or not self._is_within_root(filepath):
             return
         uri = filepath.resolve().as_uri()
-        if uri in self._open_versions:
-            try:
-                self.open_or_update(filepath, source)
-            except LSPError:
-                logger.debug("TR6 notify_changed_on_disk (re-sync) failed for %s", filepath, exc_info=True)
-                return
-        try:
-            self._client.notify("workspace/didChangeWatchedFiles", {"changes": [{"uri": uri, "type": 2}]})
-        except LSPError:
-            logger.debug("TR6 notify_changed_on_disk failed for %s", filepath, exc_info=True)
-            return
+        self._direct_input_digests[uri] = hashlib.sha256(source.encode()).digest()
+
+    def reconcile_direct_inputs(self) -> list[Path]:
+        if not self._keep_open:
+            return []
+        changed = {
+            uri: digest
+            for uri, digest in self._direct_input_digests.items()
+            if self._last_reconciled_digests.get(uri) != digest
+        }
+        self._direct_input_digests.clear()
         self._await_ty_catching_up()
+        with self._dirty_uris_lock:
+            self._dirty_uris.clear()
+        if not changed:
+            return []
+        try:
+            self._client.notify(
+                "workspace/didChangeWatchedFiles",
+                {"changes": [{"uri": uri, "type": 2} for uri in sorted(changed)]},
+            )
+        except LSPError:
+            logger.debug("TR6 direct-input reconciliation failed", exc_info=True)
+            self._direct_input_digests.update(changed)
+            return []
+        self._last_reconciled_digests.update(changed)
+        self._await_ty_catching_up()
+        with self._dirty_uris_lock:
+            dirty_uris = self._dirty_uris.copy()
+            self._dirty_uris.clear()
+        return sorted(Path.from_uri(uri) for uri in dirty_uris if uri in self._open_versions)
 
     def _await_ty_catching_up(self) -> None:
         barrier_uri = next(iter(self._open_versions), None)
@@ -247,16 +278,12 @@ class TySession:
 
     def finalize(self, filepath: Path, source: str) -> None:
         if self._keep_open and self._is_within_root(filepath):
-            self.notify_changed_on_disk(filepath, source)
+            try:
+                self.open_or_update(filepath, source)
+            except LSPError:
+                logger.debug("TR6 final resync failed for %s", filepath, exc_info=True)
         else:
             self.close_file(filepath)
-
-    def drain_cross_file_candidates(self, already_processed: list[Path]) -> list[Path]:
-        exclude_uris = {path.resolve().as_uri() for path in already_processed}
-        with self._dirty_uris_lock:
-            dirty_uris = self._dirty_uris - exclude_uris
-            self._dirty_uris.clear()
-        return [Path.from_uri(uri) for uri in dirty_uris if uri in self._open_versions]
 
     def close(self) -> None:
         self._client.close()
@@ -336,25 +363,30 @@ def _acquire_session() -> CandidateSession:
 
 
 def _local_session() -> TySession:
-    with tempfile.TemporaryDirectory(prefix="ruff-extra-rules-tri006-selftest-") as scratch_dir:
+    root = Path.cwd()
+    session = TySession(root=root)
+    with tempfile.TemporaryDirectory(dir=root, prefix=".ruff-extra-rules-tri006-selftest-") as scratch_dir:
         scratch_root = Path(scratch_dir)
-        self_test_session = TySession(root=scratch_root)
         try:
-            _run_self_test(self_test_session, scratch_root)
+            _run_self_test(session, scratch_root)
+        except BaseException:
+            session.close()
+            raise
         finally:
-            self_test_session.close()
-    return TySession(root=Path.cwd())
+            session.close_file(scratch_root / "redundant_control.py")
+            session.close_file(scratch_root / "necessary_control.py")
+    return session
 
 
 def peek_session() -> PersistentSession | None:
     return _session
 
 
-def notify_disk_change_if_session_active(filepath: Path, source: str) -> None:
+def record_direct_input_if_session_active(filepath: Path, source: str) -> None:
     global _daemon_probe_failed, _daemon_probe_next_retry_at, _session  # noqa: PLW0603
     with _session_lock:
         if _session is not None:
-            _session.notify_changed_on_disk(filepath, source)
+            _session.record_direct_input(filepath, source)
             return
         if _daemon_probe_failed:
             return
@@ -368,7 +400,7 @@ def notify_disk_change_if_session_active(filepath: Path, source: str) -> None:
         if probe.session is not None:
             _session = probe.session
             atexit.register(_session.close)
-            _session.notify_changed_on_disk(filepath, source)
+            _session.record_direct_input(filepath, source)
         elif probe.terminal_failure:
             _daemon_probe_failed = True
         else:
