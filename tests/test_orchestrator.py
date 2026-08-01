@@ -67,7 +67,7 @@ def test_expand_directories_leaves_plain_files_untouched(tmp_path: Path) -> None
     filepath.write_text("x = 1\n")
 
     assert expand_directories([str(filepath), "also/does/not/exist.py"]) == [
-        str(filepath),  # pytriage: TR6
+        str(filepath),
         "also/does/not/exist.py",
     ]
 
