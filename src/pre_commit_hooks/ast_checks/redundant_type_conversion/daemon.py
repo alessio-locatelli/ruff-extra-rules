@@ -406,8 +406,8 @@ def probe_existing(root: Path) -> ExistingDaemonProbe:
     Waits out the same busy-daemon budget `connect()` does (`_wait_for_busy_daemon()`) for a daemon
     confirmed alive but too busy to answer, rather than treating it as unreachable: `record_direct_input_
     if_session_active()` caches whatever this returns for the rest of the run (session.py's own `_session`
-    singleton), so giving up here on the first overlapping hook invocation would silently drop a disk-change
-    notification for the entire run -- exactly the gap ADR-0041 exists to close.
+    singleton), so giving up here on the first overlapping hook invocation would silently drop a direct-input
+    recording for the entire run -- exactly the gap ADR-0041 exists to close.
     """
     root = repository_root(root)
     if not _socket_path(root).exists():

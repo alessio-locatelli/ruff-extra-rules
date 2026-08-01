@@ -1237,11 +1237,7 @@ class _NeverConvergingDrainingCheck(_AlwaysRerunProbeCheck):
         self.drain_call_count = 0
 
     def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
-        # Always offers a brand-new, never-before-seen path (keyed off this method's own call count,
-        # not check()'s -- the nonexistent path this returns is never actually check()-able, so
-        # check_count itself would never advance): the orchestrator's own fixed-point loop must never
-        # converge on its own, exercising the iteration cap (_MAX_CROSS_FILE_DRAIN_ITERATIONS) rather
-        # than the "already converged" early return.
+        # Returns a fresh nonexistent path once, isolating reconciliation from direct-input processing.
         self.drain_call_count += 1
         return [Path(f"/nonexistent/never_converges_{self.drain_call_count}.py")]
 
@@ -1418,8 +1414,9 @@ def test_process_files_records_an_unavailable_direct_input_check(tmp_path: Path)
     check = _DirectInputUnavailableCheck()
     orchestrator = CheckOrchestrator(checks=[check])
 
-    orchestrator.process_files([str(filepath)])
+    violations = orchestrator.process_files([str(filepath)])
 
+    assert violations[str(filepath)][0].check_id == check.check_id
     assert orchestrator.unavailable_checks == [(check.check_id, "simulated: daemon unavailable")]
 
 
