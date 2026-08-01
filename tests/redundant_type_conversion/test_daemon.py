@@ -633,7 +633,7 @@ def test_repository_root_reuses_a_daemon_path_from_subdirectories_and_path_alias
     assert git is not None
     repository = tmp_path / "repository"
     repository.mkdir()
-    subprocess.run([git, "init", "-q", str(repository)], check=True)  # noqa: S603
+    subprocess.run([git, "init", "-q", repository], check=True)  # noqa: S603
     nested = repository / "nested"
     nested.mkdir()
     alias = tmp_path / "alias"
