@@ -1,5 +1,12 @@
 {
-  "globs": ["docs/**/*.md", "README.md", "AGENTS.md"],
+  "globs": [
+    "docs/**/*.md",
+    "README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "CONTEXT.md",
+    "CONTRIBUTING.md",
+  ],
   "config": {
     "line-length": false,
   },
