@@ -38,7 +38,7 @@ def _format_message(constructor: str, argument_type: str) -> str:
     # Not a real type match -- `ty` just didn't distinguish the two here
     # (e.g. either side of a weakly-typed `==`), see ADR-0035's permissive
     # hover-gate limitation. Saying "the argument is already X" would be
-    # false when X (here `item.argument_type`) isn't actually `constructor`.
+    # false when X (here `argument_type`) isn't actually `constructor`.
     return (
         f"Redundant `{constructor}(...)` conversion: `ty` sees no difference with or without this wrap here, "
         f"though the argument's own type is `{argument_type}`, not `{constructor}` -- verify before removing. "
