@@ -5,7 +5,7 @@
     "prettier": "3.9.6"
   },
   "scripts": {
-    "format": "prettier --write --cache --log-level warn . && markdownlint-cli2",
+    "format": "prettier --write --cache --log-level warn . && markdownlint-cli2 --fix",
     "format:check": "prettier --check --cache . && markdownlint-cli2"
   }
 }
