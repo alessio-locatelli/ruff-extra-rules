@@ -67,7 +67,7 @@ def _scripted_try_connect(
 class _FakeSession:
     """A `PersistentSession`-conforming stub for `_dispatch`/`_handle_connection` unit tests."""
 
-    __slots__ = ("close_calls", "direct_inputs", "drained", "hover_delay_seconds", "hover_result", "raises")
+    __slots__ = ("cached", "close_calls", "direct_inputs", "drained", "hover_delay_seconds", "hover_result", "raises")
 
     def __init__(
         self,
@@ -78,6 +78,7 @@ class _FakeSession:
         hover_delay_seconds: float = 0.0,
     ) -> None:
         self.hover_result = hover_result
+        self.cached: list[tuple[str, int, int, str]] | None = None
         self.drained = drained or []
         self.direct_inputs: list[Path] = []
         self.close_calls = 0
@@ -96,6 +97,16 @@ class _FakeSession:
 
     def finalize(self, _filepath: Path, _source: str) -> None:
         return
+
+    def cached_redundancies(
+        self, _filepath: Path, _source: str, _cache_key: str
+    ) -> list[tuple[str, int, int, str]] | None:
+        return self.cached
+
+    def cache_redundancies(
+        self, _filepath: Path, _source: str, _cache_key: str, redundancies: list[tuple[str, int, int, str]]
+    ) -> None:
+        self.cached = redundancies
 
     def record_direct_input(self, filepath: Path, _source: str) -> None:
         self.direct_inputs.append(filepath)
@@ -141,11 +152,25 @@ def test_ty_version_normalizes_any_failure_to_os_error(monkeypatch: pytest.Monke
         ),
         ({"op": "hover", "filepath": "f.py", "line0": 0, "char_utf16": 0}, {"result": "str"}),
         ({"op": "finalize", "filepath": "f.py", "source": "x"}, {"result": None}),
+        ({"op": "cached_redundancies", "filepath": "f.py", "source": "x", "cache_key": "strict"}, {"result": None}),
+        (
+            {"op": "cache_redundancies", "filepath": "f.py", "source": "x", "cache_key": "strict", "redundancies": []},
+            {"result": None},
+        ),
         ({"op": "record_direct_input", "filepath": "f.py", "source": "x"}, {"result": None}),
         ({"op": "reconcile_direct_inputs"}, {"result": []}),
         ({"op": "bogus"}, {"error": "unknown op: 'bogus'"}),
     ],
-    ids=["open_or_update", "hover", "finalize", "record_direct_input", "reconcile_direct_inputs", "unknown-op"],
+    ids=[
+        "open_or_update",
+        "hover",
+        "finalize",
+        "cached_redundancies",
+        "cache_redundancies",
+        "record_direct_input",
+        "reconcile_direct_inputs",
+        "unknown-op",
+    ],
 )
 def test_dispatch_routes_known_ops(message: dict[str, Any], expected: dict[str, Any]) -> None:
     session = _FakeSession(hover_result="str")
@@ -774,9 +799,9 @@ def test_remote_session_canonicalizes_file_paths_for_daemon_requests(
     filepath = tmp_path / "package" / "module.py"
     filepath.parent.mkdir()
     filepath.write_text("x = 1\n")
-    calls: list[tuple[str, dict[str, str | int | list[str]]]] = []
+    calls: list[tuple[str, dict[str, daemon_module.RPCParameter]]] = []
 
-    def call(_self: RemoteTySession, op: str, **params: str | int | list[str]) -> list[object] | None:
+    def call(_self: RemoteTySession, op: str, **params: daemon_module.RPCParameter) -> list[object] | None:
         calls.append((op, params))
         if op in {"open_or_update", "reconcile_direct_inputs"}:
             return []
@@ -790,11 +815,13 @@ def test_remote_session_canonicalizes_file_paths_for_daemon_requests(
     assert session.open_or_update(relative_path, "x = 1\n") == frozenset()
     assert session.hover(relative_path, 0, 0) is None
     session.finalize(relative_path, "x = 1\n")
+    assert session.cached_redundancies(relative_path, "x = 1\n", "strict") is None
+    session.cache_redundancies(relative_path, "x = 1\n", "strict", [])
     session.record_direct_input(relative_path, "x = 1\n")
     assert session.reconcile_direct_inputs() == []
 
     canonical_path = str(filepath.resolve())
-    assert [params.get("filepath") for _op, params in calls[:-1]] == [canonical_path] * 4
+    assert [params.get("filepath") for _op, params in calls[:-1]] == [canonical_path] * 6
     assert calls[-1] == ("reconcile_direct_inputs", {})
 
 

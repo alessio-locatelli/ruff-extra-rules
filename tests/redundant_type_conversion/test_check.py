@@ -143,6 +143,23 @@ def test_check_flags_a_redundant_conservative_case(monkeypatch: pytest.MonkeyPat
     assert "pytriage: TR6" in violations[0].message
 
 
+def test_check_reuses_a_cached_result_for_identical_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = "y = str(x)\n"
+    session = FakeSession(
+        diagnostics_by_content={source: frozenset(), "y = x\n": frozenset()},
+        hover_by_position={(0, 8): "str"},
+    )
+    _patch_session(monkeypatch, session)
+    check = RedundantTypeConversionCheck()
+
+    first = check.check(Path("test.py"), ast.parse(source), source)
+    opened_after_first = session.opened_content.copy()
+    second = check.check(Path("test.py"), ast.parse(source), source)
+
+    assert second == first
+    assert session.opened_content == opened_after_first
+
+
 def test_check_hedges_the_message_for_a_non_exact_permissive_match(monkeypatch: pytest.MonkeyPatch) -> None:
     # See ADR-0035's permissive-gate limitation.
     source = "y = str({'a': [1]}) == 1\n"

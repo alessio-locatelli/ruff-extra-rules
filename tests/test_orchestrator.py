@@ -1218,6 +1218,15 @@ class _RaisingDrainingCheck(_AlwaysRerunProbeCheck):
         raise LSPError("simulated daemon disconnect")
 
 
+class _DirectInputUnavailableCheck(_AlwaysRerunProbeCheck):
+    __slots__ = ()
+
+    check_id = "direct-input-unavailable-probe"
+
+    def record_direct_input(self, _filepath: Path, _source: str) -> None:
+        raise CheckUnavailableError("simulated: daemon unavailable")
+
+
 class _NeverConvergingDrainingCheck(_AlwaysRerunProbeCheck):
     __slots__ = ("drain_call_count",)
 
@@ -1291,6 +1300,16 @@ class _StaleThenCleanDrainingCheck(_AlwaysRerunProbeCheck):
         if self.trigger_file in already_processed:
             return [self.flagged_file]
         return []
+
+
+def test_order_dependent_draining_checks_do_not_report_before_their_trigger(tmp_path: Path) -> None:
+    trigger = tmp_path / "trigger.py"
+    reported = tmp_path / "reported.py"
+    order_dependent = _OrderDependentDrainingCheck(trigger_file=trigger, reported_file=reported)
+    stale_then_clean = _StaleThenCleanDrainingCheck(trigger_file=trigger, flagged_file=reported)
+
+    assert order_dependent.reconcile_direct_inputs([]) == []
+    assert stale_then_clean.reconcile_direct_inputs([]) == []
 
 
 class _SelectivelyViolatingDrainingCheck(_DrainingProbeCheck):
@@ -1383,6 +1402,25 @@ def test_drain_cross_file_candidates_records_rule_failure_when_a_check_raises(tm
 
     assert str(main_file) in violations
     assert orchestrator.rule_failures == [(str(main_file), "raising-draining-probe")]
+
+
+def test_drain_cross_file_candidates_does_not_invent_a_failure_without_direct_inputs() -> None:
+    orchestrator = CheckOrchestrator(checks=[_RaisingDrainingCheck()])
+
+    orchestrator._reconcile_direct_inputs([], {}, {})
+
+    assert orchestrator.rule_failures == []
+
+
+def test_process_files_records_an_unavailable_direct_input_check(tmp_path: Path) -> None:
+    filepath = tmp_path / "main.py"
+    filepath.write_text("x = 1\n")
+    check = _DirectInputUnavailableCheck()
+    orchestrator = CheckOrchestrator(checks=[check])
+
+    orchestrator.process_files([str(filepath)])
+
+    assert orchestrator.unavailable_checks == [(check.check_id, "simulated: daemon unavailable")]
 
 
 def test_drain_cross_file_candidates_skips_an_unresolvable_extra_path(tmp_path: Path) -> None:

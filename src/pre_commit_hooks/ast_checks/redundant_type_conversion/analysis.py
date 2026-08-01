@@ -97,16 +97,10 @@ def decide_candidates(
     redundant: list[RedundantConversion] = []
     with session.analysis_transaction():
         try:
+            baseline = _open_or_raise(session, filepath, source)
+            candidates_with_hovers: list[tuple[Candidate, str]] = []
             for candidate in candidates:
-                # Restores the pristine source before every hover: a previous
-                # candidate's own rewrite below would otherwise still be open,
-                # which can change what this candidate's own hover reports. Also
-                # doubles as this candidate's own recheck baseline.
-                baseline = _open_or_raise(session, filepath, source)
                 line_text = source_lines[candidate.line - 1]
-                # One character before the argument's own end, in char (not byte)
-                # space first -- arg_end_col - 1 in byte space can land mid-
-                # character for a multi-byte final character (e.g. `str(é)`).
                 arg_end_char = byte_col_to_char_col(line_text, candidate.arg_end_col)
                 hover_char = len(line_text[: arg_end_char - 1].encode("utf-16-le")) // 2
                 hover_text = session.hover(filepath, candidate.line - 1, hover_char)
@@ -122,6 +116,10 @@ def decide_candidates(
                     # See ADR-0035's Path-vs-str comparison exclusion.
                     continue
 
+                candidates_with_hovers.append((candidate, hover_text))
+
+            for candidate, hover_text in candidates_with_hovers:
+                line_text = source_lines[candidate.line - 1]
                 modified_text = _build_modified_text(source_lines, candidate)
                 after = _open_or_raise(session, filepath, modified_text)
                 if after - baseline:

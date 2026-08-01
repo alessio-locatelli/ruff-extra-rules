@@ -150,14 +150,7 @@ def test_decide_candidates_conservative_excludes_mutable_constructors() -> None:
     assert session.opened_content == []  # never even worth opening the baseline
 
 
-def test_decide_candidates_restores_pristine_source_before_each_candidates_hover() -> None:
-    # Hover must run against the file's real, unmodified content, not
-    # whatever the *previous* candidate's own synthetic rewrite left the
-    # in-memory document as -- with two candidates, the second one's hover
-    # would otherwise see the first candidate's rewrite still in place
-    # instead of the original source. The recorded open_or_update()
-    # sequence is the direct evidence: `source` must be reopened before
-    # candidate 2's own hover, not left at `modified_1`.
+def test_decide_candidates_opens_one_baseline_before_all_hovers() -> None:
     source = "a = str(x)\nb = int(y)\n"
     modified_1 = "a = x\nb = int(y)\n"
     modified_2 = "a = str(x)\nb = y\n"
@@ -168,7 +161,7 @@ def test_decide_candidates_restores_pristine_source_before_each_candidates_hover
     )
 
     assert len(redundant) == 2
-    assert session.opened_content == [source, modified_1, source, modified_2]
+    assert session.opened_content == [source, modified_1, modified_2]
 
 
 def test_decide_candidates_skips_a_len_wrapped_candidate_that_is_not_an_exact_match() -> None:

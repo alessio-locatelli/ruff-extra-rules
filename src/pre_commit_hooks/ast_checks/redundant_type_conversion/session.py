@@ -34,6 +34,14 @@ class PersistentSession(Protocol):
 
     def finalize(self, filepath: Path, source: str) -> None: ...
 
+    def cached_redundancies(
+        self, filepath: Path, source: str, cache_key: str
+    ) -> list[tuple[str, int, int, str]] | None: ...
+
+    def cache_redundancies(
+        self, filepath: Path, source: str, cache_key: str, redundancies: list[tuple[str, int, int, str]]
+    ) -> None: ...
+
     def record_direct_input(self, filepath: Path, source: str) -> None: ...
 
     def reconcile_direct_inputs(self) -> list[Path]: ...
@@ -139,6 +147,7 @@ def _diagnostic_key(diagnostic: dict[str, Any]) -> tuple[Any, ...]:
 
 class TySession:
     __slots__ = (
+        "_cached_redundancies",
         "_client",
         "_direct_input_digests",
         "_dirty_uris",
@@ -152,6 +161,7 @@ class TySession:
     def __init__(self, *, root: Path, keep_open: bool = False) -> None:
         self._root = root.resolve()
         self._keep_open = keep_open
+        self._cached_redundancies: dict[tuple[str, str], tuple[bytes, list[tuple[str, int, int, str]]]] = {}
         self._direct_input_digests: dict[str, bytes] = {}
         self._dirty_uris: set[str] = set()
         self._dirty_uris_lock = threading.Lock()
@@ -237,6 +247,28 @@ class TySession:
         uri = filepath.resolve().as_uri()
         self._direct_input_digests[uri] = hashlib.sha256(source.encode()).digest()
 
+    def cached_redundancies(
+        self, filepath: Path, source: str, cache_key: str
+    ) -> list[tuple[str, int, int, str]] | None:
+        if not self._keep_open or not self._is_within_root(filepath):
+            return None
+        cached = self._cached_redundancies.get((filepath.resolve().as_uri(), cache_key))
+        if cached is None:
+            return None
+        digest, redundancies = cached
+        if digest != hashlib.sha256(source.encode()).digest():
+            return None
+        return redundancies
+
+    def cache_redundancies(
+        self, filepath: Path, source: str, cache_key: str, redundancies: list[tuple[str, int, int, str]]
+    ) -> None:
+        if self._keep_open and self._is_within_root(filepath):
+            self._cached_redundancies[(filepath.resolve().as_uri(), cache_key)] = (
+                hashlib.sha256(source.encode()).digest(),
+                redundancies,
+            )
+
     def reconcile_direct_inputs(self) -> list[Path]:
         if not self._keep_open:
             return []
@@ -265,6 +297,9 @@ class TySession:
         with self._dirty_uris_lock:
             dirty_uris = self._dirty_uris.copy()
             self._dirty_uris.clear()
+        for key in self._cached_redundancies.copy():
+            if key[0] in dirty_uris:
+                del self._cached_redundancies[key]
         return sorted(Path.from_uri(uri) for uri in dirty_uris if uri in self._open_versions)
 
     def _await_ty_catching_up(self) -> None:
