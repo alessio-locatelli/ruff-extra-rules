@@ -74,7 +74,7 @@ Plaintext, directly usable without markdown parsing. No dedicated "does X satisf
 
 ### `pyrefly` (Meta)
 
-**1. Query primitive — yes, cross-file confirmed.** `pyrefly lsp` answers `textDocument/hover` with markdown containing the type (`(variable) bar: list[int]`, `(function) takes_list: def takes_list(items: list[int]) -> int: ...`), also cross-file-resolved through the same import. Needs light parsing (strip the ` ```python ... ``` ` fence and read after the last `: `) rather than being plain text like `ty`'s.
+**1. Query primitive — yes, cross-file confirmed.** `pyrefly lsp` answers `textDocument/hover` with markdown containing the type (`(variable) bar: list[int]`, `(function) takes_list: def takes_list(items: list[int]) -> int: ...`), also cross-file-resolved through the same import. Needs light parsing (strip the ` ```python ... ``` ` fence and read after the last `:`) rather than being plain text like `ty`'s.
 
 Separately, `pyrefly check --output-format json` supports the `reveal_type()` builtin as a `reveal-type` info-severity diagnostic in its JSON output (`{"name": "reveal-type", "description": "revealed type: list[int]", "severity": "info"}`) — a second, CLI-only way to query a type, but (see below) only reliable once a real `pyrefly.toml`/discoverable config exists.
 
