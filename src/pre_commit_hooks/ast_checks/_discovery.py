@@ -142,6 +142,7 @@ def _list_python_files_in_dir(directory: Path) -> list[str]:
 _MAX_REPORTED_IGNORED_PATHS = 20
 _GIT_STATUS_TIMEOUT_SECONDS = 5
 _PROCESS_STOP_TIMEOUT_SECONDS = 1
+_CAN_STREAM_IGNORED_STATUS = os.name == "posix"
 
 # Well-known packaging/tooling directory names, most of which are named in
 # this project's own .gitignore -- every one of these gets created by this
@@ -191,6 +192,13 @@ def _is_known_non_source_directory(entry: str) -> bool:
 
 
 def _warn_about_ignored_python_files(directory: Path) -> None:
+    if not _CAN_STREAM_IGNORED_STATUS:
+        logger.warning(
+            "Ignored paths under %s could not be inspected on this platform; ignored Python files may be skipped "
+            "during this directory scan.",
+            directory,
+        )
+        return
     try:
         git = shutil.which("git") or "git"
         process = subprocess.Popen(  # noqa: S603
@@ -235,7 +243,7 @@ def _read_ignored_status_paths(process: subprocess.Popen[bytes]) -> list[str]:
     assert stderr is not None
 
     deadline = time.monotonic() + _GIT_STATUS_TIMEOUT_SECONDS
-    streams = [stdout, stderr]
+    streams = [stderr, stdout]
     pending = b""
     stderr_seen = False
     ignored: list[str] = []
@@ -245,7 +253,7 @@ def _read_ignored_status_paths(process: subprocess.Popen[bytes]) -> list[str]:
             ready, _, _ = select.select(streams, [], [], max(deadline - time.monotonic(), 0))
             if not ready:
                 raise subprocess.TimeoutExpired(process.args, _GIT_STATUS_TIMEOUT_SECONDS)
-            for stream in ready:
+            for stream in sorted(ready, key=lambda stream: stream is stdout):
                 chunk = os.read(stream.fileno(), 65_536)
                 if not chunk:
                     streams.remove(stream)
@@ -262,6 +270,8 @@ def _read_ignored_status_paths(process: subprocess.Popen[bytes]) -> list[str]:
                         continue
                     ignored.append(path)
                     if len(ignored) == _MAX_REPORTED_IGNORED_PATHS:
+                        if stderr_seen:
+                            return []
                         return ignored
 
         if pending or stderr_seen:
