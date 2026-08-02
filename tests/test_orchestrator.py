@@ -26,6 +26,7 @@ from pre_commit_hooks.ast_checks._base import (
     CheckUnavailableError,
     Violation,
     atomic_write_text,
+    is_fix_aborted,
     is_fix_errored,
     is_fix_rejected,
     is_fixed,
@@ -1676,7 +1677,7 @@ class _AppendingFixCheck(_AlwaysRerunProbeCheck):
     ) -> bool:
         if self.write_delay_seconds:
             time.sleep(self.write_delay_seconds)
-        atomic_write_text(filepath, f"{source}# {self.marker}\n", encoding)
+        atomic_write_text(filepath, f"{source}# {self.marker}\n", encoding, source)
         return True
 
 
@@ -1708,6 +1709,77 @@ def test_check_file_serializes_concurrent_fixes_to_the_same_file_across_orchestr
     final_content = shared_file.read_text()
     assert "# marker_a" in final_content
     assert "# marker_b" in final_content
+
+
+class _ExternallyModifiedFixCheck(_AlwaysRerunProbeCheck):
+    """A `fix()` that, when `simulate_external_edit` is set, writes an
+    out-of-band edit (standing in for an editor, or a concurrent process
+    outside this tool's own per-file fix lock) to `filepath` between
+    `_apply_fixes`' own read and this check's own write -- proves
+    `atomic_write_text()`'s source-identity check actually aborts the write
+    instead of silently clobbering that edit, the scenario `_check_file`'s
+    own lock (see `_AppendingFixCheck` above) cannot cover because the other
+    writer here never goes through this tool at all. With it unset, `fix()`
+    behaves like an ordinary, uncontested single-write check.
+    """
+
+    __slots__ = ("simulate_external_edit",)
+
+    check_id = "externally-modified-fix-probe"
+    error_code = "ZZZ004"
+
+    def __init__(self, *, simulate_external_edit: bool) -> None:
+        super().__init__()
+        self.simulate_external_edit = simulate_external_edit
+
+    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+        if "# my fix" in source:
+            return []
+        return [
+            Violation(check_id=self.check_id, error_code=self.error_code, line=1, col=0, message="probe", fixable=True)
+        ]
+
+    def fix(
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+    ) -> bool:
+        if self.simulate_external_edit:
+            filepath.write_text(f"{source}# external edit\n", encoding=encoding)
+        atomic_write_text(filepath, f"{source}# my fix\n", encoding, source)
+        return True
+
+
+def test_apply_fixes_applies_normally_when_nothing_else_touches_the_file(tmp_path: Path) -> None:
+    # Companion to the abort case below: the identity check must never
+    # reject an ordinary, uncontested fix just because it exists.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+    check = _ExternallyModifiedFixCheck(simulate_external_edit=False)
+
+    orchestrator = CheckOrchestrator(checks=[check], fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    violation = violations[str(filepath)][0]
+    assert violation.fix_data == {"fixed": True}
+    assert filepath.read_text() == "x = 1\n# my fix\n"
+
+
+def test_apply_fixes_aborts_when_file_is_externally_modified_during_fix(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+    check = _ExternallyModifiedFixCheck(simulate_external_edit=True)
+
+    orchestrator = CheckOrchestrator(checks=[check], fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    violation = violations[str(filepath)][0]
+    assert is_fix_aborted(violation)
+    assert not is_fix_rejected(violation)
+    assert not is_fix_errored(violation)
+    assert not (violation.fix_data and violation.fix_data.get("fixed"))
+    # The check's own fix was discarded; the externally written content
+    # (what a real concurrent editor/process would have left behind) is what
+    # survives on disk, not a silent merge of both writes.
+    assert filepath.read_text() == "x = 1\n# external edit\n"
 
 
 def test_check_file_returns_none_when_the_fix_lock_times_out(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2123,8 +2195,10 @@ def test_apply_fixes_marks_violation_rejected_when_fix_produces_invalid_syntax(
         "\n\n\nimport requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    def broken_fix(_self: MeaninglessVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
-        atomic_write_text(fp, "def broken(:\n", "utf-8")
+    def broken_fix(
+        _self: MeaninglessVarsCheck, fp: Path, _violations: object, source: str, *_args: object, **_kwargs: object
+    ) -> None:
+        atomic_write_text(fp, "def broken(:\n", "utf-8", source)
 
     monkeypatch.setattr(MeaninglessVarsCheck, "fix", broken_fix)
 
@@ -2199,7 +2273,9 @@ def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
         "    return result.status_code\n"
     )
 
-    def partial_then_raise(_self: MeaninglessVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
+    def partial_then_raise(
+        _self: MeaninglessVarsCheck, fp: Path, _violations: object, source: str, *_args: object, **_kwargs: object
+    ) -> None:
         # Simulates a multi-write check that already committed the fix for
         # "data" before crashing while attempting "result".
         atomic_write_text(
@@ -2212,6 +2288,7 @@ def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
             "    result = requests.get(url)\n"
             "    return result.status_code\n",
             "utf-8",
+            source,
         )
         raise RuntimeError("simulated fix bug partway through")
 
@@ -2250,11 +2327,14 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    def fix_then_raise(_self: MeaninglessVarsCheck, fp: Path, *_args: object, **_kwargs: object) -> None:
+    def fix_then_raise(
+        _self: MeaninglessVarsCheck, fp: Path, _violations: object, source: str, *_args: object, **_kwargs: object
+    ) -> None:
         atomic_write_text(
             fp,
             "import requests\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n",
             "utf-8",
+            source,
         )
         raise RuntimeError("simulated cleanup bug after a successful fix")
 
@@ -2295,7 +2375,7 @@ def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
 
     def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
         if suggestion.func_name == "get_active":
-            atomic_write_text(fp, "def broken(:\n", "utf-8")
+            atomic_write_text(fp, "def broken(:\n", "utf-8", fp.read_text())
         return original_apply_fix(fp, suggestion)
 
     monkeypatch.setattr(vfn_module, "apply_fix", flaky_apply_fix)
@@ -2318,6 +2398,103 @@ def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
     fixed_content = filepath.read_text()
     assert "def get_config" not in fixed_content
     assert 'def get_active(user: dict) -> bool:\n    return user.get("status") == "active"\n' in fixed_content
+
+
+def test_apply_fixes_marks_only_the_aborted_violation_of_a_multi_write_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Same per-violation scoping as the [FIX REJECTED] case above, but for a
+    # concurrent on-disk modification: an earlier rename in this loop that
+    # already committed must still be reported [FIXED], not swept into
+    # [FIX ABORTED] alongside a later violation whose own write collided
+    # with an on-disk change.
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def get_config():\n"
+        '    with open("config.json") as f:\n'
+        "        return f.read()\n"
+        "\n\n"
+        "def get_active(user: dict) -> bool:\n"
+        '    return user.get("status") == "active"\n'
+    )
+
+    original_apply_fix = vfn_module.apply_fix
+
+    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
+        if suggestion.func_name == "get_active":
+            atomic_write_text(fp, "def get_active(user):\n    pass\n", "utf-8", "not the real current content")
+        return original_apply_fix(fp, suggestion)
+
+    monkeypatch.setattr(vfn_module, "apply_fix", flaky_apply_fix)
+
+    checks = load_checks(select={"validate-function-name"})
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    by_func_name = {v.fix_data["suggestion"].func_name: v for v in violations[str(filepath)] if v.fix_data}
+    get_config_violation = by_func_name["get_config"]
+    get_active_violation = by_func_name["get_active"]
+    get_config_fix_data = get_config_violation.fix_data
+    assert get_config_fix_data is not None
+
+    assert get_config_fix_data.get("fixed") is True
+    assert not is_fix_aborted(get_config_violation)
+    assert is_fix_aborted(get_active_violation)
+    assert not (get_active_violation.fix_data and get_active_violation.fix_data.get("fixed"))
+
+    fixed_content = filepath.read_text()
+    assert "def get_config" not in fixed_content
+    assert 'def get_active(user: dict) -> bool:\n    return user.get("status") == "active"\n' in fixed_content
+
+
+def test_apply_fixes_keeps_aborted_violation_aborted_even_when_the_external_edit_removes_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The post-fix recheck (_mark_resolved_and_get_still_present) must never
+    # report [FIXED] just because a violation is no longer detected -- the
+    # very external edit that caused the abort can easily be the reason it's
+    # gone (e.g. someone else already renamed the function), but this run's
+    # own write never landed and must not be credited for that. get_config
+    # is an unrelated, unaffected violation in the same batch, proving the
+    # fix above doesn't regress an ordinary successful multi-write fix.
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def get_config():\n"
+        '    with open("config.json") as f:\n'
+        "        return f.read()\n"
+        "\n\n"
+        "def get_active(user: dict) -> bool:\n"
+        '    return user.get("status") == "active"\n'
+    )
+
+    original_apply_fix = vfn_module.apply_fix
+
+    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
+        if suggestion.func_name == "get_active":
+            stale_source = fp.read_text()
+            # Simulate a concurrent process independently renaming the
+            # function to a compliant name between should_autofix()'s own
+            # read and this apply_fix() call.
+            fp.write_text(stale_source.replace("def get_active(", "def is_active("))
+            atomic_write_text(fp, "def get_active(user):\n    pass\n", "utf-8", stale_source)
+        return original_apply_fix(fp, suggestion)
+
+    monkeypatch.setattr(vfn_module, "apply_fix", flaky_apply_fix)
+
+    checks = load_checks(select={"validate-function-name"})
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    by_func_name = {v.fix_data["suggestion"].func_name: v for v in violations[str(filepath)] if v.fix_data}
+    get_active_violation = by_func_name["get_active"]
+    assert is_fix_aborted(get_active_violation)
+    assert not (get_active_violation.fix_data and get_active_violation.fix_data.get("fixed"))
+
+    get_config_violation = by_func_name["get_config"]
+    assert get_config_violation.fix_data is not None
+    assert get_config_violation.fix_data.get("fixed") is True
+
+    assert 'def is_active(user: dict) -> bool:\n    return user.get("status") == "active"\n' in filepath.read_text()
 
 
 def test_apply_fixes_marks_errored_violation_of_a_multi_write_check_when_apply_fix_raises(
@@ -2806,7 +2983,7 @@ def test_main_fix_flag_reports_rejected_fix(
     # both [FIXED] and the ordinary [FIXABLE]/"Run with --fix" hint, since
     # re-running --fix would just fail identically again.
     def broken_fix(_self: object, fp: Path, *_args: object, **_kwargs: object) -> None:
-        atomic_write_text(fp, "def broken(:\n", "utf-8")
+        atomic_write_text(fp, "def broken(:\n", "utf-8", fp.read_text())
 
     monkeypatch.setattr(MeaninglessVarsCheck, "fix", broken_fix)
 
@@ -2900,6 +3077,60 @@ def test_main_fix_flag_reports_failed_fix(
     assert "Run with --fix" not in err
     assert "data = requests.get(url)" in filepath.read_text()
     # [FIX FAILED] above already reports this; a raw traceback alongside it
+    # on stderr would just be redundant noise (ch. 7: "MUST NOT emit
+    # uncontrolled human-oriented text into a machine-readable output
+    # stream").
+    assert all(record.levelname == "DEBUG" for record in caplog.records)
+
+
+def test_main_fix_flag_reports_aborted_fix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A file changed on disk after _apply_fixes read it but before this
+    # check's own write landed -- an editor, or a process outside this run's
+    # own per-file fix lock. Must be reported distinctly from
+    # [FIXED]/[FIX REJECTED]/[FIX ERRORED]/[FIX FAILED]: re-running --fix is
+    # the right recovery here, not a bug report or an environmental failure.
+    def racing_fix(
+        _self: object, fp: Path, _violations: object, source: str, *_args: object, **_kwargs: object
+    ) -> None:
+        fp.write_text(f"{source}# edited elsewhere\n")
+        atomic_write_text(
+            fp,
+            "import requests\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n",
+            "utf-8",
+            source,
+        )
+
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", racing_fix)
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
+    )
+
+    with caplog.at_level("DEBUG"):
+        exit_code = main([str(filepath), "--select", "meaningless-vars", "--fix"])
+    assert exit_code == 1
+
+    err = capsys.readouterr().err
+    assert "[FIX ABORTED]" in err
+    assert "run with --fix again" in err
+    assert "[FIXED]" not in err
+    assert "[FIX ERRORED]" not in err
+    assert "[FIX REJECTED]" not in err
+    assert "[FIX FAILED]" not in err
+    assert "please report it" not in err
+    # The externally written content survives untouched -- this check's own
+    # attempted fix must never land on top of it.
+    assert filepath.read_text() == (
+        "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
+        "# edited elsewhere\n"
+    )
+    # [FIX ABORTED] above already reports this; a raw traceback alongside it
     # on stderr would just be redundant noise (ch. 7: "MUST NOT emit
     # uncontrolled human-oriented text into a machine-readable output
     # stream").
@@ -3031,6 +3262,7 @@ def test_main_reports_rule_failure_when_fix_raises_after_resolving_everything(
             filepath,
             "import requests\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n",
             "utf-8",
+            filepath.read_text(),
         )
         raise RuntimeError("simulated cleanup bug after a successful fix")
 

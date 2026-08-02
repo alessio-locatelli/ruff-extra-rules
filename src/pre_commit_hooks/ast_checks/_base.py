@@ -106,6 +106,12 @@ class ASTCheck(Protocol):
         `mark_fix_rejected()` on that specific violation, so a later write
         in the same call still gets attempted.
 
+        `ConcurrentModificationError` (also raised by `atomic_write_text()`)
+        follows the same split as `FixValidationError` above: propagate
+        uncaught for a single-write `fix()`, or catch it around each
+        individual write and call `mark_fix_aborted()` on that specific
+        violation for a multi-write one. See `docs/adr/0042-abort-fixes-on-concurrent-source-modification.md`.
+
         `OSError` from `atomic_write_text()` (missing parent directory,
         permission denied, disk full) is different: every implementation
         must catch it itself and return `False`, matching this method's own
@@ -330,8 +336,23 @@ class FixValidationError(Exception):
         self.syntax_error = syntax_error
 
 
-def atomic_write_text(path: Path, content: str, encoding: str) -> None:
-    """Validate `content` parses as Python, then write it to `path` via
+class ConcurrentModificationError(Exception):
+    """Raised by `atomic_write_text()` when `path`'s current on-disk bytes no
+    longer match `expected_source` — something modified the file after it
+    was read for this fix. `path` itself is left untouched; only the
+    already-written temp file is cleaned up. See
+    `docs/adr/0042-abort-fixes-on-concurrent-source-modification.md`.
+    """
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(f"{path} changed on disk after it was read for this fix; the fix was discarded")
+        self.path = path
+
+
+def atomic_write_text(path: Path, content: str, encoding: str, expected_source: str) -> None:
+    """Validate `content` parses as Python and that `path`'s current on-disk
+    bytes still match `expected_source` (the source this fix's edits were
+    computed against), then write `content` to `path` via
     temp-file-then-rename, atomic on POSIX.
 
     Mirrors `_cache.py`'s `_write_cache`, with three refinements needed for
@@ -359,6 +380,11 @@ def atomic_write_text(path: Path, content: str, encoding: str) -> None:
     Raises:
         FixValidationError: if `content` isn't valid Python. Raised before
             any file I/O, so `path` still holds its prior content.
+        ConcurrentModificationError: if `path`'s current on-disk bytes no
+            longer match `expected_source`. Raised after the temp file is
+            written but before it replaces `path`, so `path` still holds its
+            prior content; the now-orphaned temp file is still cleaned up
+            like any other failure here.
     """
     try:
         # compile(), not ast.parse(): some invalid code is only rejected at
@@ -376,6 +402,15 @@ def atomic_write_text(path: Path, content: str, encoding: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding=encoding, newline="") as temp_file:
             temp_file.write(content)
+        # Re-read path's actual current bytes rather than trusting whatever
+        # this fix's own caller read earlier -- that's the whole point of
+        # this check, and comparing anything cheaper (e.g. mtime) would miss
+        # an edit that lands within the same timestamp tick. Checked as late
+        # as possible, immediately before the rename that commits the write,
+        # to leave the smallest possible window in which a concurrent edit
+        # could still land unnoticed.
+        if real_path.read_bytes() != expected_source.encode(encoding):
+            raise ConcurrentModificationError(path)
         temp_path.chmod(stat.S_IMODE(real_path.stat().st_mode))
         temp_path.replace(real_path)
     finally:
@@ -531,6 +566,23 @@ def mark_fix_rejected(violation: Violation) -> None:
 def is_fix_rejected(violation: Violation) -> bool:
     """Whether `mark_fix_rejected()` has already been called on `violation`."""
     return bool(violation.fix_data and violation.fix_data.get("fix_rejected", False))
+
+
+def mark_fix_aborted(violation: Violation) -> None:
+    """Record that a fix was attempted for `violation` but discarded by
+    `atomic_write_text()` because the file changed on disk after it was read
+    for this fix — an external edit or a concurrent process outside this
+    tool's own per-file fix lock (see `ConcurrentModificationError`).
+    Mirrors `mark_fixed()`/`is_fixed()`'s `fix_data["fixed"]` convention.
+    """
+    if violation.fix_data is None:
+        violation.fix_data = {}
+    violation.fix_data["fix_aborted"] = True
+
+
+def is_fix_aborted(violation: Violation) -> bool:
+    """Whether `mark_fix_aborted()` has already been called on `violation`."""
+    return bool(violation.fix_data and violation.fix_data.get("fix_aborted", False))
 
 
 def mark_fix_errored(violation: Violation) -> None:

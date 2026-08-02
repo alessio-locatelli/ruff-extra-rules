@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from ._base import is_fix_errored, is_fix_failed, is_fix_rejected, is_fixed
+from ._base import is_fix_aborted, is_fix_errored, is_fix_failed, is_fix_rejected, is_fixed
 
 if TYPE_CHECKING:
     from ._base import Violation
@@ -55,6 +55,7 @@ def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Viola
             rejected = is_fix_rejected(v)
             errored = is_fix_errored(v)
             failed = is_fix_failed(v)
+            aborted = is_fix_aborted(v)
             if fixed:
                 tag = "[FIXED] "
             elif rejected:
@@ -63,6 +64,8 @@ def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Viola
                 tag = "[FIX ERRORED] "
             elif failed:
                 tag = "[FIX FAILED] "
+            elif aborted:
+                tag = "[FIX ABORTED] "
             elif v.fixable:
                 tag = "[FIXABLE] "
             else:
@@ -81,6 +84,11 @@ def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Viola
                 hint = (
                     " --fix could not write the file — check file permissions and available disk "
                     "space, then run with --fix again."
+                )
+            elif aborted:
+                hint = (
+                    " the file changed on disk while --fix was running, so the change was discarded — "
+                    "run with --fix again."
                 )
             elif v.fixable and not fixed:
                 hint = " Run with --fix to inline automatically."

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from pre_commit_hooks.ast_checks._base import (
+    ConcurrentModificationError,
     FixValidationError,
     atomic_write_text,
     byte_col_to_char_col,
@@ -15,10 +16,12 @@ from pre_commit_hooks.ast_checks._base import (
     fast_get_source_segment,
     find_ignored_lines,
     ignore_pattern_for,
+    is_fix_aborted,
     is_fix_errored,
     is_fix_failed,
     is_fix_rejected,
     line_terminator,
+    mark_fix_aborted,
     mark_fix_errored,
     mark_fix_failed,
     mark_fix_rejected,
@@ -280,11 +283,11 @@ def test_atomic_write_text(
 ) -> None:
     target = setup(tmp_path)
 
-    # A directory in place of the target makes the rename step fail without
-    # ever touching the temp file's own write, exercising the cleanup path.
+    # A directory in place of the target makes the write fail without ever
+    # renaming over it, exercising the cleanup path.
     ctx = pytest.raises(IsADirectoryError) if raises_error else nullcontext()
     with ctx:
-        atomic_write_text(target, "new\n", "utf-8")
+        atomic_write_text(target, "new\n", "utf-8", "old\n")
 
     if verify is not None:
         verify(target)
@@ -309,7 +312,7 @@ def test_atomic_write_text_rejects_invalid_syntax(tmp_path: Path, content: str) 
     target.write_text("old = 1\n")
 
     with pytest.raises(FixValidationError):
-        atomic_write_text(target, content, "utf-8")
+        atomic_write_text(target, content, "utf-8", "old = 1\n")
 
     assert target.read_text() == "old = 1\n"
     assert list(tmp_path.glob(f".{target.name}.*.tmp")) == []
@@ -319,10 +322,42 @@ def test_fix_validation_error_exposes_path_and_syntax_error(tmp_path: Path) -> N
     target = tmp_path / "mod.py"
 
     with pytest.raises(FixValidationError) as exc_info:
-        atomic_write_text(target, "def broken(:\n", "utf-8")
+        atomic_write_text(target, "def broken(:\n", "utf-8", "")
 
     assert exc_info.value.path == target
     assert isinstance(exc_info.value.syntax_error, SyntaxError)
+
+
+def test_atomic_write_text_aborts_when_disk_content_no_longer_matches_expected_source(tmp_path: Path) -> None:
+    # expected_source stands in for what a caller read before computing its
+    # own fix -- a mismatch against the file's real current bytes means
+    # something else changed it in between, and the write must never land.
+    target = tmp_path / "mod.py"
+    target.write_text("x = 1\n")
+
+    with pytest.raises(ConcurrentModificationError) as exc_info:
+        atomic_write_text(target, "x = 2\n", "utf-8", "x = 0\n")
+
+    assert exc_info.value.path == target
+    assert target.read_text() == "x = 1\n"
+    assert list(tmp_path.glob(f".{target.name}.*.tmp")) == []
+
+
+def test_atomic_write_text_detects_modification_that_happened_after_expected_source_was_captured(
+    tmp_path: Path,
+) -> None:
+    # Simulates the exact race this guards against: a caller reads "x = 1\n",
+    # some other process (an editor, a concurrent worker) overwrites the file
+    # in between, and only then does the caller's own fix try to write back.
+    target = tmp_path / "mod.py"
+    target.write_text("x = 1\n")
+    expected_source = target.read_text()
+    target.write_text("x = 999  # edited concurrently\n")
+
+    with pytest.raises(ConcurrentModificationError):
+        atomic_write_text(target, "x = 2\n", "utf-8", expected_source)
+
+    assert target.read_text() == "x = 999  # edited concurrently\n"
 
 
 @pytest.mark.parametrize(
@@ -396,3 +431,29 @@ def test_is_fix_failed_false_when_only_marked_errored() -> None:
     # other.
     violation = ViolationFactory.build(fix_data={"fix_errored": True})
     assert not is_fix_failed(violation)
+
+
+@pytest.mark.parametrize(
+    "fix_data",
+    [None, {"other_key": 1}],
+    ids=["no-fix-data", "existing-fix-data"],
+)
+def test_mark_fix_aborted(fix_data: dict[str, int] | None) -> None:
+    violation = ViolationFactory.build(fix_data=fix_data)
+    assert not is_fix_aborted(violation)
+
+    mark_fix_aborted(violation)
+
+    assert is_fix_aborted(violation)
+    assert violation.fix_data is not None
+    if fix_data is not None:
+        assert violation.fix_data["other_key"] == 1
+
+
+def test_is_fix_aborted_false_when_only_marked_failed() -> None:
+    # mark_fix_failed() (fix() caught its own OSError, e.g. disk full) and
+    # mark_fix_aborted() (atomic_write_text() detected the file changed on
+    # disk mid-fix) record distinct outcomes; neither must be conflated with
+    # the other.
+    violation = ViolationFactory.build(fix_data={"fix_failed": True})
+    assert not is_fix_aborted(violation)

@@ -394,7 +394,7 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
     new_source = "".join(lines)
 
     try:
-        atomic_write_text(filepath, new_source, encoding)
+        atomic_write_text(filepath, new_source, encoding, source)
     except OSError as os_error:
         logger.warning("Filepath: %s. Error: %s", filepath, repr(os_error))
         return False

@@ -221,7 +221,7 @@ class MisplacedCommentCheck(BaseCheck):
 
         if fixed_any:
             try:
-                atomic_write_text(filepath, "".join(lines), encoding)
+                atomic_write_text(filepath, "".join(lines), encoding, source)
             except OSError:
                 # Debug-only: mark_fix_failed() below already reports this
                 # cleanly as [FIX FAILED] — an ERROR-level .exception() call
