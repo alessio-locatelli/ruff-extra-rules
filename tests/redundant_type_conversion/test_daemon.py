@@ -926,6 +926,37 @@ def test_try_connect_or_departing_converts_version_mismatch_to_a_departing_resul
             thread.join(timeout=5)
 
 
+def test_context_change_rejects_an_existing_daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    socket_path = tmp_path / "d.sock"
+    monkeypatch.setenv("TY_TEST_CONTEXT", "first")
+    first_identity = daemon_module._daemon_identity(tmp_path)
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    with sock:
+        sock.bind(str(socket_path))
+        sock.listen(1)
+        sock.settimeout(5.0)
+
+        def _server() -> None:
+            conn, _peer = sock.accept()
+            with conn:
+                handshake = daemon_module.read_framed_message(conn.makefile("rb"))
+                assert handshake is not None
+                if handshake["ty_version"] != first_identity:
+                    daemon_module.write_framed_message(conn.makefile("wb"), {"error": "version_mismatch"})
+
+        thread = threading.Thread(target=_server)
+        thread.start()
+        monkeypatch.setenv("TY_TEST_CONTEXT", "second")
+        try:
+            result_sock, departing = daemon_module._try_connect_or_departing(
+                socket_path, daemon_module._daemon_identity(tmp_path)
+            )
+            assert result_sock is None
+            assert departing is True
+        finally:
+            thread.join(timeout=5)
+
+
 def test_connect_reuses_a_daemon_spawned_by_a_peer_while_waiting_for_the_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:

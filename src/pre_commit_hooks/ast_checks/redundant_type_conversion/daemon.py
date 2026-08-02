@@ -24,7 +24,7 @@ from pre_commit_hooks._filelock import locked, locking_is_available
 from pre_commit_hooks._lsp import LSPError, read_framed_message, write_framed_message
 from pre_commit_hooks.ast_checks._base import CheckUnavailableError
 
-from .session import PersistentSession, Redundancy, TySession, _run_self_test_in_temporary_directory
+from .session import PersistentSession, Redundancy, TySession, _cache_context, _run_self_test_in_temporary_directory
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -182,8 +182,8 @@ def _ty_version() -> str:
     return completed_process.stdout.strip()
 
 
-def _daemon_identity() -> str:
-    return f"{_ty_version()}|tri006-protocol-{_PROTOCOL_VERSION}"
+def _daemon_identity(root: Path) -> str:
+    return f"{_ty_version()}|tri006-protocol-{_PROTOCOL_VERSION}|context-{_cache_context(root).hex()}"
 
 
 # ---- client side ----
@@ -301,7 +301,7 @@ def connect(root: Path) -> RemoteTySession:
     """
     root = repository_root(root)
     socket_path = _socket_path(root)
-    daemon_identity = _daemon_identity()
+    daemon_identity = _daemon_identity(root)
 
     sock, already_confirmed_departing = _try_connect_or_departing(socket_path, daemon_identity)
     if sock is not None:
@@ -408,7 +408,7 @@ def probe_existing(root: Path) -> ExistingDaemonProbe:
     if not _socket_path(root).exists():
         return ExistingDaemonProbe(None)
     try:
-        daemon_identity = _daemon_identity()
+        daemon_identity = _daemon_identity(root)
     except OSError:
         return ExistingDaemonProbe(None, terminal_failure=True)
     socket_path = _socket_path(root)
@@ -789,7 +789,7 @@ def _serve(root: Path) -> None:
         socket_path.unlink()  # a stale socket left behind by a crashed prior daemon
 
     try:
-        daemon_identity = _daemon_identity()  # pytriage: TR5
+        daemon_identity = _daemon_identity(root)  # pytriage: TR5
     except OSError as error:
         print(f"FAILED: {error}", flush=True)
         return
