@@ -48,6 +48,7 @@ htmlcov/
 Thumbs.db
 
 .cache
+.ruff-extra-rules-tri006-selftest-*
 
 node_modules
 
