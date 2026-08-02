@@ -34,10 +34,12 @@ from pre_commit_hooks.ast_checks.redundant_type_conversion.daemon import (
     shutdown_if_running,
     try_connect_existing,
 )
-from tests._helpers import restricted_permissions
+from tests._helpers import raises, restricted_permissions
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
+
+    from pre_commit_hooks.ast_checks.redundant_type_conversion.session import Redundancy
 
 
 @pytest.fixture
@@ -78,7 +80,7 @@ class _FakeSession:
         hover_delay_seconds: float = 0.0,
     ) -> None:
         self.hover_result = hover_result
-        self.cached: list[tuple[str, int, int, str]] | None = None
+        self.cached: list[Redundancy] | None = None
         self.drained = drained or []
         self.direct_inputs: list[Path] = []
         self.close_calls = 0
@@ -98,13 +100,11 @@ class _FakeSession:
     def finalize(self, _filepath: Path, _source: str) -> None:
         return
 
-    def cached_redundancies(
-        self, _filepath: Path, _source: str, _cache_key: str
-    ) -> list[tuple[str, int, int, str]] | None:
+    def cached_redundancies(self, _filepath: Path, _source: str, _cache_key: str) -> list[Redundancy] | None:
         return self.cached
 
     def cache_redundancies(
-        self, _filepath: Path, _source: str, _cache_key: str, redundancies: list[tuple[str, int, int, str]]
+        self, _filepath: Path, _source: str, _cache_key: str, redundancies: list[Redundancy]
     ) -> None:
         self.cached = redundancies
 
@@ -1362,11 +1362,7 @@ def test_serve_prints_failed_when_the_session_raises(
 def test_serve_prints_failed_when_the_self_test_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr(
-        daemon_module,
-        "_self_test",
-        lambda *_args: (_ for _ in ()).throw(CheckUnavailableError("simulated self-test failure")),
-    )
+    monkeypatch.setattr(daemon_module, "_self_test", raises(CheckUnavailableError, "simulated self-test failure"))
 
     daemon_module._serve(tmp_path)
 

@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from pre_commit_hooks.ast_checks.redundant_type_conversion.session import Redundancy
+
 
 class FakeSession:
     """Records every call it receives and answers from pre-programmed,
@@ -33,7 +35,7 @@ class FakeSession:
     ) -> None:
         self._diagnostics_by_content = diagnostics_by_content
         self._hover_by_position = hover_by_position
-        self._redundancies_by_content: dict[tuple[str, str], list[tuple[str, int, int, str]]] = {}
+        self._redundancies_by_content: dict[tuple[str, str], list[Redundancy]] = {}
         self.opened_content: list[str] = []
         self.hover_calls: list[tuple[int, int]] = []
         self.closed_files: list[Path] = []
@@ -52,12 +54,8 @@ class FakeSession:
     def finalize(self, filepath: Path, _source: str) -> None:
         self.closed_files.append(filepath)
 
-    def cached_redundancies(
-        self, _filepath: Path, source: str, cache_key: str
-    ) -> list[tuple[str, int, int, str]] | None:
+    def cached_redundancies(self, _filepath: Path, source: str, cache_key: str) -> list[Redundancy] | None:
         return self._redundancies_by_content.get((source, cache_key))
 
-    def cache_redundancies(
-        self, _filepath: Path, source: str, cache_key: str, redundancies: list[tuple[str, int, int, str]]
-    ) -> None:
+    def cache_redundancies(self, _filepath: Path, source: str, cache_key: str, redundancies: list[Redundancy]) -> None:
         self._redundancies_by_content[(source, cache_key)] = redundancies

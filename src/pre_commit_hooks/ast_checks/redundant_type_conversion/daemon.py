@@ -15,7 +15,6 @@ import signal
 import socket
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -25,7 +24,7 @@ from pre_commit_hooks._filelock import locked, locking_is_available
 from pre_commit_hooks._lsp import LSPError, read_framed_message, write_framed_message
 from pre_commit_hooks.ast_checks._base import CheckUnavailableError
 
-from .session import PersistentSession, TySession, _run_self_test
+from .session import PersistentSession, Redundancy, TySession, _run_self_test_in_temporary_directory
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -62,7 +61,7 @@ _CLIENT_REQUEST_TIMEOUT_SECONDS = 60.0
 _STEADY_STATE_CALL_TIMEOUT_SECONDS = 60.0  # comfortably above the daemon's own ~20s internal ty-request budget
 _PROTOCOL_VERSION = "4"
 
-type RPCParameter = str | int | list[str] | list[tuple[str, int, int, str]]
+type RPCParameter = str | int | list[str] | list[Redundancy]
 
 
 class _VersionMismatchError(Exception):
@@ -245,9 +244,7 @@ class RemoteTySession:
             # earlier call in the same candidate loop.
             self._call("finalize", filepath=_canonical_rpc_path(filepath), source=source)
 
-    def cached_redundancies(
-        self, filepath: Path, source: str, cache_key: str
-    ) -> list[tuple[str, int, int, str]] | None:
+    def cached_redundancies(self, filepath: Path, source: str, cache_key: str) -> list[Redundancy] | None:
         cached = self._call(
             "cached_redundancies", filepath=_canonical_rpc_path(filepath), source=source, cache_key=cache_key
         )
@@ -256,9 +253,7 @@ class RemoteTySession:
         assert isinstance(cached, list)
         return [tuple(item) for item in cached]
 
-    def cache_redundancies(
-        self, filepath: Path, source: str, cache_key: str, redundancies: list[tuple[str, int, int, str]]
-    ) -> None:
+    def cache_redundancies(self, filepath: Path, source: str, cache_key: str, redundancies: list[Redundancy]) -> None:
         with contextlib.suppress(LSPError):
             self._call(
                 "cache_redundancies",
@@ -583,14 +578,8 @@ def _readline_with_timeout(stream: IO[bytes], timeout: float) -> bytes | None:
 # ---- server side ----
 
 
-def _self_test(session: TySession, root: Path) -> None:
-    with tempfile.TemporaryDirectory(dir=root, prefix=".ruff-extra-rules-tri006-selftest-") as scratch_dir:
-        scratch_root = Path(scratch_dir)
-        try:
-            _run_self_test(session, scratch_root)
-        finally:
-            session.close_file(scratch_root / "redundant_control.py")
-            session.close_file(scratch_root / "necessary_control.py")
+def _self_test(session: TySession, _root: Path) -> None:
+    _run_self_test_in_temporary_directory(session, _root)
 
 
 def _detach_stdio() -> None:
