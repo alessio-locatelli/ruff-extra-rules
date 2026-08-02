@@ -21,7 +21,7 @@ from pre_commit_hooks import ruff_extra_rules, ruff_extra_rules_ty
 from pre_commit_hooks._cache import CacheManager
 from pre_commit_hooks._filelock import locked
 from pre_commit_hooks._lsp import LSPError
-from pre_commit_hooks.ast_checks import ALL_CHECKS, _cli, _orchestrator
+from pre_commit_hooks.ast_checks import ALL_CHECKS, _cli, _discovery, _orchestrator
 from pre_commit_hooks.ast_checks._base import (
     CheckUnavailableError,
     Violation,
@@ -286,7 +286,7 @@ def test_expand_directories_caps_gitignore_warning_at_a_bounded_number_of_paths(
         (tmp_path / "README.md").write_text("keep this directory partially tracked\n")
         subprocess.run([git, "add", "README.md"], check=True, cwd=tmp_path)  # noqa: S603
 
-        num_ignored = 25
+        num_ignored = 1_000
         (tmp_path / ".gitignore").write_text("".join(f"ignored{i}.py\n" for i in range(num_ignored)))
         for i in range(num_ignored):
             (tmp_path / f"ignored{i}.py").write_text("z = 1\n")
@@ -294,27 +294,27 @@ def test_expand_directories_caps_gitignore_warning_at_a_bounded_number_of_paths(
         with caplog.at_level("WARNING"):
             expand_directories([str(tmp_path)])
 
-        assert f"{num_ignored} gitignored path(s)" in caplog.text
+        assert "at least 20 gitignored path(s)" in caplog.text
         assert "showing first 20" in caplog.text
 
 
-def _git_status_missing(_cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    raise FileNotFoundError("git not found")
-
-
-def _git_status_reports_stderr(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.CompletedProcess(cmd, returncode=0, stdout="", stderr="error: failed to stat\n")
-
-
 @pytest.mark.parametrize(
-    "simulate_status_failure",
-    [_git_status_missing, _git_status_reports_stderr],
-    ids=["status-subprocess-missing", "status-reports-stderr"],
+    "status_failure",
+    ["missing", "stderr", "malformed", "irrelevant", "nonzero", "timeout"],
+    ids=[
+        "status-subprocess-missing",
+        "status-reports-stderr",
+        "status-reports-malformed-output",
+        "status-reports-irrelevant-output",
+        "status-exits-unsuccessfully",
+        "status-times-out",
+    ],
 )
 def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unreliable(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
-    simulate_status_failure: Callable[[list[str]], subprocess.CompletedProcess[str]],
+    monkeypatch: pytest.MonkeyPatch,
+    status_failure: str,
 ) -> None:
     # Self-healing: if the extra `git status --ignored` probe used to detect
     # gitignored exclusions worth warning about is itself unreliable --
@@ -325,8 +325,11 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
     # succeed; only the warning is skipped, silently.
     git = shutil.which("git")
     assert git is not None
+    if status_failure == "timeout":
+        monkeypatch.setattr(_discovery, "_GIT_STATUS_TIMEOUT_SECONDS", 0.01)
+        monkeypatch.setattr(_discovery, "_PROCESS_STOP_TIMEOUT_SECONDS", 0.01)
 
-    real_run = subprocess.run
+    real_popen = subprocess.Popen
     with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
@@ -334,16 +337,40 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
         tracked.write_text("x = 1\n")
         subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
 
-        def fake_run(cmd: list[str], *args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        def fake_popen(cmd: list[str], *args: object, **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401
             if "status" in cmd:
-                return simulate_status_failure(cmd)
-            return real_run(cmd, *args, **kwargs)  # type: ignore[call-overload]
+                if status_failure == "missing":
+                    raise FileNotFoundError("git not found")
+                scripts = {
+                    "malformed": "import os; os.write(1, b'!! ignored.py')",
+                    "irrelevant": "import os; os.write(1, b'!! ignored.txt\\0')",
+                    "nonzero": "import sys; sys.exit(1)",
+                    "stderr": "import sys; sys.stderr.write('failed')",
+                    "timeout": (
+                        "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                        "os.write(1, b'?\\0'); time.sleep(30)"
+                    ),
+                }
+                return real_popen([sys.executable, "-c", scripts[status_failure]], **kwargs)
+            return real_popen(cmd, *args, **kwargs)  # type: ignore[call-overload]
 
-        with mock.patch("subprocess.run", side_effect=fake_run), caplog.at_level("WARNING"):
+        with mock.patch("subprocess.Popen", side_effect=fake_popen), caplog.at_level("WARNING"):
             matches = expand_directories([str(tmp_path)])
 
         assert matches == [str(tracked.resolve())]
         assert not any(record.levelname == "WARNING" for record in caplog.records)
+
+
+def test_stop_ignored_status_process_escalates_after_termination_timeout() -> None:
+    process = mock.Mock(spec=subprocess.Popen)
+    process.poll.return_value = None
+    process.wait.side_effect = [subprocess.TimeoutExpired([], 1), None]
+
+    _discovery._stop_process(process)
+
+    process.terminate.assert_called_once_with()
+    process.kill.assert_called_once_with()
+    assert process.wait.call_count == 2
 
 
 def test_expand_directories_skips_tracked_file_deleted_from_working_tree(tmp_path: Path) -> None:
