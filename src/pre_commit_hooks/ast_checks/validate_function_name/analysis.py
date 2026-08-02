@@ -27,6 +27,7 @@ class Suggestion:
     lineno: int
     suggested_name: str
     reason: str
+    requires_property: bool = False
 
 
 def read_source(path: Path) -> str:
@@ -273,6 +274,27 @@ def _is_log_output_call(func: ast.expr) -> bool:
     return isinstance(func.value, ast.Attribute) and func.value.attr in {"logger", "log"}
 
 
+def _body_without_docstring(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.stmt]:
+    body = func_node.body
+    if (
+        isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        return body[1:]
+    return body
+
+
+def _is_logging_only_function(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    body = _body_without_docstring(func_node)
+    return (
+        len(body) == 1
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Call)
+        and _is_log_output_call(body[0].value.func)
+    )
+
+
 def analyze_function(
     func_node: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> FunctionBehavior:
@@ -336,6 +358,7 @@ def analyze_function(
             defined_classes.add(stmt.name)
 
     own_scope_nodes = list(_iter_own_scope(func_node))
+    logging_only = _is_logging_only_function(func_node)
 
     for node, conditional in own_scope_nodes:
         if isinstance(node, (ast.Yield, ast.YieldFrom)):
@@ -367,7 +390,7 @@ def analyze_function(
                         flags["network_write"] = True
                 if lname == "print" or (lname.endswith(".write") and ("stdout" in lname or "stderr" in lname)):
                     flags["outputs"] = True
-                if _is_log_output_call(node.func):
+                if logging_only and _is_log_output_call(node.func):
                     flags["outputs"] = True
                 if lname in (
                     "sum",
@@ -500,6 +523,10 @@ def analyze_function(
     if has_loop_checking_exists_or_parent:
         flags["searches"] = True
 
+    body = _body_without_docstring(func_node)
+    if body and isinstance(body[-1], ast.Return) and isinstance(body[-1].value, ast.BinOp):
+        flags["aggregates"] = True
+
     assigns = [n for n, _conditional in own_scope_nodes if isinstance(n, ast.Assign)]
     for a in assigns:
         for t in a.targets:
@@ -556,15 +583,9 @@ def is_simple_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
     """
     # A function's body is never empty (Python requires at least one
     # statement), so only the post-docstring-strip check below can be.
-    body = func_node.body
-    if (
-        isinstance(body[0], ast.Expr)
-        and isinstance(body[0].value, ast.Constant)
-        and isinstance(body[0].value.value, str)
-    ):
-        body = body[1:]
-        if not body:
-            return False
+    body = _body_without_docstring(func_node)
+    if not body:
+        return False
 
     if len(body) != 1:
         return False
@@ -584,6 +605,45 @@ def is_simple_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
         if (call_name and call_name.endswith(".get")) or (isinstance(value.func, ast.Name) and value.func.id == "get"):
             return True
     return False
+
+
+def _self_attribute_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "self":
+        return node.attr
+    return None
+
+
+def is_lazy_self_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    if not isinstance(getattr(func_node, "parent", None), ast.ClassDef):
+        return False
+
+    returns = [
+        _self_attribute_name(node.value)
+        for node, _conditional in _iter_own_scope(func_node)
+        if isinstance(node, ast.Return) and node.value is not None
+    ]
+    if not returns or any(name is None for name in returns) or len(set(returns)) != 1:
+        return False
+
+    attribute_name = returns[0]
+    assert attribute_name is not None
+    writes: list[tuple[str | None, bool]] = []
+    for node, conditional in _iter_own_scope(func_node):
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets = [node.target]
+
+        writes.extend(
+            (_self_attribute_name(target), conditional) for target in targets if _get_base_name(target) == "self"
+        )
+
+    return (
+        bool(writes)
+        and all(name == attribute_name for name, _conditional in writes)
+        and any(conditional for _name, conditional in writes)
+    )
 
 
 def process_file(filepath: Path) -> list[Suggestion]:
@@ -633,8 +693,15 @@ def collect_suggestions(filepath: Path, tree: ast.Module, source: str) -> list[S
         if node.lineno in ignored_lines:
             continue
 
-        analysis = analyze_function(node)
-        suggested_name, reason = suggest_name_for(node, analysis)
+        lazy_accessor = is_lazy_self_accessor(node)
+        if lazy_accessor and isinstance(node, ast.AsyncFunctionDef):
+            continue
+        if lazy_accessor:
+            suggested_name = derive_entity_from_name(node.name)
+            reason = "synchronous lazy accessor"
+        else:
+            analysis = analyze_function(node)
+            suggested_name, reason = suggest_name_for(node, analysis)
 
         if suggested_name != node.name:
             suggestions.append(
@@ -644,6 +711,7 @@ def collect_suggestions(filepath: Path, tree: ast.Module, source: str) -> list[S
                     lineno=node.lineno,
                     suggested_name=suggested_name,
                     reason=reason,
+                    requires_property=lazy_accessor,
                 )
             )
 
@@ -749,6 +817,8 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
         return suggested, reason
 
     if _is_context_manager(func_node):
+        if isinstance(getattr(func_node, "parent", None), ast.ClassDef):
+            return old, "context manager method; get prefix is acceptable"
         return entity or old, "context manager; prefer noun phrase"
 
     # A generator's calling contract (must be iterated, can't be used as a

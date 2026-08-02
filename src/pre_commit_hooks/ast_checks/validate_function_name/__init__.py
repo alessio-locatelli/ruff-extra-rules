@@ -86,10 +86,16 @@ class ValidateFunctionNameCheck(BaseCheck):
 
         violations = []
         for suggestion in suggestions:
-            message = (
-                f"Function '{suggestion.func_name}' should be renamed to "
-                f"'{suggestion.suggested_name}' ({suggestion.reason})"
-            )
+            if suggestion.requires_property:
+                message = (
+                    f"Function '{suggestion.func_name}' should use @property "
+                    f"'{suggestion.suggested_name}' ({suggestion.reason})"
+                )
+            else:
+                message = (
+                    f"Function '{suggestion.func_name}' should be renamed to "
+                    f"'{suggestion.suggested_name}' ({suggestion.reason})"
+                )
 
             fix_data: ValidateFunctionNameFixData = {"suggestion": suggestion}
             violations.append(
@@ -99,7 +105,7 @@ class ValidateFunctionNameCheck(BaseCheck):
                     line=suggestion.lineno,
                     col=0,
                     message=message,
-                    fixable=is_autofix_safe(function_index, suggestion),
+                    fixable=not suggestion.requires_property and is_autofix_safe(function_index, suggestion),
                     # Violation.fix_data is intentionally untyped (dict[str,
                     # Any]) at this boundary; see ValidateFunctionNameFixData
                     # above for the shape check()/fix() actually agree on.
@@ -138,7 +144,7 @@ class ValidateFunctionNameCheck(BaseCheck):
 
             fix_data = cast("ValidateFunctionNameFixData", violation.fix_data)
             suggestion = fix_data.get("suggestion")
-            if not suggestion:
+            if not suggestion or suggestion.requires_property:
                 continue
 
             if should_autofix(filepath, suggestion):

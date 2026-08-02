@@ -611,7 +611,9 @@ def test_analyze_function_flags(source: str, func_name: str, flags: dict[str, bo
         ("def get_data():\n    logging.error('message')\n", True),
         ("def get_data(self):\n    self.logger.debug('message')\n", True),
         ("def get_data(service):\n    service.log.error('message')\n", True),
+        ("def get_data():\n    logger.info('message')\n    return value\n", False),
         ("def get_data(client):\n    client.info()\n", False),
+        ("def get_data(client):\n    client.status()\n", False),
         ("def get_data():\n    logging.getLogger(__name__).info('message')\n", False),
     ],
     ids=[
@@ -620,7 +622,9 @@ def test_analyze_function_flags(source: str, func_name: str, flags: dict[str, bo
         "logging-name",
         "logger-attribute",
         "log-attribute",
+        "logger-call-with-return",
         "unrelated-info-method",
+        "unrelated-method",
         "logger-factory-call",
     ],
 )
@@ -643,6 +647,122 @@ def test_client_info_does_not_propose_output_rename() -> None:
     )
 
     assert collect_suggestions(Path("test_redis.py"), ast.parse(source), source) == []
+
+
+def test_lazy_async_accessors_and_context_manager_methods_are_allowed() -> None:
+    source = (
+        "class Backend:\n"
+        "    @asynccontextmanager\n"
+        "    async def get_connection(self):\n"
+        "        if self.context.cls:\n"
+        "            yield self.context.cls\n"
+        "        else:\n"
+        "            yield await self.context.__aenter__()\n"
+        "\n"
+        "    async def get_table(self):\n"
+        "        if not self._table:\n"
+        "            async with self.get_connection() as conn:\n"
+        "                if self.create_if_not_exists:\n"
+        "                    self._table = await self._create_table(conn)\n"
+        "                else:\n"
+        "                    self._table = await conn.Table(self.table_name)\n"
+        "        return self._table\n"
+        "\n"
+        "    async def get_client(self):\n"
+        "        if not self._client:\n"
+        "            self._client = await from_url(self.address)\n"
+        "        return self._client\n"
+    )
+
+    assert collect_suggestions(Path("backend.py"), ast.parse(source), source) == []
+
+
+def test_sync_lazy_accessor_requires_property() -> None:
+    source = (
+        "class Backend:\n"
+        "    def get_connection(self):\n"
+        "        if not self._connection:\n"
+        "            self._connection = connect()\n"
+        "        return self._connection\n"
+    )
+
+    suggestions = collect_suggestions(Path("backend.py"), ast.parse(source), source)
+
+    assert len(suggestions) == 1
+    assert suggestions[0].suggested_name == "connection"
+    assert suggestions[0].requires_property is True
+
+
+def test_annotated_sync_lazy_accessor_requires_property() -> None:
+    source = (
+        "class Backend:\n"
+        "    def get_connection(self):\n"
+        "        if not self._connection:\n"
+        "            self._connection: Connection = connect()\n"
+        "        return self._connection\n"
+    )
+
+    suggestions = collect_suggestions(Path("backend.py"), ast.parse(source), source)
+
+    assert len(suggestions) == 1
+    assert suggestions[0].requires_property is True
+
+
+def test_lazy_accessor_rejects_unrelated_state_writes() -> None:
+    source = (
+        "class Backend:\n"
+        "    def get_connection(self):\n"
+        "        if not self._connection:\n"
+        "            self._connection = connect()\n"
+        "        self.last_accessed = utcnow()\n"
+        "        return self._connection\n"
+    )
+
+    suggestions = collect_suggestions(Path("backend.py"), ast.parse(source), source)
+
+    assert len(suggestions) == 1
+    assert suggestions[0].suggested_name == "update_connection"
+
+
+def test_logging_does_not_override_response_accessor() -> None:
+    source = (
+        "async def get_response(self, key):\n"
+        "    logger.debug('attempting lookup')\n"
+        "    try:\n"
+        "        response = await self.responses.read(key)\n"
+        "    except KeyError:\n"
+        "        response = None\n"
+        "    logger.debug('lookup complete')\n"
+        "    return response\n"
+    )
+
+    assert collect_suggestions(Path("base.py"), ast.parse(source), source) == []
+
+
+def test_arithmetic_return_suggests_calculation_despite_logging() -> None:
+    source = (
+        "def get_expiration_datetime(expire_after):\n"
+        "    logger.debug('determining expiration')\n"
+        "    if expire_after is None:\n"
+        "        return None\n"
+        "    return utcnow() + expire_after\n"
+    )
+
+    suggestions = collect_suggestions(Path("cache_control.py"), ast.parse(source), source)
+
+    assert len(suggestions) == 1
+    assert suggestions[0].suggested_name == "calculate_expiration_datetime"
+
+
+def test_branch_local_arithmetic_does_not_suggest_calculation() -> None:
+    source = (
+        "def get_expiration_datetime(expire_after):\n"
+        "    if expire_after is not None:\n"
+        "        return utcnow() + expire_after\n"
+        "    return None\n"
+    )
+
+    assert collect_suggestions(Path("cache_control.py"), ast.parse(source), source) == []
 
 
 def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
