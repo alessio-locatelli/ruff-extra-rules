@@ -9,6 +9,7 @@ import atexit
 import contextlib
 import hashlib
 import logging
+import os
 import re
 import tempfile
 import threading
@@ -27,6 +28,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger("ast_checks")
 
 type Redundancy = tuple[str, int, int, str]
+
+
+def _cache_context(root: Path) -> bytes:
+    digest = hashlib.sha256()
+    for filename in ("pyproject.toml", "ty.toml"):
+        path = root / filename
+        digest.update(filename.encode())
+        with contextlib.suppress(OSError):
+            digest.update(path.read_bytes())
+    for key, value in sorted(os.environ.items()):
+        if key.startswith("TY_") or key in {"PYTHONPATH", "VIRTUAL_ENV"}:
+            digest.update(key.encode())
+            digest.update(value.encode())
+    return digest.digest()
 
 
 class PersistentSession(Protocol):
@@ -147,6 +162,7 @@ def _diagnostic_key(diagnostic: dict[str, Any]) -> tuple[Any, ...]:
 
 class TySession:
     __slots__ = (
+        "_cache_identity",
         "_cached_redundancies",
         "_client",
         "_direct_input_digests",
@@ -162,6 +178,7 @@ class TySession:
         self._root = root.resolve()
         self._keep_open = keep_open
         self._cached_redundancies: dict[tuple[str, str], tuple[bytes, list[Redundancy]]] = {}
+        self._cache_identity = _cache_context(self._root)
         self._direct_input_digests: dict[str, bytes] = {}
         self._dirty_uris: set[str] = set()
         self._dirty_uris_lock = threading.Lock()
@@ -252,6 +269,10 @@ class TySession:
         resolved = filepath.resolve()
         if not self._keep_open or not self._is_within_root(resolved):
             return None
+        context = _cache_context(self._root)
+        if context != self._cache_identity:
+            self._cached_redundancies.clear()
+            self._cache_identity = context
         cached = self._cached_redundancies.get((resolved.as_uri(), cache_key))
         if cached is None:
             return None
