@@ -154,6 +154,23 @@ def test_expand_directories_excludes_gitignored_file_but_warns(
         assert "ignored.py" in caplog.text
 
 
+def test_expand_directories_warns_when_ignored_path_streaming_is_unavailable(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    git = shutil.which("git")
+    assert git is not None
+
+    with contextlib.chdir(tmp_path):
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+        monkeypatch.setattr(_discovery, "_CAN_STREAM_IGNORED_STATUS", False)
+
+        with caplog.at_level("WARNING"):
+            matches = expand_directories([str(tmp_path)])
+
+        assert matches == []
+        assert "could not be inspected on this platform" in caplog.text
+
+
 def test_expand_directories_warns_about_an_ignored_directory_with_an_unrecognized_name(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -300,10 +317,11 @@ def test_expand_directories_caps_gitignore_warning_at_a_bounded_number_of_paths(
 
 @pytest.mark.parametrize(
     "status_failure",
-    ["missing", "stderr", "malformed", "irrelevant", "nonzero", "timeout"],
+    ["missing", "stderr", "stderr-with-paths", "malformed", "irrelevant", "nonzero", "timeout"],
     ids=[
         "status-subprocess-missing",
         "status-reports-stderr",
+        "status-reports-stderr-with-ignored-paths",
         "status-reports-malformed-output",
         "status-reports-irrelevant-output",
         "status-exits-unsuccessfully",
@@ -346,6 +364,7 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
                     "irrelevant": "import os; os.write(1, b'!! ignored.txt\\0')",
                     "nonzero": "import sys; sys.exit(1)",
                     "stderr": "import sys; sys.stderr.write('failed')",
+                    "stderr-with-paths": "import os; os.write(2, b'failed'); os.write(1, b'!! ignored.py\\0' * 20)",
                     "timeout": (
                         "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
                         "os.write(1, b'?\\0'); time.sleep(30)"
@@ -359,6 +378,35 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
 
         assert matches == [str(tracked.resolve())]
         assert not any(record.levelname == "WARNING" for record in caplog.records)
+
+
+def test_expand_directories_stops_ignored_status_at_the_reporting_threshold(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    git = shutil.which("git")
+    assert git is not None
+    real_popen = subprocess.Popen
+
+    with contextlib.chdir(tmp_path):
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+        (tmp_path / "tracked.py").write_text("x = 1\n")
+        subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
+
+        def fake_popen(cmd: list[str], *args: object, **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401
+            if "status" in cmd:
+                return real_popen(
+                    [sys.executable, "-c", "import os\nwhile True:\n os.write(1, b'!! ignored.py\\0')"], **kwargs
+                )
+            return real_popen(cmd, *args, **kwargs)  # type: ignore[call-overload]
+
+        start = time.monotonic()
+        with mock.patch("subprocess.Popen", side_effect=fake_popen), caplog.at_level("WARNING"):
+            matches = expand_directories([str(tmp_path)])
+        elapsed = time.monotonic() - start
+
+        assert matches == [str((tmp_path / "tracked.py").resolve())]
+        assert "at least 20 gitignored path(s)" in caplog.text
+        assert elapsed < 1
 
 
 def test_stop_ignored_status_process_escalates_after_termination_timeout() -> None:
