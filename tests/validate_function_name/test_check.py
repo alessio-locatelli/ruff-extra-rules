@@ -82,6 +82,32 @@ def test_fix_applies_safe_suggestion(tmp_path: Path) -> None:
     assert "def is_data() -> bool:" in filepath.read_text()
 
 
+def test_fix_applies_context_manager_rename(tmp_path: Path) -> None:
+    filepath = tmp_path / "mod.py"
+    source = (
+        "from contextlib import asynccontextmanager\n"
+        "\n"
+        "@asynccontextmanager\n"
+        "async def get_tempfile_session():\n"
+        "    yield object()\n"
+        "\n"
+        "async def use_session():\n"
+        "    async with get_tempfile_session() as session:\n"
+        "        return session\n"
+    )
+    filepath.write_text(source)
+    tree = ast.parse(source)
+
+    check = ValidateFunctionNameCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert len(violations) == 1
+    assert violations[0].fixable is True
+    assert check.fix(filepath, violations, source, tree) is True
+    assert "async def tempfile_session()" in filepath.read_text()
+    assert "async with tempfile_session() as session:" in filepath.read_text()
+
+
 def test_fix_skips_unsafe_suggestion(tmp_path: Path) -> None:
     # A suggestion should_autofix rejects (e.g. a method) isn't applied.
     filepath = tmp_path / "mod.py"

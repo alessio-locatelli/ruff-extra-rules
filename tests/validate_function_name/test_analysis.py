@@ -1164,6 +1164,36 @@ def test_extract_first_verb(docstring_line: str, verb: str | None) -> None:
             "iter_lines",
             "generator/iterator",
         ),
+        (
+            ("from contextlib import contextmanager\n\n@contextmanager\ndef get_transaction():\n    yield object()\n"),
+            "get_transaction",
+            "transaction",
+            "context manager; prefer noun phrase",
+        ),
+        (
+            (
+                "from contextlib import asynccontextmanager\n"
+                "\n"
+                "@asynccontextmanager\n"
+                "async def get_tempfile_session():\n"
+                "    yield object()\n"
+            ),
+            "get_tempfile_session",
+            "tempfile_session",
+            "context manager; prefer noun phrase",
+        ),
+        (
+            ("import contextlib\n\n@contextlib.contextmanager\ndef get_connection():\n    yield object()\n"),
+            "get_connection",
+            "connection",
+            "context manager; prefer noun phrase",
+        ),
+        (
+            ("import contextlib\n\n@contextlib.asynccontextmanager\nasync def get_lock():\n    yield object()\n"),
+            "get_lock",
+            "lock",
+            "context manager; prefer noun phrase",
+        ),
     ],
     ids=[
         "test-prefixed-untouched",
@@ -1173,6 +1203,10 @@ def test_extract_first_verb(docstring_line: str, verb: str | None) -> None:
         "validates-only-suggests-validate",
         "transforms-only-suggests-transform",
         "generator-outranks-disk-read",
+        "context-manager-uses-noun-phrase",
+        "async-context-manager-uses-noun-phrase",
+        "qualified-context-manager-uses-noun-phrase",
+        "qualified-async-context-manager-uses-noun-phrase",
     ],
 )
 def test_suggest_name_for(source: str, func_name: str, suggested_name: str, reason: str) -> None:
