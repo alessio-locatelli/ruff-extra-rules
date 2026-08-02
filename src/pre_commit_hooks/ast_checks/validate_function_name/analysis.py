@@ -267,11 +267,18 @@ def _is_capitalized_call(func: ast.expr) -> bool:
 
 
 def _is_log_output_call(func: ast.expr) -> bool:
-    if not isinstance(func, ast.Attribute) or func.attr not in {"debug", "info", "warning", "error"}:
+    if not isinstance(func, ast.Attribute) or func.attr not in {
+        "debug",
+        "info",
+        "warning",
+        "error",
+        "critical",
+        "exception",
+    }:
         return False
     if isinstance(func.value, ast.Name):
         return func.value.id in {"logger", "log", "logging"}
-    return isinstance(func.value, ast.Attribute) and func.value.attr in {"logger", "log"}
+    return isinstance(func.value, ast.Attribute) and func.value.attr in {"logger", "log", "_logger", "_log"}
 
 
 def _body_without_docstring(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.stmt]:
