@@ -37,8 +37,10 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from pre_commit_hooks.ast_checks._base import (
     BaseCheck,
+    ConcurrentModificationError,
     FixValidationError,
     Violation,
+    mark_fix_aborted,
     mark_fix_errored,
     mark_fix_rejected,
 )
@@ -158,6 +160,14 @@ class ValidateFunctionNameCheck(BaseCheck):
                     # post-fix re-check attribute the rejection to this
                     # specific violation instead of the whole batch).
                     mark_fix_rejected(violation)
+                except ConcurrentModificationError:
+                    # The file changed on disk between should_autofix()'s own
+                    # read above and apply_fix()'s write -- not a bug, so
+                    # distinct from the Exception branch below. Same
+                    # per-violation scoping as FixValidationError: a rename
+                    # earlier in this loop already committed and stays, and a
+                    # later one is still attempted.
+                    mark_fix_aborted(violation)
                 except Exception:
                     # A bug in apply_fix() itself, distinct from
                     # FixValidationError above: mark it so the orchestrator's

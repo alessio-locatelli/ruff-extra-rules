@@ -259,7 +259,7 @@ class ExcessiveBlankLinesCheck(BaseCheck):
 
         fixed_content = fix_file_content(source, tree)
         try:
-            atomic_write_text(filepath, fixed_content, encoding)
+            atomic_write_text(filepath, fixed_content, encoding, source)
         except OSError:
             # Debug-only: mark_fix_failed() below already reports this
             # cleanly as [FIX FAILED] — an ERROR-level .exception() call

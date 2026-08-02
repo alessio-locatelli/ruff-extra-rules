@@ -791,7 +791,7 @@ def _apply_fixes(
         col = byte_col_to_char_col(line, byte_col)
         lines[line_idx] = line[:col] + new_name + line[col + name_len :]
 
-    atomic_write_text(filepath, "".join(lines), encoding)
+    atomic_write_text(filepath, "".join(lines), encoding, source)
 
 
 class MeaninglessVarsCheck(BaseCheck):

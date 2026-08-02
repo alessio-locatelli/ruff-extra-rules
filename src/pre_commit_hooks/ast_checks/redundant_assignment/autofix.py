@@ -170,7 +170,7 @@ def apply_fixes(
 
         new_source = "".join(source_lines)
         try:
-            atomic_write_text(filepath, new_source, encoding)
+            atomic_write_text(filepath, new_source, encoding, source)
         except OSError:
             # Debug-only: mark_fix_failed() below already reports this
             # cleanly as [FIX FAILED] — an ERROR-level .exception() call

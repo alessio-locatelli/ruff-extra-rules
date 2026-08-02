@@ -21,12 +21,15 @@ from . import ALL_CHECKS
 from ._base import (
     ASTCheck,
     CheckUnavailableError,
+    ConcurrentModificationError,
     FixValidationError,
     Violation,
+    is_fix_aborted,
     is_fix_errored,
     is_fix_failed,
     is_fix_rejected,
     is_fixed,
+    mark_fix_aborted,
     mark_fix_errored,
     mark_fix_rejected,
     mark_fixed,
@@ -619,6 +622,24 @@ class CheckOrchestrator:
                     )
                     for v in fresh_violations:
                         mark_fix_rejected(v)
+                except ConcurrentModificationError:
+                    # atomic_write_text() refused to write — the file is
+                    # untouched, but this time it's not a bug in the check's
+                    # fix logic: something else (an editor, a concurrent
+                    # process outside this run's own per-file fix lock)
+                    # modified the file after current_source was read above.
+                    # Debug-only — mark_fix_aborted() below already reports
+                    # this cleanly as [FIX ABORTED]; see _read_source's own
+                    # docstring for why ERROR-level .exception() logging here
+                    # would just be redundant noise.
+                    logger.debug(
+                        "File %s changed on disk while fixing %s; the fix was discarded.",
+                        filepath,
+                        check.check_id,
+                        exc_info=True,
+                    )
+                    for v in fresh_violations:
+                        mark_fix_aborted(v)
                 except Exception:
                     # fix() itself raised — a bug in the check's own fix
                     # logic, distinct from FixValidationError (which means
@@ -712,7 +733,7 @@ class CheckOrchestrator:
     ) -> None:
         """Re-check `filepath`'s final on-disk state and refresh the
         position of every still-*open* violation (no fixed/rejected/
-        errored/failed outcome yet this call) — covers both a check that
+        errored/failed/aborted outcome yet this call) — covers both a check that
         never got as far as calling its own `fix()` this run (e.g. a check
         that's never fixable at all, like redundant-super-init) *and* a
         check that did run but left some of its own violations open (e.g.
@@ -731,10 +752,11 @@ class CheckOrchestrator:
         untouched rather than recomputed: it's genuinely gone from the file,
         so a fresh `check()` call would never find it again (silently
         losing its `[FIXED]` confirmation). A check_id with any
-        rejected/errored/failed entry is skipped *entirely* this pass,
-        including its own still-open entries (if any): a fresh `check()`
-        call would rediscover the still-present rejected/errored/failed
-        violation too, and there's no reliable way to tell that rediscovery
+        rejected/errored/failed/aborted entry is skipped *entirely* this
+        pass, including its own still-open entries (if any): a fresh
+        `check()` call would rediscover the still-present rejected/errored/
+        failed/aborted violation too, and there's no reliable way to tell
+        that rediscovery
         apart from a different, unrelated violation that merely happens to
         share the same message text (e.g. two identically-named functions
         in different scopes) without a stable per-violation identity this
@@ -761,7 +783,7 @@ class CheckOrchestrator:
                 continue
             check_entries = [v for v in violations if v.check_id == check.check_id]
             if not check_entries or any(
-                is_fix_rejected(v) or is_fix_errored(v) or is_fix_failed(v) for v in check_entries
+                is_fix_rejected(v) or is_fix_errored(v) or is_fix_failed(v) or is_fix_aborted(v) for v in check_entries
             ):
                 continue
 
@@ -806,6 +828,16 @@ class CheckOrchestrator:
         this call. If the file couldn't be re-read (e.g. deleted
         concurrently), conservatively returns every key unresolved —
         nothing is marked fixed on an unverifiable outcome.
+
+        A violation a multi-write `fix()` (e.g. `validate_function_name`)
+        already marked rejected/errored/aborted itself, from inside its own
+        per-violation loop, is never marked fixed here even if it's no
+        longer present on this re-check — e.g. a `ConcurrentModificationError`
+        abort and the very external edit that caused it can easily be the
+        same reason the violation disappeared, but this call's own fix never
+        actually landed and must not be reported as if it had (ch. 1: "MUST
+        NOT report a fix as applied when the file was left unchanged" by
+        this fix).
         """
         post_read_result = self._read_source(filepath)
         if post_read_result is None:
@@ -817,7 +849,8 @@ class CheckOrchestrator:
             (v.line, v.col, v.message) for v in check.check(filepath, post_tree, post_source) if v.fixable
         }
         for v in fresh_violations:
-            if (v.line, v.col, v.message) not in still_present:
+            already_resolved = is_fix_rejected(v) or is_fix_errored(v) or is_fix_failed(v) or is_fix_aborted(v)
+            if (v.line, v.col, v.message) not in still_present and not already_resolved:
                 mark_fixed(v)
         return still_present
 
