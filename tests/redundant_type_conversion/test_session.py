@@ -566,10 +566,12 @@ def test_reconcile_direct_inputs_invalidates_dirty_redundancies(tmp_path: Path) 
     dependent = tmp_path / "dependent.py"
     unaffected = tmp_path / "unaffected.py"
     dependent_uri = dependent.resolve().as_uri()
-    session, _client = _session_with_dirty_uris(tmp_path, [dependent_uri])
+    session, client = _session_with_dirty_uris(tmp_path, [dependent_uri])
     session._open_versions[dependent_uri] = 1
     session.cache_redundancies(dependent, "value = str(name)\n", "strict", [("str", 1, 8, "str")])
     session.cache_redundancies(unaffected, "value = str(name)\n", "strict", [("str", 1, 8, "str")])
+    assert client.notify_hook is not None
+    client.notify_hook("unrelated", {})
 
     session.record_direct_input(direct, "source\n")
 
