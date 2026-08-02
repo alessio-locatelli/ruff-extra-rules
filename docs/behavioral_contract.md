@@ -8,6 +8,44 @@ A requirement is a **MUST** when violating it can cause incorrect results, data 
 
 A requirement is a **MUST NOT** when the behavior is inherently unsafe, misleading, or incompatible with reliable automation.
 
+## Contents
+
+- [Correctness and Safety of Auto-Fixes](#1-correctness-and-safety-of-auto-fixes)
+- [Preservation of Source Semantics](#2-preservation-of-source-semantics)
+- [Source File Integrity](#3-source-file-integrity)
+- [Parsing and Invalid Python](#4-parsing-and-invalid-python)
+- [Internal Errors and Failure Isolation](#5-internal-errors-and-failure-isolation)
+- [CLI Exit Codes](#6-cli-exit-codes)
+- [Diagnostics and User Feedback](#7-diagnostics-and-user-feedback)
+- [Auto-Fix Modes](#8-auto-fix-modes)
+- [Determinism](#9-determinism)
+- [Idempotence](#10-idempotence)
+- [Caching](#11-caching)
+- [Incremental Execution](#12-incremental-execution)
+- [Filesystem and Path Handling](#13-filesystem-and-path-handling)
+- [Cross-Platform Behavior](#14-cross-platform-behavior)
+- [Process, Signals, and Cancellation](#15-process-signals-and-cancellation)
+- [Parallelism and Concurrency](#16-parallelism-and-concurrency)
+- [Configuration](#17-configuration)
+- [Rule and Plugin Isolation](#18-rule-and-plugin-isolation)
+- [Python Version and Language Compatibility](#19-python-version-and-language-compatibility)
+- [Parsing, AST, CST, and Source Mapping](#20-parsing-ast-cst-and-source-mapping)
+- [Formatting and Source Preservation](#21-formatting-and-source-preservation)
+- [Git and VCS Integration](#22-git-and-vcs-integration)
+- [Security](#23-security)
+- [Resource Usage](#24-resource-usage)
+- [Timeouts and Hanging Operations](#25-timeouts-and-hanging-operations)
+- [Standard Input, Output, and TTY Behavior](#26-standard-input-output-and-tty-behavior)
+- [Logging and Debugging](#27-logging-and-debugging)
+- [Configuration and Environment Discovery](#28-configuration-and-environment-discovery)
+- [Installation and Runtime Environment](#29-installation-and-runtime-environment)
+- [Performance](#30-performance)
+- [Testing Requirements](#31-testing-requirements)
+- [Testing the Auto-Fix Pipeline](#32-testing-the-auto-fix-pipeline)
+- [Compatibility and Upgrade Behavior](#33-compatibility-and-upgrade-behavior)
+- [User Trust](#34-user-trust)
+- [General Failure Principle](#35-general-failure-principle)
+
 ---
 
 ## 1. Correctness and Safety of Auto-Fixes
