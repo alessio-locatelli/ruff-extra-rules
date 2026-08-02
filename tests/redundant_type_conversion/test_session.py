@@ -387,6 +387,19 @@ def _session_with_stub_client(
     return session
 
 
+def _session_with_dirty_uris(tmp_path: Path, dirty_uris: list[str]) -> tuple[TySession, _StubLSPClient]:
+    client = _StubLSPClient()
+    session = _session_with_stub_client(client, keep_open=True, root=tmp_path)
+
+    def record_diagnostics(method: str, _params: dict[str, object]) -> None:
+        if method == "workspace/didChangeWatchedFiles":
+            for uri in dirty_uris:
+                session._on_notification("textDocument/publishDiagnostics", {"uri": uri})
+
+    client.notify_hook = record_diagnostics
+    return session, client
+
+
 @pytest.mark.parametrize(
     ("hover_result", "hover_raises", "expected"),
     [
@@ -549,22 +562,15 @@ def test_cached_redundancies_are_invalidated_when_ty_configuration_changes(tmp_p
 
 
 def test_reconcile_direct_inputs_invalidates_dirty_redundancies(tmp_path: Path) -> None:
-    client = _StubLSPClient()
-    session = _session_with_stub_client(client, keep_open=True, root=tmp_path)
     direct = tmp_path / "direct.py"
     dependent = tmp_path / "dependent.py"
     unaffected = tmp_path / "unaffected.py"
     dependent_uri = dependent.resolve().as_uri()
+    session, _client = _session_with_dirty_uris(tmp_path, [dependent_uri])
     session._open_versions[dependent_uri] = 1
     session.cache_redundancies(dependent, "value = str(name)\n", "strict", [("str", 1, 8, "str")])
     session.cache_redundancies(unaffected, "value = str(name)\n", "strict", [("str", 1, 8, "str")])
 
-    def record_diagnostics(method: str, _params: dict[str, object]) -> None:
-        if method == "workspace/didChangeWatchedFiles":
-            session._on_notification("textDocument/publishDiagnostics", {"uri": dependent_uri})
-
-    client.notify_hook = record_diagnostics
-    record_diagnostics("unrelated", {})
     session.record_direct_input(direct, "source\n")
 
     assert session.reconcile_direct_inputs() == [dependent.resolve()]
@@ -586,20 +592,13 @@ def test_await_ty_catching_up_ignores_a_failed_barrier_pull(tmp_path: Path) -> N
 
 
 def test_reconcile_direct_inputs_batches_changed_files_and_returns_dirty_open_files(tmp_path: Path) -> None:
-    client = _StubLSPClient()
-    session = _session_with_stub_client(client, keep_open=True, root=tmp_path)
     first = tmp_path / "first.py"
     second = tmp_path / "second.py"
     caller = tmp_path / "caller.py"
     caller_uri = caller.resolve().as_uri()
+    session, client = _session_with_dirty_uris(tmp_path, [caller_uri])
     session._open_versions[caller_uri] = 1
 
-    def record_diagnostics(method: str, _params: dict[str, object]) -> None:
-        if method == "workspace/didChangeWatchedFiles":
-            session._on_notification("textDocument/publishDiagnostics", {"uri": caller_uri})
-
-    client.notify_hook = record_diagnostics
-    record_diagnostics("unrelated", {})
     session.record_direct_input(second, "second\n")
     session.record_direct_input(first, "first\n")
 
