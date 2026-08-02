@@ -301,9 +301,9 @@ def connect(root: Path) -> RemoteTySession:
     """
     root = repository_root(root)
     socket_path = _socket_path(root)
-    client_ty_version = _daemon_identity()
+    daemon_identity = _daemon_identity()
 
-    sock, already_confirmed_departing = _try_connect_or_departing(socket_path, client_ty_version)
+    sock, already_confirmed_departing = _try_connect_or_departing(socket_path, daemon_identity)
     if sock is not None:
         return RemoteTySession(sock)
 
@@ -321,7 +321,7 @@ def connect(root: Path) -> RemoteTySession:
         lock_path, timeout_seconds=_SPAWN_LOCK_TIMEOUT_SECONDS, poll_interval_seconds=_SPAWN_LOCK_POLL_INTERVAL_SECONDS
     ):
         # A peer may have already spawned one while this process waited for the lock.
-        sock, daemon_is_departing = _try_connect_or_departing(socket_path, client_ty_version)
+        sock, daemon_is_departing = _try_connect_or_departing(socket_path, daemon_identity)
         if sock is not None:
             return RemoteTySession(sock)
         # A departing daemon can vanish (socket and pidfile both) between the pre-lock attempt above and
@@ -336,7 +336,7 @@ def connect(root: Path) -> RemoteTySession:
             # here would unlink its socket out from under it (and it could later do the same to the new
             # one on its own exit), leaving one or both unreachable. Waiting for it to catch up instead of
             # racing to replace it avoids that entirely.
-            sock, daemon_is_departing = _wait_for_busy_daemon(socket_path, client_ty_version)
+            sock, daemon_is_departing = _wait_for_busy_daemon(socket_path, daemon_identity)
             if sock is not None:
                 return RemoteTySession(sock)
             if not daemon_is_departing:
@@ -347,14 +347,14 @@ def connect(root: Path) -> RemoteTySession:
 
         _spawn_daemon(root)
 
-        sock, _departing = _try_connect_or_departing(socket_path, client_ty_version)
+        sock, _departing = _try_connect_or_departing(socket_path, daemon_identity)
         if sock is None:
             msg = f"ty daemon for {root} did not become reachable at {socket_path}"
             raise OSError(msg)
         return RemoteTySession(sock)
 
 
-def _try_connect_or_departing(socket_path: Path, client_ty_version: str) -> tuple[socket.socket | None, bool]:
+def _try_connect_or_departing(socket_path: Path, daemon_identity: str) -> tuple[socket.socket | None, bool]:
     """`_try_connect`, but converts its `_VersionMismatchError` into a plain `(None, True)` result instead of
     propagating it -- a daemon that just explicitly rejected the handshake is already shutting itself down,
     not merely busy, and callers (`connect()`, `_wait_for_busy_daemon()`, `try_connect_existing()`) must not
@@ -363,12 +363,12 @@ def _try_connect_or_departing(socket_path: Path, client_ty_version: str) -> tupl
     daemon happens to have fully exited (see ADR-0041) instead of spawning a fresh one immediately.
     """
     try:
-        return _try_connect(socket_path, client_ty_version), False
+        return _try_connect(socket_path, daemon_identity), False
     except _VersionMismatchError:
         return None, True
 
 
-def _wait_for_busy_daemon(socket_path: Path, client_ty_version: str) -> tuple[socket.socket | None, bool]:
+def _wait_for_busy_daemon(socket_path: Path, daemon_identity: str) -> tuple[socket.socket | None, bool]:
     """Retries `_try_connect` with a short, fixed backoff, bounded by `_BUSY_DAEMON_RETRY_TIMEOUT_SECONDS`,
     for a daemon already confirmed alive (`_daemon_process_is_alive`) but currently too busy to answer.
 
@@ -381,7 +381,7 @@ def _wait_for_busy_daemon(socket_path: Path, client_ty_version: str) -> tuple[so
     deadline = time.monotonic() + _BUSY_DAEMON_RETRY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         time.sleep(_BUSY_DAEMON_RETRY_INTERVAL_SECONDS)
-        sock, daemon_is_departing = _try_connect_or_departing(socket_path, client_ty_version)
+        sock, daemon_is_departing = _try_connect_or_departing(socket_path, daemon_identity)
         if sock is not None:
             return sock, False
         if daemon_is_departing:
@@ -408,15 +408,15 @@ def probe_existing(root: Path) -> ExistingDaemonProbe:
     if not _socket_path(root).exists():
         return ExistingDaemonProbe(None)
     try:
-        client_ty_version = _daemon_identity()
+        daemon_identity = _daemon_identity()
     except OSError:
         return ExistingDaemonProbe(None, terminal_failure=True)
     socket_path = _socket_path(root)
-    sock, departing = _try_connect_or_departing(socket_path, client_ty_version)
+    sock, departing = _try_connect_or_departing(socket_path, daemon_identity)
     if sock is not None:
         return ExistingDaemonProbe(RemoteTySession(sock))
     if not departing and _daemon_process_is_alive(root):
-        sock, _departing = _wait_for_busy_daemon(socket_path, client_ty_version)
+        sock, _departing = _wait_for_busy_daemon(socket_path, daemon_identity)
         return ExistingDaemonProbe(RemoteTySession(sock) if sock is not None else None)
     if not departing:
         # A crashed daemon's own socket, confirmed by its pidfile's own process being gone -- not a
@@ -461,7 +461,7 @@ def shutdown_if_running(root: Path) -> None:
         time.sleep(_SHUTDOWN_CONFIRM_POLL_INTERVAL_SECONDS)
 
 
-def _try_connect(socket_path: Path, client_ty_version: str) -> socket.socket | None:
+def _try_connect(socket_path: Path, daemon_identity: str) -> socket.socket | None:
     """Connects and performs the version handshake against a daemon already listening at `socket_path`.
 
     Returns `None` when nothing usable answered at all -- no socket, connection refused, a timed-out or
@@ -482,7 +482,7 @@ def _try_connect(socket_path: Path, client_ty_version: str) -> socket.socket | N
         rfile = sock.makefile("rb")
         wfile = sock.makefile("wb")
         try:
-            write_framed_message(wfile, {"op": "handshake", "ty_version": client_ty_version})
+            write_framed_message(wfile, {"op": "handshake", "ty_version": daemon_identity})
         finally:
             wfile.close()
         response = read_framed_message(rfile)
@@ -642,7 +642,7 @@ def _dispatch(message: dict[str, Any], session: PersistentSession) -> dict[str, 
 
 
 def _handle_connection(
-    conn: socket.socket, session: PersistentSession, ty_version: str, session_lock: threading.Lock
+    conn: socket.socket, session: PersistentSession, daemon_identity: str, session_lock: threading.Lock
 ) -> None:
     # Closed explicitly (not left for GC) so a write that failed mid-flight -- e.g. the broken-pipe case
     # _serve_connection's own except clause already handles -- doesn't leave buffered data behind for a
@@ -654,7 +654,7 @@ def _handle_connection(
             handshake = read_framed_message(rfile)
             if handshake is None:
                 return
-            if handshake.get("op") != "handshake" or handshake.get("ty_version") != ty_version:
+            if handshake.get("op") != "handshake" or handshake.get("ty_version") != daemon_identity:
                 write_framed_message(wfile, {"error": "version_mismatch"})
                 raise _VersionMismatchError
             write_framed_message(wfile, {"result": "ok"})
@@ -693,7 +693,7 @@ def _handle_connection(
 def _serve_connection(
     conn: socket.socket,
     session: PersistentSession,
-    ty_version: str,
+    daemon_identity: str,
     session_lock: threading.Lock,
     shutdown_requested: threading.Event,
 ) -> None:
@@ -706,7 +706,7 @@ def _serve_connection(
     conn.settimeout(_CLIENT_REQUEST_TIMEOUT_SECONDS)
     try:
         with conn:
-            _handle_connection(conn, session, ty_version, session_lock)
+            _handle_connection(conn, session, daemon_identity, session_lock)
     except _VersionMismatchError, _ShutdownRequestedError:
         # Ends this whole daemon's process (see their own docstrings), not just this one connection:
         # signals the accept loop via shutdown_requested rather than returning directly, since this runs
@@ -723,7 +723,7 @@ def _serve_connection(
         logger.debug("ty daemon dropped a client connection due to a connection-level error", exc_info=True)
 
 
-def _accept_loop(sock: socket.socket, session: PersistentSession, ty_version: str) -> None:
+def _accept_loop(sock: socket.socket, session: PersistentSession, daemon_identity: str) -> None:
     """Accepts connections concurrently, one worker thread each (`_serve_connection`), rather than serving
     them one at a time: pre-commit/prek run this hook's own file-batches across several parallel worker
     processes, each opening its own connection, so serving them serially here would force work that used
@@ -757,7 +757,9 @@ def _accept_loop(sock: socket.socket, session: PersistentSession, ty_version: st
         idle_deadline = time.monotonic() + _IDLE_TIMEOUT_SECONDS
         workers = [worker for worker in workers if worker.is_alive()]
         worker = threading.Thread(
-            target=_serve_connection, args=(conn, session, ty_version, session_lock, shutdown_requested), daemon=True
+            target=_serve_connection,
+            args=(conn, session, daemon_identity, session_lock, shutdown_requested),
+            daemon=True,
         )
         worker.start()
         workers.append(worker)
@@ -787,7 +789,7 @@ def _serve(root: Path) -> None:
         socket_path.unlink()  # a stale socket left behind by a crashed prior daemon
 
     try:
-        ty_version = _daemon_identity()  # pytriage: TR5
+        daemon_identity = _daemon_identity()  # pytriage: TR5
     except OSError as error:
         print(f"FAILED: {error}", flush=True)
         return
@@ -827,7 +829,7 @@ def _serve(root: Path) -> None:
     _detach_stdio()
 
     try:
-        _accept_loop(sock, session, ty_version)
+        _accept_loop(sock, session, daemon_identity)
     finally:
         session.close()
         sock.close()
