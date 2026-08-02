@@ -108,6 +108,30 @@ def test_fix_applies_context_manager_rename(tmp_path: Path) -> None:
     assert "async with tempfile_session() as session:" in filepath.read_text()
 
 
+def test_sync_lazy_accessor_property_suggestion_is_not_fixable(tmp_path: Path) -> None:
+    filepath = tmp_path / "mod.py"
+    source = (
+        "class Backend:\n"
+        "    def get_connection(self):\n"
+        "        if not self._connection:\n"
+        "            self._connection = connect()\n"
+        "        return self._connection\n"
+    )
+    filepath.write_text(source)
+    tree = ast.parse(source)
+
+    check = ValidateFunctionNameCheck()
+    violations = check.check(filepath, tree, source)
+
+    assert len(violations) == 1
+    assert violations[0].fixable is False
+    assert violations[0].message == (
+        "Function 'get_connection' should use @property 'connection' (synchronous lazy accessor)"
+    )
+    assert check.fix(filepath, violations, source, tree) is False
+    assert filepath.read_text() == source
+
+
 def test_fix_skips_unsafe_suggestion(tmp_path: Path) -> None:
     # A suggestion should_autofix rejects (e.g. a method) isn't applied.
     filepath = tmp_path / "mod.py"
