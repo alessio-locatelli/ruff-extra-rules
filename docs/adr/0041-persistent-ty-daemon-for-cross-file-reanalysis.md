@@ -61,6 +61,8 @@ This check's own prefilter (a `git grep` fast path skipping any file that can't 
 
 A daemon's own persistence is scoped strictly to the repository root it was spawned for: a file outside that root is always closed again once this run's own analysis of it finishes, in either mode, never kept open or reported by a later drain. The daemon's own identity (its socket/pidfile path) is keyed only by the current working directory a client connects from, not by which files it's actually asked to examine — a direct CLI invocation naming a path elsewhere on disk (rather than pre-commit/prek's own file list, always within the repository being committed) would otherwise get adopted into that same long-lived session, and could resurface in a later, unrelated run against that repository once `ty`'s own cross-file push happened to touch it again.
 
+The compatibility controls run in a temporary `.ruff-extra-rules-tri006-selftest-*` directory under that root. The serving `ty` workspace does not reliably analyse controls outside its root, so an isolated external directory cannot validate that same session. Both controls are closed before a failed session is closed, and `TemporaryDirectory` removes the directory normally; the prefix is also ignored for interrupted-process cleanup.
+
 ## Consequences
 
 - TRI006's headline cross-file scenario (#109) is now caught on the commit that actually creates it, not only when a later commit happens to also touch the caller or during an explicit full-tree run — provided the daemon has been running long enough to have already seen both files at least once.
