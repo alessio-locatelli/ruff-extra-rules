@@ -377,6 +377,7 @@ def _session_with_stub_client(
     session._root = (root or Path.cwd()).resolve()
     session._client = client  # type: ignore[assignment]
     session._cached_redundancies = {}
+    session._cache_identity = session_module._cache_context(session._root)
     session._direct_input_digests = {}
     session._open_versions = {}
     session._dirty_uris = set()
@@ -533,6 +534,18 @@ def test_cached_redundancies_require_matching_source_within_a_persistent_root(tm
     assert session.cached_redundancies(filepath, "value = str(name)\n", "strict") == redundancies
     assert session.cached_redundancies(filepath, "value = str(name)\n", "permissive") is None
     assert session.cached_redundancies(filepath, "value = str(other)\n", "strict") is None
+
+
+def test_cached_redundancies_are_invalidated_when_ty_configuration_changes(tmp_path: Path) -> None:
+    config = tmp_path / "pyproject.toml"
+    config.write_text('[tool.ty]\npython-version = "3.14"\n')
+    session = _session_with_stub_client(_StubLSPClient(), keep_open=True, root=tmp_path)
+    filepath = tmp_path / "module.py"
+    session.cache_redundancies(filepath, "value = str(name)\n", "strict", [("str", 1, 4, "str")])
+
+    config.write_text('[tool.ty]\npython-version = "3.15"\n')
+
+    assert session.cached_redundancies(filepath, "value = str(name)\n", "strict") is None
 
 
 def test_reconcile_direct_inputs_invalidates_dirty_redundancies(tmp_path: Path) -> None:
