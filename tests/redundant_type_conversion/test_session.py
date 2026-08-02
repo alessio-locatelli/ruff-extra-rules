@@ -211,17 +211,17 @@ def test_get_session_returns_the_same_instance_across_calls(monkeypatch: pytest.
 
 
 def test_local_session_closes_when_its_self_test_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    closed: list[bool] = []
+    calls: list[str] = []
 
     class _FakeTySession:
         def __init__(self, *_args: object, **_kwargs: object) -> None:
             pass
 
         def close(self) -> None:
-            closed.append(True)
+            calls.append("close")
 
         def close_file(self, _filepath: Path) -> None:
-            pass
+            calls.append("close_file")
 
     def fail_self_test(*_args: object, **_kwargs: object) -> None:
         raise CheckUnavailableError("simulated: self-test failure")
@@ -233,7 +233,7 @@ def test_local_session_closes_when_its_self_test_fails(tmp_path: Path, monkeypat
     with pytest.raises(CheckUnavailableError, match="self-test failure"):
         session_module._local_session()
 
-    assert closed == [True]
+    assert calls == ["close_file", "close_file", "close"]
 
 
 class _FakeNotifiableSession:

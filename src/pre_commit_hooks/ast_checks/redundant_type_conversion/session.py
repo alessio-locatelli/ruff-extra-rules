@@ -26,6 +26,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("ast_checks")
 
+type Redundancy = tuple[str, int, int, str]
+
 
 class PersistentSession(Protocol):
     def open_or_update(self, filepath: Path, content: str) -> frozenset[tuple[Any, ...]]: ...
@@ -34,12 +36,10 @@ class PersistentSession(Protocol):
 
     def finalize(self, filepath: Path, source: str) -> None: ...
 
-    def cached_redundancies(
-        self, filepath: Path, source: str, cache_key: str
-    ) -> list[tuple[str, int, int, str]] | None: ...
+    def cached_redundancies(self, filepath: Path, source: str, cache_key: str) -> list[Redundancy] | None: ...
 
     def cache_redundancies(
-        self, filepath: Path, source: str, cache_key: str, redundancies: list[tuple[str, int, int, str]]
+        self, filepath: Path, source: str, cache_key: str, redundancies: list[Redundancy]
     ) -> None: ...
 
     def record_direct_input(self, filepath: Path, source: str) -> None: ...
@@ -161,7 +161,7 @@ class TySession:
     def __init__(self, *, root: Path, keep_open: bool = False) -> None:
         self._root = root.resolve()
         self._keep_open = keep_open
-        self._cached_redundancies: dict[tuple[str, str], tuple[bytes, list[tuple[str, int, int, str]]]] = {}
+        self._cached_redundancies: dict[tuple[str, str], tuple[bytes, list[Redundancy]]] = {}
         self._direct_input_digests: dict[str, bytes] = {}
         self._dirty_uris: set[str] = set()
         self._dirty_uris_lock = threading.Lock()
@@ -242,17 +242,17 @@ class TySession:
             del self._open_versions[uri]
 
     def record_direct_input(self, filepath: Path, source: str) -> None:
-        if not self._keep_open or not self._is_within_root(filepath):
+        resolved = filepath.resolve()
+        if not self._keep_open or not self._is_within_root(resolved):
             return
-        uri = filepath.resolve().as_uri()
+        uri = resolved.as_uri()
         self._direct_input_digests[uri] = hashlib.sha256(source.encode()).digest()
 
-    def cached_redundancies(
-        self, filepath: Path, source: str, cache_key: str
-    ) -> list[tuple[str, int, int, str]] | None:
-        if not self._keep_open or not self._is_within_root(filepath):
+    def cached_redundancies(self, filepath: Path, source: str, cache_key: str) -> list[Redundancy] | None:
+        resolved = filepath.resolve()
+        if not self._keep_open or not self._is_within_root(resolved):
             return None
-        cached = self._cached_redundancies.get((filepath.resolve().as_uri(), cache_key))
+        cached = self._cached_redundancies.get((resolved.as_uri(), cache_key))
         if cached is None:
             return None
         digest, redundancies = cached
@@ -260,11 +260,10 @@ class TySession:
             return None
         return redundancies
 
-    def cache_redundancies(
-        self, filepath: Path, source: str, cache_key: str, redundancies: list[tuple[str, int, int, str]]
-    ) -> None:
-        if self._keep_open and self._is_within_root(filepath):
-            self._cached_redundancies[(filepath.resolve().as_uri(), cache_key)] = (
+    def cache_redundancies(self, filepath: Path, source: str, cache_key: str, redundancies: list[Redundancy]) -> None:
+        resolved = filepath.resolve()
+        if self._keep_open and self._is_within_root(resolved):
+            self._cached_redundancies[(resolved.as_uri(), cache_key)] = (
                 hashlib.sha256(source.encode()).digest(),
                 redundancies,
             )
@@ -278,6 +277,7 @@ class TySession:
             if self._last_reconciled_digests.get(uri) != digest
         }
         self._direct_input_digests.clear()
+        # Discard prior analysis notifications before observing this batch's effects.
         self._await_ty_catching_up()
         with self._dirty_uris_lock:
             self._dirty_uris.clear()
@@ -371,6 +371,16 @@ def _run_self_test(session: RedundancySession, root: Path) -> None:
         raise CheckUnavailableError(_SELF_TEST_FAILED_HINT) from error
 
 
+def _run_self_test_in_temporary_directory(session: TySession, root: Path) -> None:
+    with tempfile.TemporaryDirectory(dir=root, prefix=".ruff-extra-rules-tri006-selftest-") as scratch_dir:
+        scratch_root = Path(scratch_dir)
+        try:
+            _run_self_test(session, scratch_root)
+        finally:
+            session.close_file(scratch_root / "redundant_control.py")
+            session.close_file(scratch_root / "necessary_control.py")
+
+
 _session: CandidateSession | None = None
 _session_lock = threading.Lock()
 _daemon_probe_failed = False
@@ -398,18 +408,12 @@ def _acquire_session() -> CandidateSession:
 
 
 def _local_session() -> TySession:
-    root = Path.cwd()
-    session = TySession(root=root)
-    with tempfile.TemporaryDirectory(dir=root, prefix=".ruff-extra-rules-tri006-selftest-") as scratch_dir:
-        scratch_root = Path(scratch_dir)
-        try:
-            _run_self_test(session, scratch_root)
-        except BaseException:
-            session.close()
-            raise
-        finally:
-            session.close_file(scratch_root / "redundant_control.py")
-            session.close_file(scratch_root / "necessary_control.py")
+    session = TySession(root=Path.cwd())
+    try:
+        _run_self_test_in_temporary_directory(session, Path.cwd())
+    except BaseException:
+        session.close()
+        raise
     return session
 
 
