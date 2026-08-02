@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
+import os
+import select
+import shutil
 import subprocess
+import time
 from pathlib import Path
 
 logger = logging.getLogger("ast_checks")
@@ -135,6 +140,8 @@ def _list_python_files_in_dir(directory: Path) -> list[str]:
 
 
 _MAX_REPORTED_IGNORED_PATHS = 20
+_GIT_STATUS_TIMEOUT_SECONDS = 5
+_PROCESS_STOP_TIMEOUT_SECONDS = 1
 
 # Well-known packaging/tooling directory names, most of which are named in
 # this project's own .gitignore -- every one of these gets created by this
@@ -184,90 +191,108 @@ def _is_known_non_source_directory(entry: str) -> bool:
 
 
 def _warn_about_ignored_python_files(directory: Path) -> None:
-    """Surfaces a directory scan's own `.gitignore`-driven exclusions
-    instead of leaving them silent (issue #67), except for well-known
-    non-source directories (ADR 0029) that this warning would otherwise
-    report on nearly every run.
-
-    `git status --porcelain=v1 --ignored` defaults to its "traditional"
-    mode, which reports an entirely-ignored directory as a single `!! path/`
-    line rather than recursing into it — unlike `git ls-files --others
-    --ignored`, which would walk every file inside e.g. `.venv/`,
-    reintroducing the sweep-in cost ADR 0015 avoided. That means this can't
-    confirm an ignored directory actually contains a `.py` file without
-    that same expensive recursion, so an ignored directory is reported
-    alongside any directly-ignored `.py` file rather than silently
-    dropped — unless its name matches `_NON_SOURCE_DIRECTORY_NAMES`, in
-    which case it's dropped from the warning outright rather than reported
-    on the strength of unconfirmed content.
-
-    A directory that isn't *entirely* ignored (e.g. a generated/ subtree
-    with one tracked README alongside thousands of individually-ignored
-    `.py` outputs) can't collapse to one line even in traditional mode --
-    git still has to report each ignored path separately, and this function
-    has to buffer that whole reply before it can apply
-    `_MAX_REPORTED_IGNORED_PATHS`'s own display cap below. This probe is
-    purely supplementary (the directory scan above is already correct
-    without it), so it gets a much shorter timeout than that scan's own git
-    calls -- a slow git status here degrades to "no warning printed" rather
-    than tying up an entire directory-argument run for a diagnostic that's
-    allowed to just not fire.
-    """
     try:
-        cmd: list[str | Path] = [
-            "git",
-            "-C",
-            directory,
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--ignored",
-            # A user's own `status.showUntrackedFiles` config would otherwise
-            # override this: "no" would suppress every `!!` record (the
-            # warning this whole function exists for would just never fire),
-            # while "all" would force recursion into an entirely-ignored
-            # directory instead of the single collapsed line this function's
-            # own cost reasoning above depends on. "normal" is git's own
-            # built-in default and matches what every example above assumes.
-            "--untracked-files=normal",
-            "--",
-            ".",
-        ]
-        # Same trust rationale as _list_python_files_in_dir's own git
-        # invocation above: cmd is entirely hardcoded flags plus a directory
-        # supplied by this hook's own CLI invocation. errors="surrogateescape"
-        # for the same reason as that call's own subprocess.run above.
-        git_status_result = subprocess.run(  # noqa: S603
-            cmd, capture_output=True, text=True, errors="surrogateescape", check=False, timeout=5
+        git = shutil.which("git") or "git"
+        process = subprocess.Popen(  # noqa: S603
+            [
+                git,
+                "-C",
+                directory,
+                "status",
+                "--porcelain=v1",
+                "-z",
+                "--ignored",
+                "--untracked-files=normal",
+                "--",
+                ".",
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-    except subprocess.SubprocessError, FileNotFoundError, subprocess.TimeoutExpired:
-        # Self-healing, same rationale as _list_python_files_in_dir's own
-        # except block above: this probe is purely supplementary, so any
-        # failure just means no warning is printed.
+        ignored = _read_ignored_status_paths(process)
+    except OSError, subprocess.SubprocessError:
         logger.debug("git status --ignored failed", exc_info=True)
         return
 
-    if git_status_result.returncode != 0 or git_status_result.stderr:
-        return
-
-    ignored = [
-        stripped
-        for entry in git_status_result.stdout.split("\0")
-        if entry.startswith("!! ")
-        and (stripped := entry[len("!! ") :]).endswith((".py", "/"))
-        and not (stripped.endswith("/") and _is_known_non_source_directory(stripped))
-    ]
     if ignored:
-        # Sorting only the capped slice, not the full (possibly huge) list,
-        # keeps this bounded regardless of how many paths git reported.
-        shown = sorted(ignored[:_MAX_REPORTED_IGNORED_PATHS])
-        omitted_note = f" (showing first {len(shown)})" if len(ignored) > len(shown) else ""
+        shown = sorted(ignored)
         logger.warning(
-            "%d gitignored path(s) under %s were excluded from this directory scan and may contain "
+            "at least %d gitignored path(s) under %s were excluded from this directory scan and may contain "
             ".py files these checks never examined; name a file explicitly on the command line to "
-            "check it regardless of its ignore status%s: %s",
+            "check it regardless of its ignore status (showing first %d): %s",
             len(ignored),
             directory,
-            omitted_note,
+            len(shown),
             ", ".join(shown),
         )
+
+
+def _read_ignored_status_paths(process: subprocess.Popen[bytes]) -> list[str]:
+    stdout = process.stdout
+    stderr = process.stderr
+    assert stdout is not None
+    assert stderr is not None
+
+    deadline = time.monotonic() + _GIT_STATUS_TIMEOUT_SECONDS
+    streams = [stdout, stderr]
+    pending = b""
+    stderr_seen = False
+    ignored: list[str] = []
+
+    try:
+        while streams:
+            ready, _, _ = select.select(streams, [], [], max(deadline - time.monotonic(), 0))
+            if not ready:
+                raise subprocess.TimeoutExpired(process.args, _GIT_STATUS_TIMEOUT_SECONDS)
+            for stream in ready:
+                chunk = os.read(stream.fileno(), 65_536)
+                if not chunk:
+                    streams.remove(stream)
+                    continue
+                if stream is stderr:
+                    stderr_seen = True
+                    continue
+                pending += chunk
+                entries = pending.split(b"\0")
+                pending = entries.pop()
+                for entry in entries:
+                    path = _ignored_status_path(entry)
+                    if path is None:
+                        continue
+                    ignored.append(path)
+                    if len(ignored) == _MAX_REPORTED_IGNORED_PATHS:
+                        return ignored
+
+        if pending or stderr_seen:
+            return []
+        if process.wait(timeout=max(deadline - time.monotonic(), 0)) != 0:
+            return []
+        return ignored
+    finally:
+        _stop_process(process)
+
+
+def _ignored_status_path(entry: bytes) -> str | None:
+    if not entry.startswith(b"!! "):
+        return None
+    path = os.fsdecode(entry[len(b"!! ") :])
+    if not path.endswith((".py", "/")):
+        return None
+    if path.endswith("/") and _is_known_non_source_directory(path):
+        return None
+    return path
+
+
+def _stop_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    with contextlib.suppress(OSError):
+        process.terminate()
+    try:
+        process.wait(timeout=_PROCESS_STOP_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(OSError):
+            process.kill()
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            process.wait(timeout=_PROCESS_STOP_TIMEOUT_SECONDS)
