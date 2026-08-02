@@ -265,6 +265,14 @@ def _is_capitalized_call(func: ast.expr) -> bool:
     return False
 
 
+def _is_log_output_call(func: ast.expr) -> bool:
+    if not isinstance(func, ast.Attribute) or func.attr not in {"debug", "info", "warning", "error"}:
+        return False
+    if isinstance(func.value, ast.Name):
+        return func.value.id in {"logger", "log", "logging"}
+    return isinstance(func.value, ast.Attribute) and func.value.attr in {"logger", "log"}
+
+
 def analyze_function(
     func_node: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> FunctionBehavior:
@@ -359,7 +367,7 @@ def analyze_function(
                         flags["network_write"] = True
                 if lname == "print" or (lname.endswith(".write") and ("stdout" in lname or "stderr" in lname)):
                     flags["outputs"] = True
-                if lname.endswith((".info", ".debug", ".warning", ".error")):
+                if _is_log_output_call(node.func):
                     flags["outputs"] = True
                 if lname in (
                     "sum",
