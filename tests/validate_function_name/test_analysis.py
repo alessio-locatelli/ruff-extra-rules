@@ -13,6 +13,7 @@ from pre_commit_hooks.ast_checks.validate_function_name.analysis import (
     _iter_own_scope,
     analyze_function,
     attach_parents,
+    collect_suggestions,
     decorator_name,
     derive_entity_from_name,
     extract_first_verb,
@@ -201,7 +202,6 @@ def get_config(settings):
             {"network_read": False, "network_write": False},
         ),
         ("def get_data(x):\n    print(x)\n    return x\n", "get_data", {"outputs": True}),
-        ("def get_data(x):\n    logger.info(x)\n    return x\n", "get_data", {"outputs": True}),
         ("def get_total(values):\n    return sum(values)\n", "get_total", {"aggregates": True}),
         (
             "def get_index(items, target):\n    return items.index(target)\n",
@@ -544,7 +544,6 @@ def get_config(settings):
         "network-write",
         "network-call-matching-neither-verb",
         "outputs-print",
-        "outputs-logger-call",
         "aggregates",
         "searches",
         "validates",
@@ -602,6 +601,48 @@ def test_analyze_function_flags(source: str, func_name: str, flags: dict[str, bo
 
     for flag, expected in flags.items():
         assert analysis[flag] is expected, flag
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("def get_data():\n    logger.info('message')\n", True),
+        ("def get_data():\n    log.warning('message')\n", True),
+        ("def get_data():\n    logging.error('message')\n", True),
+        ("def get_data(self):\n    self.logger.debug('message')\n", True),
+        ("def get_data(service):\n    service.log.error('message')\n", True),
+        ("def get_data(client):\n    client.info()\n", False),
+        ("def get_data():\n    logging.getLogger(__name__).info('message')\n", False),
+    ],
+    ids=[
+        "logger-name",
+        "log-name",
+        "logging-name",
+        "logger-attribute",
+        "log-attribute",
+        "unrelated-info-method",
+        "logger-factory-call",
+    ],
+)
+def test_output_detection_requires_identifiable_logger(source: str, *, expected: bool) -> None:
+    assert analyze_function(_func(source, "get_data"))["outputs"] is expected
+
+
+def test_client_info_does_not_propose_output_rename() -> None:
+    source = (
+        "import asyncio\n"
+        "from redis.asyncio import from_url\n"
+        "\n"
+        "async def get_db_info():\n"
+        "    client = await from_url(DEFAULT_ADDRESS)\n"
+        "    await client.info()\n"
+        "    await client.aclose()\n"
+        "\n"
+        "def is_db_running():\n"
+        "    asyncio.run(get_db_info())\n"
+    )
+
+    assert collect_suggestions(Path("test_redis.py"), ast.parse(source), source) == []
 
 
 def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
