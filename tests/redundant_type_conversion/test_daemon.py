@@ -251,7 +251,9 @@ def test_handle_connection_rejects_a_version_mismatch() -> None:
         daemon_module.write_framed_message(client._wfile, {"op": "handshake", "ty_version": "old-version"})
 
         with pytest.raises(_VersionMismatchError):
-            _handle_connection(server_sock, _FakeSession(), ty_version="new-version", session_lock=threading.Lock())
+            _handle_connection(
+                server_sock, _FakeSession(), daemon_identity="new-version", session_lock=threading.Lock()
+            )
 
         response = daemon_module.read_framed_message(client._rfile)
         assert response == {"error": "version_mismatch"}
@@ -263,7 +265,7 @@ def test_handle_connection_serves_a_real_round_trip_over_a_background_thread() -
 
     def _run_server() -> None:
         with server_sock, pytest.raises(_ShutdownRequestedError):
-            _handle_connection(server_sock, session, ty_version="v1", session_lock=threading.Lock())
+            _handle_connection(server_sock, session, daemon_identity="v1", session_lock=threading.Lock())
 
     server_thread = threading.Thread(target=_run_server)
     server_thread.start()
@@ -288,7 +290,7 @@ def test_handle_connection_keeps_the_session_lock_through_an_analysis_transactio
 
     def run_server() -> None:
         with server_sock:
-            _handle_connection(server_sock, _FakeSession(), ty_version="v1", session_lock=session_lock)
+            _handle_connection(server_sock, _FakeSession(), daemon_identity="v1", session_lock=session_lock)
 
     server_thread = threading.Thread(target=run_server)
     server_thread.start()
@@ -318,7 +320,7 @@ def test_handle_connection_releases_an_abandoned_analysis_transaction() -> None:
 
     def run_server() -> None:
         with server_sock:
-            _handle_connection(server_sock, _FakeSession(), ty_version="v1", session_lock=session_lock)
+            _handle_connection(server_sock, _FakeSession(), daemon_identity="v1", session_lock=session_lock)
 
     server_thread = threading.Thread(target=run_server)
     server_thread.start()
@@ -345,7 +347,7 @@ def test_handle_connection_returns_when_the_client_disconnects_before_handshake(
             # must return, not raise
             server_sock,
             _FakeSession(),
-            ty_version="v1",
+            daemon_identity="v1",
             session_lock=threading.Lock(),
         )
 
@@ -361,7 +363,7 @@ def test_handle_connection_returns_when_the_client_disconnects_mid_session() -> 
                 # must return, not raise
                 server_sock,
                 _FakeSession(),
-                ty_version="v1",
+                daemon_identity="v1",
                 session_lock=threading.Lock(),
             )
 
@@ -392,7 +394,7 @@ def test_accept_loop_ends_when_a_served_connection_requests_shutdown(tmp_path: P
 
         thread = threading.Thread(target=_client)
         thread.start()
-        _accept_loop(sock, _FakeSession(), ty_version="v1")  # must return once the client asks to shut down
+        _accept_loop(sock, _FakeSession(), daemon_identity="v1")  # must return once the client asks to shut down
         thread.join(timeout=5)
         assert not thread.is_alive()
 
@@ -417,7 +419,7 @@ def test_accept_loop_ends_on_a_version_mismatch(tmp_path: Path) -> None:
 
         thread = threading.Thread(target=_client)
         thread.start()
-        _accept_loop(sock, _FakeSession(), ty_version="v1")  # must return once the mismatch is detected
+        _accept_loop(sock, _FakeSession(), daemon_identity="v1")  # must return once the mismatch is detected
         thread.join(timeout=5)
         assert not thread.is_alive()
 
@@ -434,7 +436,7 @@ def test_accept_loop_returns_on_idle_timeout(tmp_path: Path, monkeypatch: pytest
         sock.bind(str(socket_path))
         sock.listen(1)
 
-        _accept_loop(sock, session, ty_version="v1")  # must return promptly, not hang
+        _accept_loop(sock, session, daemon_identity="v1")  # must return promptly, not hang
 
     # Mirrors what _serve()'s own finally block does once _accept_loop returns.
     session.close()
@@ -470,7 +472,7 @@ def test_accept_loop_drops_a_stalled_connection_and_still_serves_the_next_one(
             thread.start()
 
             # Must drop the stalled connection once it times out and still serve the next, real client.
-            _accept_loop(sock, _FakeSession(), ty_version="v1")
+            _accept_loop(sock, _FakeSession(), daemon_identity="v1")
 
             thread.join(timeout=5)
             assert not thread.is_alive()
@@ -507,7 +509,7 @@ def test_accept_loop_drops_a_connection_with_a_truncated_frame_and_still_serves_
         thread = threading.Thread(target=_well_behaved_client)
         thread.start()
 
-        _accept_loop(sock, _FakeSession(), ty_version="v1")
+        _accept_loop(sock, _FakeSession(), daemon_identity="v1")
 
         thread.join(timeout=5)
         assert not thread.is_alive()
@@ -548,7 +550,7 @@ def test_accept_loop_drops_a_connection_whose_reply_write_fails_and_still_serves
         thread = threading.Thread(target=_well_behaved_client)
         thread.start()
 
-        _accept_loop(sock, _FakeSession(), ty_version="v1")
+        _accept_loop(sock, _FakeSession(), daemon_identity="v1")
 
         thread.join(timeout=5)
         assert not thread.is_alive()
@@ -640,7 +642,7 @@ def test_accept_loop_serializes_concurrent_calls_into_the_shared_session(tmp_pat
             thread.start()
             time.sleep(0.05)  # stagger connects so all three overlap mid-request, not just mid-accept
 
-        _accept_loop(sock, session, ty_version="v1")
+        _accept_loop(sock, session, daemon_identity="v1")
 
         for thread in threads:
             thread.join(timeout=5)
