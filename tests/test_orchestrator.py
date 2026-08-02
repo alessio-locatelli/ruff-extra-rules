@@ -315,6 +315,19 @@ def test_expand_directories_caps_gitignore_warning_at_a_bounded_number_of_paths(
         assert "showing first 20" in caplog.text
 
 
+def _patch_status_popen(monkeypatch: pytest.MonkeyPatch, status_command: list[str] | None) -> None:
+    real_popen = subprocess.Popen
+
+    def fake_popen(cmd: list[str], *args: object, **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401
+        if "status" in cmd:
+            if status_command is None:
+                raise FileNotFoundError("git not found")
+            return real_popen(status_command, **kwargs)
+        return real_popen(cmd, *args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+
 @pytest.mark.parametrize(
     "status_failure",
     ["missing", "stderr", "stderr-with-paths", "malformed", "irrelevant", "nonzero", "timeout"],
@@ -347,7 +360,6 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
         monkeypatch.setattr(_discovery, "_GIT_STATUS_TIMEOUT_SECONDS", 0.01)
         monkeypatch.setattr(_discovery, "_PROCESS_STOP_TIMEOUT_SECONDS", 0.01)
 
-    real_popen = subprocess.Popen
     with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
@@ -355,25 +367,21 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
         tracked.write_text("x = 1\n")
         subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
 
-        def fake_popen(cmd: list[str], *args: object, **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401
-            if "status" in cmd:
-                if status_failure == "missing":
-                    raise FileNotFoundError("git not found")
-                scripts = {
-                    "malformed": "import os; os.write(1, b'!! ignored.py')",
-                    "irrelevant": "import os; os.write(1, b'!! ignored.txt\\0')",
-                    "nonzero": "import sys; sys.exit(1)",
-                    "stderr": "import sys; sys.stderr.write('failed')",
-                    "stderr-with-paths": "import os; os.write(2, b'failed'); os.write(1, b'!! ignored.py\\0' * 20)",
-                    "timeout": (
-                        "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-                        "os.write(1, b'?\\0'); time.sleep(30)"
-                    ),
-                }
-                return real_popen([sys.executable, "-c", scripts[status_failure]], **kwargs)
-            return real_popen(cmd, *args, **kwargs)  # type: ignore[call-overload]
+        scripts = {
+            "malformed": "import os; os.write(1, b'!! ignored.py')",
+            "irrelevant": "import os; os.write(1, b'!! ignored.txt\\0')",
+            "nonzero": "import sys; sys.exit(1)",
+            "stderr": "import sys; sys.stderr.write('failed')",
+            "stderr-with-paths": "import os; os.write(2, b'failed'); os.write(1, b'!! ignored.py\\0' * 20)",
+            "timeout": (
+                "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                "os.write(1, b'?\\0'); time.sleep(30)"
+            ),
+        }
+        status_command = None if status_failure == "missing" else [sys.executable, "-c", scripts[status_failure]]
+        _patch_status_popen(monkeypatch, status_command)
 
-        with mock.patch("subprocess.Popen", side_effect=fake_popen), caplog.at_level("WARNING"):
+        with caplog.at_level("WARNING"):
             matches = expand_directories([str(tmp_path)])
 
         assert matches == [str(tracked.resolve())]
@@ -381,26 +389,21 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
 
 
 def test_expand_directories_stops_ignored_status_at_the_reporting_threshold(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     git = shutil.which("git")
     assert git is not None
-    real_popen = subprocess.Popen
 
     with contextlib.chdir(tmp_path):
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
         (tmp_path / "tracked.py").write_text("x = 1\n")
         subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
 
-        def fake_popen(cmd: list[str], *args: object, **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401
-            if "status" in cmd:
-                return real_popen(
-                    [sys.executable, "-c", "import os\nwhile True:\n os.write(1, b'!! ignored.py\\0')"], **kwargs
-                )
-            return real_popen(cmd, *args, **kwargs)  # type: ignore[call-overload]
-
+        _patch_status_popen(
+            monkeypatch, [sys.executable, "-c", "import os\nwhile True:\n os.write(1, b'!! ignored.py\\0')"]
+        )
         start = time.monotonic()
-        with mock.patch("subprocess.Popen", side_effect=fake_popen), caplog.at_level("WARNING"):
+        with caplog.at_level("WARNING"):
             matches = expand_directories([str(tmp_path)])
         elapsed = time.monotonic() - start
 
