@@ -941,8 +941,8 @@ def test_context_change_rejects_an_existing_daemon(tmp_path: Path, monkeypatch: 
             with conn:
                 handshake = daemon_module.read_framed_message(conn.makefile("rb"))
                 assert handshake is not None
-                if handshake["ty_version"] != first_identity:
-                    daemon_module.write_framed_message(conn.makefile("wb"), {"error": "version_mismatch"})
+                assert handshake["ty_version"] != first_identity
+                daemon_module.write_framed_message(conn.makefile("wb"), {"error": "version_mismatch"})
 
         thread = threading.Thread(target=_server)
         thread.start()
