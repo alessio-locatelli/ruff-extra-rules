@@ -393,7 +393,9 @@ def _run_self_test(session: RedundancySession, root: Path) -> None:
 
 
 def _run_self_test_in_temporary_directory(session: TySession, root: Path) -> None:
-    with tempfile.TemporaryDirectory(dir=root, prefix=".ruff-extra-rules-tri006-selftest-") as scratch_dir:
+    scratch_parent = root / ".cache" / "pre_commit_hooks" / "tri006-selftests"
+    scratch_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=scratch_parent, prefix="tri006-selftest-") as scratch_dir:
         scratch_root = Path(scratch_dir)
         try:
             _run_self_test(session, scratch_root)

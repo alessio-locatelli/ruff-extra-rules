@@ -1402,7 +1402,6 @@ def test_drain_cross_file_candidates_records_rule_failure_when_a_check_raises(tm
 
 def test_drain_cross_file_candidates_does_not_invent_a_failure_without_direct_inputs() -> None:
     orchestrator = CheckOrchestrator(checks=[_RaisingDrainingCheck()])
-
     orchestrator._reconcile_direct_inputs([], {}, {})
 
     assert orchestrator.rule_failures == []

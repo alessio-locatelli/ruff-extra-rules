@@ -1417,6 +1417,7 @@ def test_serve_prints_failed_when_bind_fails(
     socket_path = daemon_module._socket_path(tmp_path)
     pid_path = daemon_module._pid_path(tmp_path)
     socket_path.parent.mkdir(parents=True)
+    (tmp_path / ".cache" / "pre_commit_hooks" / "tri006-selftests").mkdir(parents=True)
     pid_path.touch()
 
     with restricted_permissions(socket_path.parent, 0o555, restore=0o755):
