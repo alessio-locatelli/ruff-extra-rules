@@ -140,6 +140,7 @@ def _list_python_files_in_dir(directory: Path) -> list[str]:
 
 
 _MAX_REPORTED_IGNORED_PATHS = 20
+_MAX_PENDING_IGNORED_STATUS_BYTES = 65_536
 _GIT_STATUS_TIMEOUT_SECONDS = 5
 _PROCESS_STOP_TIMEOUT_SECONDS = 1
 _CAN_STREAM_IGNORED_STATUS = os.name == "posix"
@@ -201,7 +202,7 @@ def _warn_about_ignored_python_files(directory: Path) -> None:
         return
     try:
         git = shutil.which("git") or "git"
-        process = subprocess.Popen(  # noqa: S603
+        with subprocess.Popen(  # noqa: S603
             [
                 git,
                 "-C",
@@ -217,8 +218,8 @@ def _warn_about_ignored_python_files(directory: Path) -> None:
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-        )
-        ignored = _read_ignored_status_paths(process)
+        ) as process:
+            ignored = _read_ignored_status_paths(process)
     except OSError, subprocess.SubprocessError:
         logger.debug("git status --ignored failed", exc_info=True)
         return
@@ -250,6 +251,8 @@ def _read_ignored_status_paths(process: subprocess.Popen[bytes]) -> list[str]:
 
     try:
         while streams:
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(process.args, _GIT_STATUS_TIMEOUT_SECONDS)
             ready, _, _ = select.select(streams, [], [], max(deadline - time.monotonic(), 0))
             if not ready:
                 raise subprocess.TimeoutExpired(process.args, _GIT_STATUS_TIMEOUT_SECONDS)
@@ -261,6 +264,8 @@ def _read_ignored_status_paths(process: subprocess.Popen[bytes]) -> list[str]:
                 if stream is stderr:
                     stderr_seen = True
                     continue
+                if len(pending) + len(chunk) > _MAX_PENDING_IGNORED_STATUS_BYTES:
+                    return []
                 pending += chunk
                 entries = pending.split(b"\0")
                 pending = entries.pop()

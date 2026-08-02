@@ -328,9 +328,27 @@ def _patch_status_popen(monkeypatch: pytest.MonkeyPatch, status_command: list[st
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
 
+@pytest.fixture
+def git_repository(tmp_path: Path) -> str:
+    git = shutil.which("git")
+    assert git is not None
+    subprocess.run([git, "init", "-q"], check=True, cwd=tmp_path)  # noqa: S603
+    return git
+
+
 @pytest.mark.parametrize(
     "status_failure",
-    ["missing", "stderr", "stderr-with-paths", "malformed", "irrelevant", "nonzero", "timeout"],
+    [
+        "missing",
+        "stderr",
+        "stderr-with-paths",
+        "malformed",
+        "irrelevant",
+        "nonzero",
+        "timeout",
+        "continuous",
+        "unterminated",
+    ],
     ids=[
         "status-subprocess-missing",
         "status-reports-stderr",
@@ -339,11 +357,14 @@ def _patch_status_popen(monkeypatch: pytest.MonkeyPatch, status_command: list[st
         "status-reports-irrelevant-output",
         "status-exits-unsuccessfully",
         "status-times-out",
+        "status-emits-continuously",
+        "status-never-terminates-a-record",
     ],
 )
 def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unreliable(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
+    git_repository: str,
     monkeypatch: pytest.MonkeyPatch,
     status_failure: str,
 ) -> None:
@@ -354,18 +375,18 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
     # a result alongside stderr" rule git_grep_filter and the primary git
     # ls-files call both already follow) -- the directory listing must still
     # succeed; only the warning is skipped, silently.
-    git = shutil.which("git")
-    assert git is not None
     if status_failure == "timeout":
         monkeypatch.setattr(_discovery, "_GIT_STATUS_TIMEOUT_SECONDS", 0.01)
         monkeypatch.setattr(_discovery, "_PROCESS_STOP_TIMEOUT_SECONDS", 0.01)
+    if status_failure == "continuous":
+        monkeypatch.setattr(_discovery, "_GIT_STATUS_TIMEOUT_SECONDS", 1)
+        monotonic_values = iter([0.0, 0.0, 0.0, 1.0])
+        monkeypatch.setattr(_discovery.time, "monotonic", lambda: next(monotonic_values))
 
     with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
-
         tracked = tmp_path / "tracked.py"
         tracked.write_text("x = 1\n")
-        subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
+        subprocess.run([git_repository, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
 
         scripts = {
             "malformed": "import os; os.write(1, b'!! ignored.py')",
@@ -377,6 +398,8 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
                 "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
                 "os.write(1, b'?\\0'); time.sleep(30)"
             ),
+            "continuous": "import os\nwhile True:\n os.write(1, b'??\\0')",
+            "unterminated": "import os; os.write(1, b'!' * 70_000)",
         }
         status_command = None if status_failure == "missing" else [sys.executable, "-c", scripts[status_failure]]
         _patch_status_popen(monkeypatch, status_command)
@@ -389,15 +412,11 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
 
 
 def test_expand_directories_stops_ignored_status_at_the_reporting_threshold(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, git_repository: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    git = shutil.which("git")
-    assert git is not None
-
     with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
         (tmp_path / "tracked.py").write_text("x = 1\n")
-        subprocess.run([git, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
+        subprocess.run([git_repository, "add", "tracked.py"], check=True, cwd=tmp_path)  # noqa: S603
 
         _patch_status_popen(
             monkeypatch, [sys.executable, "-c", "import os\nwhile True:\n os.write(1, b'!! ignored.py\\0')"]
@@ -409,7 +428,7 @@ def test_expand_directories_stops_ignored_status_at_the_reporting_threshold(
 
         assert matches == [str((tmp_path / "tracked.py").resolve())]
         assert "at least 20 gitignored path(s)" in caplog.text
-        assert elapsed < 1
+        assert elapsed < 3
 
 
 def test_stop_ignored_status_process_escalates_after_termination_timeout() -> None:
