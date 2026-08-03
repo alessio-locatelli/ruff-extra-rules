@@ -682,6 +682,60 @@ def test_apply_fixes_refreshes_non_fixable_checks_position_too(tmp_path: Path) -
     assert super_init_violation.line == actual_super_init_line
 
 
+def test_apply_fixes_refreshes_non_fixable_checks_position_after_an_aborted_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Same requirement as the successful-fix case above, but the line shift
+    # comes from the external edit that aborts meaningless-vars' own fix,
+    # not from a fix this run itself applied -- the final refresh pass must
+    # not be gated on this run's own fix succeeding, since the file's
+    # content is known to have changed regardless of who changed it.
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "import requests\n\n\n"
+        "def request():\n"
+        "    data = requests.get(url)\n"
+        "    return data.status_code\n"
+        "\n\n"
+        "class Base:\n"
+        "    def __init__(self):\n"
+        "        pass\n"
+        "\n\n"
+        "class Child(Base):\n"
+        "    def __init__(self, **kwargs):\n"
+        "        super().__init__(**kwargs)\n"
+    )
+
+    def racing_fix(
+        _self: MeaninglessVarsCheck, fp: Path, _violations: object, source: str, *_args: object, **_kwargs: object
+    ) -> None:
+        # Simulate a concurrent process deleting a blank line above the
+        # redundant-super-init violation while this fix was in flight,
+        # shifting it up by one line.
+        edited = source.replace("return data.status_code\n\n\nclass Base:", "return data.status_code\n\nclass Base:", 1)
+        fp.write_text(edited)
+        atomic_write_text(
+            fp,
+            "def request():\n    response = requests.get(url)\n    return response.status_code\n",
+            "utf-8",
+            source,
+        )
+
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", racing_fix)
+
+    checks = load_checks(select={"meaningless-vars", "redundant-super-init"})
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    final_content = filepath.read_text()
+    actual_super_init_line = next(
+        i for i, line in enumerate(final_content.splitlines(), start=1) if "def __init__(self, **kwargs)" in line
+    )
+
+    super_init_violation = next(v for v in violations[str(filepath)] if v.check_id == "redundant-super-init")
+    assert super_init_violation.line == actual_super_init_line
+
+
 def test_apply_fixes_refreshes_a_participating_checks_own_left_open_violation(tmp_path: Path) -> None:
     # a check that *did* participate in the fix loop (it had
     # some fixable violation this run) only had its own positions
