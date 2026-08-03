@@ -4,16 +4,25 @@
 
 `CheckOrchestrator._process_single_file()` reads from and writes to the per-file cache (`_cache.py`) only when `fix_mode` is `False`; `--fix` always re-parses and re-runs every cacheable check on every file, for every run, regardless of whether that file ends up having anything to fix. This was never a documented decision — the code comment just states what happens ("Skip the cache in fix mode, since the file will be modified"), not that it applies unconditionally to every file in the batch, including ones that turn out to have zero violations and are never actually written to.
 
-Measured directly against this repository's own `src/` (34 files, no violations for any enabled check, so `--fix` never performs a single write):
+Measured from the repository root against this repository's own `src/` (34 files, no violations for any enabled check, so `--fix` never performs a single write; `redundant-type-conversion` excluded via `--ignore` since its own `ty`-daemon cost is a separate, already-documented factor — ADR-0041). Cache cleared via `rm -rf .cache/pre_commit_hooks` immediately before each run 1 below.
 
-| Command                                                           | Cold   | Warm (2nd run)                              |
-| ----------------------------------------------------------------- | ------ | ------------------------------------------- |
-| `--select=validate-function-name` (check only)                    | 0.140s | 0.074s                                      |
-| `--select=validate-function-name --fix`                           | 0.128s | 0.116s (no improvement on a 3rd run either) |
-| default checks, `redundant-type-conversion` excluded (check only) | 0.379s | 0.102s                                      |
-| default checks, `redundant-type-conversion` excluded, `--fix`     | 0.369s | 0.357s (no improvement on a 3rd run either) |
+Direct CLI (`uv run python -m pre_commit_hooks.ast_checks --ignore=redundant-type-conversion [--fix] src`):
 
-A plain check run gets ~1.9x–3.7x faster once the cache is warm, scaling with how much of the enabled check set's own cost the cache would otherwise avoid. `--fix` never sees that improvement, on any file, even across repeated consecutive runs on an already-clean tree — it costs the same as a cold check run every single time.
+| Run         | check only | `--fix` |
+| ----------- | ---------- | ------- |
+| 1 (cleared) | 0.367s     | 0.375s  |
+| 2           | 0.092s     | 0.347s  |
+| 3           | —          | 0.350s  |
+
+`prek run local-ruff-extra-rules-default --all-files` (this repo's own dev-code hook — `--fix` is always on; `.pre-commit-config.yaml` has no check-only equivalent to pair it against):
+
+| Run         | `--fix` |
+| ----------- | ------- |
+| 1 (cleared) | 0.593s  |
+| 2           | 0.566s  |
+| 3           | 0.537s  |
+
+A plain check run gets ~4x faster once the cache is warm (0.367s → 0.092s). `--fix` never gets that jump, through either invocation path — it stays within a few percent of the cold check-only cost on every run (0.375s → 0.347s → 0.350s direct; 0.593s → 0.566s → 0.537s via prek). The small, gradual reduction `--fix` does show run-over-run is consistent with ordinary OS-level filesystem/page-cache warming, not this project's own per-file result cache: `--fix` never consults that cache, so the ~4x shortcut a warm check-only run gets from it is never available, though incidental system-level effects outside this project's own control can still shave a few percent off any repeated run, `--fix` included.
 
 ## Considered Options
 
@@ -26,7 +35,7 @@ Document the existing behavior rather than change it: `CheckOrchestrator` treats
 
 ## Consequences
 
-- `--fix` costs roughly what a cold check run costs, for every file, on every invocation — never less, regardless of how many prior runs already confirmed the tree is clean. Measured above: 1.6x–3.6x slower than a warm check-only run on this project's own `src/` tree.
+- `--fix` costs close to what a cold check run costs, for every file, on every invocation: the ~4x shortcut a warm check-only run gets from this project's own cache is never available to it, regardless of how many prior runs already confirmed the tree is clean. Measured above: `--fix` ran ~3.8x slower than a warm check-only run on this project's own `src/` tree (0.347s vs 0.092s).
 - This is now a documented, known limitation (`docs/faq.md`) rather than an unstated implementation detail a user could only discover by profiling it themselves, as this ADR's own measurement required doing.
 - No behavior changes: `--fix`'s own correctness (ADR-0042's concurrent-modification handling, per-file fix locking) is unaffected either way, since none of it depends on whether the cache was consulted first.
 - The unimplemented "trust a clean cache hit even in fix mode" optimization from the options above remains open for a future change; this ADR does not authorize or design it, only records that the current cost is deliberate-by-inaction, not a bug to silently work around.
