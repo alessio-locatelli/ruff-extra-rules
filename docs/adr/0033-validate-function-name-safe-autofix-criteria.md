@@ -2,7 +2,7 @@
 
 ## Context
 
-TRI004 can suggest a rename for any `get_*` function based on its detected behavior, but applying that rename automatically risks missing a real call site — a rename not accompanied by updating every caller breaks the program. `apply_fix`'s reference collector only finds true call sites reachable via normal AST traversal, and for a method specifically, only `self.x`/`cls.x` accesses within the same class body: it cannot see a call routed through a differently-named receiver (e.g. `reader.get_report()` invoked from unrelated code elsewhere in the file). Without a matching restriction on which suggestions `--fix` acts on, a method rename could leave real callers referring to a now-nonexistent name.
+TR4 can suggest a rename for any `get_*` function based on its detected behavior, but applying that rename automatically risks missing a real call site — a rename not accompanied by updating every caller breaks the program. `apply_fix`'s reference collector only finds true call sites reachable via normal AST traversal, and for a method specifically, only `self.x`/`cls.x` accesses within the same class body: it cannot see a call routed through a differently-named receiver (e.g. `reader.get_report()` invoked from unrelated code elsewhere in the file). Without a matching restriction on which suggestions `--fix` acts on, a method rename could leave real callers referring to a now-nonexistent name.
 
 ## Decision
 

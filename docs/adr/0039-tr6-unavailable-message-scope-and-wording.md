@@ -1,8 +1,8 @@
-# TRI006 unavailable/self-test messages: accept per-process repetition, drop dev-only wording
+# TR6 unavailable/self-test messages: accept per-process repetition, drop dev-only wording
 
 ## Context
 
-`docs/adr/0036-check-unavailable-error-isolated-per-check.md` made `CheckOrchestrator` record a `CheckUnavailableError` once per `check_id` and skip re-invoking that check for every later file in the same process, so `_diagnostics.report()` only ever prints one line per process. That guarantee held, but consumers still reported seeing TRI006's unavailable-`ty` message more than once during a single `prek run` or commit.
+`docs/adr/0036-check-unavailable-error-isolated-per-check.md` made `CheckOrchestrator` record a `CheckUnavailableError` once per `check_id` and skip re-invoking that check for every later file in the same process, so `_diagnostics.report()` only ever prints one line per process. That guarantee held, but consumers still reported seeing TR6's unavailable-`ty` message more than once during a single `prek run` or commit.
 
 Confirmed empirically: neither `prek` nor pre-commit runs a non-`require_serial` hook as a single process. By default they partition the file list across multiple worker processes sized to CPU count, independent of argv-length limits — a throwaway repo with 12 files and a stand-in hook produced 3 separate subprocess invocations on an 8-core machine; adding `require_serial: true` to that hook collapsed it to exactly 1. `.pre-commit-hooks.yaml` does not set `require_serial`, and this codebase has no internal multiprocessing of its own, so every worker process gets its own fresh Python global state and independently discovers `ty` is missing — ADR-0036's per-process dedup is correct but was never sufficient, on its own, to bound the message to once per run.
 
@@ -12,7 +12,7 @@ Separately, the two messages `CheckUnavailableError` carries here (`_INSTALL_HIN
 
 For the repetition itself:
 
-- **`require_serial: true`** on the `ruff-extra-rules` hook: would collapse every worker process into one, making ADR-0036's per-process guarantee also a per-run guarantee. Rejected: this hook entry point bundles every check in `ALL_CHECKS` (meaningless-vars, validate-function-name, redundant-type-conversion, ...), not just TRI006, so this would remove prek/pre-commit's parallelism for the whole hook, on every commit, forever — not only on the runs where `ty` happens to be missing. Nothing in this codebase replaces that parallelism internally.
+- **`require_serial: true`** on the `ruff-extra-rules` hook: would collapse every worker process into one, making ADR-0036's per-process guarantee also a per-run guarantee. Rejected: this hook entry point bundles every check in `ALL_CHECKS` (meaningless-vars, validate-function-name, redundant-type-conversion, ...), not just TR6, so this would remove prek/pre-commit's parallelism for the whole hook, on every commit, forever — not only on the runs where `ty` happens to be missing. Nothing in this codebase replaces that parallelism internally.
 - **Cross-process shared state** (e.g. a sentinel/lockfile so worker processes agree to print only once): rejected. It would need real scoping and lifetime rules (per run? per commit?), has races between workers that start concurrently, and can go stale (a sentinel written before `ty` gets installed mid-session would keep suppressing the hint after the prerequisite is already fixed) — meaningful complexity for what is otherwise a cosmetic repeat.
 - **Accept the repeat, bounded by worker count**: adopted.
 
@@ -25,7 +25,7 @@ For the message content, once the above put a floor under how "actionable" this 
 
 ## Decision
 
-`CheckOrchestrator`'s per-process dedup (ADR-0036) is unchanged. No cross-process coordination was added. A consumer may see the TRI006 unavailable/self-test message once per prek/pre-commit worker process for a given run — bounded by CPU count under default parallelism, or exactly once if the consumer's own hook config sets `require_serial: true` — rather than a hard guarantee of exactly once per run.
+`CheckOrchestrator`'s per-process dedup (ADR-0036) is unchanged. No cross-process coordination was added. A consumer may see the TR6 unavailable/self-test message once per prek/pre-commit worker process for a given run — bounded by CPU count under default parallelism, or exactly once if the consumer's own hook config sets `require_serial: true` — rather than a hard guarantee of exactly once per run.
 
 Both `CheckUnavailableError` messages in `session.py` were rewritten:
 

@@ -4,7 +4,7 @@ The codebase was vibe-coded without deliberate architectural decisions, and has 
 
 ## Considered Options
 
-- **Rewrite from scratch**: rejected because `tests/fixtures/<check>/{good,bad}/*.py` is the only executable spec for each check's heuristics (e.g. TRI005's semantic-value scoring, TRI004's behavioral pattern classification). A rewrite would have to re-derive or re-import that same spec, without the safety net of running it after every change. The debt found is concentrated in the plumbing layer (`ast_checks/__init__.py`, `_base.py`, the two hook entrypoints), not spread through the check logic itself, so it doesn't require discarding the checks to fix.
+- **Rewrite from scratch**: rejected because `tests/fixtures/<check>/{good,bad}/*.py` is the only executable spec for each check's heuristics (e.g. TR5's semantic-value scoring, TR4's behavioral pattern classification). A rewrite would have to re-derive or re-import that same spec, without the safety net of running it after every change. The debt found is concentrated in the plumbing layer (`ast_checks/__init__.py`, `_base.py`, the two hook entrypoints), not spread through the check logic itself, so it doesn't require discarding the checks to fix.
 
 ## Consequences
 

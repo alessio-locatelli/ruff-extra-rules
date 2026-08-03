@@ -74,7 +74,7 @@ _TY_COMMAND = ("ty", "server")
 _HOVER_DOC_SEPARATOR = re.compile(r"\n-{3,}\n")
 
 # Kept in lockstep with pyproject.toml's `dependency-groups.dev` `ty>=X.Y.Z` pin by
-# test_min_ty_version_matches_pyproject_pin() -- see docs/adr/0039-tri006-unavailable-message-scope-and-wording.md.
+# test_min_ty_version_matches_pyproject_pin() -- see docs/adr/0039-tr6-unavailable-message-scope-and-wording.md.
 _MIN_TY_VERSION = "0.0.64"
 
 _INSTALL_HINT = (

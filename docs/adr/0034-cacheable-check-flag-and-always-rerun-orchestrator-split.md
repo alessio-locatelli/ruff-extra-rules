@@ -6,14 +6,14 @@
 
 Every check's `check()` contract has always been "look only at the single file you're given" (see `docs/adding-a-check.md`'s "Incremental-analysis limitations" section) — a cache hit for an unchanged file reproduces exactly what a full re-run of that file would produce, because nothing about the result can depend on any other file.
 
-`redundant-type-conversion` (TRI006) breaks that assumption on purpose: its whole value is catching a redundant conversion at a call site whose parameter type is declared in a different file (see `docs/adr/0035-redundant-type-conversion-ty-lsp-detection.md`). That means its result for `caller.py` can change when only `callee.py` changes, which `caller.py`'s own content-hash cache key has no way to invalidate on — a normal `git commit` that only touches `callee.py` never re-examines `caller.py` at all, so a stale "no violations" result for it would keep being served indefinitely.
+`redundant-type-conversion` (TR6) breaks that assumption on purpose: its whole value is catching a redundant conversion at a call site whose parameter type is declared in a different file (see `docs/adr/0035-redundant-type-conversion-ty-lsp-detection.md`). That means its result for `caller.py` can change when only `callee.py` changes, which `caller.py`'s own content-hash cache key has no way to invalidate on — a normal `git commit` that only touches `callee.py` never re-examines `caller.py` at all, so a stale "no violations" result for it would keep being served indefinitely.
 
 `CheckOrchestrator` caches one combined violation list per file, covering every enabled check together. A check that simply opted out of caching for itself would silently disable caching for every _other_, unrelated check sharing that file, defeating the point of adding a cross-file-aware check without also regressing every existing one's performance.
 
 ## Considered Options
 
 - **Extend the cache key with a hash of each file's actual import closure**: rejected. Computing "the closure" correctly means resolving Python's own dynamic import machinery (conditional imports, `importlib`, re-exports, `TYPE_CHECKING`-only imports that still affect declared types, ...) — getting this wrong in either direction reintroduces the same class of stale-cache bug `docs/adr/0005-cache-key-source-hash-and-config-fingerprint.md` was written to eliminate the root cause of, just scoped to imports instead of the package's own source.
-- **Exempt the whole check from caching by disabling `CheckOrchestrator`'s cache outright**: rejected — regresses every check's caching performance the moment TRI006 is enabled alongside them, which is the exact problem this decision needs to avoid.
+- **Exempt the whole check from caching by disabling `CheckOrchestrator`'s cache outright**: rejected — regresses every check's caching performance the moment TR6 is enabled alongside them, which is the exact problem this decision needs to avoid.
 - **A `cacheable` flag on `ASTCheck`, plus an orchestrator-level split between a cacheable group and an always-rerun group**: adopted (below).
 
 ## Decision
