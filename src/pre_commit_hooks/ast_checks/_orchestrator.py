@@ -838,8 +838,14 @@ class CheckOrchestrator:
         with more context (e.g. "fix() itself raised for this check") can
         mark those specifically, distinct from the ones already resolved by
         this call. If the file couldn't be re-read (e.g. deleted
-        concurrently), conservatively returns every key unresolved —
-        nothing is marked fixed on an unverifiable outcome.
+        concurrently) or no longer parses (e.g. a concurrent edit left it
+        syntactically invalid), conservatively returns every key unresolved
+        — nothing is marked fixed on an unverifiable outcome, and this
+        method itself never raises `SyntaxError` into a caller that would
+        otherwise mistake an unparseable file for this check's own fix logic
+        crashing (ch. 4: "MUST NOT silently skip a file because parsing
+        failed" — the caller's own fix outcomes are simply left as they
+        already were, not silently skipped).
 
         A violation a multi-write `fix()` (e.g. `validate_function_name`)
         already marked rejected/errored/aborted itself, from inside its own
@@ -856,7 +862,10 @@ class CheckOrchestrator:
             return {(v.line, v.col, v.message) for v in fresh_violations}
 
         post_source, _post_encoding = post_read_result
-        post_tree = ast.parse(post_source, filename=filepath)
+        try:
+            post_tree = ast.parse(post_source, filename=filepath)
+        except SyntaxError:
+            return {(v.line, v.col, v.message) for v in fresh_violations}
         still_present: set[ViolationKey] = {
             (v.line, v.col, v.message) for v in check.check(filepath, post_tree, post_source) if v.fixable
         }
