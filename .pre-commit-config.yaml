@@ -7,7 +7,7 @@ ci:
       local-ruff-extra-rules-aggressive,
       local-ruff-extra-rules-ty,
       local-ruff-extra-rules-ty-aggressive,
-      # redundant-type-conversion (TRI006) requires Astral's `ty` type checker on PATH
+      # redundant-type-conversion (TR6) requires Astral's `ty` type checker on PATH
       ruff-extra-rules,
       # This hook requires a local dependency, so on CI it runs in
       # `.github/workflows/prettier.yml`.
