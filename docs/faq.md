@@ -33,7 +33,7 @@ Check results are cached under `.cache/pre_commit_hooks/` relative to the proces
 
 ### Why is `--fix` slower than a plain check, even when nothing needs fixing?
 
-`--fix` doesn't use the cache described above, on any file, even one that turns out to have nothing to fix. A plain check-only run gets noticeably faster on an unchanged file once the cache is warm; `--fix` always re-analyzes every file from scratch, every run. If you're running `--fix` over a large, already-clean tree, expect it to cost about as long as the very first (cold) check-only run — every single time, not just once.
+`--fix` doesn't use the cache described above, on any file, even one that turns out to have nothing to fix — every file is re-analyzed from scratch, every run. How much slower this feels depends on which checks you have enabled: a plain check-only run can get noticeably faster on an unchanged file once the cache is warm, but only for checks the cache actually covers (a few, like `redundant-type-conversion`, never benefit from it either way). On a large, already-clean tree with mostly-cacheable checks enabled, expect `--fix` to cost close to a cold check-only run rather than a warm one.
 
 ### Why `# pytriage` instead of `# noqa` for inline ignore comments?
 
