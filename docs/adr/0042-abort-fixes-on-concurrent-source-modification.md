@@ -22,6 +22,8 @@ A multi-write check's own post-fix recheck (`CheckOrchestrator._mark_resolved_an
 
 The same recheck must also survive the concurrent edit leaving the file syntactically invalid, not just semantically different — a half-written save or a merge conflict marker parses as neither the old nor the new content. `_mark_resolved_and_get_still_present`'s own `ast.parse()` call is now wrapped the same way `CheckOrchestrator._refresh_stale_positions`'s already was: a `SyntaxError` there is treated exactly like the file being unreadable (conservatively, every violation in this batch counts as still present, none marked fixed), rather than propagating into `_apply_fixes`' outer `except Exception`, which would otherwise blanket-mark every fixable violation for that check_id `[FIX ERRORED]` and record a rule failure for a check that never actually raised — silently destroying an already-decided `[FIX ABORTED]` outcome (and any other check's own unrelated, already-successful fix in the same batch) in the process.
 
+An abort also means `CheckOrchestrator._apply_fixes` must treat the file as changed for the purpose of its own final `_refresh_stale_positions()` pass, exactly as a successful fix already does — the external edit that triggered the abort can shift line numbers just as easily as any of this run's own fixes, and a non-fixable check's (or a still-open violation's) stale position must not go unrefreshed merely because no fix in this run happened to succeed.
+
 ## Consequences
 
 - A concurrent edit to a file `--fix` is currently processing — from an editor, or from any process outside this tool's own per-file fix lock — is never silently discarded. The affected violation is reported `[FIX ABORTED]` with a non-zero exit code instead.

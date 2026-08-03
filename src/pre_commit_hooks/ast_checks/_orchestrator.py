@@ -654,6 +654,15 @@ class CheckOrchestrator:
                     )
                     for v in fresh_violations:
                         mark_fix_aborted(v)
+                    # Unlike every other branch here, the file's content is
+                    # now known to differ from what this run itself last saw
+                    # -- not because any of this run's own fixes changed it,
+                    # but because the external edit that caused this abort
+                    # did. That edit can just as easily have shifted line
+                    # numbers as any of this run's own successful fixes, so
+                    # the final refresh pass below must run even if no fix
+                    # in this run ever succeeds.
+                    file_changed = True
                 except Exception:
                     # fix() itself raised — a bug in the check's own fix
                     # logic, distinct from FixValidationError (which means
