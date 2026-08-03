@@ -2488,6 +2488,42 @@ def test_apply_fixes_keeps_aborted_violation_aborted_even_when_the_external_edit
     assert 'def is_active(user: dict) -> bool:\n    return user.get("status") == "active"\n' in filepath.read_text()
 
 
+def test_apply_fixes_keeps_aborted_violation_aborted_when_the_external_edit_leaves_invalid_python(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The concurrent edit that aborts get_active's own fix also happens to
+    # overwrite the whole file with invalid Python (a half-written save, a
+    # merge conflict marker) -- destroying get_config's own already-applied
+    # rename too. The post-fix recheck (_mark_resolved_and_get_still_present)
+    # must not let that SyntaxError escape into _apply_fixes' outer except
+    # Exception, which would blanket-mark every fixable violation for this
+    # check [FIX ERRORED] and record a spurious rule failure. get_active's
+    # own [FIX ABORTED] (decided before the file was clobbered) must survive
+    # untouched; get_config -- genuinely unconfirmable now that the file no
+    # longer parses -- must fall back to ordinary [FIXABLE], not a false
+    # [FIX ERRORED] for a check that never actually raised.
+    filepath = _write_get_config_and_get_active_module(tmp_path)
+    original_apply_fix = vfn_module.apply_fix
+
+    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
+        if suggestion.func_name == "get_active":
+            fp.write_text("this is not valid python (((\n")
+            atomic_write_text(fp, "def get_active(user):\n    pass\n", "utf-8", "stale content that won't match")
+        return original_apply_fix(fp, suggestion)
+
+    by_func_name = _run_vfn_fix_with_patched_apply_fix(filepath, monkeypatch, flaky_apply_fix)
+    get_active_violation = by_func_name["get_active"]
+    assert is_fix_aborted(get_active_violation)
+    assert not is_fix_errored(get_active_violation)
+    assert not (get_active_violation.fix_data and get_active_violation.fix_data.get("fixed"))
+
+    get_config_violation = by_func_name["get_config"]
+    assert not is_fix_errored(get_config_violation)
+    assert not (get_config_violation.fix_data and get_config_violation.fix_data.get("fixed"))
+
+    assert filepath.read_text() == "this is not valid python (((\n"
+
+
 def test_apply_fixes_marks_errored_violation_of_a_multi_write_check_when_apply_fix_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
