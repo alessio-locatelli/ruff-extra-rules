@@ -6,7 +6,7 @@
 
 Measured from the repository root against this repository's own `src/` (34 files, no violations for any enabled check, so `--fix` never performs a single write; `redundant-type-conversion` excluded via `--ignore` since its own `ty`-daemon cost is a separate, already-documented factor — ADR-0041). Cache cleared via `rm -rf .cache/pre_commit_hooks` immediately before each run 1 below.
 
-Direct CLI (`uv run python -m pre_commit_hooks.ast_checks --ignore=redundant-type-conversion [--fix] src`):
+Direct CLI, check only (`uv run python -m pre_commit_hooks.ast_checks --ignore=redundant-type-conversion src`), and `--fix` (`uv run python -m pre_commit_hooks.ast_checks --ignore=redundant-type-conversion --fix src`):
 
 | Run         | check only | `--fix` |
 | ----------- | ---------- | ------- |
