@@ -426,10 +426,8 @@ class CheckOrchestrator:
         ADR-0005 for why this is split from `_generate_cache_version()`.
         """
         cacheable_checks = [check for check in self.checks if check.cacheable]
-        check_ids = sorted(check.check_id for check in cacheable_checks)
         fingerprints = sorted(f"{check.check_id}={_fingerprint_check(check)}" for check in cacheable_checks)
-        identity = "|".join([",".join(check_ids), ",".join(fingerprints)])
-        digest = hashlib.sha1(identity.encode(), usedforsecurity=False).hexdigest()[:16]
+        digest = hashlib.sha1(",".join(fingerprints).encode(), usedforsecurity=False).hexdigest()[:16]
         return f"ruff-extra-rules:{digest}"
 
     def _generate_cache_version(self) -> str:
