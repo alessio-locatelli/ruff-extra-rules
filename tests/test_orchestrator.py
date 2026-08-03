@@ -2353,14 +2353,12 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
     )
 
 
-def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # validate-function-name's fix() writes once per violation rather than
-    # once per check. When one of those writes is rejected, the orchestrator
-    # must attribute the rejection to that specific violation, not the
-    # whole check — an earlier rename that already committed must still be
-    # reported [FIXED], not swept into [FIX REJECTED] alongside it.
+def _write_get_config_and_get_active_module(tmp_path: Path) -> Path:
+    """The shared fixture file for the multi-write `validate-function-name`
+    tests below: two independent top-level `get_`-prefixed violations, so a
+    `flaky_apply_fix` can single out `get_active`'s own write while
+    `get_config`'s stays an ordinary, unaffected fix in the same batch.
+    """
     filepath = tmp_path / "module.py"
     filepath.write_text(
         "def get_config():\n"
@@ -2370,7 +2368,36 @@ def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
         "def get_active(user: dict) -> bool:\n"
         '    return user.get("status") == "active"\n'
     )
+    return filepath
 
+
+def _run_vfn_fix_with_patched_apply_fix(
+    filepath: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    flaky_apply_fix: Callable[[Path, Suggestion], bool],
+) -> dict[str, Violation]:
+    """Patches `vfn_module.apply_fix` with `flaky_apply_fix`, runs the
+    `validate-function-name` fix flow over `filepath`, and returns its
+    violations keyed by each one's own suggested function name.
+    """
+    monkeypatch.setattr(vfn_module, "apply_fix", flaky_apply_fix)
+
+    checks = load_checks(select={"validate-function-name"})
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+
+    return {v.fix_data["suggestion"].func_name: v for v in violations[str(filepath)] if v.fix_data}
+
+
+def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # validate-function-name's fix() writes once per violation rather than
+    # once per check. When one of those writes is rejected, the orchestrator
+    # must attribute the rejection to that specific violation, not the
+    # whole check — an earlier rename that already committed must still be
+    # reported [FIXED], not swept into [FIX REJECTED] alongside it.
+    filepath = _write_get_config_and_get_active_module(tmp_path)
     original_apply_fix = vfn_module.apply_fix
 
     def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
@@ -2378,13 +2405,7 @@ def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
             atomic_write_text(fp, "def broken(:\n", "utf-8", fp.read_text())
         return original_apply_fix(fp, suggestion)
 
-    monkeypatch.setattr(vfn_module, "apply_fix", flaky_apply_fix)
-
-    checks = load_checks(select={"validate-function-name"})
-    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
-    violations = orchestrator.process_files([str(filepath)])
-
-    by_func_name = {v.fix_data["suggestion"].func_name: v for v in violations[str(filepath)] if v.fix_data}
+    by_func_name = _run_vfn_fix_with_patched_apply_fix(filepath, monkeypatch, flaky_apply_fix)
     get_config_violation = by_func_name["get_config"]
     get_active_violation = by_func_name["get_active"]
     get_config_fix_data = get_config_violation.fix_data
@@ -2408,16 +2429,7 @@ def test_apply_fixes_marks_only_the_aborted_violation_of_a_multi_write_check(
     # already committed must still be reported [FIXED], not swept into
     # [FIX ABORTED] alongside a later violation whose own write collided
     # with an on-disk change.
-    filepath = tmp_path / "module.py"
-    filepath.write_text(
-        "def get_config():\n"
-        '    with open("config.json") as f:\n'
-        "        return f.read()\n"
-        "\n\n"
-        "def get_active(user: dict) -> bool:\n"
-        '    return user.get("status") == "active"\n'
-    )
-
+    filepath = _write_get_config_and_get_active_module(tmp_path)
     original_apply_fix = vfn_module.apply_fix
 
     def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
@@ -2425,13 +2437,7 @@ def test_apply_fixes_marks_only_the_aborted_violation_of_a_multi_write_check(
             atomic_write_text(fp, "def get_active(user):\n    pass\n", "utf-8", "not the real current content")
         return original_apply_fix(fp, suggestion)
 
-    monkeypatch.setattr(vfn_module, "apply_fix", flaky_apply_fix)
-
-    checks = load_checks(select={"validate-function-name"})
-    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
-    violations = orchestrator.process_files([str(filepath)])
-
-    by_func_name = {v.fix_data["suggestion"].func_name: v for v in violations[str(filepath)] if v.fix_data}
+    by_func_name = _run_vfn_fix_with_patched_apply_fix(filepath, monkeypatch, flaky_apply_fix)
     get_config_violation = by_func_name["get_config"]
     get_active_violation = by_func_name["get_active"]
     get_config_fix_data = get_config_violation.fix_data
@@ -2457,16 +2463,7 @@ def test_apply_fixes_keeps_aborted_violation_aborted_even_when_the_external_edit
     # own write never landed and must not be credited for that. get_config
     # is an unrelated, unaffected violation in the same batch, proving the
     # fix above doesn't regress an ordinary successful multi-write fix.
-    filepath = tmp_path / "module.py"
-    filepath.write_text(
-        "def get_config():\n"
-        '    with open("config.json") as f:\n'
-        "        return f.read()\n"
-        "\n\n"
-        "def get_active(user: dict) -> bool:\n"
-        '    return user.get("status") == "active"\n'
-    )
-
+    filepath = _write_get_config_and_get_active_module(tmp_path)
     original_apply_fix = vfn_module.apply_fix
 
     def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
@@ -2479,13 +2476,7 @@ def test_apply_fixes_keeps_aborted_violation_aborted_even_when_the_external_edit
             atomic_write_text(fp, "def get_active(user):\n    pass\n", "utf-8", stale_source)
         return original_apply_fix(fp, suggestion)
 
-    monkeypatch.setattr(vfn_module, "apply_fix", flaky_apply_fix)
-
-    checks = load_checks(select={"validate-function-name"})
-    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
-    violations = orchestrator.process_files([str(filepath)])
-
-    by_func_name = {v.fix_data["suggestion"].func_name: v for v in violations[str(filepath)] if v.fix_data}
+    by_func_name = _run_vfn_fix_with_patched_apply_fix(filepath, monkeypatch, flaky_apply_fix)
     get_active_violation = by_func_name["get_active"]
     assert is_fix_aborted(get_active_violation)
     assert not (get_active_violation.fix_data and get_active_violation.fix_data.get("fixed"))
@@ -2507,16 +2498,7 @@ def test_apply_fixes_marks_errored_violation_of_a_multi_write_check_when_apply_f
     # handling at all — that handling is only reachable for single-write
     # checks. The check itself must mark the specific violation it failed
     # to fix, the same way it already does for a rejected fix.
-    filepath = tmp_path / "module.py"
-    filepath.write_text(
-        "def get_config():\n"
-        '    with open("config.json") as f:\n'
-        "        return f.read()\n"
-        "\n\n"
-        "def get_active(user: dict) -> bool:\n"
-        '    return user.get("status") == "active"\n'
-    )
-
+    filepath = _write_get_config_and_get_active_module(tmp_path)
     original_apply_fix = vfn_module.apply_fix
 
     def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
@@ -2524,13 +2506,7 @@ def test_apply_fixes_marks_errored_violation_of_a_multi_write_check_when_apply_f
             raise RuntimeError("simulated apply_fix bug")
         return original_apply_fix(fp, suggestion)
 
-    monkeypatch.setattr(vfn_module, "apply_fix", flaky_apply_fix)
-
-    checks = load_checks(select={"validate-function-name"})
-    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
-    violations = orchestrator.process_files([str(filepath)])
-
-    by_func_name = {v.fix_data["suggestion"].func_name: v for v in violations[str(filepath)] if v.fix_data}
+    by_func_name = _run_vfn_fix_with_patched_apply_fix(filepath, monkeypatch, flaky_apply_fix)
     get_config_violation = by_func_name["get_config"]
     get_active_violation = by_func_name["get_active"]
     get_config_fix_data = get_config_violation.fix_data
