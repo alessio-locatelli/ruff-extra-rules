@@ -251,7 +251,7 @@ class LSPClient:
             raise LSPError(msg) from error
 
     def close(self, *, timeout: float = 2.0) -> None:
-        """Best-effort shutdown handshake, then stdin close, then wait/kill. Never raises."""
+        """Best-effort shutdown handshake, then stdin close, then wait/kill."""
         if self._close_called:
             return
         self._close_called = True

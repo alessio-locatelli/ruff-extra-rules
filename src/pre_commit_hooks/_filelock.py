@@ -45,9 +45,6 @@ def locked(lock_path: Path, *, timeout_seconds: float, poll_interval_seconds: fl
     crashed process releases its flock automatically when its file
     descriptor closes (the OS does this even on SIGKILL), so this is only
     ever reached by a peer that's still genuinely running.
-
-    Raises:
-        TimeoutError: if the lock can't be acquired within `timeout_seconds`.
     """
     assert fcntl is not None  # callers must check their own platform availability first
     with lock_path.open("a", encoding="utf-8") as lock_fp:

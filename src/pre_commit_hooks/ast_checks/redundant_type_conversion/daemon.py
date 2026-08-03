@@ -291,14 +291,7 @@ class ExistingDaemonProbe(NamedTuple):
 
 
 def connect(root: Path) -> RemoteTySession:
-    """A session backed by a persistent per-repository daemon, spawning one if none is currently reachable.
-
-    Raises:
-        CheckUnavailableError: a freshly spawned daemon's own `ty` failed its compatibility self-test --
-            not fallback-worthy, since a local session would fail identically.
-        OSError: the daemon couldn't be reached or spawned for an operational reason (no socket support,
-            spawn timeout, ...) -- the caller should fall back to a private, non-persistent `TySession`.
-    """
+    """A session backed by a persistent per-repository daemon, spawning one if none is currently reachable."""
     root = repository_root(root)
     socket_path = _socket_path(root)
     daemon_identity = _daemon_identity(root)
@@ -392,11 +385,10 @@ def _wait_for_busy_daemon(socket_path: Path, daemon_identity: str) -> tuple[sock
 def probe_existing(root: Path) -> ExistingDaemonProbe:
     """Non-spawning: connects only if a daemon is already running and reachable for `root`.
 
-    Used by `session.record_direct_input_if_session_active()` for direct inputs -- never spawns one itself,
-    and never raises, since recording a candidate-less file
-    must not fail this check for an unrelated daemon-connectivity reason. Checks `socket_exists_for()` (a
-    plain `Path.exists()`) before ever resolving `ty --version`: a repository that has never had a daemon
-    must not pay a real subprocess spawn on every single candidate-less file just to learn that, again.
+    Used by `session.record_direct_input_if_session_active()` for direct inputs -- never spawns one itself.
+    Checks `socket_exists_for()` (a plain `Path.exists()`) before ever resolving `ty --version`: a
+    repository that has never had a daemon must not pay a real subprocess spawn on every single
+    candidate-less file just to learn that, again.
 
     Waits out the same busy-daemon budget `connect()` does (`_wait_for_busy_daemon()`) for a daemon
     confirmed alive but too busy to answer, rather than treating it as unreachable: `record_direct_input_
@@ -436,10 +428,10 @@ def shutdown_if_running(root: Path) -> None:
     """Best-effort explicit teardown: asks a daemon already running for `root` to stop, if one is
     reachable, and waits (bounded) for its own socket file to actually disappear before returning.
 
-    Never raises. Not part of this check's own normal operation (a daemon otherwise stops on its own, via
-    the idle timeout or a version mismatch) -- this is the deliberate "teardown" ADR-0041 calls for, used
-    directly by tests that spawn a real daemon and need it gone before the test ends, rather than waiting
-    out its idle timeout.
+    Not part of this check's own normal operation (a daemon otherwise stops on its own, via the idle
+    timeout or a version mismatch) -- this is the deliberate "teardown" ADR-0041 calls for, used directly
+    by tests that spawn a real daemon and need it gone before the test ends, rather than waiting out its
+    idle timeout.
 
     The "shutting_down" reply this waits for below only confirms the daemon's own accept loop has been
     told to stop, not that it already has: connections are handled concurrently (ADR-0041), so the thread
@@ -468,10 +460,9 @@ def _try_connect(socket_path: Path, daemon_identity: str) -> socket.socket | Non
     dropped connection, or a bare EOF -- genuinely ambiguous with "busy," left for the caller's own
     liveness/busy-wait logic (`_daemon_process_is_alive()`, `_wait_for_busy_daemon()`) to resolve.
 
-    Raises:
-        _VersionMismatchError: the daemon explicitly rejected the handshake and is already shutting itself
-            down as a result -- unambiguous, so callers must use `_try_connect_or_departing()` instead of
-            calling this directly whenever that distinction matters (see its own docstring).
+    Raises `_VersionMismatchError` when the daemon explicitly rejects the handshake and is already
+    shutting itself down as a result -- unambiguous, so callers must use `_try_connect_or_departing()`
+    instead of calling this directly whenever that distinction matters (see its own docstring).
     """
     if not socket_path.exists():
         return None
@@ -555,7 +546,7 @@ def _await_ready(process: subprocess.Popen[bytes], root: Path) -> None:
 def _kill_spawn_attempt(process: subprocess.Popen[bytes]) -> None:
     """Best-effort: ends the whole process group of a spawn attempt that's failing or timing out.
     `start_new_session=True` made `process` its own group leader, so killing that group also reaches
-    any `ty server` child it may have already spawned as part of its own self-test. Never raises.
+    any `ty server` child it may have already spawned as part of its own self-test.
     """
     with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(process.pid, signal.SIGTERM)
