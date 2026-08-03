@@ -2408,11 +2408,6 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
 
 
 def _write_get_config_and_get_active_module(tmp_path: Path) -> Path:
-    """The shared fixture file for the multi-write `validate-function-name`
-    tests below: two independent top-level `get_`-prefixed violations, so a
-    `flaky_apply_fix` can single out `get_active`'s own write while
-    `get_config`'s stays an ordinary, unaffected fix in the same batch.
-    """
     filepath = tmp_path / "module.py"
     filepath.write_text(
         "def get_config():\n"
@@ -2430,10 +2425,6 @@ def _run_vfn_fix_with_patched_apply_fix(
     monkeypatch: pytest.MonkeyPatch,
     flaky_apply_fix: Callable[[Path, Suggestion], bool],
 ) -> dict[str, Violation]:
-    """Patches `vfn_module.apply_fix` with `flaky_apply_fix`, runs the
-    `validate-function-name` fix flow over `filepath`, and returns its
-    violations keyed by each one's own suggested function name.
-    """
     monkeypatch.setattr(vfn_module, "apply_fix", flaky_apply_fix)
 
     checks = load_checks(select={"validate-function-name"})
