@@ -1269,6 +1269,9 @@ def test_process_files_unavailable_checks_result_is_not_cached(tmp_path: Path, m
     assert second[str(filepath)][0].error_code == "TR1"
 
 
+_CLEAN_MARKER = "# marked-clean\n"
+
+
 def test_process_files_a_sibling_hook_names_own_write_does_not_serve_a_stale_entry_after_content_changes(
     tmp_path: Path,
 ) -> None:
@@ -1292,7 +1295,7 @@ def test_process_files_a_sibling_hook_names_own_write_does_not_serve_a_stale_ent
     assert first[str(filepath)][0].check_id == "probe-a"  # pytriage: TR6
     assert probe_a.cache.get_cached_result(filepath, probe_a.cache.hook_name) is not None
 
-    filepath.write_text("x = 1\n# marked-clean\n")
+    filepath.write_text(f"x = 1\n{_CLEAN_MARKER}")
 
     probe_b = CheckOrchestrator(checks=[_MarkerFixableCheck(check_id="probe-b")])
     second = probe_b.process_files([str(filepath)])
@@ -1379,7 +1382,7 @@ class _MarkerFixableCheck(_AlwaysRerunProbeCheck):
         self.check_id = check_id
 
     def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
-        if "# marked-clean\n" in source:
+        if _CLEAN_MARKER in source:
             return []
         return [
             Violation(
@@ -1390,7 +1393,7 @@ class _MarkerFixableCheck(_AlwaysRerunProbeCheck):
     def fix(
         self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
     ) -> bool:
-        atomic_write_text(filepath, source + "# marked-clean\n", encoding, source)
+        atomic_write_text(filepath, source + _CLEAN_MARKER, encoding, source)
         return True
 
 
@@ -1406,7 +1409,7 @@ class _MarkerRemovingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
     check_id = "marker-remover"
 
     def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
-        if "# marked-clean\n" not in source:
+        if _CLEAN_MARKER not in source:
             return []
         return [
             Violation(
@@ -1422,7 +1425,7 @@ class _MarkerRemovingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
     def fix(
         self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
     ) -> bool:
-        atomic_write_text(filepath, source.replace("# marked-clean\n", ""), encoding, source)
+        atomic_write_text(filepath, source.replace(_CLEAN_MARKER, ""), encoding, source)
         return True
 
 
@@ -1437,7 +1440,7 @@ def test_fix_mode_falls_through_when_an_always_rerun_fix_invalidates_a_cached_ca
     # the stale cached "clean" result merged with the always-rerun group's
     # own fresh one.
     filepath = tmp_path / "module.py"
-    filepath.write_text("x = 1\n# marked-clean\n")
+    filepath.write_text(f"x = 1\n{_CLEAN_MARKER}")
 
     populate = CheckOrchestrator(checks=[_MarkerFixableCheck(check_id="c")])
     populate.process_files([str(filepath)])  # marker present -> clean, populates the cache
