@@ -350,42 +350,11 @@ class ConcurrentModificationError(Exception):
 
 
 def atomic_write_text(path: Path, content: str, encoding: str, expected_source: str) -> None:
-    """Validate `content` parses as Python and that `path`'s current on-disk
-    bytes still match `expected_source` (the source this fix's edits were
-    computed against), then write `content` to `path` via
-    temp-file-then-rename, atomic on POSIX.
-
-    Mirrors `_cache.py`'s `_write_cache`, with three refinements needed for
-    a source file rather than a cache blob: the write targets `path.resolve()`
-    rather than `path` itself, so a symlinked file gets its target's content
-    replaced in place rather than having the symlink itself overwritten with
-    a plain file (`replace()`, unlike the `open()` a plain `write_text()`
-    uses, acts on the symlink's own directory entry, not what it points to);
-    the temp file gets a unique name from `tempfile.mkstemp` (a fixed
-    `<name>.tmp` sibling could collide if two hook processes fix the same
-    file at once); and its permission bits are copied from the resolved
-    target before the rename (`mkstemp` creates files mode 0600, which would
-    otherwise silently strip an executable script's +x bit). A plain
-    `Path.write_text()` can also leave a truncated, invalid file on disk if
-    the process is killed mid-write; writing to a temp file first and
-    renaming it into place means the target always ends up either fully old
-    or fully new.
-
-    Every check's `fix()` ultimately writes through this one function, so
-    validating here — rather than in each check — guarantees no fix, from
-    any check, can ever leave a file syntactically broken on disk: a bad fix
-    never gets far enough to create a temp file, let alone rename it into
-    place.
-
-    Raises:
-        FixValidationError: if `content` isn't valid Python. Raised before
-            any file I/O, so `path` still holds its prior content.
-        ConcurrentModificationError: if `path`'s current on-disk content,
-            decoded via `encoding`, no longer matches `expected_source` --
-            including if it no longer decodes at all. Raised after the temp
-            file is written but before it replaces `path`, so `path` still
-            holds its prior content; the now-orphaned temp file is still
-            cleaned up like any other failure here.
+    """Writes `content` to `path` via temp-file-then-rename, atomic on
+    POSIX, after validating it parses as Python and that `path` still
+    matches `expected_source`. Mirrors `_cache.py`'s `_write_cache`. See
+    `docs/adr/0010-fix-validation-before-write.md` and
+    `docs/adr/0042-abort-fixes-on-concurrent-source-modification.md`.
     """
     try:
         # compile(), not ast.parse(): some invalid code is only rejected at
@@ -403,16 +372,9 @@ def atomic_write_text(path: Path, content: str, encoding: str, expected_source: 
     try:
         with os.fdopen(fd, "w", encoding=encoding, newline="") as temp_file:
             temp_file.write(content)
-        # Re-read path's actual current content and compare decoded text,
-        # not raw bytes: a stateful codec (e.g. iso2022_jp) can decode a
-        # redundant shift sequence to the same text but never reproduce
-        # those exact bytes on re-encode, which would otherwise make an
-        # untouched file in such an encoding fail this check on every fix.
-        # Comparing anything cheaper (e.g. mtime) would also miss an edit
-        # that lands within the same timestamp tick. Checked as late as
-        # possible, immediately before the rename that commits the write, to
-        # leave the smallest possible window in which a concurrent edit
-        # could still land unnoticed.
+        # Compare decoded text, not raw bytes: some codecs don't round-trip
+        # byte-for-byte, so a byte comparison would falsely abort an
+        # untouched file. See ADR-0042.
         try:
             current_source = real_path.read_bytes().decode(encoding)
         except UnicodeDecodeError:
