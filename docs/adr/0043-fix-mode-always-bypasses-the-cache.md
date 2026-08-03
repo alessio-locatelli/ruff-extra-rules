@@ -27,7 +27,7 @@ A plain check run gets ~4x faster once the cache is warm (0.367s → 0.092s). `-
 ## Considered Options
 
 - **Leave `--fix` unconditionally bypassing the cache, document it as a known limitation**: adopted. This is the current, already-shipped behavior; this ADR records it rather than changing it.
-- **Read the cache first even in `fix_mode`, and only bypass it for a file whose cached result already has violations (the only case that could actually need a write)**: not implemented, not decided against with a verified rationale — no ADR, commit, or comment predating this one explains why the current code takes the simpler, unconditional-bypass path instead. It stays a plausible future optimization rather than a rejected option, since fabricating a rationale here would misrepresent it as a considered trade-off when it is not documented anywhere as one.
+- **Read the cache first even in `fix_mode`, trusting a cache hit for the cacheable group while still running `always_rerun_checks` fresh — `_process_single_file()` already does exactly this outside `fix_mode` (a cache hit doesn't short-circuit an always-rerun check like `redundant-type-conversion`) — and bypass the cache only for a file where either group's result turns up a violation**: not implemented, not decided against with a verified rationale — no ADR, commit, or comment predating this one explains why the current code takes the simpler, unconditional-bypass path instead. It stays a plausible future optimization rather than a rejected option, since fabricating a rationale here would misrepresent it as a considered trade-off when it is not documented anywhere as one.
 
 ## Decision
 
