@@ -133,4 +133,4 @@ repos:
         entry: npm run format:check --
         language: system
         pass_filenames: false
-        types: [markdown, yaml, json]
+        types_or: [markdown, yaml, json]
