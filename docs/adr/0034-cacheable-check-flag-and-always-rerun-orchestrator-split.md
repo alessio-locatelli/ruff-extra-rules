@@ -1,5 +1,7 @@
 # A `cacheable` check flag, and an always-rerun split in `CheckOrchestrator`
 
+**Update, ADR-0044**: the "shared cache-version fingerprint" this ADR describes (derived from the cacheable group's own check IDs and configuration) is narrowed to the cacheable group's own check IDs and configuration moving into `CheckOrchestrator._generate_hook_name()` instead — `cache_version` (`_generate_cache_version()`) no longer includes them. The cacheable/always-rerun split itself, and every other decision below, is unaffected. See ADR-0044.
+
 ## Context
 
 Every check's `check()` contract has always been "look only at the single file you're given" (see `docs/adding-a-check.md`'s "Incremental-analysis limitations" section) — a cache hit for an unchanged file reproduces exactly what a full re-run of that file would produce, because nothing about the result can depend on any other file.
