@@ -31,6 +31,10 @@ Given that this project exists for rules that are missing in Ruff, the preferred
 
 Check results are cached under `.cache/pre_commit_hooks/` relative to the process's current working directory, not a project root discovered independently of it — the same convention `mypy` (`.mypy_cache`) uses. `prek`/`pre-commit` always invoke this hook with the working directory set to the repository root, so the cache location is consistent there; running the CLI directly from elsewhere creates a separate `.cache/pre_commit_hooks/` under that directory instead. The cache itself is safe to delete at any time (see the `CACHEDIR.TAG` file it writes).
 
+### Why is `--fix` slower than a plain check, even when nothing needs fixing?
+
+`--fix` doesn't use the cache described above, on any file, even one that turns out to have nothing to fix. A plain check-only run gets noticeably faster on an unchanged file once the cache is warm; `--fix` always re-analyzes every file from scratch, every run. If you're running `--fix` over a large, already-clean tree, expect it to cost about as long as the very first (cold) check-only run — every single time, not just once.
+
 ### Why `# pytriage` instead of `# noqa` for inline ignore comments?
 
 It will be possible to switch to `# noqa` once this is a Ruff plugin. Until then, unregistered codes will trigger "Invalid rule code in `# noqa`" warnings.

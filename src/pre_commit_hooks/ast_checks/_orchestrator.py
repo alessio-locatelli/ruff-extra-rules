@@ -296,8 +296,9 @@ class CheckOrchestrator:
         cacheable_checks = [check for check in checks if check.cacheable]
         always_rerun_checks = [check for check in checks if not check.cacheable]
 
-        # Skip the cache in fix mode, since the file will be modified, and
-        # when nothing here is even cacheable.
+        # Skip the cache in fix mode unconditionally -- for every file, not
+        # just ones that turn out to need a write -- and when nothing here
+        # is even cacheable. Known perf cost: see ADR-0043.
         cached_violations: list[Violation] | None = None
         if not self.fix_mode and cacheable_checks:
             cached_violations = self._get_cached_violations(filepath)
