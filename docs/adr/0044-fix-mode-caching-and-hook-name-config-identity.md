@@ -37,7 +37,25 @@ ADR-0043 is superseded by this decision and is annotated rather than rewritten, 
 
 ## Consequences
 
-- `--fix` gets the same warm-cache speedup a check-only run already gets, for a file with nothing to fix — see the commit introducing this ADR for cold/warm measurements on both the direct CLI and `prek run local-ruff-extra-rules-default --all-files`, superseding ADR-0043's own numbers.
+Measured the same way ADR-0043 was — cache cleared before each "cleared" row, this repo's own `src/` tree, `redundant-type-conversion` excluded via `--ignore` since its own `ty`-daemon cost is a separate, already-documented factor (ADR-0041) — superseding its numbers:
+
+Direct CLI, check only (`uv run python -m pre_commit_hooks.ast_checks --ignore=redundant-type-conversion src`), and `--fix` (`uv run python -m pre_commit_hooks.ast_checks --ignore=redundant-type-conversion --fix src`):
+
+| Run         | check only | `--fix` |
+| ----------- | ---------- | ------- |
+| 1 (cleared) | 0.507s     | 0.457s  |
+| 2           | 0.142s     | 0.154s  |
+| 3           | —          | 0.129s  |
+
+`prek run local-ruff-extra-rules-default --all-files`:
+
+| Run         | `--fix` |
+| ----------- | ------- |
+| 1 (cleared) | 0.765s  |
+| 2           | 0.272s  |
+| 3           | 0.270s  |
+
+- Measured above: `--fix` now gets the same warm-cache speedup a check-only run gets (0.507s → 0.142s direct; `--fix` 0.457s → 0.129s; 0.765s → 0.270s via `prek`), instead of staying near its cold cost on every run the way ADR-0043 recorded.
 - A file that actually needs fixing costs one extra, otherwise-avoidable full recompute on the run immediately after it's fixed (nothing from that run is cached), before converging to normal cache-hit behavior once it stops changing.
 - Every distinct cacheable-check configuration ever run against a file keeps its own permanent entry in that file's cache blob, rather than evicting whichever configuration ran last. This is bounded in practice by how many distinct configurations a repository actually runs — small and developer-controlled, not something that grows with commits or file count (this repo has exactly two: default, aggressive) — but it is not literally zero growth, and no eviction mechanism was added.
 - The first run under this change invalidates every existing on-disk cache entry once, since an old entry still carries the previous four-factor `cache_version` format — the same one-time cost every prior cache-key format change already carried (ADR-0005, ADR-0014).

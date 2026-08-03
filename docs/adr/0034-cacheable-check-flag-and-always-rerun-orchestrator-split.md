@@ -1,6 +1,6 @@
 # A `cacheable` check flag, and an always-rerun split in `CheckOrchestrator`
 
-**Update, ADR-0044**: the "shared cache-version fingerprint" this ADR describes (derived from the cacheable group's own check IDs and configuration) is narrowed to the cacheable group's own check IDs and configuration moving into `CheckOrchestrator._generate_hook_name()` instead — `cache_version` (`_generate_cache_version()`) no longer includes them. The cacheable/always-rerun split itself, and every other decision below, is unaffected. See ADR-0044.
+**Update, ADR-0044**: the "shared cache-version fingerprint" this ADR describes — the cacheable group's own check IDs and configuration — now moves into `CheckOrchestrator._generate_hook_name()` instead; `cache_version` (`_generate_cache_version()`) no longer includes it. The cacheable/always-rerun split itself, and every other decision below, is unaffected. See ADR-0044.
 
 ## Context
 
