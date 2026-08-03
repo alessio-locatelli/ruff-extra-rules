@@ -3100,6 +3100,11 @@ def test_main_fix_flag_reports_aborted_fix(
     assert "[FIX REJECTED]" not in err
     assert "[FIX FAILED]" not in err
     assert "please report it" not in err
+    # ConcurrentModificationError has its own except clause in _apply_fixes,
+    # distinct from the generic except Exception branch that records a rule
+    # failure -- an abort is an expected, cleanly-reported outcome, not an
+    # internal bug, so it must never also surface as one.
+    assert f"{filepath}: error: check 'meaningless-vars' raised an unexpected exception" not in err
     # The externally written content survives untouched -- this check's own
     # attempted fix must never land on top of it.
     assert filepath.read_text() == (
