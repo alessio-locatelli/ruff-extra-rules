@@ -102,6 +102,27 @@ def test_multiple_hooks_same_file(cache_manager: CacheManager, sample_file: Path
     assert cached2["violations"] == ["hook2"]
 
 
+def test_a_hooks_stale_entry_is_dropped_when_a_sibling_hook_writes_after_the_file_changed(
+    cache_manager: CacheManager, sample_file: Path
+) -> None:
+    # ADR-0044 lets several hook_names share one file's cache blob. If the
+    # file's content changes between hook1's own write and hook2's own
+    # later write, hook1's entry was computed against the *old* content --
+    # it must not be served as a hit once the blob's shared
+    # file_hash/mtime/size (updated by hook2's write) matches the *new*
+    # content, or a cache hit and a fresh check could report different
+    # results for the same on-disk content (ch. 9).
+    cache_manager.set_cached_result(sample_file, "hook1", {"violations": ["hook1"]})
+
+    sample_file.write_text("def bar():\n    return 42\n")
+    cache_manager.set_cached_result(sample_file, "hook2", {"violations": ["hook2"]})
+
+    assert cache_manager.get_cached_result(sample_file, "hook1") is None
+    cached2 = cache_manager.get_cached_result(sample_file, "hook2")
+    assert cached2 is not None
+    assert cached2["violations"] == ["hook2"]
+
+
 def test_cache_version_mismatch(temp_cache_dir: Path, sample_file: Path) -> None:
     cache_v1 = CacheManager(cache_dir=temp_cache_dir, cache_version="1.0.0")
     cache_v1.set_cached_result(sample_file, "test-hook", {"violations": []})

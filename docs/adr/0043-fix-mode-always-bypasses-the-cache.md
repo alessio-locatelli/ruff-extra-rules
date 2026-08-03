@@ -1,5 +1,7 @@
 # `--fix` always bypasses the cache, even for a file with nothing to fix
 
+**Update, ADR-0044**: the decision below is superseded. `--fix` now reads and writes the cache; the "not implemented" option in the list below (trusting an empty cacheable-group cache hit, still running the always-rerun group fresh) is what was built, alongside a `hook_name`/`cache_version` redesign the implementation surfaced was a prerequisite for the write side to be safe. See ADR-0044 for the full decision and updated measurements; this ADR is left as-is below as the historical record of why the bypass existed and what was measured about it at the time.
+
 ## Context
 
 `CheckOrchestrator._process_single_file()` reads from and writes to the per-file cache (`_cache.py`) only when `fix_mode` is `False`; `--fix` always re-parses and re-runs every cacheable check on every file, for every run, regardless of whether that file ends up having anything to fix. This was never a documented decision — the code comment just states what happens ("Skip the cache in fix mode, since the file will be modified"), not that it applies unconditionally to every file in the batch, including ones that turn out to have zero violations and are never actually written to.

@@ -1098,8 +1098,10 @@ def test_process_files_different_check_set_forces_recheck(tmp_path: Path) -> Non
     assert error_codes == {"TR1", "TR2"}
 
 
-def test_generate_cache_key_changes_when_source_tree_changes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # The cache key must change on its own when the hashed source tree
+def test_generate_cache_version_changes_when_source_tree_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The cache version must change on its own when the hashed source tree
     # changes, without a developer having to remember to hand-bump
     # CACHE_VERSION whenever a check's own code changes.
     fake_root = tmp_path / "pre_commit_hooks"
@@ -1108,31 +1110,46 @@ def test_generate_cache_key_changes_when_source_tree_changes(tmp_path: Path, mon
     monkeypatch.setattr(_orchestrator, "_PACKAGE_ROOT", fake_root)
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
-    key_before = orchestrator._generate_cache_key()
+    version_before = orchestrator._generate_cache_version()
 
     (fake_root / "module.py").write_text("x = 2\n")
-    key_after = orchestrator._generate_cache_key()
+    version_after = orchestrator._generate_cache_version()
 
-    assert key_before != key_after
+    assert version_before != version_after
 
 
-def test_generate_cache_key_changes_when_python_version_changes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_generate_cache_version_changes_when_python_version_changes(monkeypatch: pytest.MonkeyPatch) -> None:
     # ast.parse()'s output for identical source isn't guaranteed stable
     # across Python minor versions, so a .cache directory shared across an
     # interpreter upgrade must not silently reuse the old interpreter's
     # results. Patches the `sys` name binding inside the _orchestrator
-    # module (not the real global sys module) so only _generate_cache_key()
-    # sees a different version.
+    # module (not the real global sys module) so only
+    # _generate_cache_version() sees a different version.
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
-    key_before = orchestrator._generate_cache_key()
+    version_before = orchestrator._generate_cache_version()
 
     fake_sys = types.SimpleNamespace(
         version_info=types.SimpleNamespace(major=sys.version_info.major, minor=sys.version_info.minor + 1)
     )
     monkeypatch.setattr(_orchestrator, "sys", fake_sys)
-    key_after = orchestrator._generate_cache_key()
+    version_after = orchestrator._generate_cache_version()
 
-    assert key_before != key_after
+    assert version_before != version_after
+
+
+def test_generate_hook_name_changes_when_cacheable_check_config_changes() -> None:
+    # Two orchestrators enabling the same check with different config (e.g.
+    # this repo's own default vs. permissive --meaningless-vars-level hooks)
+    # must get distinct hook_names -- see ADR-0044's hook_name/cache_version
+    # split, which replaces folding the config fingerprint into
+    # cache_version (that approach made two such orchestrators collide on
+    # one file's cache blob, since a version mismatch wipes the whole blob,
+    # not just the mismatched hook_name's own entry).
+    default = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
+    permissive = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
+
+    assert default._generate_hook_name() != permissive._generate_hook_name()
+    assert default._generate_cache_version() == permissive._generate_cache_version()
 
 
 def test_get_cached_violations_ignores_corrupted_cache_entry(
@@ -1142,7 +1159,7 @@ def test_get_cached_violations_ignores_corrupted_cache_entry(
     filepath.write_text("data = 1\n")
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
-    orchestrator.cache.set_cached_result(filepath, "ruff-extra-rules", {"violations": [{}]})
+    orchestrator.cache.set_cached_result(filepath, orchestrator.cache.hook_name, {"violations": [{}]})
 
     cached_violations = orchestrator._get_cached_violations(filepath)
     assert cached_violations is None
@@ -1252,6 +1269,42 @@ def test_process_files_unavailable_checks_result_is_not_cached(tmp_path: Path, m
     assert second[str(filepath)][0].error_code == "TR1"
 
 
+def test_process_files_a_sibling_hook_names_own_write_does_not_serve_a_stale_entry_after_content_changes(
+    tmp_path: Path,
+) -> None:
+    # See ADR-0044: several hook_names can now share one file's cache blob.
+    # `probe_a`'s own entry, cached against the file's original content,
+    # must not survive being served once `probe_b`'s own write updates the
+    # blob for content that changed since -- CacheManager.set_cached_
+    # result() must drop it rather than leave it paired with the blob's
+    # new, updated file_hash/mtime/size. The content change here comes from
+    # outside either orchestrator (e.g. a concurrent edit, or a separate
+    # tool) rather than from a fix in this same run, since CheckOrchestrator
+    # itself now never caches a run that changed the file on its own (see
+    # test_fix_mode_does_not_cache_a_run_that_actually_changed_the_file) --
+    # this is CacheManager's own general-purpose protection underneath
+    # that, independent of how the content came to change.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    probe_a = CheckOrchestrator(checks=[_MarkerFixableCheck(check_id="probe-a")])
+    first = probe_a.process_files([str(filepath)])
+    assert first[str(filepath)][0].check_id == "probe-a"  # pytriage: TR6
+    assert probe_a.cache.get_cached_result(filepath, probe_a.cache.hook_name) is not None
+
+    filepath.write_text("x = 1\n# marked-clean\n")
+
+    probe_b = CheckOrchestrator(checks=[_MarkerFixableCheck(check_id="probe-b")])
+    second = probe_b.process_files([str(filepath)])
+    assert second == {}
+    assert probe_b.cache.get_cached_result(filepath, probe_b.cache.hook_name) is not None
+
+    assert probe_a.cache.get_cached_result(filepath, probe_a.cache.hook_name) is None
+
+    rechecked_a = CheckOrchestrator(checks=[_MarkerFixableCheck(check_id="probe-a")])
+    assert rechecked_a.process_files([str(filepath)]) == {}
+
+
 class _AlwaysRerunProbeCheck:
     """Minimal `ASTCheck` double with `cacheable = False`, for exercising
     `CheckOrchestrator`'s always-rerun split independent of any real
@@ -1303,6 +1356,109 @@ class _AlwaysRerunProbeCheck:
     @classmethod
     def cli_kwargs_from_args(cls, _args: argparse.Namespace) -> dict[str, Any]:
         return {}
+
+
+class _MarkerFixableCheck(_AlwaysRerunProbeCheck):
+    """A cacheable, fixable variant of `_AlwaysRerunProbeCheck`: flags a
+    violation whenever a fixed marker line is absent from the source, and
+    its own fix() appends that marker. Two instances with different
+    `check_id`s (and so different `hook_name`s, per ADR-0044) can share a
+    file's cache blob while each independently converges to clean once its
+    own fix runs -- lets a test deterministically change a file's content
+    via a real fix pass and observe what a *different* hook_name's own
+    cache entry does across that change.
+    """
+
+    __slots__ = ("check_id",)
+
+    error_code = "ZZZ003"
+    cacheable = True
+
+    def __init__(self, check_id: str) -> None:
+        super().__init__()
+        self.check_id = check_id
+
+    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+        if "# marked-clean\n" in source:
+            return []
+        return [
+            Violation(
+                check_id=self.check_id, error_code=self.error_code, line=1, col=0, message="marker absent", fixable=True
+            )
+        ]
+
+    def fix(
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+    ) -> bool:
+        atomic_write_text(filepath, source + "# marked-clean\n", encoding, source)
+        return True
+
+
+class _MarkerRemovingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
+    """Non-cacheable `ASTCheck` double whose own fix() strips
+    `_MarkerFixableCheck`'s marker back out of the file -- lets a test
+    demonstrate that an always-rerun check's own fix can invalidate a
+    cacheable sibling's already-cached "clean" result for the same file.
+    """
+
+    __slots__ = ()
+
+    check_id = "marker-remover"
+
+    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+        if "# marked-clean\n" not in source:
+            return []
+        return [
+            Violation(
+                check_id=self.check_id,
+                error_code=self.error_code,
+                line=1,
+                col=0,
+                message="marker present",
+                fixable=True,
+            )
+        ]
+
+    def fix(
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+    ) -> bool:
+        atomic_write_text(filepath, source.replace("# marked-clean\n", ""), encoding, source)
+        return True
+
+
+def test_fix_mode_falls_through_when_an_always_rerun_fix_invalidates_a_cached_cacheable_result(
+    tmp_path: Path,
+) -> None:
+    # See ADR-0044 (fixing a P2 finding from an earlier review of this same
+    # change): a clean cacheable-group cache hit must not be trusted once
+    # an always-rerun sibling's own fix changes the file this run -- that
+    # fix can invalidate whatever made the cacheable group clean, so this
+    # must fall through to a full recompute rather than blindly returning
+    # the stale cached "clean" result merged with the always-rerun group's
+    # own fresh one.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n# marked-clean\n")
+
+    populate = CheckOrchestrator(checks=[_MarkerFixableCheck(check_id="c")])
+    populate.process_files([str(filepath)])  # marker present -> clean, populates the cache
+
+    combined = CheckOrchestrator(
+        checks=[_MarkerFixableCheck(check_id="c"), _MarkerRemovingAlwaysRerunCheck()], fix_mode=True
+    )
+    violations = combined.process_files([str(filepath)])
+
+    # Before this fix, "c" would never appear here at all: the stale
+    # cache hit would have been returned merged with only the always-rerun
+    # check's own result, silently hiding the violation the marker-remover's
+    # own fix just introduced for "c".
+    by_check = {v.check_id: v for v in violations[str(filepath)]}
+    assert "c" in by_check
+
+    # A second P2 finding from that same earlier review: re-running the
+    # always-rerun group a second time (as part of a naive full recompute)
+    # would find it already clean and silently lose its own [FIXED]
+    # outcome. The marker-remover's own fix must still be reported.
+    assert is_fixed(by_check["marker-remover"])
 
 
 def test_always_rerun_probe_check_fix_is_a_no_op(tmp_path: Path) -> None:
@@ -1950,7 +2106,7 @@ def test_process_files_non_cacheable_check_results_are_never_written_to_cache(tm
     orchestrator = CheckOrchestrator(checks=[_AlwaysRerunProbeCheck()])
     orchestrator.process_files([str(filepath)])
 
-    cached = orchestrator.cache.get_cached_result(filepath, "ruff-extra-rules")
+    cached = orchestrator.cache.get_cached_result(filepath, orchestrator.cache.hook_name)
     assert cached is None
 
 
@@ -2014,7 +2170,7 @@ def test_process_single_file_reports_unprocessable_when_always_rerun_group_fails
     assert combined.unprocessable_files == [str(filepath)]  # pytriage: TR6
 
 
-def test_process_files_enabling_a_non_cacheable_check_does_not_change_cache_key(
+def test_process_files_enabling_a_non_cacheable_check_does_not_change_cache_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake_root = tmp_path / "pre_commit_hooks"
@@ -2024,7 +2180,177 @@ def test_process_files_enabling_a_non_cacheable_check_does_not_change_cache_key(
 
     without_probe = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     with_probe = CheckOrchestrator(checks=[MeaninglessVarsCheck(), _AlwaysRerunProbeCheck()])
-    assert without_probe._generate_cache_key() == with_probe._generate_cache_key()
+    assert without_probe._generate_cache_version() == with_probe._generate_cache_version()
+    assert without_probe._generate_hook_name() == with_probe._generate_hook_name()
+
+
+def test_fix_mode_skips_a_file_entirely_on_a_clean_cache_hit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # See ADR-0044: a fix-mode cache hit reporting zero violations means
+    # there is nothing to fix, so the file never needs to be read or
+    # parsed at all on a later run.
+    filepath = tmp_path / "module.py"
+    # "result" only appears in prose, never as an actual assignment target,
+    # so meaningless-vars' own content prefilter matches this file (it
+    # greps for the literal word) while its real, AST-based check() finds
+    # nothing to flag.
+    filepath.write_text('"""Doc mentioning a result value."""\n\n\ndef greet() -> str:\n    return "hi"\n')
+
+    first = CheckOrchestrator(checks=[MeaninglessVarsCheck()], fix_mode=True)
+    first_violations = first.process_files([str(filepath)])
+    assert first_violations == {}
+    # Guards against this test passing "for free" because the file never
+    # matched meaningless-vars' own prefilter in the first place.
+    assert first.cache.get_cached_result(filepath, first.cache.hook_name) is not None
+
+    monkeypatch.setattr(
+        CheckOrchestrator, "_check_file", raises(AssertionError, "_check_file should not run on a clean cache hit")
+    )
+    second = CheckOrchestrator(checks=[MeaninglessVarsCheck()], fix_mode=True)
+    second_violations = second.process_files([str(filepath)])
+    assert second_violations == {}
+
+
+def test_fix_mode_clean_cacheable_hit_still_fixes_a_dirty_always_rerun_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # See ADR-0044: a clean cacheable-group cache hit doesn't skip the
+    # always-rerun group -- it still runs fresh, and in fix mode still gets
+    # fixed if it finds anything, without re-running the (already known
+    # clean) cacheable group.
+    filepath = tmp_path / "module.py"
+    # "result" (prose only, see test_fix_mode_skips_a_file_entirely_on_a_clean_cache_hit)
+    # keeps meaningless-vars clean while still matching its own prefilter;
+    # the 3 blank lines are what excessive-blank-lines needs to fix.
+    filepath.write_text('"""Doc mentioning a result value."""\n\n\n\ndef greet() -> str:\n    return "hi"\n')
+
+    populate = CheckOrchestrator(checks=[MeaninglessVarsCheck()], fix_mode=True)
+    populate.process_files([str(filepath)])  # clean for meaningless-vars; populates its cache entry
+    assert populate.cache.get_cached_result(filepath, populate.cache.hook_name) is not None
+
+    monkeypatch.setattr(
+        MeaninglessVarsCheck, "check", raises(AssertionError, "meaningless-vars must be served from its cache hit")
+    )
+    monkeypatch.setattr(ExcessiveBlankLinesCheck, "cacheable", False)
+
+    combined = CheckOrchestrator(checks=[MeaninglessVarsCheck(), ExcessiveBlankLinesCheck()], fix_mode=True)
+    combined.process_files([str(filepath)])
+
+    assert "def greet" in filepath.read_text()
+    assert "\n\n\n\n" not in filepath.read_text()
+
+
+def test_fix_mode_falls_through_to_a_full_recompute_when_cache_hit_shows_a_violation(tmp_path: Path) -> None:
+    # See ADR-0044: cached violations never carry fix_data, so a fix-mode
+    # cache hit that reports a violation can't be used to fix it -- it must
+    # fall through to a real check()+fix() pass, the same as a cache miss.
+    filepath = tmp_path / "module.py"
+    filepath.write_text('"""Doc."""\n\n\n\ndef greet() -> str:\n    return "hi"\n')
+
+    check_only = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()])
+    populated = check_only.process_files([str(filepath)])
+    assert populated[str(filepath)][0].error_code == "TR2"  # pytriage: TR6
+    assert check_only.cache.get_cached_result(filepath, check_only.cache.hook_name) is not None
+
+    fixer = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()], fix_mode=True)
+    fixer.process_files([str(filepath)])
+
+    assert "\n\n\n\n" not in filepath.read_text()
+
+
+def test_fix_mode_does_not_cache_a_run_that_actually_changed_the_file(tmp_path: Path) -> None:
+    # See ADR-0044 and _apply_fixes' own docstring: a run where a fix
+    # changed the file is never cached, even for the check that was
+    # fixed -- a check with zero violations elsewhere in the same run is
+    # never re-verified against the file's final content once some other
+    # check's fix touched it, so nothing in the group is known-accurate
+    # this run. This is the fix for a P2 finding from an earlier review of
+    # this same change: caching a changed file's result let a sibling
+    # check's own stale "clean" entry survive being served after another
+    # check's fix invalidated it.
+    filepath = tmp_path / "module.py"
+    filepath.write_text('"""Doc."""\n\n\n\ndef greet() -> str:\n    return "hi"\n')
+
+    fixer = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()], fix_mode=True)
+    fixer.process_files([str(filepath)])
+    assert "\n\n\n\n" not in filepath.read_text()
+    assert fixer.cache.get_cached_result(filepath, fixer.cache.hook_name) is None
+
+
+def test_fix_mode_writes_cache_once_the_file_stops_changing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # See ADR-0044: fix mode writes to the cache too, so a file fixed once
+    # converges to a clean cache hit on the first run after it, once that
+    # run's own fix pass no longer changes anything.
+    filepath = tmp_path / "module.py"
+    filepath.write_text('"""Doc."""\n\n\n\ndef greet() -> str:\n    return "hi"\n')
+
+    fixer = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()], fix_mode=True)
+    fixer.process_files([str(filepath)])
+    assert fixer.cache.get_cached_result(filepath, fixer.cache.hook_name) is None
+
+    settled = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()], fix_mode=True)
+    settled.process_files([str(filepath)])
+    cached = settled.cache.get_cached_result(filepath, settled.cache.hook_name)
+    assert cached is not None
+    assert cached["violations"] == []
+
+    monkeypatch.setattr(
+        CheckOrchestrator, "_check_file", raises(AssertionError, "_check_file should not run on a clean cache hit")
+    )
+    rerun = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()], fix_mode=True)
+    assert rerun.process_files([str(filepath)]) == {}
+
+
+def test_fix_mode_does_not_cache_a_check_id_with_a_rejected_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # See ADR-0044: _refresh_stale_positions() leaves a check_id's other
+    # still-open violations unrefreshed once any of its violations hits a
+    # terminal negative fix outcome this run -- caching that check_id's
+    # results anyway could serve a stale position later, so it must be
+    # excluded from the write entirely, the same way an incomplete
+    # (crashed/unavailable) check_id already is.
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "\n\n\nimport requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
+    )
+
+    def broken_fix(
+        _self: MeaninglessVarsCheck, fp: Path, _violations: object, source: str, *_args: object, **_kwargs: object
+    ) -> None:
+        atomic_write_text(fp, "def broken(:\n", "utf-8", source)
+
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", broken_fix)
+
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()], fix_mode=True)
+    violations = orchestrator.process_files([str(filepath)])
+    assert is_fix_rejected(violations[str(filepath)][0])
+
+    assert orchestrator.cache.get_cached_result(filepath, orchestrator.cache.hook_name) is None
+
+
+def test_fix_mode_two_configs_do_not_collide_on_the_same_files_cache_entry(tmp_path: Path) -> None:
+    # See ADR-0044: before the hook_name/cache_version split, two
+    # orchestrators sharing one hardcoded hook_name but a different
+    # cache_version (from differing check config, e.g. this repo's own
+    # default vs. permissive --meaningless-vars-level hooks) would wipe
+    # each other's entire per-file cache blob on write -- every run of one
+    # config would evict whatever the other config's own last run wrote,
+    # forcing both into a permanent cache miss against each other forever.
+    filepath = tmp_path / "module.py"
+    # "result" (prose only) matches both instances' own prefilter (the name
+    # set doesn't vary by level -- only the reporting threshold does) while
+    # staying clean for both, so neither run performs a fix that would
+    # change the file's content hash between the two writes below.
+    filepath.write_text('"""Doc mentioning a result value."""\n\n\ndef greet() -> str:\n    return "hi"\n')
+
+    default = CheckOrchestrator(checks=[MeaninglessVarsCheck()], fix_mode=True)
+    default.process_files([str(filepath)])
+
+    permissive = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)], fix_mode=True)
+    permissive.process_files([str(filepath)])
+
+    assert default.cache.get_cached_result(filepath, default.cache.hook_name) is not None
+    assert permissive.cache.get_cached_result(filepath, permissive.cache.hook_name) is not None
 
 
 def test_check_unavailable_error_is_recorded_once_and_disables_that_check(tmp_path: Path) -> None:

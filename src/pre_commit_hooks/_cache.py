@@ -47,8 +47,8 @@ class CacheManager:
     `cache_version` has no default: a stale value here silently serves
     outdated results, so every caller must supply one that changes whenever
     something that could affect a cached result changes. See
-    `ast_checks.CheckOrchestrator._generate_cache_key()` for the one real
-    caller — it derives its version from a hash of its own source tree
+    `ast_checks.CheckOrchestrator._generate_cache_version()` for the one
+    real caller — it derives its version from a hash of its own source tree
     rather than a hand-maintained constant, which previously caused a real
     bug (commit 0e3efba) when a change was made without remembering to bump
     it.
@@ -219,6 +219,15 @@ class CacheManager:
 
                 if cache_data is None:
                     cache_data = {"version": self.cache_version, "hook_results": {}}
+                elif cache_data.get("file_hash") != file_hash:
+                    # This file's content changed since some other hook_name
+                    # in this blob was last written (ADR-0044 lets several
+                    # hook_names share one file's blob) -- every sibling
+                    # entry was computed against that old content, so it
+                    # must not survive being silently served for the new
+                    # content once this write updates the blob's own shared
+                    # file_hash/mtime/size below.
+                    cache_data["hook_results"] = {}
 
                 cache_data["file_hash"] = file_hash
                 cache_data["mtime"] = stat.st_mtime_ns
