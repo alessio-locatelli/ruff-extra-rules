@@ -337,10 +337,10 @@ class FixValidationError(Exception):
 
 
 class ConcurrentModificationError(Exception):
-    """Raised by `atomic_write_text()` when `path`'s current on-disk bytes no
-    longer match `expected_source` — something modified the file after it
-    was read for this fix. `path` itself is left untouched; only the
-    already-written temp file is cleaned up. See
+    """Raised by `atomic_write_text()` when `path`'s current on-disk content
+    no longer decodes to `expected_source` — something modified the file
+    after it was read for this fix. `path` itself is left untouched; only
+    the already-written temp file is cleaned up. See
     `docs/adr/0042-abort-fixes-on-concurrent-source-modification.md`.
     """
 
@@ -380,11 +380,12 @@ def atomic_write_text(path: Path, content: str, encoding: str, expected_source: 
     Raises:
         FixValidationError: if `content` isn't valid Python. Raised before
             any file I/O, so `path` still holds its prior content.
-        ConcurrentModificationError: if `path`'s current on-disk bytes no
-            longer match `expected_source`. Raised after the temp file is
-            written but before it replaces `path`, so `path` still holds its
-            prior content; the now-orphaned temp file is still cleaned up
-            like any other failure here.
+        ConcurrentModificationError: if `path`'s current on-disk content,
+            decoded via `encoding`, no longer matches `expected_source` --
+            including if it no longer decodes at all. Raised after the temp
+            file is written but before it replaces `path`, so `path` still
+            holds its prior content; the now-orphaned temp file is still
+            cleaned up like any other failure here.
     """
     try:
         # compile(), not ast.parse(): some invalid code is only rejected at
@@ -402,14 +403,21 @@ def atomic_write_text(path: Path, content: str, encoding: str, expected_source: 
     try:
         with os.fdopen(fd, "w", encoding=encoding, newline="") as temp_file:
             temp_file.write(content)
-        # Re-read path's actual current bytes rather than trusting whatever
-        # this fix's own caller read earlier -- that's the whole point of
-        # this check, and comparing anything cheaper (e.g. mtime) would miss
-        # an edit that lands within the same timestamp tick. Checked as late
-        # as possible, immediately before the rename that commits the write,
-        # to leave the smallest possible window in which a concurrent edit
+        # Re-read path's actual current content and compare decoded text,
+        # not raw bytes: a stateful codec (e.g. iso2022_jp) can decode a
+        # redundant shift sequence to the same text but never reproduce
+        # those exact bytes on re-encode, which would otherwise make an
+        # untouched file in such an encoding fail this check on every fix.
+        # Comparing anything cheaper (e.g. mtime) would also miss an edit
+        # that lands within the same timestamp tick. Checked as late as
+        # possible, immediately before the rename that commits the write, to
+        # leave the smallest possible window in which a concurrent edit
         # could still land unnoticed.
-        if real_path.read_bytes() != expected_source.encode(encoding):
+        try:
+            current_source = real_path.read_bytes().decode(encoding)
+        except UnicodeDecodeError:
+            raise ConcurrentModificationError(path) from None
+        if current_source != expected_source:
             raise ConcurrentModificationError(path)
         temp_path.chmod(stat.S_IMODE(real_path.stat().st_mode))
         temp_path.replace(real_path)

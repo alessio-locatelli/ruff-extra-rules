@@ -360,6 +360,40 @@ def test_atomic_write_text_detects_modification_that_happened_after_expected_sou
     assert target.read_text() == "x = 999  # edited concurrently\n"
 
 
+def test_atomic_write_text_accepts_a_stateful_encoding_whose_bytes_dont_round_trip(tmp_path: Path) -> None:
+    # A stateful codec like iso2022_jp can decode a redundant shift sequence
+    # to the same text but never reproduce those exact bytes again on
+    # encode -- comparing raw bytes against expected_source.encode() would
+    # falsely abort every fix to an untouched file using such an encoding.
+    # Comparing decoded text instead (what this test guards) is immune to
+    # that, since the file's real content genuinely hasn't changed.
+    raw = b"\x1b(B" + "x = 1\n".encode("iso2022_jp")
+    target = tmp_path / "mod.py"
+    target.write_bytes(raw)
+    expected_source = raw.decode("iso2022_jp")
+    assert expected_source.encode("iso2022_jp") != raw  # the premise this test guards against
+
+    atomic_write_text(target, "x = 2\n", "iso2022_jp", expected_source)
+
+    assert target.read_bytes().decode("iso2022_jp") == "x = 2\n"
+
+
+def test_atomic_write_text_aborts_when_disk_content_no_longer_decodes(tmp_path: Path) -> None:
+    # A concurrent edit that leaves bytes no longer valid in the original
+    # encoding (e.g. a half-written save, or content switched to a
+    # different encoding) is still a change this check must catch, not let
+    # UnicodeDecodeError escape as an unrelated internal error.
+    target = tmp_path / "mod.py"
+    target.write_text("x = 1\n")
+    expected_source = target.read_text()
+    target.write_bytes(b"x = \xff\xfe broken bytes\n")
+
+    with pytest.raises(ConcurrentModificationError):
+        atomic_write_text(target, "x = 2\n", "utf-8", expected_source)
+
+    assert target.read_bytes() == b"x = \xff\xfe broken bytes\n"
+
+
 @pytest.mark.parametrize(
     "fix_data",
     [None, {"other_key": 1}],
