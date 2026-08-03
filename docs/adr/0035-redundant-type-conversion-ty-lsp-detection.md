@@ -1,4 +1,4 @@
-# redundant-type-conversion (TRI006): `ty`-driven detection over LSP
+# redundant-type-conversion (TR6): `ty`-driven detection over LSP
 
 ## Context
 
@@ -43,7 +43,7 @@ Hover text alone carries no module provenance — a locally defined `class Path`
 
 ### Suppression
 
-A candidate on a line already carrying `# pytriage: ignore=TRI006`, or a third-party type-suppression comment (`# type: ignore`, `# pyright: ignore`, `# ty: ignore`), is always skipped outright, at either confidence level, by inspecting the target file's own source — never by trusting `ty`'s own diagnostics to already reflect the suppression. The synthetic rewrite preserves line numbers, so a pre-existing suppression comment would otherwise keep masking the recheck's own signal after the conversion is stripped, misreporting a genuinely necessary conversion as redundant; this was confirmed as a real, reproducible failure mode during development, not a theoretical concern.
+A candidate on a line already carrying `# pytriage: ignore=TR6`, or a third-party type-suppression comment (`# type: ignore`, `# pyright: ignore`, `# ty: ignore`), is always skipped outright, at either confidence level, by inspecting the target file's own source — never by trusting `ty`'s own diagnostics to already reflect the suppression. The synthetic rewrite preserves line numbers, so a pre-existing suppression comment would otherwise keep masking the recheck's own signal after the conversion is stripped, misreporting a genuinely necessary conversion as redundant; this was confirmed as a real, reproducible failure mode during development, not a theoretical concern.
 
 ### Failure handling
 

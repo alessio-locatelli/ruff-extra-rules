@@ -2,7 +2,7 @@
 
 ## Context
 
-TRI004 infers a `get_`-prefixed function's behavior by looking for specific call shapes anywhere in its body (disk I/O, network I/O, object construction, parsing, ...) and suggesting a more specific verb when it finds one. The original detection walked the function's entire AST subtree with no notion of control flow or scope, so it couldn't distinguish a call that always runs from one that only runs on a fallback path, or a call inside the function's own body from one inside a nested `def`/`class`/`lambda` that may never execute at all.
+TR4 infers a `get_`-prefixed function's behavior by looking for specific call shapes anywhere in its body (disk I/O, network I/O, object construction, parsing, ...) and suggesting a more specific verb when it finds one. The original detection walked the function's entire AST subtree with no notion of control flow or scope, so it couldn't distinguish a call that always runs from one that only runs on a fallback path, or a call inside the function's own body from one inside a nested `def`/`class`/`lambda` that may never execute at all.
 
 This produced false positives on the well-established "lazy singleton" / "cache-then-compute-on-miss" `get_` pattern — `logging.getLogger` is the canonical stdlib example. This repo had two real instances: a lazy singleton accessor whose constructor call only runs the first time (behind an `if <cache> is None:` guard), and a cache accessor whose disk read only runs on the guard's happy path (behind `try`/`except`). Both were suppressed with an inline ignore rather than the rule recognizing the shape.
 

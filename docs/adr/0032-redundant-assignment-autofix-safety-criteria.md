@@ -2,7 +2,7 @@
 
 ## Context
 
-TRI005 can report a violation whenever an assignment adds no clarity, but not every reported violation is safe to rewrite unattended. Inlining a constant or a plain name is always safe, but inlining an attribute access or a call can change how many times, and in what order, side-effecting code runs — a rewrite that silently changes program behavior is unacceptable for a check that runs automatically in a pre-commit hook. `should_autofix()` is the sole gate on whether `--fix` touches a reported violation (issue #76): pattern-independent, with no separate semantic-value ceiling narrowing it further below whatever reporting already decided.
+TR5 can report a violation whenever an assignment adds no clarity, but not every reported violation is safe to rewrite unattended. Inlining a constant or a plain name is always safe, but inlining an attribute access or a call can change how many times, and in what order, side-effecting code runs — a rewrite that silently changes program behavior is unacceptable for a check that runs automatically in a pre-commit hook. `should_autofix()` is the sole gate on whether `--fix` touches a reported violation (issue #76): pattern-independent, with no separate semantic-value ceiling narrowing it further below whatever reporting already decided.
 
 ## Decision
 
