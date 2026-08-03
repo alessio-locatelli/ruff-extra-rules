@@ -372,9 +372,7 @@ def atomic_write_text(path: Path, content: str, encoding: str, expected_source: 
     try:
         with os.fdopen(fd, "w", encoding=encoding, newline="") as temp_file:
             temp_file.write(content)
-        # Compare decoded text, not raw bytes: some codecs don't round-trip
-        # byte-for-byte, so a byte comparison would falsely abort an
-        # untouched file. See ADR-0042.
+        # Compare decoded text, not raw bytes -- see ADR-0042.
         try:
             current_source = real_path.read_bytes().decode(encoding)
         except UnicodeDecodeError:
