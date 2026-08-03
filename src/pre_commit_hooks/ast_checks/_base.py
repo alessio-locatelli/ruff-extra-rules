@@ -310,13 +310,6 @@ def read_source_with_encoding(filepath: Path) -> tuple[str, str]:
     Returns (source, encoding) — the encoding is returned alongside the
     source so a fix can write the file back in the same encoding it was
     read in.
-
-    Raises:
-        OSError: if the file can't be read
-        SyntaxError: if the PEP 263 encoding cookie itself is malformed
-        UnicodeDecodeError: if the content isn't valid in the declared/
-            detected encoding
-        LookupError: if the declared encoding name is unknown
     """
     raw = filepath.read_bytes()
     encoding, _ = tokenize.detect_encoding(io.BytesIO(raw).readline)

@@ -249,7 +249,7 @@ class TySession:
         return contextlib.nullcontext()
 
     def close_file(self, filepath: Path) -> None:
-        """Discards `filepath`'s in-memory document; never raises since it runs from a `finally` block."""
+        """Discards `filepath`'s in-memory document."""
         uri = filepath.resolve().as_uri()
         if uri in self._open_versions:
             try:
