@@ -60,6 +60,20 @@ def _fix_lock_path(filepath: Path) -> Path:
     return lock_dir / f"{file_hash}.lock"
 
 
+def _has_terminal_fix_state(violation: Violation) -> bool:
+    """Whether `violation` already carries a rejected/errored/failed/aborted
+    outcome from a check's own per-violation `fix()` handling this run --
+    i.e. the outcome is already decided and must never be second-guessed by
+    a later, broader recheck (e.g. relabeled `[FIXED]` just because it's no
+    longer detected). Deliberately excludes `is_fixed()`: a fixed violation
+    is a normal, non-terminal-in-this-sense outcome each call site here
+    already handles on its own.
+    """
+    return (
+        is_fix_rejected(violation) or is_fix_errored(violation) or is_fix_failed(violation) or is_fix_aborted(violation)
+    )
+
+
 def _replace_check_violations(
     all_violations: dict[str, list[Violation]], key: str, check_id: str, new_violations: list[Violation]
 ) -> None:
@@ -782,9 +796,7 @@ class CheckOrchestrator:
                 # retrying again this run.
                 continue
             check_entries = [v for v in violations if v.check_id == check.check_id]
-            if not check_entries or any(
-                is_fix_rejected(v) or is_fix_errored(v) or is_fix_failed(v) or is_fix_aborted(v) for v in check_entries
-            ):
+            if not check_entries or any(_has_terminal_fix_state(v) for v in check_entries):
                 continue
 
             stale = [v for v in check_entries if not is_fixed(v)]
@@ -849,8 +861,7 @@ class CheckOrchestrator:
             (v.line, v.col, v.message) for v in check.check(filepath, post_tree, post_source) if v.fixable
         }
         for v in fresh_violations:
-            already_resolved = is_fix_rejected(v) or is_fix_errored(v) or is_fix_failed(v) or is_fix_aborted(v)
-            if (v.line, v.col, v.message) not in still_present and not already_resolved:
+            if (v.line, v.col, v.message) not in still_present and not _has_terminal_fix_state(v):
                 mark_fixed(v)
         return still_present
 
