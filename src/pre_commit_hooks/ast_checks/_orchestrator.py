@@ -654,14 +654,8 @@ class CheckOrchestrator:
                     )
                     for v in fresh_violations:
                         mark_fix_aborted(v)
-                    # Unlike every other branch here, the file's content is
-                    # now known to differ from what this run itself last saw
-                    # -- not because any of this run's own fixes changed it,
-                    # but because the external edit that caused this abort
-                    # did. That edit can just as easily have shifted line
-                    # numbers as any of this run's own successful fixes, so
-                    # the final refresh pass below must run even if no fix
-                    # in this run ever succeeds.
+                    # The external edit itself can shift line numbers too,
+                    # same as a successful fix. See ADR-0042.
                     file_changed = True
                 except Exception:
                     # fix() itself raised — a bug in the check's own fix
@@ -846,25 +840,12 @@ class CheckOrchestrator:
         Returns the keys of `fresh_violations` still present, so a caller
         with more context (e.g. "fix() itself raised for this check") can
         mark those specifically, distinct from the ones already resolved by
-        this call. If the file couldn't be re-read (e.g. deleted
-        concurrently) or no longer parses (e.g. a concurrent edit left it
-        syntactically invalid), conservatively returns every key unresolved
-        — nothing is marked fixed on an unverifiable outcome, and this
-        method itself never raises `SyntaxError` into a caller that would
-        otherwise mistake an unparseable file for this check's own fix logic
-        crashing (ch. 4: "MUST NOT silently skip a file because parsing
-        failed" — the caller's own fix outcomes are simply left as they
-        already were, not silently skipped).
-
-        A violation a multi-write `fix()` (e.g. `validate_function_name`)
-        already marked rejected/errored/aborted itself, from inside its own
-        per-violation loop, is never marked fixed here even if it's no
-        longer present on this re-check — e.g. a `ConcurrentModificationError`
-        abort and the very external edit that caused it can easily be the
-        same reason the violation disappeared, but this call's own fix never
-        actually landed and must not be reported as if it had (ch. 1: "MUST
-        NOT report a fix as applied when the file was left unchanged" by
-        this fix).
+        this call. If the file couldn't be re-read or no longer parses,
+        conservatively returns every key unresolved rather than raising —
+        nothing is marked fixed on an unverifiable outcome. Never marks
+        fixed a violation already carrying a rejected/errored/failed/aborted
+        outcome from the check's own per-violation loop. See
+        `docs/adr/0042-abort-fixes-on-concurrent-source-modification.md`.
         """
         post_read_result = self._read_source(filepath)
         if post_read_result is None:
