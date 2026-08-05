@@ -57,6 +57,8 @@ Declare it once and the rest follows: the `--your-check-level` flag, the `[tool.
 
 Create `src/pre_commit_hooks/ast_checks/your_check.py` (or a package with `__init__.py` if the check needs multiple modules — see `validate_function_name/` for an example). Register the class in `ALL_CHECKS` in `src/pre_commit_hooks/ast_checks/__init__.py`. That's the whole registration step — no `.pre-commit-hooks.yaml` entry and no `[project.scripts]` entry. The check becomes selectable via `--select=your-check`/`--ignore=your-check` on the `ruff-extra-rules` hook and shows up in `python -m pre_commit_hooks.ast_checks --list-checks`.
 
+Append to `ALL_CHECKS` rather than inserting. Its order is the order checks were written — `docs/adr/0001-iterative-refactor-not-rewrite.md` lists "import-order-dependent check registration" among this codebase's structural debt, so nothing about the current order is a design statement, and it shouldn't be cited to justify a new decision (error-code numbering, priority, which check "matters more"). It is not inert either: `docs/audits/0014-behavioral-contract-audit-determinism-idempotence.md` pins that order as the defined ordering for both diagnostics within a file and fix commits across checks. Reordering the list is therefore a deliberate change to a documented contract, not a tidy-up.
+
 **Requirements:**
 
 - Standard library only, no external runtime dependencies.

@@ -111,6 +111,14 @@ uv run -- coverage report
 strict-no-cover
 ```
 
+### Committing to this repository
+
+This repo runs its own checks against itself, which creates three gotchas that don't apply to consumers.
+
+- **The pinned `ruff-extra-rules` hook lags the working tree.** `.pre-commit-config.yaml` also depends on this repo by tag (`rev:`), which `prek` installs as its own copy built from that tag — it never sees local changes. So it keeps CLI `args:` for anything the working tree has since renamed or moved into `pyproject.toml`, and that duplication is deliberate until a new tag is released and `rev:` is bumped. Don't delete those args to "deduplicate", and don't bump `rev:` yourself — that needs a real tagged release on the remote.
+- **The `local-*-aggressive` hooks run live working-tree code, at `permissive` level, against `src/` and `tests/` on every commit — and they fix.** They no longer pass `--fix` explicitly; it comes from `[tool.ruff-extra-rules] fix = true`. Widening any check's default detection can therefore fail your very next commit, or rewrite code you just wrote, mid-commit. Before widening a default, search `src/` and `tests/` for what it would newly catch and reconcile anything that has no auto-fix path.
+- **`ruff check`/`ruff format` above use the standalone binary, not the pinned `ruff-pre-commit` rev.** When the two drift, the standalone one can make edits the pinned one rejects — including stripping `# noqa` comments the pinned version still wants. Compare `ruff --version` against the `rev:` under `astral-sh/ruff-pre-commit` in `.pre-commit-config.yaml`; if they differ, use `prek run ruff-check --files <paths>` instead and tell the user about the drift.
+
 ## Agent skills
 
 ### Issue tracker
