@@ -31,7 +31,8 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
     generator-expression argument, a call spanning multiple physical
     lines (see ADR-0035's "Detection method"), a shadowed constructor
     name, every candidate in a module with a wildcard import, and an
-    argument ending in a nested call (`_ends_in_call()`). All scanned in
+    argument the hover can't describe as a whole
+    (`_hover_would_miss_the_argument()`). All scanned in
     one `_scan()` pass over `tree` -- `_scan()` already collects every
     structurally-eligible call (`raw_candidates` below) while it computes
     `shadowed`, so this never needs its own second pass over `tree` just
@@ -67,7 +68,8 @@ _EQUALITY_OPS = (ast.Eq, ast.NotEq, ast.In, ast.NotIn, ast.Is, ast.IsNot)
 @dataclass(slots=True, frozen=True)
 class _RawCandidate:
     """A `name(single_positional_arg)` call found during `_scan()`'s own walk, already past every *local*
-    structural filter (arg shape, single-line span, not ending in a nested call) -- everything about it that
+    structural filter (arg shape, single-line span, an argument the hover can describe as a whole) --
+    everything about it that
     doesn't depend on whole-module shadowing, which isn't known until the scan finishes. `find_candidates()`
     applies the final `eligible - shadowed` filter against this already-narrow list instead of re-walking `tree`
     a second time just to re-find the same calls.
@@ -119,7 +121,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
     set, before subtracting `shadowed`) -- cheap, and safe to do this
     early: `eligible - shadowed` can only ever shrink `eligible`, so
     nothing this filters out here could have passed the final filter
-    either, and it skips the pricier remaining checks (span, `_ends_in_call`)
+    either, and it skips the pricier remaining checks (span, hover anchor)
     for a call whose name was never eligible to begin with.
     """
     has_wildcard_import = False
@@ -166,7 +168,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
                 and node.lineno == node.end_lineno
                 and only_arg.end_lineno is not None
                 and only_arg.end_col_offset is not None
-                and not _ends_in_call(only_arg)
+                and not _hover_would_miss_the_argument(only_arg)
             ):
                 raw_candidates.append(
                     _RawCandidate(
@@ -210,10 +212,15 @@ def _mark_call_ids(operand: ast.expr, ids: set[int]) -> None:
             _mark_call_ids(value, ids)
 
 
-def _ends_in_call(arg: ast.expr) -> bool:
-    # See ADR-0035's "Detection method" for why this can't be hovered reliably.
+def _hover_would_miss_the_argument(arg: ast.expr) -> bool:
+    # See ADR-0035's "Detection method" for why neither shape can be hovered reliably.
+    if isinstance(arg, ast.Call):
+        return True
     return any(
-        isinstance(node, ast.Call) and node.end_lineno == arg.end_lineno and node.end_col_offset == arg.end_col_offset
+        node is not arg
+        and isinstance(node, ast.expr)
+        and node.end_lineno == arg.end_lineno
+        and node.end_col_offset == arg.end_col_offset
         for node in ast.walk(arg)
     )
 

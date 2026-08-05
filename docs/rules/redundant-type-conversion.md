@@ -78,6 +78,6 @@ def echo(value: str) -> str:
 
 A line already carrying a third-party type-checker suppression comment — `# type: ignore`, `# pyright: ignore`, `# ty: ignore` — is never flagged either, so a suppression you've already placed for an unrelated reason can't get misreported as a redundant conversion.
 
-## Known false positive
+## Coverage
 
-A conversion whose argument is a binary expression can be reported using the type of the expression's **rightmost operand** instead of the expression's own type. The clearest case is `str(some_path / name)`, where `some_path` is a `Path` and `name` is a `str`: the conversion is required, but it gets reported as though the argument were already a `str`. Suppress it with `# pytriage: TR6` for now. Tracked in [issue #155](https://github.com/alessio-locatelli/ruff-extra-rules/issues/155).
+A conversion is only examined when the value it wraps is a plain name, attribute, subscript, or literal — a number, `True`/`False`, a string, or a list/dict/set/tuple literal. A compound argument — `str(root / name)`, `list(a or b)`, `str(get_value())` — is left alone, so a necessary conversion around one is never reported.

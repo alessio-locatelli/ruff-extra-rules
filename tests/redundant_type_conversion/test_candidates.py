@@ -199,28 +199,68 @@ def test_finds_multiple_independent_candidates_on_different_lines() -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        "a = list(get_items())\n",  # argument is itself a call
-        "a = list(get(1, 2))\n",  # a nested call with its own arguments
-        "a = str(a or get_default())\n",  # a nested call as the tail of a larger expression
+        "a = list(get_items())\n",
+        "a = list(get(1, 2))\n",
+        "a = str(a or get_default())\n",
+        "a = str(root / name)\n",
+        "a = str(prefix + suffix)\n",
+        "a = str(a if flag else b)\n",
+        "a = int(-count)\n",
+        "a = bool(not flag)\n",
+        "async def f():\n    a = str(await coro)\n",
+        "a = str(value := compute)\n",
+        "a = str(box.a / box.b)\n",
+        "a = str(items[0] + rest[1])\n",
     ],
-    ids=["bare-call", "call-with-arguments", "call-as-tail-of-larger-expression"],
+    ids=[
+        "bare-call",
+        "call-with-arguments",
+        "call-as-tail-of-larger-expression",
+        "binary-operator",
+        "binary-operator-on-scalars",
+        "conditional-expression",
+        "unary-minus",
+        "not-operator",
+        "await",
+        "walrus",
+        "binary-operator-ending-in-an-attribute",
+        "binary-operator-ending-in-a-subscript",
+    ],
 )
-def test_ignores_a_candidate_whose_argument_ends_in_a_nested_call(source: str) -> None:
+def test_ignores_a_candidate_whose_argument_the_hover_cannot_describe(source: str) -> None:
     # See ADR-0035's "Detection method".
     assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
 
 
-def test_a_candidate_whose_argument_is_an_attribute_is_still_found() -> None:
-    # Attribute/Subscript arguments don't end on a Call's own closing
-    # paren, so they're unaffected by the nested-call exclusion above.
-    source = "a = list(box.value)\n"
-    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.constructor == "list"
-
-
-def test_a_candidate_whose_argument_is_a_subscript_is_still_found() -> None:
-    (candidate,) = find_candidates(ast.parse("a = list(items[0])\n"), ALL_CONSTRUCTORS)
-    assert candidate.constructor == "list"
+@pytest.mark.parametrize(
+    "source",
+    [
+        "a = list(box.value)\n",
+        "a = list(items[0])\n",
+        "a = list(rows[start:stop])\n",
+        "a = list([1, 2])\n",
+        "a = dict({'k': 1})\n",
+        "a = tuple((first, second))\n",
+        "a = str(f'{name}')\n",
+        "a = str('a' 'b')\n",
+        "a = list(get_rows().values[0])\n",
+    ],
+    ids=[
+        "attribute",
+        "subscript",
+        "slice",
+        "list-literal",
+        "dict-literal",
+        "parenthesized-tuple",
+        "f-string",
+        "implicitly-concatenated-string",
+        "attribute-chain-off-a-call",
+    ],
+)
+def test_a_candidate_whose_argument_ends_on_its_own_last_token_is_still_found(source: str) -> None:
+    # Each of these ends on a token belonging to the argument expression
+    # itself, so hovering it describes the whole argument.
+    assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) != []
 
 
 @pytest.mark.parametrize(
