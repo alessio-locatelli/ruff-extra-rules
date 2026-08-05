@@ -320,6 +320,34 @@ def test_exclude_from_the_config_file_is_anchored_at_the_project_root(project: P
     assert main([str(checked), *argv]) == 1
 
 
+@pytest.mark.parametrize(
+    ("entrypoint", "flag"),
+    [
+        (ruff_extra_rules.main, "--redundant-type-conversion-level"),
+        (ruff_extra_rules_ty.main, "--meaningless-vars-level"),
+    ],
+    ids=["default-hook-takes-ty-option", "ty-hook-takes-default-option"],
+)
+def test_a_sibling_hooks_option_is_accepted_on_the_command_line(
+    entrypoint: Callable[[list[str] | None], int], flag: str
+) -> None:
+    # The command line must match the configuration file: an option owned by
+    # a check this entry point cannot run is accepted and ignored, so one set
+    # of options works with either hook.
+    assert entrypoint(["--isolated", flag, "permissive"]) == 0
+
+
+def test_a_sibling_hooks_option_does_not_change_this_hooks_own_behaviour(project: Path) -> None:
+    filepath = project / "module.py"
+    filepath.write_text(_UNSUGGESTABLE)
+
+    # meaningless-vars stays conservative: the level belongs to TR6, which
+    # this entry point never runs.
+    exit_code = ruff_extra_rules.main(["--isolated", "--redundant-type-conversion-level", "permissive", str(filepath)])
+
+    assert exit_code == 0
+
+
 def test_a_sibling_hooks_check_section_is_accepted_but_not_applied(project: Path) -> None:
     # One project-wide config serves both entry points, so the section for
     # a check this one cannot run is validated and then ignored.
