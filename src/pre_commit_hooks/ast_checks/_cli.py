@@ -123,7 +123,11 @@ def main(
 
     enabled_check_classes = ALL_CHECKS if check_classes is None else check_classes
 
-    for check_class in enabled_check_classes:
+    # Every check's options, not just the ones this entry point runs, so the
+    # command line matches the configuration file: an option owned by a check
+    # this entry point can't run is accepted and ignored rather than
+    # rejected, and one set of options works with either hook (ADR-0045).
+    for check_class in ALL_CHECKS:
         add_check_arguments(parser, check_class().check_id, check_class.OPTIONS)
 
     args = parser.parse_args(argv)
