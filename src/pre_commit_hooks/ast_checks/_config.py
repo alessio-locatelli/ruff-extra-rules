@@ -133,26 +133,21 @@ def _validate_check_ids(check_ids: Iterable[str], key: str, source: str, known: 
         raise ConfigError(message)
 
 
-def _resolve_check_ids(
-    cli_values: list[str] | None,
-    table: Mapping[str, Any],
-    key: str,
-    source: str,
-    known: Iterable[str],
-) -> set[str] | None:
-    if cli_values is not None:
-        selected = _split_check_ids(cli_values)
-        if not selected:
-            message = f"Invalid value for `--{key}` from {CLI_SOURCE}; expected at least one check name"
-            raise ConfigError(message)
-        _validate_check_ids(selected, f"--{key}", CLI_SOURCE, known)
-        return selected
-
+def _table_check_ids(table: Mapping[str, Any], key: str, source: str, known: Iterable[str]) -> set[str] | None:
     configured = _table_string_list(table, key, source)
     if configured is None:
         return None
     _validate_check_ids(configured, key, source, known)
     return set(configured)
+
+
+def _cli_check_ids(cli_values: list[str], key: str, known: Iterable[str]) -> set[str]:
+    selected = _split_check_ids(cli_values)
+    if not selected:
+        message = f"Invalid value for `--{key}` from {CLI_SOURCE}; expected at least one check name"
+        raise ConfigError(message)
+    _validate_check_ids(selected, f"--{key}", CLI_SOURCE, known)
+    return selected
 
 
 def _load(args: argparse.Namespace, cwd: Path) -> tuple[Mapping[str, Any], Path, str]:
@@ -209,10 +204,20 @@ def resolve(
         )
         raise ConfigError(message)
 
+    # The file is validated in full before any command-line value is layered
+    # over it. Validating only what the CLI leaves unset would let an
+    # override launder an invalid file into an accepted one — for `fix`, that
+    # is the difference between reporting the error and letting an
+    # unvalidated file authorize rewriting sources (ch. 17).
+    configured_fix = _table_bool(table, "fix", source, default=False)
+    configured_exclude = _table_string_list(table, "exclude", source)
+    configured_select = _table_check_ids(table, "select", source, known_check_ids)
+    configured_ignore = _table_check_ids(table, "ignore", source, known_check_ids)
+
     if args.exclude is not None:
         exclude = [ExcludePattern(pattern.strip(), cwd) for pattern in args.exclude.split(",") if pattern.strip()]
     else:
-        exclude = [ExcludePattern(pattern, root) for pattern in _table_string_list(table, "exclude", source) or ()]
+        exclude = [ExcludePattern(pattern, root) for pattern in configured_exclude or ()]
 
     enabled_check_ids = {check_class().check_id for check_class in enabled_check_classes}
     check_kwargs: dict[str, dict[str, Any]] = {}
@@ -226,10 +231,18 @@ def resolve(
                 f"expected one of: {_quoted(option_names)}"
             )
             raise ConfigError(message)
+        # Coerced, and so validated, for every check — not just the ones this
+        # entry point runs — so one shared file is accepted or rejected
+        # identically by both hooks.
+        configured_options = {
+            option.name: option.coerce(sub_table[option.name], source)
+            for option in check_class.OPTIONS
+            if option.name in sub_table
+        }
         if check_id not in enabled_check_ids:
             continue
         kwargs = {
-            option.name: _resolve_option_value(args, check_id, option, sub_table, source)
+            option.name: _resolve_option_value(args, check_id, option, configured_options)
             for option in check_class.OPTIONS
         }
         if kwargs:
@@ -237,10 +250,10 @@ def resolve(
 
     return ResolvedConfig(
         root=root,
-        select=_resolve_check_ids(args.select, table, "select", source, known_check_ids),
-        ignore=_resolve_check_ids(args.ignore, table, "ignore", source, known_check_ids),
+        select=_cli_check_ids(args.select, "select", known_check_ids) if args.select is not None else configured_select,
+        ignore=_cli_check_ids(args.ignore, "ignore", known_check_ids) if args.ignore is not None else configured_ignore,
         exclude=exclude,
-        fix=args.fix if args.fix is not None else _table_bool(table, "fix", source, default=False),
+        fix=configured_fix if args.fix is None else args.fix,
         check_kwargs=check_kwargs,
     )
 
@@ -257,12 +270,9 @@ def _resolve_option_value(
     args: argparse.Namespace,
     check_id: str,
     option: CheckOption,
-    sub_table: Mapping[str, Any],
-    source: str,
+    configured: Mapping[str, Enum],
 ) -> Enum:
     cli_value = getattr(args, option.dest(check_id), None)
     if cli_value is not None:
         return option.coerce(cli_value, CLI_SOURCE)
-    if option.name in sub_table:
-        return option.coerce(sub_table[option.name], source)
-    return option.default
+    return configured.get(option.name, option.default)
