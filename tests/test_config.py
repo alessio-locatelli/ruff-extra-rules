@@ -145,6 +145,52 @@ def test_invalid_configuration_exits_two_and_names_its_source(
     assert str(path) in err
 
 
+@pytest.mark.parametrize(
+    ("body", "argv", "needle"),
+    [
+        ('[tool.ruff-extra-rules]\nfix = "yes"\n', ["--fix"], "expected a boolean"),
+        ('[tool.ruff-extra-rules]\nexclude = "a"\n', ["--exclude", "*.py"], "expected a list of strings"),
+        ("[tool.ruff-extra-rules]\nselect = [1]\n", ["--select", "meaningless-vars"], "expected a list of strings"),
+        ("[tool.ruff-extra-rules]\nignore = [1]\n", ["--ignore", "meaningless-vars"], "expected a list of strings"),
+        ('[tool.ruff-extra-rules]\nselect = ["nope"]\n', ["--select", "meaningless-vars"], "Unknown check `nope`"),
+    ],
+    ids=["fix", "exclude", "select", "ignore", "unknown-check-in-select"],
+)
+def test_an_invalid_setting_is_rejected_even_when_the_command_line_overrides_it(
+    project: Path, capsys: pytest.CaptureFixture[str], body: str, argv: list[str], needle: str
+) -> None:
+    # An override must not turn an invalid file into an accepted one. For
+    # `fix` that is the difference between reporting the error and letting an
+    # unvalidated file authorize rewriting sources (behavioral contract
+    # chapter 17, "MUST validate configuration before performing potentially
+    # destructive operations").
+    path = _write_config(project, body)
+    filepath = project / "module.py"
+    filepath.write_text("x = 1\n")
+
+    assert main([str(filepath), *argv]) == 2
+
+    err = capsys.readouterr().err
+    assert needle in err
+    assert str(path) in err
+
+
+def test_an_invalid_option_value_for_a_sibling_hooks_check_is_rejected(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # One shared file must be accepted or rejected identically by both hooks,
+    # so a value is validated even when this entry point will not apply it.
+    path = _write_config(project, '[tool.ruff-extra-rules.redundant-type-conversion]\nlevel = "bad"\n')
+    filepath = project / "module.py"
+    filepath.write_text("x = 1\n")
+
+    assert ruff_extra_rules.main([str(filepath)]) == 2
+
+    err = capsys.readouterr().err
+    assert "expected one of: `conservative`" in err
+    assert str(path) in err
+
+
 def test_unknown_field_error_lists_the_valid_ones(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _write_config(project, "[tool.ruff-extra-rules]\nfxi = true\n")
     filepath = project / "module.py"
