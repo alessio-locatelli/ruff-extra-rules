@@ -261,6 +261,24 @@ def test_config_flag_uses_the_named_file_without_searching(project: Path) -> Non
     assert main([str(filepath), "--config", str(override), "--select", "meaningless-vars"]) == 1
 
 
+def test_a_relative_config_path_still_anchors_exclude_at_that_files_directory(project: Path) -> None:
+    # `--config pyproject.toml` must behave like the absolute form: a
+    # relative anchor can never match the absolute paths patterns are
+    # compared against, which would silently check — and with fix = true,
+    # rewrite — a file the configuration excludes.
+    _write_config(project, '[tool.ruff-extra-rules]\nfix = true\nexclude = ["vendor/**"]\n')
+    vendored = project / "vendor"
+    vendored.mkdir()
+    excluded = vendored / "module.py"
+    original = "def f():\n    value = compute()\n    return value\n"
+    excluded.write_text(original)
+
+    exit_code = main([str(excluded), "--config", "pyproject.toml", "--select", "redundant-assignment"])
+
+    assert exit_code == 0
+    assert excluded.read_text() == original
+
+
 @pytest.mark.parametrize(
     ("target", "needle"),
     [("missing.toml", "no such file"), ("bare.toml", "has no `[tool.ruff-extra-rules]` table")],

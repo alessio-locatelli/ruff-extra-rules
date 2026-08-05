@@ -5,6 +5,7 @@ See `docs/adr/0045-pyproject-toml-configuration.md`.
 
 from __future__ import annotations
 
+import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -162,7 +163,11 @@ def _load(args: argparse.Namespace, cwd: Path) -> tuple[Mapping[str, Any], Path,
         return {}, cwd, CLI_SOURCE
 
     if args.config is not None:
-        path = Path(args.config)
+        # Absolute before anything derives from it: `path.parent` becomes the
+        # anchor every config-file `exclude` pattern resolves against, and a
+        # relative anchor can never match the absolute paths those patterns
+        # are compared to. It is also what error messages name (ch. 17).
+        path = Path(os.path.abspath(args.config))  # noqa: PTH100
         if not path.is_file():
             message = f"Could not read `{path}`: no such file"
             raise ConfigError(message)
