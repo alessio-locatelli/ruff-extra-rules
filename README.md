@@ -61,8 +61,6 @@ level = "permissive"                # each check's own settings live in its own 
 
 The nearest `pyproject.toml` with a `[tool.ruff-extra-rules]` table, searching upward from where the command runs, is the one used — so a monorepo can configure everything from its root. The search stops at your git repository. Command-line arguments win over the file, `--config` points at a specific file, and `--isolated` ignores configuration files entirely.
 
-Run `python -m pre_commit_hooks.ast_checks --help` for the full list of options; every setting has both a flag and a `pyproject.toml` key.
-
 ### Inline Suppression
 
 Use `# pytriage: <code>` (e.g., `# pytriage: TR1`), or a comma-separated list to suppress more than one check on the same line (`# pytriage: TR1,TR5`).
