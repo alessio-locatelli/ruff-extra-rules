@@ -11,7 +11,7 @@ from __future__ import annotations
 import ast
 import logging
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 
 from ._base import (
     BaseCheck,
@@ -24,12 +24,14 @@ from ._base import (
     split_lines_like_ast,
 )
 from ._meaningless_vars_suggestions import Confidence, plan_suggestions
+from ._options import EnumOption
 from ._scope import iter_within_scope_from
 
 if TYPE_CHECKING:
-    import argparse
     from collections.abc import Iterator
     from pathlib import Path
+
+    from ._options import CheckOption
 
 logger = logging.getLogger("meaningless_vars")
 
@@ -797,6 +799,22 @@ def _apply_fixes(
 class MeaninglessVarsCheck(BaseCheck):
     __slots__ = ("_level", "meaningless_names")
 
+    OPTIONS: ClassVar[tuple[CheckOption, ...]] = (
+        EnumOption(
+            name="level",
+            values=MeaninglessVarsLevel,
+            default=MeaninglessVarsLevel.CONSERVATIVE,
+            help=(
+                "Whether meaningless-vars (TR1) reports a meaningless name "
+                "that has no suggested replacement. 'conservative' "
+                "(default) reports a name only when a rename can be "
+                "suggested; 'permissive' reports every meaningless name "
+                "regardless. --fix only ever applies a high-confidence "
+                "suggestion at either level."
+            ),
+        ),
+    )
+
     def __init__(self, level: MeaninglessVarsLevel = MeaninglessVarsLevel.CONSERVATIVE) -> None:
         self.meaningless_names = DEFAULT_MEANINGLESS_NAMES
         self._level = level
@@ -811,26 +829,6 @@ class MeaninglessVarsCheck(BaseCheck):
 
     def get_prefilter_pattern(self) -> list[str] | None:
         return sorted(self.meaningless_names)
-
-    @classmethod
-    def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--meaningless-vars-level",
-            choices=["conservative", "permissive"],
-            default="conservative",
-            help=(
-                "Whether meaningless-vars (TR1) reports a meaningless name "
-                "that has no suggested replacement. 'conservative' "
-                "(default) reports a name only when a rename can be "
-                "suggested; 'permissive' reports every meaningless name "
-                "regardless. --fix only ever applies a high-confidence "
-                "suggestion at either level."
-            ),
-        )
-
-    @classmethod
-    def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
-        return {"level": MeaninglessVarsLevel[args.meaningless_vars_level.upper()]}
 
     def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         visitor = MeaninglessNameVisitor(self.meaningless_names, source)

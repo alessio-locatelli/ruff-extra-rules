@@ -1,5 +1,7 @@
 # Behavioral contract audit: configuration & environment/project-root discovery (ch. 17, 28)
 
+**Update, ADR-0045**: both findings below are superseded. This project now parses `[tool.ruff-extra-rules]` from `pyproject.toml` and discovers a project root by walking upward from the working directory, so the "no config file, no project-root discovery" premise no longer holds; and the cache directory is anchored at that discovered root rather than the working directory. The `--select`/`--ignore` blank-token handling this ADR introduced is unchanged, but its error now exits 2 rather than 1 (ADR-0045).
+
 `docs/behavioral_contract.md` chapters 17 (Configuration) and 28 (Configuration and Environment Discovery) were audited against `_cli.py`'s CLI argument handling, `load_checks()`/`_generate_cache_key()`, and `CacheManager`. Both chapters are written for a tool with a config-file format and a project-root-discovery step; this project has neither (no `tomllib`, no `os.environ`/`os.getenv` reads, no upward directory walk anywhere in `src/`) — every check's configuration comes exclusively from CLI arguments. Full findings are in `docs/audits/0009-behavioral-contract-audit-configuration-and-discovery.md`.
 
 ## Decision

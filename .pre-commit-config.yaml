@@ -58,7 +58,6 @@ repos:
         # It deliberately contains "bad" (and otherwise non-representative) example
         # code for our own test suite (see docs/adr/0009-lint-tests-directory.md).
         exclude: ^tests/fixtures/
-        args: [--fix]
       - id: local-ruff-extra-rules-aggressive
         name: Extra Python rule checks (self-check with the strictest config)
         description: Run our own AST-based checks against src/ and tests/, except redundant-type-conversion (see local-ruff-extra-rules-ty)
@@ -69,7 +68,6 @@ repos:
         exclude: ^tests/fixtures/
         args:
           [
-            "--fix",
             "--meaningless-vars-level=permissive",
             "--redundant-assignment-level=permissive",
           ]
@@ -86,7 +84,6 @@ repos:
         files: ^(src|tests)/
         exclude: ^tests/fixtures/
         require_serial: true
-        args: ["--fix"]
       - id: local-ruff-extra-rules-ty-aggressive
         name: Extra Python rule checks (redundant-type-conversion, serial, strictest config)
         description: >-
@@ -100,7 +97,7 @@ repos:
         files: ^(src|tests)/
         exclude: ^tests/fixtures/
         require_serial: true
-        args: ["--fix", "--redundant-type-conversion-level=permissive"]
+        args: ["--redundant-type-conversion-level=permissive"]
 
   - repo: https://github.com/alessio-locatelli/ruff-extra-rules
     rev: v0.0.44

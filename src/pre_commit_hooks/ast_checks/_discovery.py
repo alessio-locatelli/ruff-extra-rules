@@ -9,33 +9,77 @@ import select
 import shutil
 import subprocess
 import time
-from pathlib import Path
+from collections import defaultdict
+from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, NamedTuple
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 logger = logging.getLogger("ast_checks")
 
+_CURRENT_DIR = PurePosixPath()
 
-def filter_excluded_files(filepaths: list[str], exclude_patterns: list[str]) -> list[str]:
+
+class ExcludePattern(NamedTuple):
+    """A glob plus the directory it is anchored at.
+
+    The anchor differs by where the pattern came from: `--exclude` resolves
+    against the working directory, while an `exclude` entry in
+    `[tool.ruff-extra-rules]` resolves against the project root. See
+    `docs/adr/0046-exclude-glob-semantics.md`.
+    """
+
+    pattern: str
+    anchor: Path
+
+
+def filter_excluded_files(filepaths: list[str], exclude_patterns: Sequence[ExcludePattern]) -> list[str]:
     if not exclude_patterns:
         return filepaths
 
-    filtered = []
-    for filepath_str in filepaths:
-        filepath = Path(filepath_str)
-        excluded = False
+    patterns_by_anchor: defaultdict[Path, list[str]] = defaultdict(list)
+    for pattern, anchor in exclude_patterns:
+        patterns_by_anchor[anchor].append(pattern)
 
-        for pattern in exclude_patterns:
-            if filepath.match(pattern):
-                excluded = True
-                break
-            # Also match against each parent directory component.
-            if any(part for part in filepath.parts if Path(part).match(pattern)):
-                excluded = True
-                break
+    return [
+        filepath
+        for filepath in filepaths
+        if not _is_excluded(PurePosixPath(os.path.abspath(filepath)), patterns_by_anchor)  # noqa: PTH100
+    ]
 
-        if not excluded:
-            filtered.append(filepath_str)
 
-    return filtered
+def _is_excluded(absolute: PurePosixPath, patterns_by_anchor: dict[Path, list[str]]) -> bool:
+    for anchor, patterns in patterns_by_anchor.items():
+        relative = _relative_to_anchor(absolute, anchor)
+        if relative is not None and any(_matches(relative, pattern) for pattern in patterns):
+            return True
+    return False
+
+
+def _relative_to_anchor(absolute: PurePosixPath, anchor: Path) -> PurePosixPath | None:
+    """A file outside the anchor is never excluded by that anchor's
+    patterns, matching `ruff`'s treatment of `exclude` as project-relative.
+    """
+    try:
+        return absolute.relative_to(PurePosixPath(anchor))
+    except ValueError:
+        return None
+
+
+def _matches(relative: PurePosixPath, pattern: str) -> bool:
+    """`ruff`'s two exclusion rules, confirmed against `ruff 0.16.1`.
+
+    A pattern with no separator (`tests`, `*.py`) matches any file or
+    directory of that name anywhere beneath the anchor. A pattern
+    containing one (`src/vendor/*`) is anchored, and matching a directory
+    excludes everything beneath it.
+    """
+    if "/" not in pattern:
+        return any(PurePosixPath(part).full_match(pattern) for part in relative.parts)
+    return relative.full_match(pattern) or any(
+        parent.full_match(pattern) for parent in relative.parents if parent != _CURRENT_DIR
+    )
 
 
 def expand_directories(filenames: list[str]) -> list[str]:

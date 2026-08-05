@@ -13,7 +13,7 @@ Extra Python rule checks and fixups that run as a pre-commit/prek hook alongside
 
 ## Available Checks
 
-When invoking `python -m pre_commit_hooks.ast_checks` directly, individual checks are toggled with `--select`/`--ignore`, and `--fix` applies whatever each check's own fix logic considers safe — mirroring `ruff check`'s own `--select`/`--ignore`/`--fix` flags:
+Individual checks are toggled with `--select`/`--ignore` (or the matching `pyproject.toml` keys), and `--fix` applies whatever each check's own fix logic considers safe — mirroring `ruff check`'s own `--select`/`--ignore`/`--fix` flags:
 
 - `--select=<id>,<id>` restricts the hook to **only** the listed check(s).
 - `--ignore=<id>,<id>` excludes the listed check(s) — it composes with `--select` rather than replacing it, just like `ruff check --select`/`--ignore`.
@@ -43,9 +43,25 @@ repos:
 
 `ruff-extra-rules-ty` runs [redundant-type-conversion](docs/rules/redundant-type-conversion.md) by itself. It's optional and requires [`ty`](https://github.com/astral-sh/ty) on `PATH`.
 
-`ruff-extra-rules` always excludes `redundant-type-conversion`, and `ruff-extra-rules-ty` always runs only that check. Both accept shared options such as `--fix`; check-selection options are not supported by these hooks.
+`ruff-extra-rules` always excludes `redundant-type-conversion`, and `ruff-extra-rules-ty` always runs only that check. Both read the same configuration and accept the same options; a check one hook can't run is simply left out rather than rejected, so a single configuration works for both.
 
 ## Configuration
+
+Settings go in your `pyproject.toml`, under `[tool.ruff-extra-rules]`:
+
+```toml
+[tool.ruff-extra-rules]
+fix = true                          # apply safe fixes without passing --fix
+exclude = ["vendor/**"]             # glob patterns, relative to this file
+ignore = ["misplaced-comment"]      # or select = [...] to run only certain checks
+
+[tool.ruff-extra-rules.meaningless-vars]
+level = "permissive"                # each check's own settings live in its own table
+```
+
+The nearest `pyproject.toml` with a `[tool.ruff-extra-rules]` table, searching upward from where the command runs, is the one used — so a monorepo can configure everything from its root. The search stops at your git repository. Command-line arguments win over the file, `--config` points at a specific file, and `--isolated` ignores configuration files entirely.
+
+Run `python -m pre_commit_hooks.ast_checks --help` for the full list of options; every setting has both a flag and a `pyproject.toml` key.
 
 ### Inline Suppression
 

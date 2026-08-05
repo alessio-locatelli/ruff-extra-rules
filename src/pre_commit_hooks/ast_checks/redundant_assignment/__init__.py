@@ -30,7 +30,7 @@ Examples:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pre_commit_hooks.ast_checks._base import (
     BaseCheck,
@@ -39,15 +39,17 @@ from pre_commit_hooks.ast_checks._base import (
     find_ignored_lines_and_classify_comments,
     ignore_pattern_for,
 )
+from pre_commit_hooks.ast_checks._options import EnumOption
 
 from .analysis import VariableTracker, detect_redundancy
 from .autofix import RedundantAssignmentFixData, apply_fixes
 from .semantic import AggressivenessLevel, should_autofix, should_report_violation
 
 if TYPE_CHECKING:
-    import argparse
     import ast
     from pathlib import Path
+
+    from pre_commit_hooks.ast_checks._options import CheckOption
 
 # Format: # pytriage: TR5
 IGNORE_PATTERN = ignore_pattern_for("TR5")
@@ -83,6 +85,22 @@ def format_message(var_name: str, pattern_type: str) -> str:
 class RedundantAssignmentCheck(BaseCheck):
     __slots__ = ("_level",)
 
+    OPTIONS: ClassVar[tuple[CheckOption, ...]] = (
+        EnumOption(
+            name="level",
+            values=AggressivenessLevel,
+            default=AggressivenessLevel.CONSERVATIVE,
+            help=(
+                "How eagerly redundant-assignment (TR5) reports a "
+                "violation. 'conservative' (default) flags only the "
+                "clearest, safest-to-inline cases; 'permissive' flags a "
+                "broader range. Either way, --fix applies to whatever is "
+                "reported and mechanically safe to inline — the level "
+                "doesn't narrow autofix separately."
+            ),
+        ),
+    )
+
     def __init__(self, level: AggressivenessLevel = AggressivenessLevel.CONSERVATIVE) -> None:
         self._level = level
 
@@ -96,26 +114,6 @@ class RedundantAssignmentCheck(BaseCheck):
 
     def get_prefilter_pattern(self) -> list[str] | None:
         return [" = "]
-
-    @classmethod
-    def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--redundant-assignment-level",
-            choices=["conservative", "permissive"],
-            default="conservative",
-            help=(
-                "How eagerly redundant-assignment (TR5) reports a "
-                "violation. 'conservative' (default) flags only the "
-                "clearest, safest-to-inline cases; 'permissive' flags a "
-                "broader range. Either way, --fix applies to whatever is "
-                "reported and mechanically safe to inline — the level "
-                "doesn't narrow autofix separately."
-            ),
-        )
-
-    @classmethod
-    def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
-        return {"level": AggressivenessLevel[args.redundant_assignment_level.upper()]}
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         # Tokenized once and reused for both lookups below, rather than

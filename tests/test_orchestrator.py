@@ -9,8 +9,9 @@ import sys
 import threading
 import time
 import types
+from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, NoReturn
 from unittest import mock
 
 import pytest
@@ -32,7 +33,8 @@ from pre_commit_hooks.ast_checks._base import (
     is_fixed,
 )
 from pre_commit_hooks.ast_checks._cli import main
-from pre_commit_hooks.ast_checks._discovery import expand_directories, filter_excluded_files
+from pre_commit_hooks.ast_checks._discovery import ExcludePattern, expand_directories, filter_excluded_files
+from pre_commit_hooks.ast_checks._options import CheckOption, EnumOption
 from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, load_checks
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsCheck, MeaninglessVarsLevel
@@ -42,25 +44,54 @@ from tests._helpers import raises, restricted_permissions
 from tests.factories import ViolationFactory
 
 if TYPE_CHECKING:
-    import argparse
     from collections.abc import Callable, Iterator
 
     from pre_commit_hooks.ast_checks import ASTCheck
     from pre_commit_hooks.ast_checks.validate_function_name.analysis import Suggestion
 
 
+# Every expectation below was measured against `ruff 0.16.1`'s own
+# `exclude` handling before being written down; see ADR-0046.
 @pytest.mark.parametrize(
     ("files", "patterns", "expected"),
     [
         (["a.py", "b.py"], [], ["a.py", "b.py"]),
-        (["a.py", "b.py", "migrations/0001_init.py"], ["migrations/*.py"], ["a.py", "b.py"]),
+        (["a.py", "migrations/0001_init.py"], ["migrations/*.py"], ["a.py"]),
         (["src/main.py", "vendor/lib/thing.py"], ["vendor"], ["src/main.py"]),
         (["src/main.py"], ["nonexistent/*.py"], ["src/main.py"]),
+        (["tests/fixtures/x/deep.py", "a.py"], ["tests/fixtures/**"], ["a.py"]),
+        (["tests/fixtures/shallow.py", "a.py"], ["tests/fixtures/**"], ["a.py"]),
+        (["tests/fixtures/x/deep.py", "a.py"], ["tests/fixtures"], ["a.py"]),
+        (["src/vendor/v.py", "vendor/w.py"], ["vendor/*"], ["src/vendor/v.py"]),
+        (["src/vendor/v.py", "vendor/w.py"], ["src/vendor/*"], ["vendor/w.py"]),
+        (["src/vendor/v.py", "a.py"], ["src/*"], ["a.py"]),
+        (["sub/tests/t.py", "a.py"], ["tests/fixtures/**"], ["sub/tests/t.py", "a.py"]),
+        (["sub/tests/t.py", "a.py"], ["tests"], ["a.py"]),
     ],
-    ids=["no-patterns-returns-all", "excludes-matching-file", "excludes-matching-parent-dir", "no-match-keeps-file"],
+    ids=[
+        "no-patterns-returns-all",
+        "excludes-matching-file",
+        "excludes-matching-parent-dir",
+        "no-match-keeps-file",
+        "double-star-is-recursive",
+        "double-star-matches-direct-child",
+        "bare-directory-excludes-its-subtree",
+        "anchored-pattern-does-not-match-deeper-namesake",
+        "anchored-pattern-matches-its-own-path",
+        "star-in-directory-position-prunes-subtree",
+        "anchored-pattern-is-rooted-not-suffix-matched",
+        "separatorless-pattern-matches-any-component",
+    ],
 )
-def test_filter_excluded_files(files: list[str], patterns: list[str], expected: list[str]) -> None:
-    assert filter_excluded_files(files, patterns) == expected
+def test_filter_excluded_files(tmp_path: Path, files: list[str], patterns: list[str], expected: list[str]) -> None:
+    absolute = [str(tmp_path / name) for name in files]
+    anchored = [ExcludePattern(pattern, tmp_path) for pattern in patterns]
+
+    filtered = filter_excluded_files(absolute, anchored)
+
+    # str() is required: dropping it compares list[str] to list[Path], which
+    # is always False. TR6 reports it anyway because no *type* error results.
+    assert filtered == [str(tmp_path / name) for name in expected]  # pytriage: TR6
 
 
 def test_expand_directories_leaves_plain_files_untouched(tmp_path: Path) -> None:
@@ -1320,6 +1351,7 @@ class _AlwaysRerunProbeCheck:
     check_id = "always-rerun-probe"
     error_code = "ZZZ001"
     cacheable = False
+    OPTIONS: ClassVar[tuple[CheckOption, ...]] = ()
 
     def __init__(self, message: str = "probe") -> None:
         self.message = message
@@ -1351,14 +1383,6 @@ class _AlwaysRerunProbeCheck:
 
     def record_direct_input(self, _filepath: Path, _source: str) -> None:
         return
-
-    @classmethod
-    def add_cli_arguments(cls, _parser: argparse.ArgumentParser) -> None:
-        return
-
-    @classmethod
-    def cli_kwargs_from_args(cls, _args: argparse.Namespace) -> dict[str, Any]:
-        return {}
 
 
 class _MarkerFixableCheck(_AlwaysRerunProbeCheck):
@@ -3170,22 +3194,35 @@ def test_fixed_hook_entrypoints_list_only_their_own_checks(
 
 
 @pytest.mark.parametrize(
-    ("entrypoint", "flag"),
+    ("entrypoint", "selected"),
     [
-        (entrypoint, flag)
-        for entrypoint in (ruff_extra_rules.main, ruff_extra_rules_ty.main)
-        for flag in ("--select=meaningless-vars", "--ignore=meaningless-vars")
+        (ruff_extra_rules.main, "redundant-type-conversion"),
+        (ruff_extra_rules_ty.main, "meaningless-vars"),
     ],
-    ids=["default-select", "default-ignore", "ty-select", "ty-ignore"],
+    ids=["default-drops-ty-check", "ty-drops-default-check"],
 )
-def test_fixed_hook_entrypoints_reject_check_selection_arguments(
-    capsys: pytest.CaptureFixture[str], entrypoint: Callable[[list[str] | None], int], flag: str
+def test_fixed_hook_entrypoint_selecting_only_a_check_it_cannot_run_exits_zero(
+    tmp_path: Path, entrypoint: Callable[[list[str] | None], int], selected: str
 ) -> None:
-    with pytest.raises(SystemExit) as exc_info:
-        entrypoint([flag])
+    # One project-wide selection is shared by both hooks, so a check this
+    # entry point can't run is dropped rather than rejected -- and dropping
+    # everything exits 0, the way `ruff format` does with a lint-only
+    # config. `--isolated` keeps this repo's own pyproject.toml out of it.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
 
-    assert exc_info.value.code == 2
-    assert f"unrecognized arguments: {flag}" in capsys.readouterr().err
+    assert entrypoint(["--isolated", "--select", selected, str(filepath)]) == 0
+
+
+def test_fixed_hook_entrypoint_runs_a_selected_check_it_does_own(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+
+    exit_code = ruff_extra_rules.main(
+        ["--isolated", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive", str(filepath)]
+    )
+
+    assert exit_code == 1
 
 
 def test_main_no_filenames_returns_zero() -> None:
@@ -3700,15 +3737,21 @@ def test_main_check_specific_cli_arg_round_trip(
     # below) already exercises this wiring against a shipped check; this
     # synthetic one keeps that coverage independent of TR5's own reporting
     # rules.
-    # Exercises main()'s add_cli_arguments -> parse_args ->
-    # cli_kwargs_from_args -> check_args wiring end-to-end against a
-    # synthetic check.
+    # Exercises main()'s OPTIONS -> parse_args -> resolved-config ->
+    # check_args wiring end-to-end against a synthetic check.
+    class _Marker(Enum):
+        DEFAULT = auto()
+        CUSTOM = auto()
+
     class ConfigurableCheck:
         check_id = "configurable"
         error_code = "CFG001"
         cacheable = True
+        OPTIONS: ClassVar[tuple[CheckOption, ...]] = (
+            EnumOption(name="marker", values=_Marker, default=_Marker.DEFAULT, help="synthetic"),
+        )
 
-        def __init__(self, marker: str = "default") -> None:
+        def __init__(self, marker: _Marker = _Marker.DEFAULT) -> None:
             self.marker = marker
 
         def get_prefilter_pattern(self) -> list[str] | None:
@@ -3721,18 +3764,10 @@ def test_main_check_specific_cli_arg_round_trip(
                     error_code=self.error_code,
                     line=1,
                     col=0,
-                    message=self.marker,
+                    message=self.marker.name,
                     fixable=False,
                 )
             ]
-
-        @classmethod
-        def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
-            parser.add_argument("--configurable-marker")
-
-        @classmethod
-        def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
-            return {"marker": args.configurable_marker}
 
     # main() and load_checks() each hold their own `ALL_CHECKS` name binding
     # (imported via `from . import ALL_CHECKS` into `_cli.py` and
@@ -3748,15 +3783,16 @@ def test_main_check_specific_cli_arg_round_trip(
     exit_code = main(
         [
             str(filepath),
+            "--isolated",
             "--select",
             "configurable",
             "--configurable-marker",
-            "custom-message",
+            "custom",
         ]
     )
     assert exit_code == 1
 
-    assert "custom-message" in capsys.readouterr().err
+    assert "CUSTOM" in capsys.readouterr().err
 
 
 class _LevelFlagCase(NamedTuple):
@@ -3829,27 +3865,31 @@ def test_main_level_flag_rejects_unknown_value(
 
 
 @pytest.mark.parametrize("flag", ["--select", "--ignore"], ids=["select", "ignore"])
-def test_main_unknown_check_name_returns_one(tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str) -> None:
+def test_main_unknown_check_name_returns_two(tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1\n")
 
     exit_code = main([str(filepath), flag, "not-a-real-check"])
-    assert exit_code == 1
+    assert exit_code == 2
 
-    # The offending flag is named in the message, not just the bad value —
-    # otherwise --select and --ignore errors are indistinguishable.
-    assert f"Unknown checks in {flag}: not-a-real-check" in capsys.readouterr().err
+    # Both the offending flag and where the value came from are named —
+    # otherwise --select and --ignore errors are indistinguishable, and a
+    # config-file typo reads as if it came from the command line.
+    err = capsys.readouterr().err
+    assert f"Unknown check `not-a-real-check` in `{flag}` from the CLI" in err
 
 
-def test_main_ignoring_all_checks_returns_one(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_ignoring_all_checks_returns_zero(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # Enabling no checks is a legitimate configuration, not an error:
+    # `ruff check` with `select = []` likewise reports nothing and exits 0.
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1\n")
 
     all_ids = ",".join(sorted(cls().check_id for cls in ALL_CHECKS))
-    exit_code = main([str(filepath), "--ignore", all_ids])
-    assert exit_code == 1
+    exit_code = main([str(filepath), "--isolated", "--ignore", all_ids])
+    assert exit_code == 0
 
-    assert "Error: No checks enabled" in capsys.readouterr().err
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.parametrize(
@@ -3878,18 +3918,21 @@ def test_main_trailing_comma_does_not_report_blank_unknown_check(
     assert exit_code == (1 if meaningless_vars_runs else 0)
 
 
-def test_main_select_only_commas_reports_no_checks_enabled(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    # A --select value naming no real check (once blanks are filtered) must
-    # report "no checks enabled", not a blank "Unknown checks: ".
+def test_main_select_only_commas_is_a_configuration_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    # A --select naming no check at all (once blanks are filtered) is
+    # malformed input, not a request to run nothing — `ruff` likewise
+    # rejects `--select=` as an unknown rule selector rather than treating
+    # it like `select = []`. The blank value must not be echoed back as a
+    # nameless "Unknown check ``".
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1\n")
 
     exit_code = main([str(filepath), "--select", ",,"])
-    assert exit_code == 1
+    assert exit_code == 2
 
     err = capsys.readouterr().err
-    assert "Unknown checks:" not in err
-    assert "Error: No checks enabled" in err
+    assert "Unknown check ``" not in err
+    assert "expected at least one check name" in err
 
 
 def test_main_select_and_ignore_compose(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

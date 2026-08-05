@@ -29,7 +29,7 @@ Given that this project exists for rules that are missing in Ruff, the preferred
 
 ### Cache Location
 
-Check results are cached under `.cache/pre_commit_hooks/` relative to the process's current working directory, not a project root discovered independently of it — the same convention `mypy` (`.mypy_cache`) uses. `prek`/`pre-commit` always invoke this hook with the working directory set to the repository root, so the cache location is consistent there; running the CLI directly from elsewhere creates a separate `.cache/pre_commit_hooks/` under that directory instead. The cache itself is safe to delete at any time (see the `CACHEDIR.TAG` file it writes).
+Check results are cached under `.cache/pre_commit_hooks/` in your project root — the directory holding the `pyproject.toml` whose `[tool.ruff-extra-rules]` table configured the run. Running the CLI from a subdirectory therefore reuses the same cache rather than starting a new one. With no configuration file (or under `--isolated`), it falls back to the working directory. The cache is safe to delete at any time (see the `CACHEDIR.TAG` file it writes).
 
 ### Why `# pytriage` instead of `# noqa` for inline ignore comments?
 

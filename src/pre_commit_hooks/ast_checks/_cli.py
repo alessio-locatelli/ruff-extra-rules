@@ -1,5 +1,6 @@
-"""Command-line interface: argument parsing, wiring the discovery,
-orchestrator, and diagnostics layers together, and the process exit code.
+"""Command-line interface: argument parsing, wiring the configuration,
+discovery, orchestrator, and diagnostics layers together, and the process
+exit code.
 """
 
 from __future__ import annotations
@@ -7,11 +8,15 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from pre_commit_hooks._cache import CacheManager
 
 from . import ALL_CHECKS
+from ._config import resolve
 from ._diagnostics import report
 from ._discovery import expand_directories, filter_excluded_files
+from ._options import ConfigError, add_check_arguments
 from ._orchestrator import CheckOrchestrator, load_checks
 
 if TYPE_CHECKING:
@@ -20,17 +25,10 @@ if TYPE_CHECKING:
     from ._base import ASTCheck
 
 
-def _parse_check_ids(values: list[str] | None) -> set[str] | None:
-    if values is None:
-        return None
-    return {check_id.strip() for value in values for check_id in value.split(",") if check_id.strip()}
-
-
 def main(
     argv: list[str] | None = None,
     *,
     check_classes: Sequence[type[ASTCheck]] | None = None,
-    allow_check_selection: bool = True,
 ) -> int:
     """Main entry point for grouped AST checks.
 
@@ -43,44 +41,56 @@ def main(
             resolved every violation — matching the pre-commit convention
             that a hook only reports success when the working tree needs
             no further review, not `ruff check --fix`'s own bare-CLI
-            default of exit 0 on a fully-fixed run).
+            default of exit 0 on a fully-fixed run). A selection that
+            enables no checks at all also returns 0, having checked
+            nothing, the same way `ruff check` does with `select = []`.
         1: any of — a violation is present in the report (fixed, fixable,
             rejected, errored, or non-fixable; see the tags in each printed
             line); a file couldn't be read, decoded, or parsed
             (`--list-checks` and `--exclude`d files, so also `orchestrator.
             unprocessable_files`); a check raised while analyzing a file
-            (`orchestrator.rule_failures`); a check raised
+            (`orchestrator.rule_failures`); or a check raised
             `CheckUnavailableError` (printed once here, not once per file —
-            every other check's own results are still reported normally);
-            or invalid CLI input (unknown `--select`/`--ignore` check id, or
-            every check disabled). `--list-checks` and no-files-to-check
-            return 0 unconditionally, before any of the above can apply.
-
-        `argparse` itself calls `sys.exit(2)` directly (bypassing this
-        function's own return) for malformed CLI arguments themselves (e.g.
-        an unknown flag) — a third, separate value from this function's
-        0/1 contract above.
+            every other check's own results are still reported normally).
+            `--list-checks` and no-files-to-check return 0 unconditionally,
+            before any of the above can apply.
+        2: the configuration itself is invalid, so nothing was checked —
+            malformed TOML, an unknown field or value in
+            `[tool.ruff-extra-rules]`, an unknown check id in
+            `--select`/`--ignore`, or an unreadable `--config` path. This is
+            the same code `argparse` itself exits with (bypassing this
+            function's own return) for a malformed argument such as an
+            unknown flag. See `docs/adr/0045-pyproject-toml-configuration.md`.
     """
     parser = argparse.ArgumentParser(
         prog="ruff-extra-rules",
         description="Run multiple AST-based checks in a single pass",
     )
     parser.add_argument("filenames", nargs="*", help="Python files to check")
-    if allow_check_selection:
-        parser.add_argument(
-            "--select",
-            action="append",
-            help="Comma-separated list of checks to restrict to (default: all); may be repeated",
-        )
-        parser.add_argument(
-            "--ignore",
-            action="append",
-            help="Comma-separated list of checks to exclude; may be repeated",
-        )
+    parser.add_argument(
+        "--select",
+        action="append",
+        help="Comma-separated list of checks to restrict to (default: all); may be repeated",
+    )
+    parser.add_argument(
+        "--ignore",
+        action="append",
+        help="Comma-separated list of checks to exclude; may be repeated",
+    )
+    # default=None throughout, so an unset flag stays distinguishable from
+    # one explicitly set to its default — otherwise argparse's own default
+    # would outrank the pyproject.toml value it must lose to.
     parser.add_argument(
         "--fix",
         action="store_true",
+        default=None,
         help="Auto-fix violations where possible",
+    )
+    parser.add_argument(
+        "--no-fix",
+        action="store_false",
+        dest="fix",
+        help="Report violations without fixing them, overriding `fix` in the configuration file",
     )
     parser.add_argument(
         "--list-checks",
@@ -89,7 +99,16 @@ def main(
     )
     parser.add_argument(
         "--exclude",
-        help="Glob pattern(s) to exclude files/directories (comma-separated)",
+        help="Glob pattern(s) to exclude files/directories (comma-separated), relative to the working directory",
+    )
+    parser.add_argument(
+        "--config",
+        help="Path to a pyproject.toml to use, instead of searching for one",
+    )
+    parser.add_argument(
+        "--isolated",
+        action="store_true",
+        help="Ignore any configuration file and use defaults plus these arguments",
     )
     parser.add_argument(
         "-v",
@@ -105,7 +124,7 @@ def main(
     enabled_check_classes = ALL_CHECKS if check_classes is None else check_classes
 
     for check_class in enabled_check_classes:
-        check_class.add_cli_arguments(parser)
+        add_check_arguments(parser, check_class().check_id, check_class.OPTIONS)
 
     args = parser.parse_args(argv)
 
@@ -124,6 +143,12 @@ def main(
             print(f"  - {check.check_id}: {check.error_code}")
         return 0
 
+    try:
+        config = resolve(args, enabled_check_classes=enabled_check_classes, all_check_classes=ALL_CHECKS)
+    except ConfigError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
+
     if not args.filenames:
         return 0
 
@@ -134,45 +159,28 @@ def main(
     if not filenames:
         return 0
 
-    exclude_patterns = []
-    if args.exclude:
-        exclude_patterns = [p.strip() for p in args.exclude.split(",") if p.strip()]
-
-    filenames = filter_excluded_files(filenames, exclude_patterns)
+    filenames = filter_excluded_files(filenames, config.exclude)
     if not filenames:
         return 0
 
-    select = _parse_check_ids(args.select) if allow_check_selection else None
-    ignore = _parse_check_ids(args.ignore) if allow_check_selection else None
-
-    all_check_ids = {cls().check_id for cls in enabled_check_classes}
-    for flag_name, check_ids in (("--select", select), ("--ignore", ignore)):
-        if check_ids:
-            invalid = check_ids - all_check_ids
-            if invalid:
-                checks_str = ", ".join(sorted(invalid))
-                print(f"Error: Unknown checks in {flag_name}: {checks_str}", file=sys.stderr)
-                return 1
-
-    # Each check translates its own parsed CLI args into its own __init__ kwargs, if any.
-    check_args: dict[str, dict[str, Any]] = {}
-    for check_class in enabled_check_classes:
-        kwargs = check_class.cli_kwargs_from_args(args)
-        if kwargs:
-            check_args[check_class().check_id] = kwargs
-
     checks = load_checks(
-        select=select,
-        ignore=ignore,
-        check_args=check_args,
+        select=config.select,
+        ignore=config.ignore,
+        check_args=config.check_kwargs,
         check_classes=enabled_check_classes,
     )
 
+    # A selection that leaves this entry point with nothing to run is a
+    # legitimate outcome, not an error: one project-wide `select` is shared
+    # by both hooks, each of which can only run its own subset.
     if not checks:
-        print("Error: No checks enabled", file=sys.stderr)
-        return 1
+        return 0
 
-    orchestrator = CheckOrchestrator(checks=checks, fix_mode=args.fix)
+    orchestrator = CheckOrchestrator(
+        checks=checks,
+        fix_mode=config.fix,
+        cache_dir=config.root / CacheManager.DEFAULT_CACHE_DIR,
+    )
     all_violations = orchestrator.process_files(filenames)
 
     return report(orchestrator, all_violations)
