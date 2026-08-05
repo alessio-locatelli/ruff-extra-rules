@@ -89,8 +89,9 @@ def test_filter_excluded_files(tmp_path: Path, files: list[str], patterns: list[
 
     filtered = filter_excluded_files(absolute, anchored)
 
-    # str() is required: dropping it compares list[str] to list[Path], which
-    # is always False. TR6 reports it anyway because no *type* error results.
+    # str() is required here: `tmp_path / name` is a Path, so dropping it
+    # would compare list[str] against list[Path] and never hold. TR6's report
+    # is a false positive, https://github.com/alessio-locatelli/ruff-extra-rules/issues/155.
     assert filtered == [str(tmp_path / name) for name in expected]  # pytriage: TR6
 
 
