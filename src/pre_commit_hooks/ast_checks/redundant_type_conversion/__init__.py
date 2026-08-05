@@ -6,9 +6,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, ClassVar
 
 from pre_commit_hooks.ast_checks._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
+from pre_commit_hooks.ast_checks._options import EnumOption
 
 from .analysis import decide_candidates
 from .candidates import find_candidates
@@ -16,8 +17,9 @@ from .confidence import ConfidenceLevel, eligible_constructors, is_exact_match
 from .session import get_session, peek_session, record_direct_input_if_session_active
 
 if TYPE_CHECKING:
-    import argparse
     import ast
+
+    from pre_commit_hooks.ast_checks._options import CheckOption
 
 # Format: # pytriage: TR6
 IGNORE_PATTERN = ignore_pattern_for("TR6")
@@ -48,6 +50,22 @@ def _format_message(constructor: str, argument_type: str) -> str:
 
 class RedundantTypeConversionCheck(BaseCheck):
     __slots__ = ("_level",)
+
+    OPTIONS: ClassVar[tuple[CheckOption, ...]] = (
+        EnumOption(
+            name="level",
+            values=ConfidenceLevel,
+            default=ConfidenceLevel.CONSERVATIVE,
+            help=(
+                "How eagerly redundant-type-conversion (TR6) reports a violation. 'conservative' (default) "
+                "flags str/int/float/bool/bytes/frozenset/tuple conversions, only when the wrapped value already "
+                "matches that type exactly. 'permissive' also flags copy-producing conversions "
+                "(list/dict/set/bytearray) and a looser match, e.g. an already-list[str] value passed somewhere "
+                "only an Iterable[str] is required -- an explicit opt-in to the aliasing/mutation risk a "
+                "copy-producing constructor's result can carry."
+            ),
+        ),
+    )
 
     def __init__(self, level: ConfidenceLevel = ConfidenceLevel.CONSERVATIVE) -> None:
         self._level = level
@@ -82,26 +100,6 @@ class RedundantTypeConversionCheck(BaseCheck):
         if daemon.socket_exists_for(Path.cwd()):
             return None
         return [f"{name}(" for name in eligible_constructors(self._level)]
-
-    @classmethod
-    def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
-        parser.add_argument(
-            "--redundant-type-conversion-level",
-            choices=["conservative", "permissive"],
-            default="conservative",
-            help=(
-                "How eagerly redundant-type-conversion (TR6) reports a violation. 'conservative' (default) "
-                "flags str/int/float/bool/bytes/frozenset/tuple conversions, only when the wrapped value already "
-                "matches that type exactly. 'permissive' also flags copy-producing conversions "
-                "(list/dict/set/bytearray) and a looser match, e.g. an already-list[str] value passed somewhere "
-                "only an Iterable[str] is required -- an explicit opt-in to the aliasing/mutation risk a "
-                "copy-producing constructor's result can carry."
-            ),
-        )
-
-    @classmethod
-    def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
-        return {"level": ConfidenceLevel[args.redundant_type_conversion_level.upper()]}
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         candidates = find_candidates(tree, eligible_constructors(self._level))

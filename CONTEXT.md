@@ -5,12 +5,24 @@ Custom pre-commit/prek hooks providing fast, AST-based Python rule checks that r
 ## Language
 
 **Hook**:
-An installable unit registered in `.pre-commit-hooks.yaml` that pre-commit/prek invokes as a subprocess against a set of files. This repo exposes a single one, `ruff-extra-rules`, backed by the `ast_checks` orchestrator: every check runs in one pass, report-only by default, with `--select`/`--ignore`/`--fix` narrowing and fixing like `ruff check`'s own flags (see `docs/adr/0008-ruff-check-cli-parity.md`).
+An installable unit registered in `.pre-commit-hooks.yaml` that pre-commit/prek invokes as a subprocess against a set of files. Each hook runs a fixed set of checks in one pass, report-only by default, with `--select`/`--ignore`/`--fix` narrowing and fixing like `ruff check`'s own flags (see `docs/adr/0008-ruff-check-cli-parity.md`). A selection is intersected with the hook's own fixed set rather than rejected, so one project's configuration can serve every hook.
 _Avoid_: linter, tool
 
 **Check**:
-A single, independently toggleable rule (e.g. `meaningless-vars`, `redundant-assignment`, `misplaced-comment`) implementing the `ASTCheck` protocol, identified by a `check_id` and an error code (e.g. `TR1`). Many checks run inside one hook invocation, orchestrated by `CheckOrchestrator`.
+A single, independently toggleable rule (e.g. `meaningless-vars`, `redundant-assignment`, `misplaced-comment`) implementing the `ASTCheck` protocol, identified by a `check_id` and an error code (e.g. `TR1`). The `check_id` is also what names the check's own configuration sub-table. Many checks run inside one hook invocation, orchestrated by `CheckOrchestrator`.
 _Avoid_: rule, linter, hook — a check is not a hook; several checks share one hook
+
+**Project root**:
+The directory holding the nearest `pyproject.toml` that carries a `[tool.ruff-extra-rules]` table, found by searching upward from the working directory and never leaving the enclosing git repository. Anchors the cache directory and every relative path in the configuration (see `docs/adr/0045-pyproject-toml-configuration.md`).
+_Avoid_: config directory, workspace root, repository root — the git repository bounds the search but is not itself the answer
+
+**Resolved configuration**:
+The single settings object a run operates on, layering command-line arguments over the project root's table over each option's declared default. One per process, never per file — which is what lets every check be instantiated once for the whole run.
+_Avoid_: settings, config, config file — the file is one input to it, not the thing itself
+
+**Option**:
+A single setting a check declares once, as data, from which its command-line flag, its TOML key, its accepted values, and the constructor keyword it supplies are all derived (see `docs/adr/0047-declarative-option-descriptors.md`).
+_Avoid_: flag, argument — a flag is one of an option's two surfaces, not the option
 
 **Violation**:
 A single reported instance of a check failing on one file, at one line/column, optionally carrying data needed to auto-fix it.

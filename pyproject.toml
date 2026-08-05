@@ -44,6 +44,10 @@ dev = [
 where = ["src"]
 include = ["pre_commit_hooks*"]
 
+[tool.ruff-extra-rules]
+fix = true
+exclude = ["tests/fixtures/**"]
+
 # Ruff configuration (linting and formatting)
 [tool.ruff]
 target-version = "py314"
@@ -93,6 +97,9 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+markers = [
+  "uses_project_config: let config-file discovery run for real; see tests/conftest.py",
+]
 
 [tool.slotscheck]
 strict-imports = true
@@ -118,7 +125,9 @@ paths = ["src", "tests"]
 # can't see any of these kinds of use. (A vulture `ignore_decorators` entry
 # can't target autouse specifically: vulture's decorator matching strips call
 # arguments, so "@pytest.fixture" and "@pytest.fixture(autouse=True)" are
-# indistinguishable to it.)
+# indistinguishable to it.) pytestmark is read by pytest itself to apply a
+# marker to a whole module, and CUSTOM is an enum member a test reaches
+# through a configured string value rather than by attribute.
 ignore_names = [
   "visit_*",
   "return_value",
@@ -151,6 +160,9 @@ ignore_names = [
   "_use_shared_session",
   "_no_leftover_tri006_daemon_in_this_repo",
   "_isolate_and_teardown",
+  "_isolated_from_this_repositorys_own_configuration",
+  "pytestmark",
+  "CUSTOM",
 ]
 
 # Coverage configuration lives in .coveragerc, not here: coverage.py reads

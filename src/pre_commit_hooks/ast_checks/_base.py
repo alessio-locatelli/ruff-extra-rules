@@ -11,11 +11,12 @@ import tempfile
 import tokenize
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 if TYPE_CHECKING:
-    import argparse
     from collections.abc import Iterable, Iterator
+
+    from ._options import CheckOption
 
 
 @dataclass(slots=True)
@@ -121,33 +122,22 @@ class ASTCheck(Protocol):
         """
         ...
 
-    @classmethod
-    def add_cli_arguments(cls, parser: argparse.ArgumentParser) -> None:
-        """Register this check's own CLI arguments on the shared parser.
-
-        Optional — a check with no check-specific configuration doesn't
-        need to override this. Pair with `cli_kwargs_from_args()` to turn
-        the parsed values into this check's own `__init__` kwargs.
-        """
-        ...
-
-    @classmethod
-    def cli_kwargs_from_args(cls, args: argparse.Namespace) -> dict[str, Any]:
-        """Translate parsed CLI args into this check's own `__init__` kwargs.
-
-        Optional, paired with `add_cli_arguments()`.
-        """
-        ...
+    OPTIONS: ClassVar[tuple[CheckOption, ...]]
+    """This check's own configurable options, each named by the `__init__`
+    keyword it supplies. Empty for a check with nothing to configure.
+    """
 
 
 class BaseCheck:
-    """No-op defaults for ASTCheck's optional CLI-argument extension
-    points, so a check with nothing check-specific doesn't have to repeat
-    the override itself, plus the `cacheable=True` default every check
-    except a cross-file one (see `ASTCheck.cacheable`) wants.
+    """No-op defaults for ASTCheck's optional extension points, so a check
+    with nothing check-specific doesn't have to repeat the override
+    itself, plus the `cacheable=True` default every check except a
+    cross-file one (see `ASTCheck.cacheable`) wants.
     """
 
     __slots__ = ()
+
+    OPTIONS: ClassVar[tuple[CheckOption, ...]] = ()
 
     @property
     def cacheable(self) -> bool:
@@ -158,14 +148,6 @@ class BaseCheck:
 
     def reconcile_direct_inputs(self, _direct_inputs: list[Path]) -> list[Path]:
         return []
-
-    @classmethod
-    def add_cli_arguments(cls, _parser: argparse.ArgumentParser) -> None:
-        return
-
-    @classmethod
-    def cli_kwargs_from_args(cls, _args: argparse.Namespace) -> dict[str, Any]:
-        return {}
 
 
 class CheckUnavailableError(Exception):

@@ -1,5 +1,7 @@
 # Behavioral contract audit: internal error isolation & CLI exit codes (ch. 5, 6)
 
+**Update, ADR-0045**: the exit-code contract documented below gains a third value. Invalid configuration — including an unknown `--select`/`--ignore` name, which this ADR recorded as exiting 1 — now exits 2. The 0 and 1 outcomes for runs that actually happened are unchanged.
+
 `docs/behavioral_contract.md` chapters 5 (Internal Errors and Failure Isolation) and 6 (CLI Exit Codes) were audited against `CheckOrchestrator` and `main()`'s reporting/exit-code logic. Failure isolation itself was already correct: a check's `check()`/`fix()` exception is caught per-file-per-check, so one broken check can't stop another check or file from being processed. The gap was that an isolated failure wasn't always surfaced to the user or the exit code. Full findings are in `docs/audits/0003-behavioral-contract-audit-internal-errors-exit-codes.md`.
 
 ## Decision

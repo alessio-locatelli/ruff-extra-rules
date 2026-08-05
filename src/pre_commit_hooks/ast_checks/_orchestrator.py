@@ -164,10 +164,15 @@ class CheckOrchestrator:
         checks: list[ASTCheck],
         *,
         fix_mode: bool = False,
+        cache_dir: Path | None = None,
     ) -> None:
         self.checks = checks
         self.fix_mode = fix_mode
-        self.cache = CacheManager(hook_name=self._generate_hook_name(), cache_version=self._generate_cache_version())
+        self.cache = CacheManager(
+            cache_dir=cache_dir,
+            hook_name=self._generate_hook_name(),
+            cache_version=self._generate_cache_version(),
+        )
         # Populated by process_files() with every candidate file _check_file()
         # returned None for (couldn't be read/decoded or failed to parse) —
         # reset at the start of each call, so main() can report them instead

@@ -10,7 +10,7 @@ _CHECKS = [RedundantTypeConversionCheck]
 
 
 def main(argv: list[str] | None = None) -> int:
-    return run_checks(argv, check_classes=_CHECKS, allow_check_selection=False)
+    return run_checks(argv, check_classes=_CHECKS)
 
 
 if __name__ == "__main__":

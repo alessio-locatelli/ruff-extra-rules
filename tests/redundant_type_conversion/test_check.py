@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import ast
 from pathlib import Path
 from typing import NoReturn
@@ -97,27 +96,6 @@ def test_check_never_calls_get_session_when_every_candidate_is_suppressed(monkey
     violations = RedundantTypeConversionCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert violations == []
-
-
-@pytest.mark.parametrize(
-    ("cli_value", "expected"),
-    [("conservative", ConfidenceLevel.CONSERVATIVE), ("permissive", ConfidenceLevel.PERMISSIVE)],
-)
-def test_cli_kwargs_from_args_round_trip(cli_value: str, expected: ConfidenceLevel) -> None:
-
-    parser = argparse.ArgumentParser()
-    RedundantTypeConversionCheck.add_cli_arguments(parser)
-    args = parser.parse_args(["--redundant-type-conversion-level", cli_value])
-    assert RedundantTypeConversionCheck.cli_kwargs_from_args(args) == {"level": expected}
-
-
-def test_cli_level_flag_defaults_to_conservative() -> None:
-
-    parser = argparse.ArgumentParser()
-    RedundantTypeConversionCheck.add_cli_arguments(parser)
-    assert RedundantTypeConversionCheck.cli_kwargs_from_args(parser.parse_args([])) == {
-        "level": ConfidenceLevel.CONSERVATIVE
-    }
 
 
 def _patch_session(monkeypatch: pytest.MonkeyPatch, session: FakeSession) -> None:
