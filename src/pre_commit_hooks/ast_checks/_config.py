@@ -31,10 +31,7 @@ _GLOBAL_KEYS = frozenset({"exclude", "fix", "ignore", "select"})
 
 @dataclass(frozen=True, slots=True)
 class ResolvedConfig:
-    """One run's settings, layered command line over config file over each
-    option's declared default. Never per-file: a single project's config
-    applies to every path in the run.
-    """
+    """See `docs/adr/0045-pyproject-toml-configuration.md`."""
 
     root: Path
     select: set[str] | None
@@ -55,13 +52,7 @@ def _git_boundary(start: Path) -> Path | None:
 
 
 def discover(start: Path) -> tuple[Path, Mapping[str, Any]] | None:
-    """Nearest `pyproject.toml` carrying our table, searching upward from
-    `start` and never leaving the enclosing git repository.
-
-    A `pyproject.toml` without the table doesn't halt the search, so a
-    monorepo root still configures a subpackage that has its own
-    packaging metadata but no opinion about this tool.
-    """
+    """See `docs/adr/0045-pyproject-toml-configuration.md`."""
     boundary = _git_boundary(start)
     for directory in (start, *start.parents):
         candidate = directory / CONFIG_FILENAME
@@ -120,9 +111,7 @@ def _table_string_list(table: Mapping[str, Any], key: str, source: str) -> list[
 
 
 def _split_check_ids(values: list[str]) -> set[str]:
-    """Blank tokens are dropped so a trailing or doubled comma is tolerated,
-    matching `--exclude`'s own comma handling (ADR-0019).
-    """
+    """See `docs/adr/0019-behavioral-contract-audit-configuration-and-discovery.md`."""
     return {check_id.strip() for value in values for check_id in value.split(",") if check_id.strip()}
 
 
@@ -158,10 +147,9 @@ def _load(args: argparse.Namespace, cwd: Path) -> tuple[Mapping[str, Any], Path,
         return {}, cwd, CLI_SOURCE
 
     if args.config is not None:
-        # Absolute before anything derives from it: `path.parent` becomes the
-        # anchor every config-file `exclude` pattern resolves against, and a
+        # `path.parent` anchors every config-file `exclude` pattern, and a
         # relative anchor can never match the absolute paths those patterns
-        # are compared to. It is also what error messages name (ch. 17).
+        # are compared against. See ADR-0046.
         path = Path(os.path.abspath(args.config))  # noqa: PTH100
         if not path.is_file():
             message = f"Could not read `{path}`: no such file"
@@ -185,12 +173,7 @@ def resolve(
     enabled_check_classes: Sequence[type[ASTCheck]],
     all_check_classes: Sequence[type[ASTCheck]],
 ) -> ResolvedConfig:
-    """Layer the command line over the config file over declared defaults.
-
-    Every check in `all_check_classes` has its own sub-table validated,
-    not just the ones this entry point runs, so one project-wide config can
-    serve both hooks without either rejecting the other's settings.
-    """
+    """See `docs/adr/0045-pyproject-toml-configuration.md`."""
     cwd = Path.cwd()
     table, root, source = _load(args, cwd)
 
@@ -204,11 +187,7 @@ def resolve(
         )
         raise ConfigError(message)
 
-    # The file is validated in full before any command-line value is layered
-    # over it. Validating only what the CLI leaves unset would let an
-    # override launder an invalid file into an accepted one — for `fix`, that
-    # is the difference between reporting the error and letting an
-    # unvalidated file authorize rewriting sources (ch. 17).
+    # Validated in full before precedence is applied; see ADR-0045.
     configured_fix = _table_bool(table, "fix", source, default=False)
     configured_exclude = _table_string_list(table, "exclude", source)
     configured_select = _table_check_ids(table, "select", source, known_check_ids)
@@ -231,9 +210,6 @@ def resolve(
                 f"expected one of: {_quoted(option_names)}"
             )
             raise ConfigError(message)
-        # Coerced, and so validated, for every check — not just the ones this
-        # entry point runs — so one shared file is accepted or rejected
-        # identically by both hooks.
         configured_options = {
             option.name: option.coerce(sub_table[option.name], source)
             for option in check_class.OPTIONS

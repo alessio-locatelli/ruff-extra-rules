@@ -18,12 +18,7 @@ if TYPE_CHECKING:
 
 
 class ConfigError(Exception):
-    """Invalid configuration, from the command line or a `pyproject.toml`.
-
-    Reported without a traceback and with exit code 2, distinct from a run
-    that completed and found violations. See
-    `docs/adr/0045-pyproject-toml-configuration.md`.
-    """
+    """Reported with exit code 2; see `docs/adr/0045-pyproject-toml-configuration.md`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,10 +50,8 @@ type CheckOption = EnumOption[Enum]
 
 
 def add_check_arguments(parser: argparse.ArgumentParser, check_id: str, options: Iterable[CheckOption]) -> None:
-    """`default=None` throughout, so that a flag left unset is
-    distinguishable from one explicitly given its default value — without
-    that, argparse's own default would outrank the `pyproject.toml` value
-    it is supposed to lose to.
+    """`default=None` keeps an unset flag distinguishable from one given its
+    default value; see `docs/adr/0047-declarative-option-descriptors.md`.
     """
     for option in options:
         parser.add_argument(

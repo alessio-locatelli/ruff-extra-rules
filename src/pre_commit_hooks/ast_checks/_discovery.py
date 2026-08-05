@@ -22,11 +22,7 @@ _CURRENT_DIR = PurePosixPath()
 
 
 class ExcludePattern(NamedTuple):
-    """A glob plus the directory it is anchored at.
-
-    The anchor differs by where the pattern came from: `--exclude` resolves
-    against the working directory, while an `exclude` entry in
-    `[tool.ruff-extra-rules]` resolves against the project root. See
+    """A glob plus the directory it resolves against; see
     `docs/adr/0046-exclude-glob-semantics.md`.
     """
 
@@ -58,8 +54,8 @@ def _is_excluded(absolute: PurePosixPath, patterns_by_anchor: dict[Path, list[st
 
 
 def _relative_to_anchor(absolute: PurePosixPath, anchor: Path) -> PurePosixPath | None:
-    """A file outside the anchor is never excluded by that anchor's
-    patterns, matching `ruff`'s treatment of `exclude` as project-relative.
+    """A file outside the anchor is never excluded by that anchor's patterns;
+    see `docs/adr/0046-exclude-glob-semantics.md`.
     """
     try:
         return absolute.relative_to(PurePosixPath(anchor))
@@ -68,13 +64,7 @@ def _relative_to_anchor(absolute: PurePosixPath, anchor: Path) -> PurePosixPath 
 
 
 def _matches(relative: PurePosixPath, pattern: str) -> bool:
-    """`ruff`'s two exclusion rules, confirmed against `ruff 0.16.1`.
-
-    A pattern with no separator (`tests`, `*.py`) matches any file or
-    directory of that name anywhere beneath the anchor. A pattern
-    containing one (`src/vendor/*`) is anchored, and matching a directory
-    excludes everything beneath it.
-    """
+    """See `docs/adr/0046-exclude-glob-semantics.md`."""
     if "/" not in pattern:
         return any(PurePosixPath(part).full_match(pattern) for part in relative.parts)
     return relative.full_match(pattern) or any(
