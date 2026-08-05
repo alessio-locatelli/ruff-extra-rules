@@ -36,13 +36,13 @@ class ASTCheck(Protocol):
         encoding: str = "utf-8",
     ) -> bool: ...
 
-    # Optional: this check's own configurable settings, empty for most checks
+    # This check's own configurable settings; empty for most checks
     OPTIONS: ClassVar[tuple[CheckOption, ...]]
 ```
 
 `CheckOrchestrator` parses each file's AST **once** and hands the same `tree`/`source` to every enabled check — `check()` must not re-parse the file.
 
-`OPTIONS` is part of the protocol, so `type[ASTCheck]` (as used by `ALL_CHECKS`) requires it. `BaseCheck` defaults it to empty — inherit it (`class YourCheck(BaseCheck):`) unless your check has something to configure:
+`OPTIONS` is part of the protocol, so `type[ASTCheck]` (as used by `ALL_CHECKS`) requires every check to have it. `BaseCheck` supplies the empty default, so inheriting it (`class YourCheck(BaseCheck):`) is enough for a check with nothing to configure; a check that doesn't inherit `BaseCheck` — a test double, say — has to declare `OPTIONS` itself. Declare it explicitly when your check does have something to configure:
 
 ```python
 class YourCheck(BaseCheck):
