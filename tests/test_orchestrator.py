@@ -3792,6 +3792,7 @@ def test_main_check_specific_cli_arg_round_trip(
         check_id = "configurable"
         error_code = "CFG001"
         cacheable = True
+        tracks_direct_inputs = False
         OPTIONS: ClassVar[tuple[CheckOption, ...]] = (
             EnumOption(name="marker", values=_Marker, default=_Marker.DEFAULT, help="synthetic"),
         )

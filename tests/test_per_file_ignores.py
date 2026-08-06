@@ -359,3 +359,23 @@ def test_a_glob_metacharacter_in_the_anchor_path_still_matches(tmp_path: Path) -
     ignores = PerFileIgnoreList((_entry("src/**", anchor),))
 
     assert "a-check" in ignores.ignored_check_ids(anchor / "src" / "mod.py")
+
+
+@pytest.mark.parametrize(
+    ("source", "relative", "exit_code"),
+    [("config", "src/mod.py", 1), ("config", "tests/t.py", 0), ("flag", "src/mod.py", 1), ("flag", "tests/t.py", 0)],
+    ids=["configured-spares-src", "configured-covers-the-rest", "flag-spares-src", "flag-covers-the-rest"],
+)
+def test_a_negated_pattern_reaches_matching_from_either_source(
+    project: Path, source: str, relative: str, exit_code: int
+) -> None:
+    # The `!` is stripped where the pattern is read, so it has to survive both
+    # readers rather than only the one a unit test constructs by hand.
+    flagged = _flagged_file(project, relative)
+    if source == "config":
+        _write_config(project, '"!src/**" = ["meaningless-vars"]')
+        argv = []
+    else:
+        argv = ["--per-file-ignores", "!src/**:meaningless-vars"]
+
+    assert main([str(flagged), *argv, *_ARGV]) == exit_code
