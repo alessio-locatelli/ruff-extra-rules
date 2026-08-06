@@ -2230,7 +2230,7 @@ def test_process_single_file_reports_unprocessable_when_always_rerun_group_fails
     # _process_single_file only ever calls _check_file for the always-rerun
     # group (checks == [_AlwaysRerunProbeCheck()]) here -- nothing else calls this stub.
     def unreadable_always_rerun_group(
-        _self: CheckOrchestrator, _fp: Path, _checks: list[ASTCheck]
+        _self: CheckOrchestrator, _fp: Path, _checks: list[ASTCheck], **_kwargs: object
     ) -> list[Violation] | None:
         return None
 
@@ -4374,3 +4374,45 @@ def test_an_exclude_pattern_is_resolved_against_its_anchor(tmp_path: Path, patte
     filtered = filter_excluded_files(absolute, [ExcludePattern(spelled, anchor)])
 
     assert filtered == [str(anchor / name) for name in expected]
+
+
+def _cross_file_probe_orchestrator(tmp_path: Path, probe: _CrossFileProbeCheck) -> CheckOrchestrator:
+    """A cacheable check that sees every file, plus a cross-file check the
+    named file switches off -- so a second run hits the cache with nothing
+    left to re-run.
+    """
+    return CheckOrchestrator(
+        checks=[_MarkerFixableCheck(check_id="probe-a"), probe],
+        cache_dir=tmp_path / ".cache",
+        per_file_ignores=_ignoring(probe.check_id, "module.py", tmp_path),
+    )
+
+
+def test_a_clean_cache_hit_still_hands_an_ignored_file_to_a_cross_file_check(tmp_path: Path) -> None:
+    # Nothing else opens the file on this path, so the direct-input lifecycle
+    # has to; see ADR-0049.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    _cross_file_probe_orchestrator(tmp_path, _CrossFileProbeCheck()).process_files([str(filepath)])
+    probe = _CrossFileProbeCheck()
+    orchestrator = _cross_file_probe_orchestrator(tmp_path, probe)
+
+    assert {v.check_id for v in orchestrator.process_files([str(filepath)])[str(filepath)]} == {"probe-a"}
+    assert probe.direct_inputs == [filepath.resolve()]
+
+
+def test_an_unreadable_file_is_reported_even_on_a_clean_cache_hit(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("x = 1\n")
+
+    _cross_file_probe_orchestrator(tmp_path, _CrossFileProbeCheck()).process_files([str(filepath)])
+    probe = _CrossFileProbeCheck()
+    orchestrator = _cross_file_probe_orchestrator(tmp_path, probe)
+
+    with restricted_permissions(filepath, 0o000, restore=0o644):
+        violations = orchestrator.process_files([str(filepath)])
+
+    assert violations == {}
+    assert orchestrator.unprocessable_files == [str(filepath)]
+    assert probe.direct_inputs == []
