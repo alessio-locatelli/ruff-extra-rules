@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING
 
-from ._globs import anchored_patterns, glob_matches, relative_to_anchor
+from ._globs import anchored_pattern, glob_matches, relative_to_anchor
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -48,7 +48,6 @@ class PerFileIgnoreList:
 def _matches(entry: PerFileIgnore, absolute: PurePosixPath) -> bool:
     if glob_matches(entry.pattern, absolute.name):
         return True
-    relative = relative_to_anchor(absolute, entry.anchor)
-    if relative is None:
+    if relative_to_anchor(absolute, entry.anchor) is None:
         return False
-    return any(glob_matches(anchored, str(relative)) for anchored in anchored_patterns(entry.pattern, entry.anchor))
+    return glob_matches(anchored_pattern(entry.pattern, entry.anchor), str(absolute))

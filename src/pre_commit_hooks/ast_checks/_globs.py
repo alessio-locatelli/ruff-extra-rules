@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, NamedTuple
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["InvalidGlobError", "anchored_patterns", "compile_glob", "glob_matches", "relative_to_anchor"]
+__all__ = ["InvalidGlobError", "anchored_pattern", "compile_glob", "glob_matches", "relative_to_anchor"]
 
 
 class InvalidGlobError(ValueError):
@@ -55,31 +55,19 @@ def glob_matches(pattern: str, candidate: str) -> bool:
 
 
 @functools.cache
-def anchored_patterns(pattern: str, anchor: Path) -> tuple[str, ...]:
-    """`pattern` resolved against `anchor` and expressed relative to it again,
-    the way `ruff` resolves a pattern before matching: `./tests/**`,
-    `tests/../src/**`, `../<project>/tests/**` and an absolute path all name
-    what they look like. Empty when nothing it names lies beneath `anchor`,
-    which nothing there can ever match (see
-    `docs/adr/0046-exclude-glob-semantics.md`).
+def anchored_pattern(pattern: str, anchor: Path) -> str:
+    """`pattern` resolved against `anchor` into an absolute glob, to be matched
+    against a file's own absolute path. Resolution is textual, exactly as in
+    `ruff`, which is what lets an alternation survive into the match instead of
+    being expanded into one pattern per branch. See
+    `docs/adr/0046-exclude-glob-semantics.md`.
 
-    Alternatives are expanded first, since resolution is textual and a `..`
-    has to pop whatever each branch actually names -- `../{a,b}/src/**`
-    resolves to a different directory per branch, and only some of them may
-    land beneath the anchor.
-
-    Only the anchored half of a match uses this. `ruff` matches a bare file
-    name against the pattern exactly as written, so `./mod.py` covers the
-    project root's own `mod.py` and no other.
+    The anchor is escaped on the way in: it is a real directory path, not a
+    pattern, so a `[` or `*` someone's checkout happens to contain must not
+    start matching things.
     """
-    anchor_parts = _resolved_parts(str(anchor))
-    resolved: list[str] = []
-    for alternative in _expanded(pattern):
-        absolute = alternative if alternative.startswith("/") else f"{anchor}/{alternative}"
-        parts = _resolved_parts(absolute)
-        if parts[: len(anchor_parts)] == anchor_parts:
-            resolved.append("/".join(parts[len(anchor_parts) :]))
-    return tuple(resolved)
+    joined = pattern if pattern.startswith("/") else f"{_escaped(str(anchor))}/{pattern}"
+    return "/" + "/".join(_resolved_parts(joined))
 
 
 def _resolved_parts(path: str) -> list[str]:
@@ -95,84 +83,8 @@ def _resolved_parts(path: str) -> list[str]:
     return parts
 
 
-def _expanded(pattern: str) -> list[str]:
-    """Every branch `pattern`'s alternations spell out, reading `\\` and
-    `[...]` the way `_translate` does so a `{` those already spoke for is
-    left alone.
-    """
-    group = _alternation_group(pattern)
-    if group is None:
-        return [pattern]
-    start, end = group
-    head, tail = pattern[:start], pattern[end + 1 :]
-    return [
-        expansion for branch in _branches(pattern[start + 1 : end]) for expansion in _expanded(f"{head}{branch}{tail}")
-    ]
-
-
-def _alternation_group(pattern: str) -> tuple[int, int] | None:
-    """The outermost `{`/`}` pair, or `None` when there is nothing to expand.
-    An unterminated `{` reads as nothing to expand here and is rejected by
-    `compile_glob` instead.
-    """
-    depth = 0
-    start = 0
-    index = 0
-    while index < len(pattern):
-        char = pattern[index]
-        if char == "\\":
-            index += 2
-            continue
-        if char == "[":
-            index = _class_end(pattern, index)
-            continue
-        if char == "{":
-            if not depth:
-                start = index
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if not depth:
-                return start, index
-        index += 1
-    return None
-
-
-def _branches(group: str) -> list[str]:
-    branches: list[str] = []
-    depth = 0
-    start = 0
-    index = 0
-    while index < len(group):
-        char = group[index]
-        if char == "\\":
-            index += 2
-            continue
-        if char == "[":
-            index = _class_end(group, index)
-            continue
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-        elif char == "," and not depth:
-            branches.append(group[start:index])
-            start = index + 1
-        index += 1
-    branches.append(group[start:])
-    return branches
-
-
-def _class_end(pattern: str, index: int) -> int:
-    """Just past the `]` closing the class opening at `index`."""
-    cursor = index + 1
-    if cursor < len(pattern) and pattern[cursor] in "!^":
-        cursor += 1
-    if cursor < len(pattern) and pattern[cursor] == "]":
-        cursor += 1
-    while cursor < len(pattern) and pattern[cursor] != "]":
-        cursor += 1
-    return cursor + 1
+def _escaped(path: str) -> str:
+    return "".join(f"\\{char}" if char in "\\*?[]{}," else char for char in path)
 
 
 def relative_to_anchor(absolute: PurePosixPath, anchor: Path) -> PurePosixPath | None:
@@ -281,6 +193,20 @@ def _translate_stars(pattern: str, index: int) -> tuple[_Piece, int]:
     if not is_own_component or end == len(pattern):
         return _STAR, end
     return _Piece("(?:.*/)?", fixed_width=False), end + 1
+
+
+def _class_end(pattern: str, index: int) -> int:
+    """Just past the `]` closing the class opening at `index`, or past the end
+    of `pattern` when there is none.
+    """
+    cursor = index + 1
+    if cursor < len(pattern) and pattern[cursor] in "!^":
+        cursor += 1
+    if cursor < len(pattern) and pattern[cursor] == "]":
+        cursor += 1
+    while cursor < len(pattern) and pattern[cursor] != "]":
+        cursor += 1
+    return cursor + 1
 
 
 def _translate_class(pattern: str, index: int) -> tuple[str, int]:
