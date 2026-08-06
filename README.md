@@ -57,7 +57,13 @@ ignore = ["misplaced-comment"]      # or select = [...] to run only certain chec
 
 [tool.ruff-extra-rules.meaningless-vars]
 level = "permissive"                # each check's own settings live in its own table
+
+[tool.ruff-extra-rules.per-file-ignores]
+"tests/**" = ["meaningless-vars"]   # switch a check off in the files it matches
+"!src/**" = ["redundant-assignment"] # an initial `!` flips it: everywhere but src/
 ```
+
+Patterns use the same glob syntax as `ruff`'s, so an entry copied from your `[tool.ruff.lint.per-file-ignores]` covers the same files. `--per-file-ignores 'tests/**:meaningless-vars'` is the command-line form.
 
 The nearest `pyproject.toml` with a `[tool.ruff-extra-rules]` table, searching upward from where the command runs, is the one used — so a monorepo can configure everything from its root. The search stops at your git repository. Command-line arguments win over the file, `--config` points at a specific file, and `--isolated` ignores configuration files entirely.
 

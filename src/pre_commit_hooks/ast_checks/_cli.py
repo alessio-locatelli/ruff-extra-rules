@@ -57,7 +57,8 @@ def main(
         2: the configuration itself is invalid, so nothing was checked —
             malformed TOML, an unknown field or value in
             `[tool.ruff-extra-rules]`, an unknown check id in
-            `--select`/`--ignore`, or an unreadable `--config` path. This is
+            `--select`/`--ignore`/`--per-file-ignores`, a file pattern that
+            doesn't compile, or an unreadable `--config` path. This is
             the same code `argparse` itself exits with (bypassing this
             function's own return) for a malformed argument such as an
             unknown flag. See `docs/adr/0045-pyproject-toml-configuration.md`.
@@ -100,6 +101,14 @@ def main(
     parser.add_argument(
         "--exclude",
         help="Glob pattern(s) to exclude files/directories (comma-separated), relative to the working directory",
+    )
+    parser.add_argument(
+        "--per-file-ignores",
+        action="append",
+        help=(
+            "Comma-separated `<file pattern>:<check>` pairs switching a check off in the files it matches, "
+            "relative to the working directory; an initial `!` negates the pattern; may be repeated"
+        ),
     )
     parser.add_argument(
         "--config",
@@ -181,6 +190,7 @@ def main(
         checks=checks,
         fix_mode=config.fix,
         cache_dir=config.root / CacheManager.DEFAULT_CACHE_DIR,
+        per_file_ignores=config.per_file_ignores,
     )
     all_violations = orchestrator.process_files(filenames)
 

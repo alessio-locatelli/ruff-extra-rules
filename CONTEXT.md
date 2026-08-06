@@ -32,6 +32,10 @@ _Avoid_: error, issue, finding
 A fixed string a check declares via `get_prefilter_pattern()` so `git grep` can cheaply skip files that can't possibly contain a violation, before the file is read or parsed.
 _Avoid_: filter — the user-facing `--exclude` glob is a distinct, unrelated concept (excludes files outright; a prefilter pattern only skips _checking_, never skips reporting if matched)
 
+**Per-file ignore**:
+A `per-file-ignores` entry switching one check off for the files a glob pattern matches, so a check can be dropped in a subtree without being dropped from the run (see `docs/adr/0049-per-file-ignores.md`). The check does not run on those files at all, and so never fixes them either.
+_Avoid_: exclude — an excluded file is not checked by anything; a per-file ignore only removes some checks from it. Also avoid calling it a suppression: an inline ignore comment suppresses one violation on one line, this decides which checks a file gets.
+
 **Inline ignore comment**:
 A `# pytriage: TR1` comment, or a comma-separated list (`# pytriage: TR1,TR5`) to suppress more than one check's violation on the same line. Detected via `tokenize`, never text/regex matching, so a string or byte literal containing the same text can't be mistaken for one.
 _Avoid_: pragma — this repo's own suppression comment is distinct from the _third-party_ linter pragmas (`noqa`, `type: ignore`, `pylint:`, etc.) that `misplaced-comment` recognizes and refuses to ever move; don't conflate the two.

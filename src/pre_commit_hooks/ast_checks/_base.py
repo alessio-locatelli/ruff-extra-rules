@@ -66,6 +66,18 @@ class ASTCheck(Protocol):
         """
         ...
 
+    @property
+    def tracks_direct_inputs(self) -> bool:
+        """Whether `record_direct_input` below actually does something, so
+        `CheckOrchestrator` still feeds this check a file it has been
+        switched off for by `per-file-ignores`: suppressing a *report* in one
+        file must not also withhold that file's content from the cross-file
+        analysis another file's report depends on. See
+        `docs/adr/0049-per-file-ignores.md` and
+        `docs/adr/0041-persistent-ty-daemon-for-cross-file-reanalysis.md`.
+        """
+        ...
+
     def record_direct_input(self, filepath: Path, source: str) -> None: ...
 
     def reconcile_direct_inputs(self, direct_inputs: list[Path]) -> list[Path]: ...
@@ -142,6 +154,10 @@ class BaseCheck:
     @property
     def cacheable(self) -> bool:
         return True
+
+    @property
+    def tracks_direct_inputs(self) -> bool:
+        return False
 
     def record_direct_input(self, _filepath: Path, _source: str) -> None:
         return

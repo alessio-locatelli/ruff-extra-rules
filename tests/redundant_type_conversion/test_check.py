@@ -33,6 +33,12 @@ def test_is_not_cacheable() -> None:
     assert RedundantTypeConversionCheck().cacheable is False
 
 
+def test_tracks_direct_inputs() -> None:
+    # See ADR-0049: a file this check is switched off for must still reach
+    # it, since what it reports in *other* files depends on that content.
+    assert RedundantTypeConversionCheck().tracks_direct_inputs is True
+
+
 @pytest.mark.parametrize(
     ("level", "expected"),
     [
