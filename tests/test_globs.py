@@ -50,6 +50,9 @@ from pre_commit_hooks.ast_checks._globs import InvalidGlobError, compile_glob, g
         ("[]].py", "].py", True),
         (r"a\*.py", "a*.py", True),
         (r"a\*.py", "ab.py", False),
+        (r"b\.py", "b.py", True),
+        (r"b\.py", "b\\.py", False),
+        (r"*\.py", "b\\.py", True),
         ("a,b.py", "a,b.py", True),
         ("a.b.py", "ab.py", False),
     ],
@@ -92,6 +95,9 @@ from pre_commit_hooks.ast_checks._globs import InvalidGlobError, compile_glob, g
         "closing-bracket-first-is-a-member",
         "backslash-escapes-a-metacharacter",
         "escaped-metacharacter-is-not-a-wildcard",
+        "an-escaped-dot-is-an-ordinary-dot",
+        "an-escaped-dot-is-not-a-backslash",
+        "a-star-spans-a-backslash-in-the-name",
         "comma-outside-braces-is-literal",
         "dot-is-literal",
     ],
@@ -100,6 +106,7 @@ def test_glob_matches(pattern: str, candidate: str, expected: bool) -> None:
     assert glob_matches(pattern, candidate) is expected
 
 
+# `ruff 0.16.1` refuses each of these too, rather than quietly matching nothing.
 @pytest.mark.parametrize(
     ("pattern", "needle"),
     [

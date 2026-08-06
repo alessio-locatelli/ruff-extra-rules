@@ -51,6 +51,12 @@ def _entry(pattern: str, anchor: Path, *, negated: bool = False) -> PerFileIgnor
         ("src/**", True, "tests/t.py", True),
         ("src/**", True, "src/pkg/mod.py", False),
         ("__init__.py", True, "src/pkg/mod.py", True),
+        ("./tests/**", False, "tests/t.py", True),
+        ("tests//**", False, "tests/deep/t.py", True),
+        ("tests/../src/**", False, "src/mod.py", True),
+        ("tests/../src/**", False, "tests/t.py", False),
+        ("./mod.py", False, "mod.py", True),
+        ("./mod.py", False, "src/mod.py", False),
     ],
     ids=[
         "basename-matches-at-any-depth",
@@ -60,6 +66,12 @@ def _entry(pattern: str, anchor: Path, *, negated: bool = False) -> PerFileIgnor
         "negated-pattern-applies-to-what-it-misses",
         "negated-pattern-spares-what-it-matches",
         "negation-applies-to-the-basename-matcher-too",
+        "a-leading-dot-component-is-resolved",
+        "a-repeated-separator-is-resolved",
+        "a-parent-component-is-resolved",
+        "a-resolved-pattern-stops-matching-what-it-left",
+        "a-dot-prefixed-name-anchors-at-the-root",
+        "a-dot-prefixed-name-is-not-matched-unanchored",
     ],
 )
 def test_which_checks_a_file_ignores(
