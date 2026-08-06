@@ -333,31 +333,22 @@ class CheckOrchestrator:
         fresh, on every call, regardless of what the cache holds for this
         file.
 
-        `file_checks.record_only` is handled first and unconditionally --
-        the cache-hit paths below can return without ever reading the file,
-        and a check switched off for this file by `per-file-ignores` must
-        still be handed its content (ADR-0049).
+        `file_checks.record_only` rides along with whichever pass below
+        already reads the file, since a check switched off for it by
+        `per-file-ignores` still has to be handed its content (ADR-0049).
+        Only a clean cache hit with nothing to re-run pays for its own read,
+        being the one path that would otherwise never open the file.
 
         Returns `None` if the file couldn't be read/parsed (mirrors
         `_check_file`'s own contract).
         """
-        if file_checks.record_only:
-            # Parsed first, exactly as the ordinary path parses before it
-            # records: a file that isn't valid Python must not reach a
-            # cross-file session and colour what it reports elsewhere.
-            parsed = self._parsed_source(filepath)
-            if parsed is None:
-                return None
-            source, _tree = parsed
-            for check in file_checks.record_only:
-                self._record_direct_input(check, filepath, source)
-
+        record_only = file_checks.record_only
         checks = file_checks.run
         if not checks:
             # Nothing left to run, but reading and parsing the file is what
             # turns an unreadable or unparseable input into a report rather
             # than a silent skip (ch. 13).
-            return self._check_file(filepath, ())
+            return self._check_file(filepath, (), record_only=record_only)
 
         hook_name = file_checks.hook_name
         cacheable_checks = [check for check in checks if check.cacheable]
@@ -374,6 +365,10 @@ class CheckOrchestrator:
         # same as a genuine cache miss. See ADR-0044.
         if cached_violations is not None and (not self.fix_mode or not cached_violations):
             if not always_rerun_checks:
+                # The one path that returns without opening the file, so a
+                # check owed its content gets a pass of its own here.
+                if record_only and not self._record_direct_inputs(filepath, record_only):
+                    return None
                 return cached_violations
             # The cacheable group's cache entry is still valid, but a
             # non-cacheable check must run fresh against this file's
@@ -384,7 +379,7 @@ class CheckOrchestrator:
             # produced, so it never touches the (already-clean) cacheable
             # group.
             self._fix_changed_file = False
-            fresh = self._check_file(filepath, always_rerun_checks)
+            fresh = self._check_file(filepath, always_rerun_checks, record_only=record_only)
             if fresh is None:
                 return None
             if not self._fix_changed_file:
@@ -402,7 +397,7 @@ class CheckOrchestrator:
             # that sets it.
             return self._check_and_cache(filepath, cacheable_checks, hook_name, extra_violations=fresh)
 
-        return self._check_and_cache(filepath, checks, hook_name)
+        return self._check_and_cache(filepath, checks, hook_name, record_only=record_only)
 
     def _check_and_cache(
         self,
@@ -411,6 +406,7 @@ class CheckOrchestrator:
         hook_name: str,
         *,
         extra_violations: list[Violation] | None = None,
+        record_only: Sequence[ASTCheck] = (),
     ) -> list[Violation] | None:
         """Runs `checks` fresh against `filepath` (fixing, in fix mode),
         then caches whatever cacheable subset of `checks` is complete and
@@ -425,7 +421,7 @@ class CheckOrchestrator:
         """
         rule_failures_before = len(self.rule_failures)
         self._fix_changed_file = False
-        violations = self._check_file(filepath, checks)
+        violations = self._check_file(filepath, checks, record_only=record_only)
         new_failure_ids = {check_id for _fp, check_id in self.rule_failures[rule_failures_before:]}
 
         if violations is None:
@@ -613,17 +609,19 @@ class CheckOrchestrator:
             logger.debug("Failed to decode %s", filepath, exc_info=True)
             return None
 
-    def _check_file(self, filepath: Path, checks: Sequence[ASTCheck]) -> list[Violation] | None:
-        return self._check_file_with_lifecycle(filepath, checks, direct=True)
+    def _check_file(
+        self, filepath: Path, checks: Sequence[ASTCheck], *, record_only: Sequence[ASTCheck] = ()
+    ) -> list[Violation] | None:
+        return self._check_file_with_lifecycle(filepath, checks, direct=True, record_only=record_only)
 
     def _check_derived_file(self, filepath: Path, checks: Sequence[ASTCheck]) -> list[Violation] | None:
         return self._check_file_with_lifecycle(filepath, checks, direct=False)
 
     def _check_file_with_lifecycle(
-        self, filepath: Path, checks: Sequence[ASTCheck], *, direct: bool
+        self, filepath: Path, checks: Sequence[ASTCheck], *, direct: bool, record_only: Sequence[ASTCheck] = ()
     ) -> list[Violation] | None:
         if not self.fix_mode or not locking_is_available():
-            return self._check_file_locked(filepath, checks, direct=direct)
+            return self._check_file_locked(filepath, checks, direct=direct, record_only=record_only)
 
         try:
             lock_path = _fix_lock_path(filepath)
@@ -633,7 +631,7 @@ class CheckOrchestrator:
                 timeout_seconds=_FIX_LOCK_TIMEOUT_SECONDS,
                 poll_interval_seconds=_FIX_LOCK_POLL_INTERVAL_SECONDS,
             ):
-                return self._check_file_locked(filepath, checks, direct=direct)
+                return self._check_file_locked(filepath, checks, direct=direct, record_only=record_only)
         except TimeoutError:
             logger.debug(
                 "Could not acquire the fix lock for %s within %ss -- another process may be fixing it",
@@ -663,7 +661,9 @@ class CheckOrchestrator:
             logger.debug("Failed to parse %s", filepath, exc_info=True)
             return None
 
-    def _check_file_locked(self, filepath: Path, checks: Sequence[ASTCheck], *, direct: bool) -> list[Violation] | None:
+    def _check_file_locked(
+        self, filepath: Path, checks: Sequence[ASTCheck], *, direct: bool, record_only: Sequence[ASTCheck] = ()
+    ) -> list[Violation] | None:
         parsed = self._parsed_source(filepath)
         if parsed is None:
             return None
@@ -697,10 +697,27 @@ class CheckOrchestrator:
                 if direct:
                     self._record_direct_input(check, filepath, source)
 
+        if direct:
+            for check in record_only:
+                self._record_direct_input(check, filepath, source)
+
         if self.fix_mode and all_violations:
             self._apply_fixes(filepath, all_violations)
 
         return all_violations
+
+    def _record_direct_inputs(self, filepath: Path, checks: Sequence[ASTCheck]) -> bool:
+        """Reads and parses `filepath` for its own sake, for the one caller
+        with nothing else to read it. `False` if it couldn't be, which is that
+        caller's cue to report the file unprocessable.
+        """
+        parsed = self._parsed_source(filepath)
+        if parsed is None:
+            return False
+        source, _tree = parsed
+        for check in checks:
+            self._record_direct_input(check, filepath, source)
+        return True
 
     def _record_direct_input(self, check: ASTCheck, filepath: Path, source: str) -> None:
         if check.check_id in self._unavailable_check_ids:
