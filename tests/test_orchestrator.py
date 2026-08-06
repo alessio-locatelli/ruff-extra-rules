@@ -1553,6 +1553,24 @@ class _CrossFileProbeCheck(_DrainingProbeCheck):
     tracks_direct_inputs = True
 
 
+class _PrefilteredProbeCheck(_AlwaysRerunProbeCheck):
+    __slots__ = ()
+
+    check_id = "prefiltered-probe"
+
+    def get_prefilter_pattern(self) -> list[str] | None:
+        return ["probe-marker"]
+
+
+class _PrefilteredCrossFileProbeCheck(_CrossFileProbeCheck):
+    __slots__ = ()
+
+    check_id = "prefiltered-cross-file-probe"
+
+    def get_prefilter_pattern(self) -> list[str] | None:
+        return ["cross-file-marker"]
+
+
 class _UnavailableCrossFileProbeCheck(_CrossFileProbeCheck):
     __slots__ = ()
 
@@ -4301,3 +4319,43 @@ def test_an_ignored_file_is_not_fed_to_a_check_already_found_unavailable(tmp_pat
 
     assert orchestrator.unavailable_checks == [(probe.check_id, "simulated: prerequisite missing")]
     assert probe.direct_inputs == []
+
+
+def test_a_prefilter_skips_the_files_its_own_check_is_ignored_for(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Scanning for a check that cannot run is the expensive half of deciding
+    # something already decided; see ADR-0049.
+    ignored = tmp_path / "skip_me.py"
+    ignored.write_text("x = 1\n")
+    checked = tmp_path / "check_me.py"
+    checked.write_text("y = 2\n")
+    ignored_path, checked_path = str(ignored), str(checked)
+    plain = _PrefilteredProbeCheck()
+    cross_file = _PrefilteredCrossFileProbeCheck()
+
+    scanned: dict[str, list[str]] = {}
+
+    def spy(filepaths: list[str], patterns: list[str]) -> list[str]:
+        scanned[patterns[0]] = sorted(filepaths)
+        return filepaths
+
+    monkeypatch.setattr(_orchestrator, "batch_filter_files", spy)
+
+    per_file_ignores = PerFileIgnoreList(
+        (
+            PerFileIgnore(
+                pattern="skip_me.py",
+                anchor=tmp_path,
+                negated=False,
+                check_ids=frozenset({plain.check_id, cross_file.check_id}),
+            ),
+        )
+    )
+    CheckOrchestrator(checks=[plain, cross_file], per_file_ignores=per_file_ignores).process_files(
+        [ignored_path, checked_path]
+    )
+
+    assert scanned["probe-marker"] == [checked_path]
+    # A check that has to be handed the file regardless is still asked.
+    assert scanned["cross-file-marker"] == sorted([checked_path, ignored_path])
