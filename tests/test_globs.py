@@ -138,6 +138,8 @@ def test_glob_matches(pattern: str, candidate: str, expected: bool) -> None:
         ("{a,b", "leaves a `{` unclosed"),
         ("a}", "closes a `{` that was never opened"),
         ("a\\", "ends with an unfinished escape"),
+        # `{a,aa}` repeated overlaps with itself, which a backtracking engine
+        # explores exhaustively; the ceiling turns a stall into a rejection.
         ("{a,aa}" * 30 + "b", "more than 1024 ways to match"),
     ],
     ids=[
@@ -166,13 +168,6 @@ def test_an_anchor_is_escaped_rather_than_read_as_a_pattern() -> None:
     # A checkout path is a real directory name, not a glob; an unescaped `[`
     # here would be an unclosed character class and fail to compile at all.
     assert anchored_pattern("src/**", Path("/base/pro[ject")) == "/base/pro\\[ject/src/**"
-
-
-def test_a_pattern_is_matched_without_exploring_its_alternatives_exhaustively() -> None:
-    # `{a,aa}` repeated overlaps with itself, which a backtracking engine
-    # explores exhaustively; the ceiling turns a stall into a rejection.
-    with pytest.raises(InvalidGlobError, match="more than 1024 ways to match"):
-        compile_glob("{a,aa}" * 30 + "b")
 
 
 def test_a_pattern_may_still_spell_out_a_useful_number_of_alternatives() -> None:
