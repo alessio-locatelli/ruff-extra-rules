@@ -466,20 +466,35 @@ class CheckOrchestrator:
         returns None specifically to see every file. Preserves `self.checks`
         order per file, since `_apply_fixes` depends on it.
 
+        A check's prefilter is never asked about a file `per-file-ignores`
+        switched it off for -- the answer could not change what runs, and
+        the scan is the expensive half of deciding it. A check tracking
+        direct inputs is the exception, since it still has to be handed
+        those files (ADR-0049).
+
         The cache identity is decided from the `per-file-ignores` outcome
         alone, never from the prefilter: a prefiltered-out check genuinely
         has nothing to report for that file, so its absence is already part
         of what a cache entry means (ADR-0049).
         """
+        ignored_by_file = {
+            filepath_str: self._per_file_ignores.ignored_check_ids(filepath_str) for filepath_str in filepaths
+        }
+
         matches_by_check_id: dict[str, set[str]] = {}
         for check in self.checks:
             pattern = check.get_prefilter_pattern()
             if pattern:
-                matches_by_check_id[check.check_id] = set(batch_filter_files(filepaths, pattern))
+                candidates = [
+                    filepath_str
+                    for filepath_str in filepaths
+                    if check.tracks_direct_inputs or check.check_id not in ignored_by_file[filepath_str]
+                ]
+                matches_by_check_id[check.check_id] = set(batch_filter_files(candidates, pattern))
 
         checks_by_file: dict[str, _FileChecks] = {}
         for filepath_str in filepaths:
-            ignored = self._per_file_ignores.ignored_check_ids(filepath_str)
+            ignored = ignored_by_file[filepath_str]
             applicable = [
                 check
                 for check in self.checks
@@ -489,11 +504,10 @@ class CheckOrchestrator:
             record_only = tuple(
                 check for check in applicable if check.check_id in ignored and check.tracks_direct_inputs
             )
-            # Keyed on `applicable`, not on what survives `per-file-ignores`:
-            # a file left with nothing to run is still an input the user
-            # named, and dropping it here is what would make an unreadable
-            # one vanish without a word (ch. 13).
-            if applicable:
+            # A file `per-file-ignores` emptied out is still an input the
+            # user named, and dropping it here is what would make an
+            # unreadable one vanish without a word (ch. 13).
+            if applicable or ignored:
                 checks_by_file[filepath_str] = _FileChecks(
                     run=run,
                     record_only=record_only,
