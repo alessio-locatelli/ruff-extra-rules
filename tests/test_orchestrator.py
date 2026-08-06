@@ -4359,3 +4359,18 @@ def test_a_prefilter_skips_the_files_its_own_check_is_ignored_for(
     assert scanned["probe-marker"] == [checked_path]
     # A check that has to be handed the file regardless is still asked.
     assert scanned["cross-file-marker"] == sorted([checked_path, ignored_path])
+
+
+@pytest.mark.parametrize(
+    ("pattern", "expected"),
+    [("../{anchor}/vendor/**", []), ("{absolute}/vendor/**", []), ("../elsewhere/**", ["vendor/v.py"])],
+    ids=["leads-back-in", "absolute-pattern", "leads-out-and-stays-out"],
+)
+def test_an_exclude_pattern_is_resolved_against_its_anchor(tmp_path: Path, pattern: str, expected: list[str]) -> None:
+    anchor = tmp_path / "project"
+    spelled = pattern.format(anchor=anchor.name, absolute=anchor)
+    absolute = [str(anchor / "vendor" / "v.py")]
+
+    filtered = filter_excluded_files(absolute, [ExcludePattern(spelled, anchor)])
+
+    assert filtered == [str(anchor / name) for name in expected]

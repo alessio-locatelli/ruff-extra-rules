@@ -289,3 +289,28 @@ def test_an_unusable_file_is_still_reported_when_every_check_is_ignored(
 
     assert main([str(filepath), "--select", "meaningless-vars"]) == 1
     assert "could not be read or parsed" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("pattern", "expected"),
+    [
+        ("../{anchor}/src/**", True),
+        ("{absolute}/src/**", True),
+        ("../elsewhere/**", False),
+        ("../../../../../../../../../../../../elsewhere/**", False),
+    ],
+    ids=[
+        "a-parent-component-can-lead-back-in",
+        "an-absolute-pattern-is-honoured",
+        "a-pattern-leading-out-matches-nothing",
+        "a-pattern-climbing-past-the-root-matches-nothing",
+    ],
+)
+def test_a_pattern_is_resolved_against_its_anchor(tmp_path: Path, pattern: str, expected: bool) -> None:
+    # `ruff` resolves the pattern before matching, so one that walks out and
+    # back in still names what it looks like; see ADR-0046.
+    anchor = tmp_path / "project"
+    spelled = pattern.format(anchor=anchor.name, absolute=anchor)
+    ignores = PerFileIgnoreList((_entry(spelled, anchor),))
+
+    assert ("a-check" in ignores.ignored_check_ids(anchor / "src" / "mod.py")) is expected

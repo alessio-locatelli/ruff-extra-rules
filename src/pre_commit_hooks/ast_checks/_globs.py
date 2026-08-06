@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, NamedTuple
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["InvalidGlobError", "compile_glob", "glob_matches", "normalize_pattern", "relative_to_anchor"]
+__all__ = ["InvalidGlobError", "anchored_pattern", "compile_glob", "glob_matches", "relative_to_anchor"]
 
 
 class InvalidGlobError(ValueError):
@@ -55,24 +55,37 @@ def glob_matches(pattern: str, candidate: str) -> bool:
 
 
 @functools.cache
-def normalize_pattern(pattern: str) -> str:
-    """Resolves `.`, `..`, and repeated separators, the way `ruff` resolves a
-    pattern against its anchor before matching, so `./tests/**` and
-    `tests/../src/**` mean what they look like.
+def anchored_pattern(pattern: str, anchor: Path) -> str | None:
+    """`pattern` resolved against `anchor` and expressed relative to it again,
+    the way `ruff` resolves a pattern before matching: `./tests/**`,
+    `tests/../src/**`, `../<project>/tests/**` and an absolute path all name
+    what they look like. `None` for a pattern resolving outside `anchor`,
+    which nothing beneath it can ever match (see
+    `docs/adr/0046-exclude-glob-semantics.md`).
 
     Only the anchored half of a match uses this. `ruff` matches a bare file
     name against the pattern exactly as written, so `./mod.py` covers the
     project root's own `mod.py` and no other.
     """
+    absolute = pattern if pattern.startswith("/") else f"{anchor}/{pattern}"
+    parts = _resolved_parts(absolute)
+    anchor_parts = _resolved_parts(str(anchor))
+    if parts[: len(anchor_parts)] != anchor_parts:
+        return None
+    return "/".join(parts[len(anchor_parts) :])
+
+
+def _resolved_parts(path: str) -> list[str]:
     parts: list[str] = []
-    for part in pattern.split("/"):
+    for part in path.split("/"):
         if part in {"", "."}:
             continue
-        if part == ".." and parts and parts[-1] != "..":
-            parts.pop()
+        if part == "..":
+            if parts:
+                parts.pop()
             continue
         parts.append(part)
-    return "/".join(parts)
+    return parts
 
 
 def relative_to_anchor(absolute: PurePosixPath, anchor: Path) -> PurePosixPath | None:
