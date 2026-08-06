@@ -167,6 +167,7 @@ class CheckOrchestrator:
     __slots__ = (
         "_cacheable_check_ids",
         "_cacheable_fingerprints",
+        "_check_ids",
         "_fix_changed_file",
         "_hook_names",
         "_per_file_ignores",
@@ -193,6 +194,7 @@ class CheckOrchestrator:
         self._cacheable_fingerprints = {
             check.check_id: f"{check.check_id}={_fingerprint_check(check)}" for check in checks if check.cacheable
         }
+        self._check_ids = frozenset(check.check_id for check in checks)
         self._cacheable_check_ids = frozenset(self._cacheable_fingerprints)
         self._hook_names: dict[frozenset[str], str] = {}
         self.cache = CacheManager(
@@ -473,8 +475,13 @@ class CheckOrchestrator:
         has nothing to report for that file, so its absence is already part
         of what a cache entry means (ADR-0049).
         """
+        # Intersected with this run's own checks: one table serves both
+        # published hooks (ADR-0045), so an entry naming only the other one's
+        # check has switched nothing off here and must not change what this
+        # run reads or reports.
         ignored_by_file = {
-            filepath_str: self._per_file_ignores.ignored_check_ids(filepath_str) for filepath_str in filepaths
+            filepath_str: self._per_file_ignores.ignored_check_ids(filepath_str) & self._check_ids
+            for filepath_str in filepaths
         }
 
         matches_by_check_id: dict[str, set[str]] = {}
