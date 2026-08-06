@@ -296,12 +296,14 @@ def test_an_unusable_file_is_still_reported_when_every_check_is_ignored(
     [
         ("../{anchor}/src/**", True),
         ("{absolute}/src/**", True),
+        ("../{{{anchor},elsewhere}}/src/**", True),
         ("../elsewhere/**", False),
         ("../../../../../../../../../../../../elsewhere/**", False),
     ],
     ids=[
         "a-parent-component-can-lead-back-in",
         "an-absolute-pattern-is-honoured",
+        "an-alternative-that-leads-back-in-is-resolved",
         "a-pattern-leading-out-matches-nothing",
         "a-pattern-climbing-past-the-root-matches-nothing",
     ],
@@ -314,3 +316,39 @@ def test_a_pattern_is_resolved_against_its_anchor(tmp_path: Path, pattern: str, 
     ignores = PerFileIgnoreList((_entry(spelled, anchor),))
 
     assert ("a-check" in ignores.ignored_check_ids(anchor / "src" / "mod.py")) is expected
+
+
+# Every expectation below was measured against `ruff 0.16.1`. Each pattern
+# carries a directory, so the anchored half of the rule decides it -- the
+# file's own name never matches these.
+@pytest.mark.parametrize(
+    ("pattern", "relative", "expected"),
+    [
+        (r"src/a\{b,c\}d.py", "src/a{b,c}d.py", True),
+        ("src/[{]a.py", "src/{a.py", True),
+        ("src/{a[,]b,c}.py", "src/a,b.py", True),
+        ("src/{a[,]b,c}.py", "src/c.py", True),
+        (r"src/{a\,b,c}.py", "src/a,b.py", True),
+        ("src/a{b,{c,d}}e.py", "src/ade.py", True),
+        ("src/{a,[!x]b}.py", "src/yb.py", True),
+        ("src/{a,[]]b}.py", "src/]b.py", True),
+        ("src/{a,b}.py", "src/c.py", False),
+    ],
+    ids=[
+        "escaped-braces-are-literal",
+        "a-brace-in-a-character-class-is-literal",
+        "a-comma-in-a-character-class-does-not-split",
+        "a-class-branch-still-alternates",
+        "an-escaped-comma-does-not-split",
+        "braces-nest",
+        "a-negated-class-inside-a-branch",
+        "a-closing-bracket-first-inside-a-branch",
+        "a-branch-still-has-to-match",
+    ],
+)
+def test_an_anchored_pattern_alternates_the_way_it_translates(
+    tmp_path: Path, pattern: str, relative: str, expected: bool
+) -> None:
+    ignores = PerFileIgnoreList((_entry(pattern, tmp_path),))
+
+    assert ("a-check" in ignores.ignored_check_ids(tmp_path / relative)) is expected
