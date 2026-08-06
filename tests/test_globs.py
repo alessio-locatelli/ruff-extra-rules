@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
-from pre_commit_hooks.ast_checks._globs import InvalidGlobError, compile_glob, glob_matches
+from pre_commit_hooks.ast_checks._globs import InvalidGlobError, anchored_pattern, compile_glob, glob_matches
 
 
 # Every expectation below was measured against `ruff 0.16.1` before being
@@ -143,3 +144,15 @@ def test_glob_matches(pattern: str, candidate: str, expected: bool) -> None:
 def test_an_uncompilable_pattern_is_rejected(pattern: str, needle: str) -> None:
     with pytest.raises(InvalidGlobError, match=re.escape(needle)):
         compile_glob(pattern)
+
+
+def test_an_anchored_pattern_keeps_its_alternation_rather_than_expanding_it() -> None:
+    # One pattern per branch would be 2**n of them for n adjacent groups, so
+    # the alternation stays in the pattern for the matcher to handle.
+    assert anchored_pattern("{a,b}{c,d}/x.py", Path("/p")) == "/p/{a,b}{c,d}/x.py"
+
+
+def test_an_anchor_is_escaped_rather_than_read_as_a_pattern() -> None:
+    # A checkout path is a real directory name, not a glob; an unescaped `[`
+    # here would be an unclosed character class and fail to compile at all.
+    assert anchored_pattern("src/**", Path("/base/pro[ject")) == "/base/pro\\[ject/src/**"

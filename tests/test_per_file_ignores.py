@@ -352,3 +352,10 @@ def test_an_anchored_pattern_alternates_the_way_it_translates(
     ignores = PerFileIgnoreList((_entry(pattern, tmp_path),))
 
     assert ("a-check" in ignores.ignored_check_ids(tmp_path / relative)) is expected
+
+
+def test_a_glob_metacharacter_in_the_anchor_path_still_matches(tmp_path: Path) -> None:
+    anchor = tmp_path / "pro[ject"
+    ignores = PerFileIgnoreList((_entry("src/**", anchor),))
+
+    assert "a-check" in ignores.ignored_check_ids(anchor / "src" / "mod.py")

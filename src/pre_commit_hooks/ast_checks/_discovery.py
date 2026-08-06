@@ -13,7 +13,7 @@ from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, NamedTuple
 
-from ._globs import anchored_patterns, glob_matches, relative_to_anchor
+from ._globs import anchored_pattern, glob_matches, relative_to_anchor
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -50,18 +50,19 @@ def filter_excluded_files(filepaths: list[str], exclude_patterns: Sequence[Exclu
 def _is_excluded(absolute: PurePosixPath, patterns_by_anchor: dict[Path, list[str]]) -> bool:
     for anchor, patterns in patterns_by_anchor.items():
         relative = relative_to_anchor(absolute, anchor)
-        if relative is not None and any(_matches(relative, pattern, anchor) for pattern in patterns):
+        if relative is not None and any(_matches(absolute, relative, pattern, anchor) for pattern in patterns):
             return True
     return False
 
 
-def _matches(relative: PurePosixPath, pattern: str, anchor: Path) -> bool:
+def _matches(absolute: PurePosixPath, relative: PurePosixPath, pattern: str, anchor: Path) -> bool:
     """See `docs/adr/0046-exclude-glob-semantics.md`."""
     if "/" not in pattern:
         return any(glob_matches(pattern, part) for part in relative.parts)
-    candidates = [str(relative), *(str(parent) for parent in relative.parents if parent != _CURRENT_DIR)]
-    return any(
-        glob_matches(anchored, candidate) for anchored in anchored_patterns(pattern, anchor) for candidate in candidates
+    anchored = anchored_pattern(pattern, anchor)
+    directories = (PurePosixPath(anchor) / parent for parent in relative.parents if parent != _CURRENT_DIR)
+    return glob_matches(anchored, str(absolute)) or any(
+        glob_matches(anchored, str(directory)) for directory in directories
     )
 
 
