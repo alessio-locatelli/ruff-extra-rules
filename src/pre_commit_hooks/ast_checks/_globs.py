@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, NamedTuple
 if TYPE_CHECKING:
     from pathlib import Path
 
-__all__ = ["InvalidGlobError", "compile_glob", "glob_matches", "relative_to_anchor"]
+__all__ = ["InvalidGlobError", "compile_glob", "glob_matches", "normalize_pattern", "relative_to_anchor"]
 
 
 class InvalidGlobError(ValueError):
@@ -52,6 +52,27 @@ def compile_glob(pattern: str) -> re.Pattern[str]:
 
 def glob_matches(pattern: str, candidate: str) -> bool:
     return compile_glob(pattern).fullmatch(candidate) is not None
+
+
+@functools.cache
+def normalize_pattern(pattern: str) -> str:
+    """Resolves `.`, `..`, and repeated separators, the way `ruff` resolves a
+    pattern against its anchor before matching, so `./tests/**` and
+    `tests/../src/**` mean what they look like.
+
+    Only the anchored half of a match uses this. `ruff` matches a bare file
+    name against the pattern exactly as written, so `./mod.py` covers the
+    project root's own `mod.py` and no other.
+    """
+    parts: list[str] = []
+    for part in pattern.split("/"):
+        if part in {"", "."}:
+            continue
+        if part == ".." and parts and parts[-1] != "..":
+            parts.pop()
+            continue
+        parts.append(part)
+    return "/".join(parts)
 
 
 def relative_to_anchor(absolute: PurePosixPath, anchor: Path) -> PurePosixPath | None:

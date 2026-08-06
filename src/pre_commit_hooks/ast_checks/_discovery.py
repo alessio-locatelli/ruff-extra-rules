@@ -13,7 +13,7 @@ from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, NamedTuple
 
-from ._globs import glob_matches, relative_to_anchor
+from ._globs import glob_matches, normalize_pattern, relative_to_anchor
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -59,8 +59,9 @@ def _matches(relative: PurePosixPath, pattern: str) -> bool:
     """See `docs/adr/0046-exclude-glob-semantics.md`."""
     if "/" not in pattern:
         return any(glob_matches(pattern, part) for part in relative.parts)
-    return glob_matches(pattern, str(relative)) or any(
-        glob_matches(pattern, str(parent)) for parent in relative.parents if parent != _CURRENT_DIR
+    anchored = normalize_pattern(pattern)
+    return glob_matches(anchored, str(relative)) or any(
+        glob_matches(anchored, str(parent)) for parent in relative.parents if parent != _CURRENT_DIR
     )
 
 
