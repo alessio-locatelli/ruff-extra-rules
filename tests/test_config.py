@@ -112,6 +112,7 @@ def test_an_unreadable_config_file_is_reported_rather_than_skipped(
         ("[tool.ruff-extra-rules]\nfxi = true\n", "Unknown field `fxi`"),
         ('[tool.ruff-extra-rules]\nfix = "yes"\n', "expected a boolean"),
         ('[tool.ruff-extra-rules]\nexclude = "a"\n', "expected a list of strings"),
+        ('[tool.ruff-extra-rules]\nexclude = ["[bad"]\n', "Invalid file pattern"),
         ("[tool.ruff-extra-rules]\nselect = [1]\n", "expected a list of strings"),
         ('[tool.ruff-extra-rules]\nselect = ["nope"]\n', "Unknown check `nope`"),
         ("[tool.ruff-extra-rules]\nmeaningless-vars = 1\n", "must be a table"),
@@ -124,6 +125,7 @@ def test_an_unreadable_config_file_is_reported_rather_than_skipped(
         "unknown-global-field",
         "non-boolean-fix",
         "non-list-exclude",
+        "uncompilable-exclude-pattern",
         "non-string-select-entry",
         "unknown-check-in-select",
         "non-table-check-section",
@@ -199,7 +201,7 @@ def test_unknown_field_error_lists_the_valid_ones(project: Path, capsys: pytest.
     assert main([str(filepath)]) == 2
 
     err = capsys.readouterr().err
-    for valid in ("`fix`", "`select`", "`ignore`", "`exclude`", "`meaningless-vars`"):
+    for valid in ("`fix`", "`select`", "`ignore`", "`exclude`", "`per-file-ignores`", "`meaningless-vars`"):
         assert valid in err
 
 
@@ -233,6 +235,7 @@ def _parsed(argv: list[str], *, enabled: Sequence[type[ASTCheck]]) -> argparse.N
     parser.add_argument("--select", action="append")
     parser.add_argument("--ignore", action="append")
     parser.add_argument("--exclude")
+    parser.add_argument("--per-file-ignores", action="append")
     parser.add_argument("--config")
     parser.add_argument("--isolated", action="store_true")
     parser.add_argument("--fix", action="store_true", default=None)
@@ -433,3 +436,13 @@ def test_the_cache_directory_is_anchored_at_the_discovered_project_root(project:
 
     assert (project / ".cache" / "pre_commit_hooks").is_dir()
     assert not (source / ".cache").exists()
+
+
+def test_an_uncompilable_exclude_pattern_on_the_command_line_is_rejected(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filepath = project / "module.py"
+    filepath.write_text("x = 1\n")
+
+    assert main([str(filepath), "--exclude", "[bad"]) == 2
+    assert "Invalid file pattern" in capsys.readouterr().err

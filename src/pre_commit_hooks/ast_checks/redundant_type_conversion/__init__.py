@@ -83,6 +83,11 @@ class RedundantTypeConversionCheck(BaseCheck):
         """See ADR-0034."""
         return False
 
+    @property
+    def tracks_direct_inputs(self) -> bool:
+        """See ADR-0041."""
+        return True
+
     def get_prefilter_pattern(self) -> list[str] | None:
         # Widens to "check every file" once a persistent daemon might already be running (ADR-0041): a
         # file can be a dependency of an already-tracked one without having any redundant-conversion

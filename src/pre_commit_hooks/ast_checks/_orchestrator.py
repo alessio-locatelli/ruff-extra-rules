@@ -10,6 +10,7 @@ import json
 import logging
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -35,6 +36,7 @@ from ._base import (
     mark_fixed,
     read_source_with_encoding,
 )
+from ._per_file_ignores import PerFileIgnoreList
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -137,6 +139,20 @@ def _fingerprint_check(check: ASTCheck) -> str:
     return json.dumps(_instance_state(check), default=_fingerprint_default, sort_keys=True)
 
 
+@dataclass(frozen=True, slots=True)
+class _FileChecks:
+    """One file's share of a run: the checks to run against it, the checks
+    `per-file-ignores` switched off for it that must still be handed its
+    content (see `ASTCheck.tracks_direct_inputs`), and the cache identity of
+    what running that set produces. See
+    `docs/adr/0049-per-file-ignores.md`.
+    """
+
+    run: tuple[ASTCheck, ...]
+    record_only: tuple[ASTCheck, ...]
+    hook_name: str
+
+
 class CheckOrchestrator:
     """Orchestrates running multiple AST checks on Python files.
 
@@ -149,7 +165,11 @@ class CheckOrchestrator:
     """
 
     __slots__ = (
+        "_cacheable_check_ids",
+        "_cacheable_fingerprints",
         "_fix_changed_file",
+        "_hook_names",
+        "_per_file_ignores",
         "_unavailable_check_ids",
         "cache",
         "checks",
@@ -165,12 +185,19 @@ class CheckOrchestrator:
         *,
         fix_mode: bool = False,
         cache_dir: Path | None = None,
+        per_file_ignores: PerFileIgnoreList | None = None,
     ) -> None:
         self.checks = checks
         self.fix_mode = fix_mode
+        self._per_file_ignores = per_file_ignores or PerFileIgnoreList()
+        self._cacheable_fingerprints = {
+            check.check_id: f"{check.check_id}={_fingerprint_check(check)}" for check in checks if check.cacheable
+        }
+        self._cacheable_check_ids = frozenset(self._cacheable_fingerprints)
+        self._hook_names: dict[frozenset[str], str] = {}
         self.cache = CacheManager(
             cache_dir=cache_dir,
-            hook_name=self._generate_hook_name(),
+            hook_name=self._hook_name_for(self._cacheable_check_ids),
             cache_version=self._generate_cache_version(),
         )
         # Populated by process_files() with every candidate file _check_file()
@@ -243,9 +270,9 @@ class CheckOrchestrator:
             except OSError:
                 logger.debug("Could not resolve input path %s", filepath_str, exc_info=True)
 
-        for filepath_str, checks in checks_by_file.items():
+        for filepath_str, file_checks in checks_by_file.items():
             filepath = Path(filepath_str)
-            violations = self._process_single_file(filepath, checks)
+            violations = self._process_single_file(filepath, file_checks)
 
             if violations is None:
                 # Unreadable, undecodable, or unparseable — _check_file
@@ -288,6 +315,8 @@ class CheckOrchestrator:
                 except OSError:
                     logger.debug("Check %s returned an unresolvable path %s", check.check_id, extra_file, exc_info=True)
                     continue
+                if check.check_id in self._per_file_ignores.ignored_check_ids(extra_resolved):
+                    continue
                 violations = self._check_derived_file(extra_resolved, [check])
                 extra_file_str = resolved_to_key.get(extra_resolved, str(extra_resolved))
                 if violations is None:
@@ -296,22 +325,47 @@ class CheckOrchestrator:
                 else:
                     _replace_check_violations(all_violations, extra_file_str, check.check_id, violations)
 
-    def _process_single_file(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
-        """Runs `checks` against a single file, honoring each check's own
-        `cacheable` flag: a cacheable check's violations may come from (and
-        be written to) the shared per-file cache; a non-cacheable check
-        (see `ASTCheck.cacheable`) is always re-run fresh, on every call,
-        regardless of what the cache holds for this file.
+    def _process_single_file(self, filepath: Path, file_checks: _FileChecks) -> list[Violation] | None:
+        """Runs `file_checks.run` against a single file, honoring each
+        check's own `cacheable` flag: a cacheable check's violations may
+        come from (and be written to) the shared per-file cache; a
+        non-cacheable check (see `ASTCheck.cacheable`) is always re-run
+        fresh, on every call, regardless of what the cache holds for this
+        file.
+
+        `file_checks.record_only` is handled first and unconditionally --
+        the cache-hit paths below can return without ever reading the file,
+        and a check switched off for this file by `per-file-ignores` must
+        still be handed its content (ADR-0049).
 
         Returns `None` if the file couldn't be read/parsed (mirrors
         `_check_file`'s own contract).
         """
+        if file_checks.record_only:
+            # Parsed first, exactly as the ordinary path parses before it
+            # records: a file that isn't valid Python must not reach a
+            # cross-file session and colour what it reports elsewhere.
+            parsed = self._parsed_source(filepath)
+            if parsed is None:
+                return None
+            source, _tree = parsed
+            for check in file_checks.record_only:
+                self._record_direct_input(check, filepath, source)
+
+        checks = file_checks.run
+        if not checks:
+            # Nothing left to run, but reading and parsing the file is what
+            # turns an unreadable or unparseable input into a report rather
+            # than a silent skip (ch. 13).
+            return self._check_file(filepath, ())
+
+        hook_name = file_checks.hook_name
         cacheable_checks = [check for check in checks if check.cacheable]
         always_rerun_checks = [check for check in checks if not check.cacheable]
 
         cached_violations: list[Violation] | None = None
         if cacheable_checks:
-            cached_violations = self._get_cached_violations(filepath)
+            cached_violations = self._get_cached_violations(filepath, hook_name)
 
         # A cache hit is only trustworthy in fix mode when it reports zero
         # violations: fix_data is never cached (see _cache_violations), so
@@ -346,12 +400,17 @@ class CheckOrchestrator:
             # cacheable_checks is guaranteed non-empty here: cached_violations
             # is only ever not None when it was, since that's the only branch
             # that sets it.
-            return self._check_and_cache(filepath, cacheable_checks, extra_violations=fresh)
+            return self._check_and_cache(filepath, cacheable_checks, hook_name, extra_violations=fresh)
 
-        return self._check_and_cache(filepath, checks)
+        return self._check_and_cache(filepath, checks, hook_name)
 
     def _check_and_cache(
-        self, filepath: Path, checks: list[ASTCheck], *, extra_violations: list[Violation] | None = None
+        self,
+        filepath: Path,
+        checks: Sequence[ASTCheck],
+        hook_name: str,
+        *,
+        extra_violations: list[Violation] | None = None,
     ) -> list[Violation] | None:
         """Runs `checks` fresh against `filepath` (fixing, in fix mode),
         then caches whatever cacheable subset of `checks` is complete and
@@ -395,17 +454,22 @@ class CheckOrchestrator:
             # A violation marked fixed no longer exists in the file's
             # current content, so it must never be cached as still present.
             cacheable_violations = [v for v in violations if v.check_id in cacheable_ids and not is_fixed(v)]
-            self._cache_violations(filepath, cacheable_violations)
+            self._cache_violations(filepath, hook_name, cacheable_violations)
 
         return violations + extra_violations if extra_violations else violations
 
-    def _checks_by_file(self, filepaths: list[str]) -> dict[str, list[ASTCheck]]:
+    def _checks_by_file(self, filepaths: list[str]) -> dict[str, _FileChecks]:
         """Applies each check's own prefilter pattern independently, rather
         than combining every enabled check's pattern into one OR'd filter --
         the combined filter dropped a file for every check whenever it
         matched none of them, even a check whose own get_prefilter_pattern()
         returns None specifically to see every file. Preserves `self.checks`
         order per file, since `_apply_fixes` depends on it.
+
+        The cache identity is decided from the `per-file-ignores` outcome
+        alone, never from the prefilter: a prefiltered-out check genuinely
+        has nothing to report for that file, so its absence is already part
+        of what a cache entry means (ADR-0049).
         """
         matches_by_check_id: dict[str, set[str]] = {}
         for check in self.checks:
@@ -413,27 +477,45 @@ class CheckOrchestrator:
             if pattern:
                 matches_by_check_id[check.check_id] = set(batch_filter_files(filepaths, pattern))
 
-        checks_by_file: dict[str, list[ASTCheck]] = {}
+        checks_by_file: dict[str, _FileChecks] = {}
         for filepath_str in filepaths:
+            ignored = self._per_file_ignores.ignored_check_ids(filepath_str)
             applicable = [
                 check
                 for check in self.checks
                 if check.check_id not in matches_by_check_id or filepath_str in matches_by_check_id[check.check_id]
             ]
+            run = tuple(check for check in applicable if check.check_id not in ignored)
+            record_only = tuple(
+                check for check in applicable if check.check_id in ignored and check.tracks_direct_inputs
+            )
+            # Keyed on `applicable`, not on what survives `per-file-ignores`:
+            # a file left with nothing to run is still an input the user
+            # named, and dropping it here is what would make an unreadable
+            # one vanish without a word (ch. 13).
             if applicable:
-                checks_by_file[filepath_str] = applicable
+                checks_by_file[filepath_str] = _FileChecks(
+                    run=run,
+                    record_only=record_only,
+                    hook_name=self._hook_name_for(self._cacheable_check_ids - ignored),
+                )
 
         return checks_by_file
 
-    def _generate_hook_name(self) -> str:
-        """Identity of *what produced* a cached result: a short hash of the
-        enabled cacheable checks and their own config. See ADR-0044 and
-        ADR-0005 for why this is split from `_generate_cache_version()`.
+    def _hook_name_for(self, check_ids: frozenset[str]) -> str:
+        """Identity of *what produced* a cached result: a short hash of
+        `check_ids` (a subset of the enabled cacheable checks, since
+        `per-file-ignores` can switch some of them off for one file) and
+        their own config. See ADR-0044 and ADR-0005 for why this is split
+        from `_generate_cache_version()`, and ADR-0049 for why it is decided
+        per file.
         """
-        cacheable_checks = [check for check in self.checks if check.cacheable]
-        fingerprints = sorted(f"{check.check_id}={_fingerprint_check(check)}" for check in cacheable_checks)
-        digest = hashlib.sha1(",".join(fingerprints).encode(), usedforsecurity=False).hexdigest()[:16]
-        return f"ruff-extra-rules:{digest}"
+        hook_name = self._hook_names.get(check_ids)
+        if hook_name is None:
+            fingerprints = sorted(self._cacheable_fingerprints[check_id] for check_id in check_ids)
+            digest = hashlib.sha1(",".join(fingerprints).encode(), usedforsecurity=False).hexdigest()[:16]
+            hook_name = self._hook_names[check_ids] = f"ruff-extra-rules:{digest}"
+        return hook_name
 
     def _generate_cache_version(self) -> str:
         """Whether a cached result can be trusted *at all*: this package's
@@ -445,11 +527,12 @@ class CheckOrchestrator:
         python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
         return f"{tree_hash}|{python_version}"
 
-    def _get_cached_violations(self, filepath: Path) -> list[Violation] | None:
+    def _get_cached_violations(self, filepath: Path, hook_name: str) -> list[Violation] | None:
         try:
-            # self.cache's own cache_version and hook_name already reject a
-            # stale or mismatched-config entry before this ever sees it.
-            cached = self.cache.get_cached_result(filepath)
+            # self.cache's own cache_version already rejects a stale entry,
+            # and `hook_name` a mismatched-config one, before this ever sees
+            # it.
+            cached = self.cache.get_cached_result(filepath, hook_name)
             if cached is None:
                 return None
 
@@ -471,7 +554,7 @@ class CheckOrchestrator:
         else:
             return violations
 
-    def _cache_violations(self, filepath: Path, violations: list[Violation]) -> None:
+    def _cache_violations(self, filepath: Path, hook_name: str, violations: list[Violation]) -> None:
         try:
             serialized = [
                 {
@@ -486,7 +569,7 @@ class CheckOrchestrator:
                 for v in violations
             ]
 
-            self.cache.set_cached_result(filepath, self.cache.hook_name, {"violations": serialized})
+            self.cache.set_cached_result(filepath, hook_name, {"violations": serialized})
         except (TypeError, ValueError) as error:
             logger.warning("Cache serialization failed: %s", repr(error))
 
@@ -516,14 +599,14 @@ class CheckOrchestrator:
             logger.debug("Failed to decode %s", filepath, exc_info=True)
             return None
 
-    def _check_file(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
+    def _check_file(self, filepath: Path, checks: Sequence[ASTCheck]) -> list[Violation] | None:
         return self._check_file_with_lifecycle(filepath, checks, direct=True)
 
-    def _check_derived_file(self, filepath: Path, checks: list[ASTCheck]) -> list[Violation] | None:
+    def _check_derived_file(self, filepath: Path, checks: Sequence[ASTCheck]) -> list[Violation] | None:
         return self._check_file_with_lifecycle(filepath, checks, direct=False)
 
     def _check_file_with_lifecycle(
-        self, filepath: Path, checks: list[ASTCheck], *, direct: bool
+        self, filepath: Path, checks: Sequence[ASTCheck], *, direct: bool
     ) -> list[Violation] | None:
         if not self.fix_mode or not locking_is_available():
             return self._check_file_locked(filepath, checks, direct=direct)
@@ -549,20 +632,28 @@ class CheckOrchestrator:
             logger.debug("Could not acquire the fix lock for %s", filepath, exc_info=True)
             return None
 
-    def _check_file_locked(self, filepath: Path, checks: list[ASTCheck], *, direct: bool) -> list[Violation] | None:
+    def _parsed_source(self, filepath: Path) -> tuple[str, ast.Module] | None:
+        """`None` if the file couldn't be read, decoded, or parsed — every
+        caller here turns that into the same "unprocessable file" outcome.
+
+        Debug-only logging: see `_read_source`'s own docstring for why an
+        ERROR-level `.exception()` call here would just be redundant noise.
+        """
         read_result = self._read_source(filepath)
         if read_result is None:
             return None
         source, _encoding = read_result
-
         try:
-            tree = ast.parse(source, filename=filepath)
+            return source, ast.parse(source, filename=filepath)
         except SyntaxError:
-            # Debug-only: the caller reports this via unprocessable_files —
-            # see _read_source's own docstring for why ERROR-level
-            # .exception() logging here would just be redundant noise.
             logger.debug("Failed to parse %s", filepath, exc_info=True)
             return None
+
+    def _check_file_locked(self, filepath: Path, checks: Sequence[ASTCheck], *, direct: bool) -> list[Violation] | None:
+        parsed = self._parsed_source(filepath)
+        if parsed is None:
+            return None
+        source, tree = parsed
 
         all_violations: list[Violation] = []
         for check in checks:
@@ -590,21 +681,24 @@ class CheckOrchestrator:
             else:
                 all_violations.extend(violations)
                 if direct:
-                    try:
-                        check.record_direct_input(filepath, source)
-                    except CheckUnavailableError as error:
-                        logger.debug("Check %s is unavailable: %s", check.check_id, error, exc_info=True)
-                        self._record_unavailable_check(check, error)
-                    except Exception:
-                        logger.debug(
-                            "Check %s failed to record direct input %s", check.check_id, filepath, exc_info=True
-                        )
-                        self.rule_failures.append((str(filepath), check.check_id))
+                    self._record_direct_input(check, filepath, source)
 
         if self.fix_mode and all_violations:
             self._apply_fixes(filepath, all_violations)
 
         return all_violations
+
+    def _record_direct_input(self, check: ASTCheck, filepath: Path, source: str) -> None:
+        if check.check_id in self._unavailable_check_ids:
+            return
+        try:
+            check.record_direct_input(filepath, source)
+        except CheckUnavailableError as error:
+            logger.debug("Check %s is unavailable: %s", check.check_id, error, exc_info=True)
+            self._record_unavailable_check(check, error)
+        except Exception:
+            logger.debug("Check %s failed to record direct input %s", check.check_id, filepath, exc_info=True)
+            self.rule_failures.append((str(filepath), check.check_id))
 
     def _apply_fixes(
         self,

@@ -36,6 +36,7 @@ from pre_commit_hooks.ast_checks._cli import main
 from pre_commit_hooks.ast_checks._discovery import ExcludePattern, expand_directories, filter_excluded_files
 from pre_commit_hooks.ast_checks._options import CheckOption, EnumOption
 from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, load_checks
+from pre_commit_hooks.ast_checks._per_file_ignores import PerFileIgnore, PerFileIgnoreList
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsCheck, MeaninglessVarsLevel
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
@@ -57,6 +58,7 @@ if TYPE_CHECKING:
     [
         (["a.py", "b.py"], [], ["a.py", "b.py"]),
         (["a.py", "migrations/0001_init.py"], ["migrations/*.py"], ["a.py"]),
+        (["a.py", "migrations/versions/0001_init.py"], ["migrations/*.py"], ["a.py"]),
         (["src/main.py", "vendor/lib/thing.py"], ["vendor"], ["src/main.py"]),
         (["src/main.py"], ["nonexistent/*.py"], ["src/main.py"]),
         (["tests/fixtures/x/deep.py", "a.py"], ["tests/fixtures/**"], ["a.py"]),
@@ -71,6 +73,7 @@ if TYPE_CHECKING:
     ids=[
         "no-patterns-returns-all",
         "excludes-matching-file",
+        "star-spans-separators",
         "excludes-matching-parent-dir",
         "no-match-keeps-file",
         "double-star-is-recursive",
@@ -1166,7 +1169,7 @@ def test_generate_cache_version_changes_when_python_version_changes(monkeypatch:
     assert version_before != version_after
 
 
-def test_generate_hook_name_changes_when_cacheable_check_config_changes() -> None:
+def test_the_hook_name_changes_when_cacheable_check_config_changes() -> None:
     # Two orchestrators enabling the same check with different config (e.g.
     # this repo's own default vs. permissive --meaningless-vars-level hooks)
     # must get distinct hook_names -- see ADR-0044's hook_name/cache_version
@@ -1177,7 +1180,7 @@ def test_generate_hook_name_changes_when_cacheable_check_config_changes() -> Non
     default = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     permissive = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
 
-    assert default._generate_hook_name() != permissive._generate_hook_name()
+    assert default.cache.hook_name != permissive.cache.hook_name
     assert default._generate_cache_version() == permissive._generate_cache_version()
 
 
@@ -1190,7 +1193,7 @@ def test_get_cached_violations_ignores_corrupted_cache_entry(
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     orchestrator.cache.set_cached_result(filepath, orchestrator.cache.hook_name, {"violations": [{}]})
 
-    cached_violations = orchestrator._get_cached_violations(filepath)
+    cached_violations = orchestrator._get_cached_violations(filepath, orchestrator.cache.hook_name)
     assert cached_violations is None
 
 
@@ -1349,6 +1352,7 @@ class _AlwaysRerunProbeCheck:
     check_id = "always-rerun-probe"
     error_code = "ZZZ001"
     cacheable = False
+    tracks_direct_inputs = False
     OPTIONS: ClassVar[tuple[CheckOption, ...]] = ()
 
     def __init__(self, message: str = "probe") -> None:
@@ -1531,6 +1535,27 @@ class _OtherDrainingProbeCheck(_DrainingProbeCheck):
     __slots__ = ()
 
     check_id = "other-draining-probe"
+
+
+class _CrossFileProbeCheck(_DrainingProbeCheck):
+    """A `_DrainingProbeCheck` declaring the direct-input lifecycle that
+    `per-file-ignores` must keep feeding even for a file it switched the
+    check off for; see ADR-0049.
+    """
+
+    __slots__ = ()
+
+    check_id = "cross-file-probe"
+    tracks_direct_inputs = True
+
+
+class _UnavailableCrossFileProbeCheck(_CrossFileProbeCheck):
+    __slots__ = ()
+
+    check_id = "unavailable-cross-file-probe"
+
+    def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        raise CheckUnavailableError("simulated: prerequisite missing")
 
 
 class _DrainUnavailableCheck(_AlwaysRerunProbeCheck):
@@ -2206,7 +2231,7 @@ def test_process_files_enabling_a_non_cacheable_check_does_not_change_cache_iden
     without_probe = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     with_probe = CheckOrchestrator(checks=[MeaninglessVarsCheck(), _AlwaysRerunProbeCheck()])
     assert without_probe._generate_cache_version() == with_probe._generate_cache_version()
-    assert without_probe._generate_hook_name() == with_probe._generate_hook_name()
+    assert without_probe.cache.hook_name == with_probe.cache.hook_name
 
 
 def test_fix_mode_skips_a_file_entirely_on_a_clean_cache_hit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4141,3 +4166,134 @@ def test_process_files_handles_a_large_file(tmp_path: Path) -> None:
     fixed = [v for v in violations[str(filepath)] if is_fixed(v)]
     assert len(fixed) == function_count
     assert "data = requests.get" not in filepath.read_text(encoding="utf-8")
+
+
+def _ignoring(check_id: str, pattern: str, anchor: Path) -> PerFileIgnoreList:
+    return PerFileIgnoreList(
+        (PerFileIgnore(pattern=pattern, anchor=anchor, negated=False, check_ids=frozenset({check_id})),)
+    )
+
+
+def test_per_file_ignores_runs_a_check_on_the_files_it_does_not_match(tmp_path: Path) -> None:
+    ignored = tmp_path / "skip_me.py"
+    ignored.write_text("x = 1\n")
+    checked = tmp_path / "check_me.py"
+    checked.write_text("y = 2\n")
+    probe = _AlwaysRerunProbeCheck()
+
+    orchestrator = CheckOrchestrator(checks=[probe], per_file_ignores=_ignoring(probe.check_id, "skip_me.py", tmp_path))
+    violations = orchestrator.process_files([str(ignored), str(checked)])
+
+    assert violations.keys() == {str(checked)}
+    assert probe.call_count == 1
+
+
+def test_a_per_file_ignored_check_is_still_handed_the_files_content(tmp_path: Path) -> None:
+    # Suppressing a report in one file must not withhold that file from the
+    # cross-file analysis another file's report depends on; see ADR-0049.
+    ignored = tmp_path / "dependency.py"
+    ignored.write_text("x = 1\n")
+    checked = tmp_path / "importer.py"
+    checked.write_text("y = 2\n")
+    probe = _CrossFileProbeCheck()
+
+    orchestrator = CheckOrchestrator(
+        checks=[probe], per_file_ignores=_ignoring(probe.check_id, "dependency.py", tmp_path)
+    )
+    violations = orchestrator.process_files([str(ignored), str(checked)])
+
+    assert violations.keys() == {str(checked)}
+    assert probe.direct_inputs == [ignored.resolve(), checked.resolve()]
+
+
+def test_an_unreadable_file_is_reported_even_when_every_check_is_ignored(tmp_path: Path) -> None:
+    ignored = tmp_path / "dependency.py"
+    ignored.write_text("x = 1\n")
+    probe = _CrossFileProbeCheck()
+
+    orchestrator = CheckOrchestrator(
+        checks=[probe], per_file_ignores=_ignoring(probe.check_id, "dependency.py", tmp_path)
+    )
+    with restricted_permissions(ignored, 0o000, restore=0o644):
+        violations = orchestrator.process_files([str(ignored)])
+
+    assert violations == {}
+    assert orchestrator.unprocessable_files == [str(ignored)]
+
+
+def test_an_unparseable_ignored_file_never_reaches_a_cross_file_session(tmp_path: Path) -> None:
+    ignored = tmp_path / "dependency.py"
+    ignored.write_text("def broken(\n")
+    probe = _CrossFileProbeCheck()
+
+    orchestrator = CheckOrchestrator(
+        checks=[probe], per_file_ignores=_ignoring(probe.check_id, "dependency.py", tmp_path)
+    )
+    violations = orchestrator.process_files([str(ignored)])
+
+    assert violations == {}
+    assert orchestrator.unprocessable_files == [str(ignored)]
+    assert probe.direct_inputs == []
+
+
+def test_a_check_without_the_direct_input_lifecycle_never_sees_an_ignored_file(tmp_path: Path) -> None:
+    ignored = tmp_path / "skip_me.py"
+    ignored.write_text("x = 1\n")
+    probe = _DrainingProbeCheck()
+
+    orchestrator = CheckOrchestrator(checks=[probe], per_file_ignores=_ignoring(probe.check_id, "skip_me.py", tmp_path))
+    orchestrator.process_files([str(ignored)])
+
+    assert probe.direct_inputs == []
+
+
+def test_a_cross_file_candidate_is_skipped_where_its_check_is_ignored(tmp_path: Path) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+    extra_file = tmp_path / "extra.py"
+    extra_file.write_text("y = 2\n")
+    probe = _DrainingProbeCheck(extra_files=[extra_file])
+
+    orchestrator = CheckOrchestrator(checks=[probe], per_file_ignores=_ignoring(probe.check_id, "extra.py", tmp_path))
+    violations = orchestrator.process_files([str(main_file)])
+
+    assert violations.keys() == {str(main_file)}
+
+
+def test_an_ignored_check_leaves_the_remaining_ones_their_own_cache_identity(tmp_path: Path) -> None:
+    # The cached result of a run that skipped a check must never be served to
+    # a run that did not, which is what deciding hook_name per file buys;
+    # see ADR-0049.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("data = 1\n")
+    cache_dir = tmp_path / ".cache"
+
+    def orchestrate(per_file_ignores: PerFileIgnoreList) -> dict[str, list[Violation]]:
+        return CheckOrchestrator(
+            checks=[_MarkerFixableCheck(check_id="probe-a"), MeaninglessVarsCheck(MeaninglessVarsLevel.PERMISSIVE)],
+            cache_dir=cache_dir,
+            per_file_ignores=per_file_ignores,
+        ).process_files([str(filepath)])
+
+    while_ignored = orchestrate(_ignoring("meaningless-vars", "module.py", tmp_path))
+    assert {v.check_id for v in while_ignored[str(filepath)]} == {"probe-a"}
+
+    assert {v.check_id for v in orchestrate(PerFileIgnoreList())[str(filepath)]} == {"probe-a", "meaningless-vars"}
+
+
+def test_an_ignored_file_is_not_fed_to_a_check_already_found_unavailable(tmp_path: Path) -> None:
+    # A missing prerequisite does not get better on the next file, so the
+    # check is not worth feeding again this run either.
+    checked = tmp_path / "importer.py"
+    checked.write_text("x = 1\n")
+    ignored = tmp_path / "dependency.py"
+    ignored.write_text("y = 2\n")
+    probe = _UnavailableCrossFileProbeCheck()
+
+    orchestrator = CheckOrchestrator(
+        checks=[probe], per_file_ignores=_ignoring(probe.check_id, "dependency.py", tmp_path)
+    )
+    orchestrator.process_files([str(checked), str(ignored)])
+
+    assert orchestrator.unavailable_checks == [(probe.check_id, "simulated: prerequisite missing")]
+    assert probe.direct_inputs == []
