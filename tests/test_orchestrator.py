@@ -4416,3 +4416,18 @@ def test_an_unreadable_file_is_reported_even_on_a_clean_cache_hit(tmp_path: Path
     assert violations == {}
     assert orchestrator.unprocessable_files == [str(filepath)]
     assert probe.direct_inputs == []
+
+
+def test_an_entry_for_a_check_this_run_cannot_run_changes_nothing(tmp_path: Path) -> None:
+    # One table serves both published hooks (ADR-0045), so an entry naming
+    # only the other one's check must not make this run read a file its own
+    # prefilter already dropped.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("def broken(\n")
+    orchestrator = CheckOrchestrator(
+        checks=[_PrefilteredProbeCheck()],
+        per_file_ignores=_ignoring("some-other-hooks-check", "module.py", tmp_path),
+    )
+
+    assert orchestrator.process_files([str(filepath)]) == {}
+    assert orchestrator.unprocessable_files == []

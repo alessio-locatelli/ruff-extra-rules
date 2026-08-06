@@ -35,6 +35,17 @@ class _Piece(NamedTuple):
 
 _STAR = _Piece(".*", fixed_width=False, is_star=True)
 
+# `]`, `^` and `\` carry their own meaning to `re` inside a class. `[`, `&`,
+# `|` and `~` are ordinary members in a glob, but `re` reads them as its
+# own set operators and warns about them on the user's stderr.
+_CLASS_MEMBERS_TO_ESCAPE = "^\\][&|~"
+
+# Alternation is what a backtracking engine explores exhaustively, so a
+# pattern spelling out more ways to match than this is refused rather than
+# left to stall every file it is tried against. See
+# `docs/adr/0046-exclude-glob-semantics.md`.
+_MAX_ALTERNATIVES = 1024
+
 
 @functools.cache
 def compile_glob(pattern: str) -> re.Pattern[str]:
@@ -101,6 +112,8 @@ def _translate(pattern: str) -> str:
     pieces: list[_Piece] = []
     index = 0
     depth = 0
+    branches: list[int] = []
+    alternatives = 1
     while index < len(pattern):
         char = pattern[index]
         if char == "\\":
@@ -121,6 +134,7 @@ def _translate(pattern: str) -> str:
             pieces.append(_Piece(regex, fixed_width=True))
         elif char == "{":
             depth += 1
+            branches.append(1)
             pieces.append(_Piece("(?:", fixed_width=False))
             index += 1
         elif char == "}":
@@ -128,9 +142,11 @@ def _translate(pattern: str) -> str:
                 message = f"`{pattern}` closes a `{{` that was never opened"
                 raise InvalidGlobError(message)
             depth -= 1
+            alternatives = min(alternatives * branches.pop(), _MAX_ALTERNATIVES + 1)
             pieces.append(_Piece(")", fixed_width=False))
             index += 1
         elif char == "," and depth:
+            branches[-1] += 1
             pieces.append(_Piece("|", fixed_width=False))
             index += 1
         else:
@@ -139,6 +155,9 @@ def _translate(pattern: str) -> str:
 
     if depth:
         message = f"`{pattern}` leaves a `{{` unclosed"
+        raise InvalidGlobError(message)
+    if alternatives > _MAX_ALTERNATIVES:
+        message = f"`{pattern}` spells out more than {_MAX_ALTERNATIVES} ways to match"
         raise InvalidGlobError(message)
     return _join(pieces)
 
@@ -222,5 +241,5 @@ def _translate_class(pattern: str, index: int) -> tuple[str, int]:
     negated = body.startswith(("!", "^"))
     if negated:
         body = body[1:]
-    members = "".join(f"\\{char}" if char in "^\\]" else char for char in body)
+    members = "".join(f"\\{char}" if char in _CLASS_MEMBERS_TO_ESCAPE else char for char in body)
     return f"[{'^' if negated else ''}{members}]", end
