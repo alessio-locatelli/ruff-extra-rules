@@ -46,8 +46,12 @@ def test_check_detects_trailing_comment(source: str, line: int, *, fixable: bool
         "result = func(\n    arg\n)  # Comment  # pytriage: TR7\n",
         # `[1, 2][0]  # c`: tokens between the first `]` and the comment aren't COMMENT.
         "items = [1, 2][0]  # not a bracket-only line\n",
+        # An fmt:off block wrapping the bracket line suppresses the
+        # violation the same way the project's own inline ignore comment
+        # does — see docs/adr/0050-format-suppression-pragmas.md.
+        "# fmt: off\nresult = func(\n    arg\n)  # Comment here\n# fmt: on\n",
     ],
-    ids=["correctly-placed", "inline-ignore", "tokens-between-bracket-and-comment"],
+    ids=["correctly-placed", "inline-ignore", "tokens-between-bracket-and-comment", "fmt-off-suppressed"],
 )
 def test_check_returns_no_violations(source: str) -> None:
     assert MisplacedCommentCheck().check(Path("test.py"), ast.parse(source), source) == []
@@ -98,8 +102,9 @@ def test_fix_moves_trailing_comment(source: str, fixed_source: str, tmp_path: Pa
         # ignore comment too, since it re-scans the source rather than
         # trusting its input.
         "result = func(\n    arg\n)  # Comment  # pytriage: TR7\n",
+        "# fmt: off\nresult = func(\n    arg\n)  # Comment here\n# fmt: on\n",
     ],
-    ids=["nothing-to-fix", "ignore-comment-respected"],
+    ids=["nothing-to-fix", "ignore-comment-respected", "fmt-off-respected"],
 )
 def test_fix_is_noop_when_nothing_to_fix(source: str, tmp_path: Path) -> None:
     test_file = tmp_path / "test.py"

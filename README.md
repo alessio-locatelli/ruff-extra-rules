@@ -71,6 +71,8 @@ The nearest `pyproject.toml` with a `[tool.ruff-extra-rules]` table, searching u
 
 Use `# pytriage: <code>` (e.g., `# pytriage: TR1`), or a comma-separated list to suppress more than one check on the same line (`# pytriage: TR1,TR5`).
 
+`ruff format`'s own `# fmt: off` / `# fmt: on`, `# fmt: skip`, and YAPF's `# yapf: disable` / `# yapf: enable` are honored the same way: a line they cover is never reported and never fixed by any check.
+
 ---
 
 See [FAQ](docs/faq.md) for more information.
