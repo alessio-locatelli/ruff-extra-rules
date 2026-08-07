@@ -114,6 +114,27 @@ func(x=x)
 x = "foo"  # PYTRIAGE: TR5
 func(x=x)
 """,
+        # fmt: off wrapping the assignment line -- see
+        # docs/adr/0050-format-suppression-pragmas.md.
+        """
+# fmt: off
+x = "foo"
+# fmt: on
+func(x=x)
+""",
+        # fmt: off wrapping only the use line, not the assignment -- see
+        # docs/adr/0050-format-suppression-pragmas.md.
+        """
+x = "foo"
+# fmt: off
+func(x=x)
+# fmt: on
+""",
+        # Same, via this project's own inline ignore comment on the use line.
+        """
+x = "foo"
+func(x=x)  # pytriage: TR5
+""",
         """
 def func():
     global state
@@ -388,6 +409,9 @@ def func(depot_data, depots):
         "semantic-value",
         "inline-suppression",
         "inline-suppression-case-insensitive",
+        "fmt-off-wrapping-assignment-line",
+        "fmt-off-wrapping-use-line-only",
+        "inline-suppression-on-use-line-only",
         "global-variable",
         "class-attributes",
         "tuple-unpacking",

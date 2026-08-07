@@ -733,10 +733,17 @@ def _apply_fixes(
     violations: list[MeaninglessVarsFixData],
     source: str,
     tree: ast.Module,
+    *,
+    ignored_lines: set[int],
     encoding: str = "utf-8",
-) -> None:
+) -> bool:
     """Scope-aware: groups violations by scope and replaces ALL uses of a
     variable within that scope, not just the assignment position.
+
+    `ignored_lines` is checked per `(scope, old_name)`, not per individual
+    replacement -- see docs/adr/0050-format-suppression-pragmas.md. Returns
+    whether anything was actually replaced, since every `fixable`
+    violation's rename can end up suppressed this way.
     """
     lines = source.splitlines(keepends=True)
     has_future_annotations = _has_future_annotations_import(tree)
@@ -766,14 +773,25 @@ def _apply_fixes(
             replacements[old_name] = new_name
         scope_replacements[scope_id] = replacements
 
-    # Step 3: Collect replacements for each scope
+    # Step 3: Collect replacements for each scope, then drop every
+    # replacement for an (scope, old_name) pair where at least one of its
+    # own occurrences falls on an ignored line -- see this function's own
+    # docstring for why a partial rename isn't an acceptable fallback here.
     all_replacements: list[tuple[int, int, VariableName, VariableName]] = []
     for scope_id, replacements in scope_replacements.items():
-        all_replacements.extend(
-            _collect_scope_replacements(
-                scope_nodes[scope_id], replacements, has_future_annotations=has_future_annotations
-            )
+        collected = _collect_scope_replacements(
+            scope_nodes[scope_id], replacements, has_future_annotations=has_future_annotations
         )
+        by_old_name: dict[VariableName, list[tuple[int, int, VariableName, VariableName]]] = {}
+        for item in collected:
+            by_old_name.setdefault(item[2], []).append(item)
+        for items in by_old_name.values():
+            if any(line_num in ignored_lines for line_num, _col, _old, _new in items):
+                continue
+            all_replacements.extend(items)
+
+    if not all_replacements:
+        return False
 
     # Step 4: Sort reverse and apply replacements
     all_replacements.sort(key=lambda x: (x[0], x[1]), reverse=True)
@@ -794,6 +812,7 @@ def _apply_fixes(
         lines[line_idx] = line[:col] + new_name + line[col + name_len :]
 
     atomic_write_text(filepath, "".join(lines), encoding, source)
+    return True
 
 
 class MeaninglessVarsCheck(BaseCheck):
@@ -886,8 +905,14 @@ class MeaninglessVarsCheck(BaseCheck):
         if not fixable:
             return False
 
+        # Re-derived fresh, like check() does, rather than threaded through
+        # fix_data: a stale ignored_lines snapshot from check()-time could
+        # miss a suppression comment added since, or one an earlier check's
+        # fix in this same run introduced by shifting line numbers.
+        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
+
         try:
-            _apply_fixes(filepath, fixable, source, tree, encoding)
+            return _apply_fixes(filepath, fixable, source, tree, ignored_lines=ignored_lines, encoding=encoding)
         except OSError:
             # Debug-only: mark_fix_failed() below already reports this
             # cleanly as [FIX FAILED] — an ERROR-level .exception() call
@@ -900,5 +925,3 @@ class MeaninglessVarsCheck(BaseCheck):
                 if v.fixable:
                     mark_fix_failed(v)
             return False
-        else:
-            return True

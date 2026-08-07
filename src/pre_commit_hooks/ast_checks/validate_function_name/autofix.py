@@ -7,10 +7,15 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from pre_commit_hooks.ast_checks._base import atomic_write_text, byte_col_to_char_col, read_source_with_encoding
+from pre_commit_hooks.ast_checks._base import (
+    atomic_write_text,
+    byte_col_to_char_col,
+    find_ignored_lines,
+    read_source_with_encoding,
+)
 from pre_commit_hooks.ast_checks._scope import iter_within_scope
 
-from .analysis import Suggestion, attach_parents, read_source
+from .analysis import IGNORE_PATTERN, Suggestion, attach_parents, read_source
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -375,6 +380,13 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
     collector = _ReferenceCollector(func_node.name, func_node, lines, is_method=is_method)
     collector.visit(scope_node)
     positions.extend(collector.positions)
+
+    # Checked against every reference's own line too, not just the
+    # definition line collect_suggestions() already gated on -- see
+    # docs/adr/0050-format-suppression-pragmas.md.
+    ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
+    if any(line_num in ignored_lines for line_num, _col in positions):
+        return False
 
     old_name = func_node.name
     new_name = suggestion.suggested_name
