@@ -389,6 +389,86 @@ def ignore_pattern_for(error_code: str) -> re.Pattern[str]:
     return re.compile(rf"#\s*pytriage:\s*(?:[^,\s]+\s*,\s*)*{escaped}(?!\w)", re.IGNORECASE)
 
 
+_FMT_OFF_PATTERN = re.compile(r"#\s*fmt:\s*off")
+_FMT_ON_PATTERN = re.compile(r"#\s*fmt:\s*on")
+_YAPF_DISABLE_PATTERN = re.compile(r"#\s*yapf:\s*disable")
+_YAPF_ENABLE_PATTERN = re.compile(r"#\s*yapf:\s*enable")
+# See docs/adr/0050-format-suppression-pragmas.md.
+_FMT_SKIP_SEGMENT_PATTERN = re.compile(r"fmt:\s*skip")
+
+
+def _is_fmt_skip_comment(comment_text: str) -> bool:
+    return any(_FMT_SKIP_SEGMENT_PATTERN.fullmatch(segment.strip()) for segment in comment_text.split("#"))
+
+
+# See docs/adr/0050-format-suppression-pragmas.md.
+_LOGICAL_LINE_BOUNDARY_TOKEN_TYPES = frozenset(
+    {tokenize.NL, tokenize.INDENT, tokenize.DEDENT, tokenize.ENCODING, tokenize.ENDMARKER}
+)
+
+
+class _FormatSuppressionScanner:
+    """See `docs/adr/0050-format-suppression-pragmas.md`.
+
+    `observe()` returns `None`, not an empty `set()`, when a token
+    suppresses nothing new -- the common case on every token. Call
+    `finalize()` once after the last token.
+    """
+
+    __slots__ = ("_last_line", "_logical_start", "_pending_skip", "_suppressed_from")
+
+    def __init__(self) -> None:
+        self._suppressed_from: int | None = None
+        self._logical_start: int | None = None
+        self._pending_skip = False
+        self._last_line = 0
+
+    def observe(self, tok: tokenize.TokenInfo) -> set[int] | None:
+        if tok.type != tokenize.ENDMARKER:
+            # ENDMARKER's own reported line is one past the file's last
+            # physical line when the source ends in a newline -- excluded so
+            # an unterminated fmt:off's finalize() below doesn't suppress a
+            # phantom line past the file's real content.
+            self._last_line = tok.end[0]
+
+        if tok.type == tokenize.COMMENT:
+            return self._observe_comment(tok)
+        if tok.type == tokenize.NEWLINE:
+            return self._observe_newline(tok)
+        if tok.type not in _LOGICAL_LINE_BOUNDARY_TOKEN_TYPES and self._logical_start is None:
+            self._logical_start = tok.start[0]
+        return None
+
+    def _observe_comment(self, tok: tokenize.TokenInfo) -> set[int] | None:
+        if self._logical_start is not None:
+            if _is_fmt_skip_comment(tok.string):
+                self._pending_skip = True
+            return None
+
+        stripped = tok.string.rstrip()
+        if self._suppressed_from is None:
+            if _FMT_OFF_PATTERN.fullmatch(stripped) or _YAPF_DISABLE_PATTERN.fullmatch(stripped):
+                self._suppressed_from = tok.start[0]
+        elif _FMT_ON_PATTERN.fullmatch(stripped) or _YAPF_ENABLE_PATTERN.fullmatch(stripped):
+            suppressed = set(range(self._suppressed_from, tok.start[0] + 1))
+            self._suppressed_from = None
+            return suppressed
+        return None
+
+    def _observe_newline(self, tok: tokenize.TokenInfo) -> set[int] | None:
+        suppressed: set[int] | None = None
+        if self._pending_skip and self._logical_start is not None:
+            suppressed = set(range(self._logical_start, tok.start[0] + 1))
+        self._logical_start = None
+        self._pending_skip = False
+        return suppressed
+
+    def finalize(self) -> set[int]:
+        if self._suppressed_from is None:
+            return set()
+        return set(range(self._suppressed_from, self._last_line + 1))
+
+
 def tokenize_source(source: str) -> Iterator[tokenize.TokenInfo]:
     """Tokenize `source`, normalizing line endings first (see
     `normalize_for_tokenize`) — the one `tokenize`-invocation boilerplate
@@ -399,21 +479,35 @@ def tokenize_source(source: str) -> Iterator[tokenize.TokenInfo]:
 
 def ignored_lines_from_tokens(tokens: Iterable[tokenize.TokenInfo], *patterns: re.Pattern[str]) -> set[int]:
     """Extract line numbers with a comment matching any of `patterns` from an
-    already-tokenized stream.
+    already-tokenized stream, plus every line suppressed by a ruff/Black-style
+    `# fmt: off`/`# fmt: on`/`# fmt: skip` pragma (or YAPF's `# yapf:
+    disable`/`# yapf: enable` equivalents) -- see `_FormatSuppressionScanner`
+    and `docs/adr/0050-format-suppression-pragmas.md`. Distinct from this
+    project's own `# pytriage: <code>` inline ignore comment (see
+    `ignore_pattern_for`), which is what `patterns` matches; a caller passes
+    its own error-code pattern there, but gets format suppression for free.
 
     Shared building block for `find_ignored_lines` (which tokenizes `source`
     itself) and a caller that already has its own token stream in hand (e.g.
     `misplaced_comment`, which would otherwise tokenize the same source a
     second time just to check for suppression comments).
     """
-    return {
-        tok.start[0] for tok in tokens if tok.type == tokenize.COMMENT and any(p.search(tok.string) for p in patterns)
-    }
+    ignored: set[int] = set()
+    scanner = _FormatSuppressionScanner()
+    for tok in tokens:
+        newly_ignored = scanner.observe(tok)
+        if newly_ignored:
+            ignored |= newly_ignored
+        if tok.type == tokenize.COMMENT and any(p.search(tok.string) for p in patterns):
+            ignored.add(tok.start[0])
+    ignored |= scanner.finalize()
+    return ignored
 
 
 def find_ignored_lines(source: str, *patterns: re.Pattern[str]) -> set[int]:
     """Extract line numbers that have an inline ignore comment matching any
-    of `patterns`.
+    of `patterns`, plus every line a ruff/Black-style format-suppression
+    pragma covers -- see `ignored_lines_from_tokens`, which this delegates to.
 
     Uses the tokenize module to accurately detect comments, so a string or
     byte literal that happens to contain matching text (e.g. a dict key)
@@ -475,7 +569,10 @@ def find_ignored_lines_and_classify_comments(
     """Tokenize `source` exactly once, returning (ignored_lines,
     comment_only_lines, trailing_comment_lines) — the same results
     `find_ignored_lines`/`classify_comment_lines` would each compute from
-    their own separate tokenize pass, fused into one.
+    their own separate tokenize pass, fused into one. `ignored_lines` also
+    includes every line suppressed by a ruff/Black-style format-suppression
+    pragma, same as `ignored_lines_from_tokens` — see that function's own
+    docstring and `docs/adr/0050-format-suppression-pragmas.md`.
 
     `RedundantAssignmentCheck.check()` needs both, and streams this single
     combined pass over `tokenize_source`'s lazy `Iterator` (rather than
@@ -486,15 +583,20 @@ def find_ignored_lines_and_classify_comments(
     ignored_lines: set[int] = set()
     comment_lines: set[int] = set()
     code_lines: set[int] = set()
+    scanner = _FormatSuppressionScanner()
 
-    for tok_type, tok_string, start, end, _ in tokenize_source(source):
-        if tok_type == tokenize.COMMENT:
-            comment_lines.add(start[0])
-            if any(p.search(tok_string) for p in patterns):
-                ignored_lines.add(start[0])
-        elif tok_type not in _NON_CODE_TOKEN_TYPES:
-            code_lines.update(range(start[0], end[0] + 1))
+    for tok in tokenize_source(source):
+        newly_ignored = scanner.observe(tok)
+        if newly_ignored:
+            ignored_lines |= newly_ignored
+        if tok.type == tokenize.COMMENT:
+            comment_lines.add(tok.start[0])
+            if any(p.search(tok.string) for p in patterns):
+                ignored_lines.add(tok.start[0])
+        elif tok.type not in _NON_CODE_TOKEN_TYPES:
+            code_lines.update(range(tok.start[0], tok.end[0] + 1))
 
+    ignored_lines |= scanner.finalize()
     return ignored_lines, comment_lines - code_lines, comment_lines & code_lines
 
 

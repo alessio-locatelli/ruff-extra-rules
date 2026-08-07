@@ -15,7 +15,9 @@ from pre_commit_hooks.ast_checks._base import (
     classify_comment_lines,
     fast_get_source_segment,
     find_ignored_lines,
+    find_ignored_lines_and_classify_comments,
     ignore_pattern_for,
+    ignored_lines_from_tokens,
     is_fix_aborted,
     is_fix_errored,
     is_fix_failed,
@@ -27,6 +29,7 @@ from pre_commit_hooks.ast_checks._base import (
     mark_fix_rejected,
     normalize_for_tokenize,
     split_lines_like_ast,
+    tokenize_source,
 )
 from tests.factories import ViolationFactory
 
@@ -214,6 +217,127 @@ def test_find_ignored_lines_on_cr_only_source() -> None:
 )
 def test_ignore_pattern_for_comma_separated_codes(comment: str, code: str, expected: bool) -> None:
     assert bool(find_ignored_lines(f"x = 1  {comment}\n", ignore_pattern_for(code))) is expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            "x = 1\n# fmt: off\nnot_formatted=3\nalso_not_formatted=4\n# fmt: on\ny = 2\n",
+            {2, 3, 4, 5},
+        ),
+        (
+            "x = 1\n# fmt: off\na=1\n# yapf: enable\ny = 2\n",
+            {2, 3, 4},
+        ),
+        (
+            "x = 1\n# yapf: disable\na=1\n# fmt: on\ny = 2\n",
+            {2, 3, 4},
+        ),
+        (
+            "x = 1\n# fmt: off\na=1\nb=2\n",
+            {2, 3, 4},
+        ),
+        (
+            # An unrelated standalone comment inside an active fmt:off block
+            # is neither fmt:on nor yapf:enable, so it doesn't close the
+            # block -- just an ordinary comment line within it.
+            "x = 1\n# fmt: off\n# just a comment\na=1\n# fmt: on\ny = 2\n",
+            {2, 3, 4, 5},
+        ),
+        (
+            "data = [\n    # fmt: off\n    '1',\n    # fmt: on\n    '2',\n]\n",
+            set(),
+        ),
+        (
+            "a = [1,2,3,4,5] # fmt: skip\nb = 2\n",
+            {1},
+        ),
+        (
+            "x=1;x=2;x=3 # fmt: skip\ny = 2\n",
+            {1},
+        ),
+        (
+            "@Test\n@Test2(a,b) # fmt: skip\ndef test(): ...\nz = 1\n",
+            {2},
+        ),
+        (
+            "def test(a,b,c,d,e,f) -> int: # fmt: skip\n    pass\nz = 1\n",
+            {1},
+        ),
+        (
+            "match point:\n    case Point(0, 0): # fmt: skip\n        pass\nz = 1\n",
+            {2},
+        ),
+        (
+            "a = call(\n    [\n        '1',\n        '2',\n    ],\n    b\n)  # fmt: skip\nz = 1\n",
+            {1, 2, 3, 4, 5, 6, 7},
+        ),
+        (
+            # Ruff's own SuppressionKind::from_comment (ruff_python_trivia)
+            # recognizes fmt:skip interspersed with another pragma on the
+            # same comment.
+            "a = [1,2,3,4,5]  # fmt: skip  # noqa: E501\nb = 2\n",
+            {1},
+        ),
+        (
+            "a = [1,2,3,4,5]  # noqa: E501  # fmt: skip\nb = 2\n",
+            {1},
+        ),
+        (
+            # "fmt: skipper" must not be mistaken for "fmt: skip".
+            "a = 1  # fmt: skipper\nb = 2\n",
+            set(),
+        ),
+    ],
+    ids=[
+        "fmt-off-on-block",
+        "fmt-off-closed-by-yapf-enable",
+        "yapf-disable-closed-by-fmt-on",
+        "unterminated-fmt-off-suppresses-to-eof",
+        "unrelated-standalone-comment-inside-fmt-off-block",
+        "fmt-off-on-inside-expression-has-no-effect",
+        "fmt-skip-simple-assignment",
+        "fmt-skip-semicolon-joined-statements",
+        "fmt-skip-decorator",
+        "fmt-skip-def-header-only",
+        "fmt-skip-case-header-only",
+        "fmt-skip-multiline-call-covers-whole-statement",
+        "fmt-skip-with-trailing-noqa-pragma",
+        "fmt-skip-after-leading-noqa-pragma",
+        "fmt-skip-substring-does-not-false-match",
+    ],
+)
+def test_find_ignored_lines_honors_format_suppression_pragmas(source: str, expected: set[int]) -> None:
+    assert find_ignored_lines(source) == expected
+
+
+def test_find_ignored_lines_format_suppression_combines_with_inline_ignore_pattern() -> None:
+    source = "x = 1  # pytriage: TR1\n# fmt: off\na=1\n# fmt: on\ny = 2\n"
+    assert find_ignored_lines(source, ignore_pattern_for("TR1")) == {1, 2, 3, 4}
+
+
+def test_find_ignored_lines_fmt_skip_on_nested_expression_over_suppresses_whole_statement() -> None:
+    # Documented trade-off -- see docs/adr/0050-format-suppression-pragmas.md.
+    source = "a = call(\n    [\n        '1',  # fmt: skip\n        '2',\n    ],\n    b\n)\nz = 1\n"
+    assert find_ignored_lines(source) == {1, 2, 3, 4, 5, 6, 7}
+
+
+def test_find_ignored_lines_fmt_off_between_decorators_only_covers_the_marked_interval() -> None:
+    # Documented limitation -- see docs/adr/0050-format-suppression-pragmas.md.
+    source = "@Test\n# fmt: off\n@Test2(a,b)\n# fmt: on\ndef test(): ...\nz = 1\n"
+    assert find_ignored_lines(source) == {2, 3, 4}
+
+
+def test_ignored_lines_from_tokens_also_honors_format_suppression() -> None:
+    source = "x = 1\n# fmt: off\na=1\n# fmt: on\ny = 2\n"
+    assert ignored_lines_from_tokens(tokenize_source(source)) == {2, 3, 4}
+
+
+def test_find_ignored_lines_and_classify_comments_also_honors_format_suppression() -> None:
+    source = "x = 1\n# fmt: off\na=1\n# fmt: on\ny = 2\n"
+    ignored, _comment_only, _trailing = find_ignored_lines_and_classify_comments(source)
+    assert ignored == {2, 3, 4}
 
 
 def _setup_plain(tmp_path: Path) -> Path:
