@@ -320,6 +320,28 @@ def test_apply_fix_updates_free_function_call_sites(tmp_path: Path) -> None:
     assert "get_data" not in file_content
 
 
+def test_apply_fix_refuses_when_a_call_site_line_is_format_suppressed(tmp_path: Path) -> None:
+    # See docs/adr/0050-format-suppression-pragmas.md.
+    test_file = tmp_path / "module.py"
+    test_file.write_text(
+        "def get_data():\n"
+        '    f = open("f.txt")\n'
+        "    return f.read()\n"
+        "\n"
+        "\n"
+        "def caller():\n"
+        "    # fmt: off\n"
+        "    return get_data()\n"
+        "    # fmt: on\n"
+    )
+
+    suggestion = _suggestion_for(test_file, "get_data")
+    original_content = test_file.read_text()
+
+    assert apply_fix(test_file, suggestion) is False
+    assert test_file.read_text() == original_content
+
+
 def test_apply_fix_renames_call_site_on_line_with_non_ascii_text(
     tmp_path: Path,
 ) -> None:

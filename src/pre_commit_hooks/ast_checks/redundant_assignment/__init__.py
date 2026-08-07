@@ -149,7 +149,9 @@ class RedundantAssignmentCheck(BaseCheck):
             if pattern is None:
                 continue
 
-            if lifecycle.assignment.line in ignored_lines:
+            # Checked against every use's own line too, not just the
+            # assignment's -- see docs/adr/0050-format-suppression-pragmas.md.
+            if lifecycle.assignment.line in ignored_lines or any(use.line in ignored_lines for use in lifecycle.uses):
                 continue
 
             if not should_report_violation(lifecycle, pattern, filepath, level=self._level):
