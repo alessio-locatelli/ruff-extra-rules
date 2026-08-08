@@ -65,10 +65,13 @@ def _read_json(path: Path) -> object:
 
 
 def _number(value: object, path: Path, expected: str, *, minimum: float | None = None) -> float:
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, int | float):
         raise _malformed(path, expected)
-    number = float(value)
-    if minimum is not None and number < minimum:
+    try:
+        number = float(value)
+    except OverflowError as error:
+        raise _malformed(path, expected) from error
+    if not math.isfinite(number) or (minimum is not None and number < minimum):
         raise _malformed(path, expected)
     return number
 
@@ -140,6 +143,7 @@ def _load_baseline(path: Path) -> Baseline:
             baseline.get("minimum_regression_ratio"),
             path,
             "expected numeric minimum_regression_ratio",
+            minimum=0,
         ),
         "version": version,
     }
