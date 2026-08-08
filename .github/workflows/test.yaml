@@ -21,6 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -35,6 +36,41 @@ jobs:
           else
             uv run pytest --cov --cov-report=xml
           fi
+
+      - name: Install prek
+        run: |
+          uv tool install prek==0.4.12
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+
+      - name: Measure default-hook performance
+        run: >-
+          uv run pytest tests/performance --benchmark-only
+          --benchmark-json=benchmark-results.json
+
+      - name: Review benchmark results
+        run: uv run python -m benchmarks.regression benchmark-results.json benchmarks/baseline.json
+
+      - name: Require baseline rationale
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PERFORMANCE_BASELINE_RATIONALE: ${{ github.event.pull_request.body }}
+        run: |
+          if git diff --quiet "${BASE_SHA}" "${HEAD_SHA}" -- benchmarks/baseline.json; then
+            exit 0
+          fi
+          if printf '%s\n' "${PERFORMANCE_BASELINE_RATIONALE}" | rg -q 'Performance baseline rationale:[[:space:]]*[^[:space:]]'; then
+            exit 0
+          fi
+          echo "A baseline update requires a Performance baseline rationale section in the pull request body."
+          exit 1
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: benchmark-results
+          path: benchmark-results.json
 
       - name: Upload coverage to Codecov
         if: github.actor != 'dependabot[bot]'

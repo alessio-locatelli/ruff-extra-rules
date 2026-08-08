@@ -54,7 +54,7 @@ repos:
         entry: uv run python -m pre_commit_hooks.ruff_extra_rules
         language: system
         types: [python]
-        files: ^(src|tests)/
+        files: ^(src|tests|benchmarks/fixtures)/
         # It deliberately contains "bad" (and otherwise non-representative) example
         # code for our own test suite (see docs/adr/0009-lint-tests-directory.md).
         exclude: ^tests/fixtures/

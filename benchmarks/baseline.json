@@ -1,0 +1,43 @@
+{
+  "benchmarks": {
+    "direct-cold-large": {
+      "median_seconds": 0.083092
+    },
+    "direct-cold-small": {
+      "median_seconds": 0.079896
+    },
+    "direct-cold-typical": {
+      "median_seconds": 0.082802
+    },
+    "direct-warm-large": {
+      "median_seconds": 0.082257
+    },
+    "direct-warm-small": {
+      "median_seconds": 0.080898
+    },
+    "direct-warm-typical": {
+      "median_seconds": 0.078923
+    },
+    "prek-cold-large": {
+      "median_seconds": 0.099171
+    },
+    "prek-cold-small": {
+      "median_seconds": 0.089411
+    },
+    "prek-cold-typical": {
+      "median_seconds": 0.088693
+    },
+    "prek-warm-large": {
+      "median_seconds": 0.088887
+    },
+    "prek-warm-small": {
+      "median_seconds": 0.095993
+    },
+    "prek-warm-typical": {
+      "median_seconds": 0.092663
+    }
+  },
+  "minimum_absolute_increase_seconds": 0.05,
+  "minimum_regression_ratio": 1.5,
+  "version": 1
+}
