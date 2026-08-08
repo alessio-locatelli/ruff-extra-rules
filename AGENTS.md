@@ -106,7 +106,7 @@ ZIZMOR_OFFLINE=true zizmor --fix=all --persona=auditor --collect=all .
 ### Test
 
 ```bash
-uv run -- coverage run -m pytest
+uv run -- coverage run -m pytest -qq
 uv run -- coverage report
 strict-no-cover
 ```
