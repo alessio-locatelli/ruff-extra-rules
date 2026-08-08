@@ -60,6 +60,9 @@ jobs:
           if git diff --quiet "${BASE_SHA}" "${HEAD_SHA}" -- benchmarks/baseline.json; then
             exit 0
           fi
+          if ! git cat-file -e "${BASE_SHA}:benchmarks/baseline.json" 2>/dev/null; then
+            exit 0
+          fi
           if [[ "${PERFORMANCE_BASELINE_RATIONALE}" =~ Performance\ baseline\ rationale:([[:blank:]]+[^[:space:]]|[[:blank:]]*$'\n'[[:blank:]]*[^[:space:]]) ]]; then
             exit 0
           fi

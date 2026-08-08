@@ -139,11 +139,40 @@ def test_main_reports_file_access_errors(
         ({"benchmarks": [{"name": "", "stats": {"iqr": 0.01, "median": 0.1}}]}, _baseline()),
         ({"benchmarks": [{"name": "default", "stats": None}]}, _baseline()),
         ({"benchmarks": [{"name": "default", "stats": {"iqr": True, "median": 0.1}}]}, _baseline()),
+        ({"benchmarks": [{"name": "default", "stats": {"iqr": -0.01, "median": 0.1}}]}, _baseline()),
+        ({"benchmarks": [{"name": "default", "stats": {"iqr": 0.01, "median": -0.1}}]}, _baseline()),
+        (
+            {
+                "benchmarks": [
+                    {"name": "default", "stats": {"iqr": 0.01, "median": 0.1}},
+                    {"name": "default", "stats": {"iqr": 0.01, "median": 0.1}},
+                ]
+            },
+            _baseline(),
+        ),
         (_report(), []),
         (_report(), {"benchmarks": {}, "version": True}),
         (_report(), {"benchmarks": {"": {"median_seconds": 0.1}}, "version": 1}),
         (_report(), {"benchmarks": {"default": None}, "version": 1}),
         (_report(), {"benchmarks": {"default": {"median_seconds": True}}, "version": 1}),
+        (
+            _report(),
+            {
+                "benchmarks": {"default": {"median_seconds": -0.1}},
+                "minimum_absolute_increase_seconds": 0.05,
+                "minimum_regression_ratio": 1.5,
+                "version": 1,
+            },
+        ),
+        (
+            _report(),
+            {
+                "benchmarks": {"default": {"median_seconds": 0.1}},
+                "minimum_absolute_increase_seconds": -0.01,
+                "minimum_regression_ratio": 1.5,
+                "version": 1,
+            },
+        ),
     ],
 )
 def test_main_reports_all_other_malformed_input(
