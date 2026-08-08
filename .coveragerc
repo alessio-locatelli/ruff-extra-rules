@@ -1,5 +1,8 @@
 [run]
 plugins = covdefaults
+omit =
+    benchmarks/fixtures/*
+    tests/performance/*
 
 [report]
 # fail_under defaults to 100 via covdefaults; no override needed now that

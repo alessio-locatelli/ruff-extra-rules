@@ -21,9 +21,19 @@ ExecutionPath = Literal["direct", "prek"]
 CacheState = Literal["cold", "warm"]
 
 
-@pytest.fixture(scope="module", autouse=True)
 def _clear_benchmark_cache() -> None:
-    shutil.rmtree(_CACHE_DIRECTORY, ignore_errors=True)
+    try:
+        shutil.rmtree(_CACHE_DIRECTORY)
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        message = f"Could not remove benchmark cache {_CACHE_DIRECTORY}: {error}"
+        raise OSError(message) from error
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _reset_benchmark_cache() -> None:
+    _clear_benchmark_cache()
 
 
 def _command(execution_path: ExecutionPath, fixture_path: Path) -> list[str]:
@@ -45,7 +55,7 @@ def _run(command: list[str]) -> None:
 
 
 def _cold_setup() -> None:
-    shutil.rmtree(_CACHE_DIRECTORY, ignore_errors=True)
+    _clear_benchmark_cache()
 
 
 def _warm_setup(command: list[str]) -> None:

@@ -10,6 +10,8 @@ For the technical walkthrough of how checks are built (if you're forking this or
 
 The benchmark suite measures the direct ast-check invocation and the equivalent local `prek` hook against small, typical, and large Python files. Each path is measured with an empty check cache and with a populated one.
 
+Install the standalone `prek` executable before running these commands; see the [official installation documentation](https://prek.j178.dev/installation/).
+
 ```bash
 uv run pytest tests/performance --benchmark-only --benchmark-json=benchmark-results.json
 uv run python -m benchmarks.regression benchmark-results.json benchmarks/baseline.json
