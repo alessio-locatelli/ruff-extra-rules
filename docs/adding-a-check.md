@@ -108,11 +108,10 @@ Guidelines:
 - `prek`/`pre-commit` may run hooks in parallel across files — avoid shared mutable state without locking (see `_cache.py`).
 
 ```bash
-uv run python scripts/benchmark.py --iterations=3 --clear-cache  # measures this repo's own src/+tests/
 python -m cProfile -o profile.stats -m pre_commit_hooks.ast_checks --select=your-check src/
 python -c "import pstats; p = pstats.Stats('profile.stats'); p.sort_stats('cumulative'); p.print_stats(20)"
 ```
 
-Each check invocation pays Python interpreter startup once per subprocess, which tends to dominate over per-file analysis cost at this repo's current size — don't trust a single run's cold-vs-warm percentage as a stable signal, the sign can flip between runs. Re-run `scripts/benchmark.py` yourself to get current numbers rather than relying on a hardcoded figure in docs. Cache location: `.cache/pre_commit_hooks/` (safe to delete).
+Use the benchmark procedure in `CONTRIBUTING.md` to measure the direct ast-check invocation and the local `prek` hook against small, typical, and large fixtures, with both cold and warm check caches. Cache location: `.cache/pre_commit_hooks/` (safe to delete).
 
 **Incremental-analysis limitations**: a `check()` implementation must only ever look at the single file it's given (`filepath`/`tree`/`source`) — no check reads another file, imports, or any other cross-file state — so a cache hit for an unchanged file always reproduces exactly what a full re-run of that file would produce. Keep it that way: a check that started inspecting other files would silently break this guarantee, since the cache identity (`CheckOrchestrator._generate_cache_version()`/`_hook_name_for()`, ADR-0044) has no way to invalidate one file's cached result because a _different_ file it depended on changed. `redundant-type-conversion` (TR6) is the one documented exception, and it doesn't break this guarantee: it's marked `cacheable = False` (see `ASTCheck.cacheable`, ADR-0034) so its own results are never cached in the first place, and it reports files outside the ones it was given through a separate, explicit extension point instead (`ASTCheck.reconcile_direct_inputs`, ADR-0041) rather than by reading cross-file state from inside `check()` itself. A new check needing similar cross-file awareness should use that same extension point rather than reaching outside the file it's given from within `check()`, and should declare `tracks_direct_inputs` so `per-file-ignores` keeps feeding it files it has been switched off for (ADR-0049).
