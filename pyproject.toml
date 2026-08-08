@@ -38,6 +38,7 @@ dev = [
   "slotscheck>=0.20.1",
   "pytest-cov>=7.1.0",
   "ty>=0.0.64",
+  "pytest-benchmark>=5.2.3",
 ]
 
 [tool.setuptools.packages.find]
