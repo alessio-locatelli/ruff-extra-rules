@@ -289,6 +289,23 @@ def test_ignore_pattern_for_comma_separated_codes(comment: str, code: str, expec
             "a = 1  # fmt: skipper\nb = 2\n",
             set(),
         ),
+        (
+            # Documented trade-off -- see docs/adr/0050-format-suppression-pragmas.md.
+            "a = call(\n    [\n        '1',  # fmt: skip\n        '2',\n    ],\n    b\n)\nz = 1\n",
+            {1, 2, 3, 4, 5, 6, 7},
+        ),
+        (
+            # Documented limitation -- see docs/adr/0050-format-suppression-pragmas.md.
+            "@Test\n# fmt: off\n@Test2(a,b)\n# fmt: on\ndef test(): ...\nz = 1\n",
+            {2, 3, 4},
+        ),
+        (
+            # DEDENT (like ENDMARKER) reports the line past the file's real
+            # content when it ends inside an indented suite -- must not
+            # leak into an unterminated fmt:off's suppressed range.
+            "# fmt: off\ndef f():\n    x = 1\n",
+            {1, 2, 3},
+        ),
     ],
     ids=[
         "fmt-off-on-block",
@@ -306,6 +323,9 @@ def test_ignore_pattern_for_comma_separated_codes(comment: str, code: str, expec
         "fmt-skip-with-trailing-noqa-pragma",
         "fmt-skip-after-leading-noqa-pragma",
         "fmt-skip-substring-does-not-false-match",
+        "fmt-skip-on-nested-expression-over-suppresses-whole-statement",
+        "fmt-off-between-decorators-only-covers-marked-interval",
+        "unterminated-fmt-off-ending-in-indented-suite-no-phantom-line",
     ],
 )
 def test_find_ignored_lines_honors_format_suppression_pragmas(source: str, expected: set[int]) -> None:
@@ -315,18 +335,6 @@ def test_find_ignored_lines_honors_format_suppression_pragmas(source: str, expec
 def test_find_ignored_lines_format_suppression_combines_with_inline_ignore_pattern() -> None:
     source = "x = 1  # pytriage: TR1\n# fmt: off\na=1\n# fmt: on\ny = 2\n"
     assert find_ignored_lines(source, ignore_pattern_for("TR1")) == {1, 2, 3, 4}
-
-
-def test_find_ignored_lines_fmt_skip_on_nested_expression_over_suppresses_whole_statement() -> None:
-    # Documented trade-off -- see docs/adr/0050-format-suppression-pragmas.md.
-    source = "a = call(\n    [\n        '1',  # fmt: skip\n        '2',\n    ],\n    b\n)\nz = 1\n"
-    assert find_ignored_lines(source) == {1, 2, 3, 4, 5, 6, 7}
-
-
-def test_find_ignored_lines_fmt_off_between_decorators_only_covers_the_marked_interval() -> None:
-    # Documented limitation -- see docs/adr/0050-format-suppression-pragmas.md.
-    source = "@Test\n# fmt: off\n@Test2(a,b)\n# fmt: on\ndef test(): ...\nz = 1\n"
-    assert find_ignored_lines(source) == {2, 3, 4}
 
 
 def test_ignored_lines_from_tokens_also_honors_format_suppression() -> None:

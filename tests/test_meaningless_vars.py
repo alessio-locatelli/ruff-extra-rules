@@ -590,7 +590,7 @@ def fetch_users():
         assert "return response.status_code" in fixed_content
 
 
-def test_autofix_refuses_when_a_reference_line_is_format_suppressed() -> None:
+def test_autofix_refuses_when_a_reference_line_is_format_suppressed(tmp_path: Path) -> None:
     # See docs/adr/0050-format-suppression-pragmas.md.
     source = """import requests
 
@@ -601,20 +601,19 @@ def fetch_users():
     # fmt: on
 """
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.py"
-        filepath.write_text(source)
+    filepath = tmp_path / "test.py"
+    filepath.write_text(source)
 
-        tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
-        violations = check.check(filepath, tree, source)
+    tree = ast.parse(source)
+    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+    violations = check.check(filepath, tree, source)
 
-        assert len(violations) == 1
-        assert violations[0].fixable
+    assert len(violations) == 1
+    assert violations[0].fixable
 
-        success = check.fix(filepath, violations, source, tree)
-        assert success is False
-        assert filepath.read_text() == source
+    success = check.fix(filepath, violations, source, tree)
+    assert success is False
+    assert filepath.read_text() == source
 
 
 def test_autofix_no_fixable_violations() -> None:
