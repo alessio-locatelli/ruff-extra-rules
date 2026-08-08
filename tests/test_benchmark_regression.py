@@ -64,6 +64,11 @@ def test_find_regressions_rejects_different_benchmark_sets() -> None:
         regression.find_regressions(report, _baseline())
 
 
+def test_number_reports_integer_outside_float_range() -> None:
+    with pytest.raises(ValueError, match="malformed benchmark input"):
+        regression._number(10**10000, Path("report.json"), "expected a numeric value")
+
+
 @pytest.mark.parametrize(
     "case",
     [
@@ -170,6 +175,15 @@ def test_main_reports_file_access_errors(
                 "benchmarks": {"default": {"median_seconds": 0.1}},
                 "minimum_absolute_increase_seconds": -0.01,
                 "minimum_regression_ratio": 1.5,
+                "version": 1,
+            },
+        ),
+        (
+            _report(),
+            {
+                "benchmarks": {"default": {"median_seconds": 0.1}},
+                "minimum_absolute_increase_seconds": 0.05,
+                "minimum_regression_ratio": -0.1,
                 "version": 1,
             },
         ),
