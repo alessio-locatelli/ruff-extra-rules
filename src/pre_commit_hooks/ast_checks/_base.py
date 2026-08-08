@@ -424,11 +424,13 @@ class _FormatSuppressionScanner:
         self._last_line = 0
 
     def observe(self, tok: tokenize.TokenInfo) -> set[int] | None:
-        if tok.type != tokenize.ENDMARKER:
-            # ENDMARKER's own reported line is one past the file's last
-            # physical line when the source ends in a newline -- excluded so
-            # an unterminated fmt:off's finalize() below doesn't suppress a
-            # phantom line past the file's real content.
+        if tok.type not in (tokenize.ENDMARKER, tokenize.DEDENT):
+            # ENDMARKER's and DEDENT's own reported line is one past the
+            # file's last physical line when the source ends in a newline
+            # (DEDENT too, whenever the last real content is inside an
+            # indented suite) -- both excluded so an unterminated fmt:off's
+            # finalize() below doesn't suppress a phantom line past the
+            # file's real content.
             self._last_line = tok.end[0]
 
         if tok.type == tokenize.COMMENT:
