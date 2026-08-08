@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypedDict, cast
+from typing import TypedDict
 
 
 class BenchmarkStats(TypedDict):
@@ -40,24 +41,93 @@ class Regression:
     name: str
 
 
-def _load_json(path: Path) -> object:
-    return json.loads(path.read_text())
+def _malformed(path: Path, expected: str) -> ValueError:
+    return ValueError(f"{path}: malformed benchmark input; {expected}. Regenerate the file and try again.")
+
+
+def _read_json(path: Path) -> object:
+    try:
+        source = path.read_text()
+    except FileNotFoundError as error:
+        message = f"{path}: file is missing; create it or pass the correct path."
+        raise ValueError(message) from error
+    except PermissionError as error:
+        message = f"{path}: permission denied; grant read access and try again."
+        raise ValueError(message) from error
+    except OSError as error:
+        message = f"{path}: could not access the file; check the path and filesystem access."
+        raise ValueError(message) from error
+    try:
+        return json.loads(source)
+    except json.JSONDecodeError as error:
+        message = f"{path}: invalid JSON; regenerate the benchmark file and try again."
+        raise ValueError(message) from error
+
+
+def _number(value: object, path: Path, expected: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        raise _malformed(path, expected)
+    return float(value)
 
 
 def _load_report(path: Path) -> BenchmarkReport:
-    report = _load_json(path)
-    if not isinstance(report, dict) or not isinstance(report.get("benchmarks"), list):
-        message = f"{path} is not a pytest-benchmark report"
-        raise TypeError(message)
-    return cast("BenchmarkReport", report)
+    report = _read_json(path)
+    if not isinstance(report, dict) or not isinstance(entries := report.get("benchmarks"), list):
+        raise _malformed(path, "expected a pytest-benchmark report with a benchmarks list")
+    benchmark_entries: list[BenchmarkReportEntry] = []
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict) or not isinstance(name := entry.get("name"), str) or not name:
+            raise _malformed(path, f"benchmark entry {index} needs a non-empty name")
+        if not isinstance(stats := entry.get("stats"), dict):
+            raise _malformed(path, f"benchmark entry {index} needs a stats object")
+        benchmark_entries.append(
+            {
+                "name": name,
+                "stats": {
+                    "iqr": _number(stats.get("iqr"), path, f"benchmark entry {index} needs numeric stats.iqr"),
+                    "median": _number(
+                        stats.get("median"),
+                        path,
+                        f"benchmark entry {index} needs numeric stats.median",
+                    ),
+                },
+            }
+        )
+    return {"benchmarks": benchmark_entries}
 
 
 def _load_baseline(path: Path) -> Baseline:
-    baseline = _load_json(path)
-    if not isinstance(baseline, dict) or not isinstance(baseline.get("benchmarks"), dict):
-        message = f"{path} is not a benchmark baseline"
-        raise TypeError(message)
-    return cast("Baseline", baseline)
+    baseline = _read_json(path)
+    if not isinstance(baseline, dict) or not isinstance(entries := baseline.get("benchmarks"), dict):
+        raise _malformed(path, "expected a baseline with a benchmarks object")
+    version = baseline.get("version")
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise _malformed(path, "expected an integer version")
+    baseline_entries: dict[str, BaselineEntry] = {}
+    for name, entry in entries.items():
+        if not isinstance(name, str) or not name or not isinstance(entry, dict):
+            raise _malformed(path, "each benchmark needs a non-empty name and an object value")
+        baseline_entries[name] = {
+            "median_seconds": _number(
+                entry.get("median_seconds"),
+                path,
+                f"benchmark {name} needs numeric median_seconds",
+            )
+        }
+    return {
+        "benchmarks": baseline_entries,
+        "minimum_absolute_increase_seconds": _number(
+            baseline.get("minimum_absolute_increase_seconds"),
+            path,
+            "expected numeric minimum_absolute_increase_seconds",
+        ),
+        "minimum_regression_ratio": _number(
+            baseline.get("minimum_regression_ratio"),
+            path,
+            "expected numeric minimum_regression_ratio",
+        ),
+        "version": version,
+    }
 
 
 def find_regressions(report: BenchmarkReport, baseline: Baseline) -> list[Regression]:
@@ -110,8 +180,12 @@ def _write_summary(regressions: list[Regression]) -> None:
             f"| {regression.name} | {regression.baseline_seconds:.3f}s | {regression.current_seconds:.3f}s |"
             for regression in regressions
         )
-    with Path(summary_path).open("a") as summary_file:
-        summary_file.write("\n".join(lines) + "\n")
+    try:
+        with Path(summary_path).open("a") as summary_file:
+            summary_file.write("\n".join(lines) + "\n")
+    except OSError as error:
+        message = f"{summary_path}: could not write the benchmark summary; set GITHUB_STEP_SUMMARY to a writable file."
+        raise OSError(message) from error
 
 
 def main() -> int:
@@ -119,8 +193,13 @@ def main() -> int:
     parser.add_argument("report", type=Path)
     parser.add_argument("baseline", type=Path)
     arguments = parser.parse_args()
-    regressions = find_regressions(_load_report(arguments.report), _load_baseline(arguments.baseline))
-    _write_summary(regressions)
+    try:
+        report = _load_report(arguments.report)
+        baseline = _load_baseline(arguments.baseline)
+        regressions = find_regressions(report, baseline)
+        _write_summary(regressions)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
     for regression in regressions:
         print(
             f"::warning title=Performance regression candidate::{regression.name}: "

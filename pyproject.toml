@@ -159,7 +159,7 @@ ignore_names = [
   "returns_class",
   "auto_fixable",
   "_restore_sigterm_handler",
-  "_clear_benchmark_cache",
+  "_reset_benchmark_cache",
   "_isolated_session_singleton",
   "_use_shared_session",
   "_no_leftover_tri006_daemon_in_this_repo",
