@@ -64,10 +64,13 @@ def _read_json(path: Path) -> object:
         raise ValueError(message) from error
 
 
-def _number(value: object, path: Path, expected: str) -> float:
+def _number(value: object, path: Path, expected: str, *, minimum: float | None = None) -> float:
     if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
         raise _malformed(path, expected)
-    return float(value)
+    number = float(value)
+    if minimum is not None and number < minimum:
+        raise _malformed(path, expected)
+    return number
 
 
 def _load_report(path: Path) -> BenchmarkReport:
@@ -75,20 +78,30 @@ def _load_report(path: Path) -> BenchmarkReport:
     if not isinstance(report, dict) or not isinstance(entries := report.get("benchmarks"), list):
         raise _malformed(path, "expected a pytest-benchmark report with a benchmarks list")
     benchmark_entries: list[BenchmarkReportEntry] = []
+    names: set[str] = set()
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict) or not isinstance(name := entry.get("name"), str) or not name:
             raise _malformed(path, f"benchmark entry {index} needs a non-empty name")
+        if name in names:
+            raise _malformed(path, f"benchmark entry {index} duplicates name {name}")
         if not isinstance(stats := entry.get("stats"), dict):
             raise _malformed(path, f"benchmark entry {index} needs a stats object")
+        names.add(name)
         benchmark_entries.append(
             {
                 "name": name,
                 "stats": {
-                    "iqr": _number(stats.get("iqr"), path, f"benchmark entry {index} needs numeric stats.iqr"),
+                    "iqr": _number(
+                        stats.get("iqr"),
+                        path,
+                        f"benchmark entry {index} needs numeric stats.iqr",
+                        minimum=0,
+                    ),
                     "median": _number(
                         stats.get("median"),
                         path,
                         f"benchmark entry {index} needs numeric stats.median",
+                        minimum=0,
                     ),
                 },
             }
@@ -112,6 +125,7 @@ def _load_baseline(path: Path) -> Baseline:
                 entry.get("median_seconds"),
                 path,
                 f"benchmark {name} needs numeric median_seconds",
+                minimum=0,
             )
         }
     return {
@@ -120,6 +134,7 @@ def _load_baseline(path: Path) -> Baseline:
             baseline.get("minimum_absolute_increase_seconds"),
             path,
             "expected numeric minimum_absolute_increase_seconds",
+            minimum=0,
         ),
         "minimum_regression_ratio": _number(
             baseline.get("minimum_regression_ratio"),
