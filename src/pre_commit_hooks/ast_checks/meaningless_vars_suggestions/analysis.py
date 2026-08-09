@@ -354,7 +354,7 @@ def _scope_proposals(
 def _proposal_for(assignment: Assignment, meaningless_names: set[str]) -> RenameProposal | None:
     candidates: dict[str, set[str]] = defaultdict(set)
     constraints = _annotation_constraints(assignment.annotation)
-    annotation_name = _annotation_name(assignment.annotation)
+    annotation_name = _annotation_name(assignment.annotation, assignment.scope)
     if annotation_name is not None:
         candidates[annotation_name].add("annotation")
     else:
@@ -527,7 +527,7 @@ def _call_candidates(node: ast.Call, scope: ScopeInfo, target: ast.Name) -> dict
 
     if isinstance(node.func, ast.Name):
         return_annotation = _function_return_annotation(scope, node.func.id)
-        return_name = _annotation_name(return_annotation)
+        return_name = _annotation_name(return_annotation, scope)
         if return_name is not None:
             candidates.setdefault(return_name, set()).add("return_annotation")
     return candidates
@@ -726,24 +726,24 @@ def _verb_parameter_proposals(
         )
 
 
-def _annotation_name(annotation: ast.expr | None) -> str | None:
+def _annotation_name(annotation: ast.expr | None, scope: ScopeInfo | None = None) -> str | None:
     annotation = _unwrap_nullable_annotation(annotation)
     if annotation is None:
         return None
     if isinstance(annotation, ast.Subscript):
         base = _annotation_terminal(annotation.value)
         if base in {"list", "set", "frozenset"}:
-            element_name = _annotation_name(_slice_value(annotation.slice))
+            element_name = _annotation_name(_slice_value(annotation.slice), scope)
             return _pluralize(element_name) if element_name is not None else None
         if base == "tuple" and isinstance(annotation.slice, ast.Tuple) and len(annotation.slice.elts) == 2:
             element_annotation, ellipsis = annotation.slice.elts
             if isinstance(ellipsis, ast.Constant) and ellipsis.value is Ellipsis:
-                element_name = _annotation_name(element_annotation)
+                element_name = _annotation_name(element_annotation, scope)
                 return _pluralize(element_name) if element_name is not None else None
         if base not in _GENERIC_TYPE_NAMES:
-            return _type_name(base)
+            return _type_name(base, scope)
         return None
-    return _type_name(_annotation_terminal(annotation))
+    return _type_name(_annotation_terminal(annotation), scope)
 
 
 def _annotation_constraints(annotation: ast.expr | None) -> set[str]:
@@ -757,16 +757,38 @@ def _annotation_constraints(annotation: ast.expr | None) -> set[str]:
     return set()
 
 
-def _type_name(name: str) -> str | None:
+def _type_name(name: str, scope: ScopeInfo | None = None) -> str | None:
     normalized_name = name.lstrip("_")
     if (
         not normalized_name
         or normalized_name in _GENERIC_TYPE_NAMES
-        or normalized_name in _GENERIC_TYPE_VARIABLE_NAMES
+        or _is_type_parameter_name(scope, name)
         or not normalized_name[0].isupper()
     ):
         return None
     return _to_snake_case(normalized_name)
+
+
+def _is_type_parameter_name(scope: ScopeInfo | None, name: str) -> bool:
+    current = scope
+    while current is not None:
+        bindings = current.bindings.get(name)
+        if bindings:
+            return any(
+                isinstance(binding, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple) for binding in bindings
+            ) or any(
+                assignment.target.id == name and _is_typevar_call(assignment.value, current)
+                for assignment in current.candidates
+            )
+        current = current.parent
+    return False
+
+
+def _is_typevar_call(node: ast.expr, scope: ScopeInfo) -> bool:
+    return isinstance(node, ast.Call) and _qname(node.func, scope) in {
+        ("typing", "TypeVar"),
+        ("typing_extensions", "TypeVar"),
+    }
 
 
 def _comprehension_name(node: ast.ListComp | ast.SetComp | ast.GeneratorExp) -> str | None:
@@ -1022,7 +1044,6 @@ _GENERIC_TYPE_NAMES = {
     "Optional",
     "Union",
 }
-_GENERIC_TYPE_VARIABLE_NAMES = {"T", "K", "V", "KT", "VT"}
 _IRREGULAR_WORDS = {
     "analysis",
     "basis",
