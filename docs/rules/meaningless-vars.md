@@ -15,7 +15,7 @@ Meaningless variable names reduce code clarity and maintainability. See [Peter H
 ## Features
 
 - Detects meaningless names in assignments, function parameters, and async functions
-- **Autofixing**: derives names from file-local semantics such as concrete annotations, imported standard APIs, producers, and consumers (`--fix`). The rename is scope-aware — it replaces only the AST `Name` nodes for that specific binding within its scope, not every textual occurrence in the file. `--fix` applies only high-confidence local renames; weaker evidence is reported as a suggestion without changing the file.
+- **Autofixing**: derives names from file-local semantics such as concrete annotations, recognized imported APIs, producers, and consumers (`--fix`). The rename is scope-aware — it replaces only the AST `Name` nodes for that specific binding within its scope, not every textual occurrence in the file. `--fix` applies only high-confidence local renames; weaker evidence is reported as a suggestion without changing the file.
 - Inline suppression with `# pytriage: TR1`
 
 ## Reporting level

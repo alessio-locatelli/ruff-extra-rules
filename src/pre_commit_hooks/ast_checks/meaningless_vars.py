@@ -23,9 +23,9 @@ from ._base import (
     mark_fix_failed,
     split_lines_like_ast,
 )
-from ._meaningless_vars_suggestions import Confidence, plan_suggestions
 from ._options import EnumOption
 from ._scope import iter_within_scope_from
+from .meaningless_vars_suggestions import Confidence, plan_suggestions
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
