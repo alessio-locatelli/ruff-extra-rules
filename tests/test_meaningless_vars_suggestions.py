@@ -700,9 +700,17 @@ class Storage[RecordT]:
         return result
 """
 
+    targets = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == "result"
+    ]
+    load_target, fetch_target = targets
     proposals = _plans(source)
 
-    assert {proposal.name for proposal in proposals.values()} == {"response"}
+    assert proposals.get((load_target.lineno, load_target.col_offset)) is None
+    proposal = proposals[(fetch_target.lineno, fetch_target.col_offset)]
+    assert proposal.name == "response"
 
 
 def test_function_return_type_parameter_uses_the_declaration_scope() -> None:
@@ -889,6 +897,12 @@ def f(client):
 
 
 _WITH_RESULTS = {"data", "result", "results"}
+_PYMONGO_SINGLE_DOCUMENT_METHODS = (
+    "find_one",
+    "find_one_and_delete",
+    "find_one_and_replace",
+    "find_one_and_update",
+)
 
 
 @pytest.mark.parametrize(
@@ -917,7 +931,7 @@ def test_db_fetch_method_evidence_excludes_fetchnumpy() -> None:
 
 @pytest.mark.parametrize(
     "method_name",
-    ["find_one", "find_one_and_delete", "find_one_and_replace", "find_one_and_update"],
+    _PYMONGO_SINGLE_DOCUMENT_METHODS,
 )
 def test_pymongo_find_one_methods_produce_autofixable_documents(method_name: str) -> None:
     source = f"""from typing import Optional
@@ -958,8 +972,9 @@ def load():
     _assert_plan_for(source, "result", "document", Confidence.AUTO_FIX)
 
 
-def test_unproven_find_one_does_not_produce_a_generic_suggestion() -> None:
-    source = "def load(collection):\n    result = collection.find_one({})\n    return result\n"
+@pytest.mark.parametrize("method_name", _PYMONGO_SINGLE_DOCUMENT_METHODS)
+def test_unproven_find_one_does_not_produce_a_generic_suggestion(method_name: str) -> None:
+    source = f"def load(collection):\n    result = collection.{method_name}({{}})\n    return result\n"
 
     _assert_plan_for(source, "result", None, None)
 
