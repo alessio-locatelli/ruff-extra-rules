@@ -5,7 +5,7 @@ from typing import cast
 
 import pytest
 
-from pre_commit_hooks.ast_checks._meaningless_vars_suggestions import (
+from pre_commit_hooks.ast_checks.meaningless_vars_suggestions.analysis import (
     Confidence,
     RenameProposal,
     _annotation_constraints,
@@ -661,6 +661,12 @@ def test_regular_singularization(name: str, expected: str) -> None:
         ("str", None, {"text"}),
         ("bytes", None, {"bytes"}),
         ("list[User]", "users", set()),
+        ("Optional[User]", "user", set()),
+        ("User | None", "user", set()),
+        ("Optional[_DocumentType]", "document_type", set()),
+        ("T | None", None, set()),
+        ("bool | None", None, {"bool"}),
+        ("Union[User, None]", "user", set()),
     ],
 )
 def test_annotation_helpers(annotation: str, name: str | None, constraints: set[str]) -> None:
@@ -866,6 +872,151 @@ def test_db_fetch_method_evidence_excludes_fetchnumpy() -> None:
     source = "def f(conn):\n    results = conn.fetchnumpy()\n    return results\n"
 
     _assert_plan_for(source, "results", None, None, meaningless_names=_WITH_RESULTS)
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    ["find_one", "find_one_and_delete", "find_one_and_replace", "find_one_and_update"],
+)
+def test_pymongo_find_one_methods_produce_autofixable_documents(method_name: str) -> None:
+    source = f"""from typing import Optional
+from pymongo import MongoClient
+
+class Storage:
+    def __init__(self, connection: Optional[MongoClient] = None):
+        self.connection = connection or MongoClient()
+        self.collection = self.connection[\"database\"][\"collection\"]
+
+    def load(self):
+        result = self.collection.{method_name}({{}})
+        return result
+"""
+
+    _assert_plan_for(source, "result", "document", Confidence.AUTO_FIX)
+
+
+@pytest.mark.parametrize(
+    ("imports", "client_name"),
+    [
+        ("from pymongo import MongoClient", "MongoClient"),
+        ("from pymongo import MongoClient as Client", "Client"),
+        ("import pymongo", "pymongo.MongoClient"),
+        ("import pymongo as pm", "pm.MongoClient"),
+    ],
+)
+def test_pymongo_import_forms_and_collection_factory_produce_documents(imports: str, client_name: str) -> None:
+    source = f"""{imports}
+
+def load():
+    client = {client_name}()
+    collection = client.get_database(\"database\").get_collection(\"collection\")
+    result = collection.find_one({{}})
+    return result
+"""
+
+    _assert_plan_for(source, "result", "document", Confidence.AUTO_FIX)
+
+
+def test_unproven_find_one_does_not_produce_a_generic_suggestion() -> None:
+    source = "def load(collection):\n    result = collection.find_one({})\n    return result\n"
+
+    _assert_plan_for(source, "result", None, None)
+
+
+def test_concrete_annotation_wins_over_pymongo_document_name() -> None:
+    source = """from pymongo import MongoClient
+
+def load():
+    client = MongoClient()
+    collection = client[\"database\"][\"collection\"]
+    result: CacheDocument = collection.find_one({})
+    return result
+"""
+
+    _assert_plan_for(source, "result", "cache_document", Confidence.AUTO_FIX)
+
+
+def test_pymongo_collection_provenance_survives_a_containing_block() -> None:
+    source = """from pymongo import MongoClient
+
+class Storage:
+    def __init__(self):
+        self.collection = MongoClient()["database"]["collection"]
+
+    def load(self, enabled):
+        if enabled:
+            result = self.collection.find_one({})
+            return result
+"""
+
+    _assert_plan_for(source, "result", "document", Confidence.AUTO_FIX)
+
+
+@pytest.mark.parametrize(
+    ("setup", "expected_name", "expected_confidence"),
+    [
+        (
+            'client = MongoClient()\n    client = 0\n    collection = client["database"]["collection"]',
+            None,
+            None,
+        ),
+        (
+            'client = build_client()\n    collection = client["database"]["collection"]',
+            None,
+            None,
+        ),
+        (
+            (
+                "client = MongoClient()\n"
+                "    connection = client.close()\n"
+                '    collection = connection["database"]["collection"]'
+            ),
+            None,
+            None,
+        ),
+        (
+            'client = MongoClient()\n    first, second = 1, 2\n    collection = client["database"]["collection"]',
+            "document",
+            Confidence.AUTO_FIX,
+        ),
+        (
+            'client = MongoClient()\n    collection: object = client["database"]["collection"]',
+            "document",
+            Confidence.AUTO_FIX,
+        ),
+    ],
+)
+def test_pymongo_provenance_handles_rebindings_and_nonname_targets(
+    setup: str,
+    expected_name: str | None,
+    expected_confidence: Confidence | None,
+) -> None:
+    source = f"""from pymongo import MongoClient
+
+def load():
+    {setup}
+    result = collection.find_one({{}})
+    return result
+"""
+
+    _assert_plan_for(source, "result", expected_name, expected_confidence)
+
+
+def test_pymongo_provenance_rejects_rebound_instance_attributes() -> None:
+    source = """from pymongo import MongoClient
+
+class Storage:
+    def __init__(self, other):
+        self.connection = MongoClient()
+        self.connection = other
+        self.collection = self.connection["database"]["collection"]
+
+    def load(self):
+        result = self.collection.find_one({})
+        return result
+"""
+
+    _assert_plan_for(source, "result", None, None)
 
 
 @pytest.mark.parametrize(

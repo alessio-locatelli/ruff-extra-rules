@@ -9,6 +9,14 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from .pymongo import call_candidate, collection_attributes, suppresses_producer_tail
+from .syntax import _annotation_terminal
+from .syntax import arguments as _arguments
+from .syntax import import_qname as _import_qname
+from .syntax import position as _position
+from .syntax import qname as _qname
+from .syntax import unwrap_nullable_annotation as _unwrap_nullable_annotation
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -49,6 +57,7 @@ class ScopeInfo:
     has_reflection: bool = False
     reachable_names: set[str] | None = None
     class_references: set[str] = field(default_factory=set)
+    mongodb_collection_attributes: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,11 +99,12 @@ class _Index:
         parent: ScopeInfo,
         *,
         register_parent: bool = True,
+        mongodb_collection_attributes: frozenset[str] = frozenset(),
     ) -> None:
         if register_parent:
             parent.bindings[node.name].append(node)
             parent.function_returns[node.name] = node.returns
-        child = ScopeInfo(node, parent)
+        child = ScopeInfo(node, parent, mongodb_collection_attributes=mongodb_collection_attributes)
         parent.children.append(child)
         self._build_scope(child, node.body)
 
@@ -103,7 +113,7 @@ class _Index:
         parent.class_references.update(
             child.id for child in ast.walk(node) if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)
         )
-        visitor = _ClassVisitor(self, parent)
+        visitor = _ClassVisitor(self, parent, collection_attributes(node, parent))
         for statement in node.body:
             visitor.visit(statement)
 
@@ -273,15 +283,31 @@ class _ScopeVisitor(ast.NodeVisitor):
 
 
 class _ClassVisitor(ast.NodeVisitor):
-    def __init__(self, index: _Index, parent: ScopeInfo) -> None:
+    def __init__(
+        self,
+        index: _Index,
+        parent: ScopeInfo,
+        mongodb_collection_attributes: frozenset[str],
+    ) -> None:
         self.index = index
         self.parent = parent
+        self.mongodb_collection_attributes = mongodb_collection_attributes
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self.index.add_function(node, self.parent, register_parent=False)
+        self.index.add_function(
+            node,
+            self.parent,
+            register_parent=False,
+            mongodb_collection_attributes=self.mongodb_collection_attributes,
+        )
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self.index.add_function(node, self.parent, register_parent=False)
+        self.index.add_function(
+            node,
+            self.parent,
+            register_parent=False,
+            mongodb_collection_attributes=self.mongodb_collection_attributes,
+        )
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.index.add_class(node, self.parent)
@@ -331,17 +357,17 @@ def _proposal_for(assignment: Assignment, meaningless_names: set[str]) -> Rename
     annotation_name = _annotation_name(assignment.annotation)
     if annotation_name is not None:
         candidates[annotation_name].add("annotation")
+    else:
+        for name, evidence in _expression_candidates(assignment.value, assignment.scope, assignment.target).items():
+            candidates[name].update(evidence)
 
-    for name, evidence in _expression_candidates(assignment.value, assignment.scope).items():
-        candidates[name].update(evidence)
+        if isinstance(assignment.value, ast.ListComp | ast.SetComp | ast.GeneratorExp):
+            comprehension_name = _comprehension_name(assignment.value)
+            if comprehension_name is not None:
+                candidates[comprehension_name].update({"comprehension_element", "comprehension_iterable"})
 
-    if isinstance(assignment.value, ast.ListComp | ast.SetComp | ast.GeneratorExp):
-        comprehension_name = _comprehension_name(assignment.value)
-        if comprehension_name is not None:
-            candidates[comprehension_name].update({"comprehension_element", "comprehension_iterable"})
-
-    _add_use_candidates(candidates, constraints, assignment)
-    _refine_parser_candidates(candidates, constraints)
+        _add_use_candidates(candidates, constraints, assignment)
+        _refine_parser_candidates(candidates, constraints)
 
     if len(candidates) != 1:
         return None
@@ -439,11 +465,15 @@ def _refine_parser_candidates(candidates: dict[str, set[str]], constraints: set[
         candidates.pop("json_text", None)
 
 
-def _expression_candidates(value: ast.expr, scope: ScopeInfo) -> dict[str, set[str]]:
+def _expression_candidates(
+    value: ast.expr,
+    scope: ScopeInfo,
+    target: ast.Name,
+) -> dict[str, set[str]]:
     if isinstance(value, ast.Await):
-        return _expression_candidates(value.value, scope)
+        return _expression_candidates(value.value, scope, target)
     if isinstance(value, ast.Call):
-        return _call_candidates(value, scope)
+        return _call_candidates(value, scope, target)
     if isinstance(value, ast.Attribute) and _is_public_attribute(value.attr):
         return {value.attr: {"attribute"}}
     return {}
@@ -452,9 +482,9 @@ def _expression_candidates(value: ast.expr, scope: ScopeInfo) -> dict[str, set[s
 _DB_FETCH_METHOD_NAMES = {"fetchall": "rows", "fetchmany": "rows", "fetchone": "row", "to_list": "documents"}
 
 
-def _call_candidates(node: ast.Call, scope: ScopeInfo) -> dict[str, set[str]]:
+def _call_candidates(node: ast.Call, scope: ScopeInfo, target: ast.Name) -> dict[str, set[str]]:
     if isinstance(node.func, ast.Attribute) and node.func.attr == "json" and isinstance(node.func.value, ast.Call):
-        nested = _call_candidates(node.func.value, scope)
+        nested = _call_candidates(node.func.value, scope, target)
         if "response" in nested:
             return {"payload": {"http_json"}}
 
@@ -469,6 +499,10 @@ def _call_candidates(node: ast.Call, scope: ScopeInfo) -> dict[str, set[str]]:
     if isinstance(node.func, ast.Attribute) and node.func.attr in _DB_FETCH_METHOD_NAMES:
         return {_DB_FETCH_METHOD_NAMES[node.func.attr]: {"registry"}}
 
+    pymongo_candidate = call_candidate(node, scope, target)
+    if pymongo_candidate is not None:
+        return pymongo_candidate
+
     name = _call_terminal_name(node.func)
     if name is None:
         return {}
@@ -480,7 +514,9 @@ def _call_candidates(node: ast.Call, scope: ScopeInfo) -> dict[str, set[str]]:
     for prefix in ("get", "fetch", "load", "read", "parse", "create", "build", "make", "find", "list", "collect"):
         marker = f"{prefix}_"
         if name.startswith(marker) and len(name) > len(marker):
-            candidates[name.removeprefix(marker)] = {"producer"}
+            produced_name = name.removeprefix(marker)
+            if not suppresses_producer_tail(produced_name):
+                candidates[produced_name] = {"producer"}
             break
     if name.startswith(("is_", "has_", "can_", "should_")):
         candidates[name] = {"predicate"}
@@ -691,6 +727,7 @@ def _verb_parameter_proposals(
 
 
 def _annotation_name(annotation: ast.expr | None) -> str | None:
+    annotation = _unwrap_nullable_annotation(annotation)
     if annotation is None:
         return None
     if isinstance(annotation, ast.Subscript):
@@ -710,6 +747,7 @@ def _annotation_name(annotation: ast.expr | None) -> str | None:
 
 
 def _annotation_constraints(annotation: ast.expr | None) -> set[str]:
+    annotation = _unwrap_nullable_annotation(annotation)
     if _annotation_terminal(annotation) == "bool":
         return {"bool"}
     if _annotation_terminal(annotation) == "str":
@@ -719,20 +757,16 @@ def _annotation_constraints(annotation: ast.expr | None) -> set[str]:
     return set()
 
 
-def _annotation_terminal(annotation: ast.expr | None) -> str:
-    if isinstance(annotation, ast.Name):
-        return annotation.id
-    if isinstance(annotation, ast.Attribute):
-        return annotation.attr
-    if isinstance(annotation, ast.Subscript):
-        return _annotation_terminal(annotation.value)
-    return ""
-
-
 def _type_name(name: str) -> str | None:
-    if not name or name in _GENERIC_TYPE_NAMES or not name[0].isupper():
+    normalized_name = name.lstrip("_")
+    if (
+        not normalized_name
+        or normalized_name in _GENERIC_TYPE_NAMES
+        or normalized_name in _GENERIC_TYPE_VARIABLE_NAMES
+        or not normalized_name[0].isupper()
+    ):
         return None
-    return _to_snake_case(name)
+    return _to_snake_case(normalized_name)
 
 
 def _comprehension_name(node: ast.ListComp | ast.SetComp | ast.GeneratorExp) -> str | None:
@@ -757,26 +791,6 @@ def _attribute_role(attribute: str) -> str | None:
         return "match"
     if attribute in {"read", "write", "seek", "close", "fileno"}:
         return "file_handle"
-    return None
-
-
-def _qname(node: ast.expr, scope: ScopeInfo) -> tuple[str, ...] | None:
-    if isinstance(node, ast.Name):
-        return _import_qname(scope, node.id)
-    if isinstance(node, ast.Attribute):
-        parent = _qname(node.value, scope)
-        return (*parent, node.attr) if parent is not None else None
-    return None
-
-
-def _import_qname(scope: ScopeInfo, name: str) -> tuple[str, ...] | None:
-    current: ScopeInfo | None = scope
-    while current is not None:
-        if name in current.imports:
-            return current.imports[name]
-        if name in current.bindings:
-            return None
-        current = current.parent
     return None
 
 
@@ -909,16 +923,6 @@ def _iter_scopes(scope: ScopeInfo) -> Iterable[ScopeInfo]:
         yield from _iter_scopes(child)
 
 
-def _arguments(arguments: ast.arguments) -> Iterable[ast.arg]:
-    yield from arguments.posonlyargs
-    yield from arguments.args
-    yield from arguments.kwonlyargs
-    if arguments.vararg is not None:
-        yield arguments.vararg
-    if arguments.kwarg is not None:
-        yield arguments.kwarg
-
-
 def _condition_name(expression: ast.expr) -> str | None:
     if isinstance(expression, ast.Name) and isinstance(expression.ctx, ast.Load):
         return expression.id
@@ -936,10 +940,6 @@ def _is_reflection_call(node: ast.Call) -> bool:
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == "inspect"
     )
-
-
-def _position(node: ast.expr | ast.stmt) -> tuple[int, int]:
-    return (node.lineno, node.col_offset)
 
 
 def _target_key(target: ast.Name) -> TargetKey:
@@ -1019,7 +1019,10 @@ _GENERIC_TYPE_NAMES = {
     "set",
     "str",
     "tuple",
+    "Optional",
+    "Union",
 }
+_GENERIC_TYPE_VARIABLE_NAMES = {"T", "K", "V", "KT", "VT"}
 _IRREGULAR_WORDS = {
     "analysis",
     "basis",
