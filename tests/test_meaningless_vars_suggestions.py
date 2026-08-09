@@ -687,6 +687,36 @@ def test_active_type_parameters_do_not_produce_annotation_names(source: str) -> 
     _assert_plan_for(source, "result", None, None)
 
 
+def test_class_type_parameters_remain_local_to_methods() -> None:
+    source = """import requests
+
+class Storage[RecordT]:
+    def load(self) -> RecordT:
+        result: RecordT = read()
+        return result
+
+    def fetch(self):
+        result = requests.get("https://example.test")
+        return result
+"""
+
+    proposals = _plans(source)
+
+    assert {proposal.name for proposal in proposals.values()} == {"response"}
+
+
+def test_function_return_type_parameter_uses_the_declaration_scope() -> None:
+    source = """def load[T]() -> T:
+    raise NotImplementedError
+
+def fetch():
+    result = load()
+    return result
+"""
+
+    _assert_plan_for(source, "result", None, None)
+
+
 def test_small_ast_helpers() -> None:
     command = ast.parse('["git", "status"]', mode="eval").body
     length_call = ast.parse("len(values)", mode="eval").body
