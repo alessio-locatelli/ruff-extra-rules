@@ -44,7 +44,7 @@ class ScopeInfo:
     bindings: dict[str, list[ast.AST]] = field(default_factory=lambda: defaultdict(list))
     imports: dict[str, tuple[str, ...]] = field(default_factory=dict)
     explicit_modules: set[tuple[str, ...]] = field(default_factory=set)
-    function_returns: dict[str, ast.expr | None] = field(default_factory=dict)
+    function_returns: dict[str, tuple[ast.expr | None, ScopeInfo]] = field(default_factory=dict)
     candidates: list[Assignment] = field(default_factory=list)
     attributes: dict[str, list[ast.Attribute]] = field(default_factory=lambda: defaultdict(list))
     calls: dict[str, list[CallArgument]] = field(default_factory=lambda: defaultdict(list))
@@ -100,11 +100,15 @@ class _Index:
         *,
         register_parent: bool = True,
         mongodb_collection_attributes: frozenset[str] = frozenset(),
+        class_type_parameters: tuple[ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple, ...] = (),
     ) -> None:
         if register_parent:
             parent.bindings[node.name].append(node)
-            parent.function_returns[node.name] = node.returns
         child = ScopeInfo(node, parent, mongodb_collection_attributes=mongodb_collection_attributes)
+        for type_parameter in class_type_parameters:
+            child.bindings[type_parameter.name].append(type_parameter)
+        if register_parent:
+            parent.function_returns[node.name] = node.returns, child
         parent.children.append(child)
         self._build_scope(child, node.body)
 
@@ -113,7 +117,12 @@ class _Index:
         parent.class_references.update(
             child.id for child in ast.walk(node) if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)
         )
-        visitor = _ClassVisitor(self, parent, collection_attributes(node, parent))
+        class_type_parameters = tuple(
+            type_parameter
+            for type_parameter in node.type_params
+            if isinstance(type_parameter, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple)
+        )
+        visitor = _ClassVisitor(self, parent, collection_attributes(node, parent), class_type_parameters)
         for statement in node.body:
             visitor.visit(statement)
 
@@ -288,10 +297,12 @@ class _ClassVisitor(ast.NodeVisitor):
         index: _Index,
         parent: ScopeInfo,
         mongodb_collection_attributes: frozenset[str],
+        class_type_parameters: tuple[ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple, ...],
     ) -> None:
         self.index = index
         self.parent = parent
         self.mongodb_collection_attributes = mongodb_collection_attributes
+        self.class_type_parameters = class_type_parameters
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.index.add_function(
@@ -299,6 +310,7 @@ class _ClassVisitor(ast.NodeVisitor):
             self.parent,
             register_parent=False,
             mongodb_collection_attributes=self.mongodb_collection_attributes,
+            class_type_parameters=self.class_type_parameters,
         )
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
@@ -307,6 +319,7 @@ class _ClassVisitor(ast.NodeVisitor):
             self.parent,
             register_parent=False,
             mongodb_collection_attributes=self.mongodb_collection_attributes,
+            class_type_parameters=self.class_type_parameters,
         )
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
@@ -526,10 +539,12 @@ def _call_candidates(node: ast.Call, scope: ScopeInfo, target: ast.Name) -> dict
         candidates[constructor_name] = {"constructor"}
 
     if isinstance(node.func, ast.Name):
-        return_annotation = _function_return_annotation(scope, node.func.id)
-        return_name = _annotation_name(return_annotation, scope)
-        if return_name is not None:
-            candidates.setdefault(return_name, set()).add("return_annotation")
+        function_return = _function_return_annotation(scope, node.func.id)
+        if function_return is not None:
+            return_annotation, declaration_scope = function_return
+            return_name = _annotation_name(return_annotation, declaration_scope)
+            if return_name is not None:
+                candidates.setdefault(return_name, set()).add("return_annotation")
     return candidates
 
 
@@ -816,7 +831,7 @@ def _attribute_role(attribute: str) -> str | None:
     return None
 
 
-def _function_return_annotation(scope: ScopeInfo, name: str) -> ast.expr | None:
+def _function_return_annotation(scope: ScopeInfo, name: str) -> tuple[ast.expr | None, ScopeInfo] | None:
     current: ScopeInfo | None = scope
     while current is not None:
         if name in current.function_returns:
