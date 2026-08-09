@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ast
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from .syntax import arguments, position, qname, unwrap_nullable_annotation
 
@@ -54,11 +54,13 @@ def suppresses_producer_tail(name: str) -> bool:
 
 
 def _expression_kind(node: ast.expr, scope: ScopeInfo, target: ast.Name) -> str | None:
-    function = cast("ast.FunctionDef | ast.AsyncFunctionDef", scope.node)
-    names = _argument_kinds(function, scope)
+    scope_node = scope.node
+    names = _argument_kinds(scope_node, scope) if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef) else {}
     attributes = dict.fromkeys(scope.mongodb_collection_attributes, "collection")
-    receiver_name = _receiver_name(function)
-    for statement in function.body:
+    receiver_name = (
+        _receiver_name(scope_node) if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef) else None
+    )
+    for statement in scope_node.body:
         if position(statement) >= position(target):
             break
         _record_assignment(statement, names, attributes, receiver_name, scope)
@@ -89,19 +91,29 @@ def _record_assignment(
 
     kind = _value_kind(value, names, attributes, receiver_name, scope)
     for target in targets:
+        if kind is None:
+            _clear_names(target, names)
+            attribute_name = _receiver_attribute_name(target, receiver_name)
+            if attribute_name is not None:
+                attributes.pop(attribute_name, None)
+            continue
         if isinstance(target, ast.Name):
-            if kind is None:
-                names.pop(target.id, None)
-            else:
-                names[target.id] = kind
+            names[target.id] = kind
         else:
             attribute_name = _receiver_attribute_name(target, receiver_name)
             if attribute_name is None:
                 continue
-            if kind is None:
-                attributes.pop(attribute_name, None)
-            else:
-                attributes[attribute_name] = kind
+            attributes[attribute_name] = kind
+
+
+def _clear_names(target: ast.expr, names: dict[str, str]) -> None:
+    if isinstance(target, ast.Name):
+        names.pop(target.id, None)
+    elif isinstance(target, ast.Tuple | ast.List):
+        for element in target.elts:
+            _clear_names(element, names)
+    elif isinstance(target, ast.Starred):
+        _clear_names(target.value, names)
 
 
 def _value_kind(

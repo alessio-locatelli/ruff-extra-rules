@@ -23,6 +23,7 @@ from pre_commit_hooks.ast_checks.meaningless_vars_suggestions.analysis import (
     _to_snake_case,
     plan_suggestions,
 )
+from pre_commit_hooks.ast_checks.meaningless_vars_suggestions.pymongo import call_candidate
 
 
 def _plans(
@@ -664,7 +665,6 @@ def test_regular_singularization(name: str, expected: str) -> None:
         ("Optional[User]", "user", set()),
         ("User | None", "user", set()),
         ("Optional[_DocumentType]", "document_type", set()),
-        ("T | None", None, set()),
         ("bool | None", None, {"bool"}),
         ("Union[User, None]", "user", set()),
     ],
@@ -674,6 +674,17 @@ def test_annotation_helpers(annotation: str, name: str | None, constraints: set[
 
     assert _annotation_name(expression) == name
     assert _annotation_constraints(expression) == constraints
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'from typing import TypeVar\nU = TypeVar("U")\ndef load():\n    result: U = fetch()\n    return result\n',
+        "def load[RecordT]():\n    result: RecordT = fetch()\n    return result\n",
+    ],
+)
+def test_active_type_parameters_do_not_produce_annotation_names(source: str) -> None:
+    _assert_plan_for(source, "result", None, None)
 
 
 def test_small_ast_helpers() -> None:
@@ -980,6 +991,11 @@ class Storage:
             Confidence.AUTO_FIX,
         ),
         (
+            'client = MongoClient()\n    first, second = client\n    collection = client["database"]["collection"]',
+            "document",
+            Confidence.AUTO_FIX,
+        ),
+        (
             'client = MongoClient()\n    collection: object = client["database"]["collection"]',
             "document",
             Confidence.AUTO_FIX,
@@ -1017,6 +1033,37 @@ class Storage:
 """
 
     _assert_plan_for(source, "result", None, None)
+
+
+def test_pymongo_provenance_rejects_nested_destructuring_rebindings() -> None:
+    source = """from pymongo import MongoClient
+
+def load():
+    client = MongoClient()
+    client, (other, *rest) = build_values()
+    collection = client["database"]["collection"]
+    result = collection.find_one({})
+    return result
+"""
+
+    _assert_plan_for(source, "result", None, None)
+
+
+def test_pymongo_call_candidate_supports_module_scope() -> None:
+    tree = ast.parse(
+        """from pymongo import MongoClient
+client = MongoClient()
+collection = client["database"]["collection"]
+result = collection.find_one({})
+"""
+    )
+    index = _Index(tree)
+    assignment = next(candidate for candidate in index.root.candidates if candidate.target.id == "result")
+
+    assert isinstance(assignment.value, ast.Call)
+    assert call_candidate(assignment.value, index.root, assignment.target) == {
+        "document": {"pymongo_collection", "pymongo_find_one"}
+    }
 
 
 @pytest.mark.parametrize(
