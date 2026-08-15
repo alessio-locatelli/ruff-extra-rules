@@ -43,6 +43,8 @@ from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, _group_
 from pre_commit_hooks.ast_checks._per_file_ignores import PerFileIgnore, PerFileIgnoreList
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsCheck, MeaninglessVarsLevel
+from pre_commit_hooks.ast_checks.redundant_assignment import RedundantAssignmentCheck
+from pre_commit_hooks.ast_checks.redundant_assignment.semantic import AggressivenessLevel
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
 from pre_commit_hooks.ast_checks.redundant_type_conversion import daemon as tri006_daemon
 from tests._helpers import raises, restricted_permissions
@@ -3141,9 +3143,9 @@ def test_apply_fixes_marks_nothing_fixed(
 
 
 class _LineRemovingFixCheck(_AlwaysRerunProbeCheck):
-    """Stands in for a real check whose fix also removes a *different*
-    check's violation, which no two shipped checks currently do (see
-    `docs/adr/0053-indirect-resolution-outcome.md`).
+    """Removes a *different* check's violation on demand, so the outcomes
+    below can be exercised without depending on which shipped checks happen
+    to interact today (see `docs/adr/0053-indirect-resolution-outcome.md`).
     """
 
     __slots__ = ("target",)
@@ -3344,6 +3346,48 @@ def test_apply_fixes_does_not_attribute_a_disappearance_to_a_fix_when_the_file_w
 
     assert is_fix_aborted(by_check["line-remover"][0])
     assert "line-flagger" not in by_check
+
+
+def _run_shipped_fix_pair(tmp_path: Path, source: str) -> dict[str, list[Violation]]:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(source)
+    # ALL_CHECKS order, which is what decides who fixes first.
+    checks: list[ASTCheck] = [
+        MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE),
+        RedundantAssignmentCheck(level=AggressivenessLevel.PERMISSIVE),
+    ]
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True, cache_dir=tmp_path / "cache")
+
+    return _group_by_check_id(orchestrator.process_files([str(filepath)])[str(filepath)])
+
+
+def test_apply_fixes_marks_a_shipped_checks_violation_another_shipped_fix_removed(tmp_path: Path) -> None:
+    # Two real checks, in their real order: meaningless-vars reports `data`
+    # but has no autofix for this shape, and redundant-assignment then
+    # inlines the assignment away, taking the reported violation with it.
+    by_check = _run_shipped_fix_pair(
+        tmp_path, "import requests\n\n\ndef request():\n    data = requests.get(url)\n    return data\n"
+    )
+    (meaningless,) = by_check["meaningless-vars"]
+
+    assert is_resolved_indirectly(meaningless)
+    assert not is_fixed(meaningless)
+    assert is_fixed(by_check["redundant-assignment"][0])
+
+
+def test_apply_fixes_does_not_double_report_a_violation_whose_message_another_fix_rewrote(tmp_path: Path) -> None:
+    # meaningless-vars renames `data` to `response` before
+    # redundant-assignment runs, so redundant-assignment's own message names a
+    # different variable before and after -- for one and the same violation,
+    # which it then fixes itself. Deciding what went missing by message alone
+    # would report that violation twice, [FIXED] under the new wording and
+    # [RESOLVED INDIRECTLY] under the old (ADR-0053).
+    by_check = _run_shipped_fix_pair(
+        tmp_path, "import requests\n\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
+    )
+
+    assert [is_fixed(v) for violations in by_check.values() for v in violations] == [True, True]
+    assert not any(is_resolved_indirectly(v) for violations in by_check.values() for v in violations)
 
 
 def test_report_prints_an_indirectly_resolved_violation_distinctly(
