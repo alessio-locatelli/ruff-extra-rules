@@ -74,7 +74,7 @@ def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Viola
             else:
                 tag = ""
             if resolved_indirectly:
-                hint = " another fix in this run already removed it, so no change was applied for it."
+                hint = " it disappeared as a side effect of another fix in this run; nothing was applied for it."
             elif rejected:
                 hint = (
                     " --fix produced invalid syntax, so the change was discarded — this is a bug, "

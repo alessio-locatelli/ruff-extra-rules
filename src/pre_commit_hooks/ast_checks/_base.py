@@ -622,9 +622,9 @@ def is_fixed(violation: Violation) -> bool:
 
 
 def mark_resolved_indirectly(violation: Violation) -> None:
-    """Record that another check's fix in the same run removed `violation`
-    as a side effect. Distinct from `mark_fixed()`: no fix of this
-    violation's own check ever resolved it. See
+    """Record that some other fix in the same run removed `violation` as a
+    side effect. Distinct from `mark_fixed()`: no fix was ever applied for
+    this violation itself, whichever check's fix took it away. See
     `docs/adr/0053-indirect-resolution-outcome.md`.
     """
     _mark(violation, "resolved_indirectly")
