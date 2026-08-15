@@ -3226,6 +3226,40 @@ class _UnfixableLineFlaggingCheck(_LineFlaggingCheck):
         return violations
 
 
+class _PairFlaggingFixCheck(_AlwaysRerunProbeCheck):
+    """Reports a fixable and a non-fixable violation for the same line, and
+    deletes that line to fix the first one -- so the second goes away
+    without any fix ever having been applied for it.
+    """
+
+    __slots__ = ()
+
+    check_id = "pair-flagger"
+    error_code = "ZZZ007"
+    cacheable = True
+
+    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+        if _FLAGGED_LINE not in source:
+            return []
+        return [
+            Violation(
+                check_id=self.check_id,
+                error_code=self.error_code,
+                line=1,
+                col=0,
+                message=f"{half} half",
+                fixable=fixable,
+            )
+            for half, fixable in (("fixable", True), ("unfixable", False))
+        ]
+
+    def fix(
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+    ) -> bool:
+        atomic_write_text(filepath, source.replace(_FLAGGED_LINE, ""), encoding, source)
+        return True
+
+
 def _run_line_probes(tmp_path: Path, checks: list[ASTCheck], source: str = "") -> dict[str, list[Violation]]:
     filepath = tmp_path / "module.py"
     filepath.write_text(source or f"{_UNRELATED_LINE}{_FLAGGED_LINE}")
@@ -3348,6 +3382,19 @@ def test_apply_fixes_does_not_attribute_a_disappearance_to_a_fix_when_the_file_w
     assert "line-flagger" not in by_check
 
 
+def test_apply_fixes_marks_a_violation_its_own_checks_fix_took_with_it(tmp_path: Path) -> None:
+    # No other check is even enabled here: the violation went away because
+    # the same check's fix deleted the line, having only ever been asked to
+    # fix the other half. Nothing was applied for it either way, which is
+    # what this outcome means -- so it must not be dropped, and the report
+    # must not name a different check (ADR-0053).
+    by_message = {v.message: v for v in _run_line_probes(tmp_path, [_PairFlaggingFixCheck()])["pair-flagger"]}
+
+    assert is_fixed(by_message["fixable half"])
+    assert is_resolved_indirectly(by_message["unfixable half"])
+    assert not is_fixed(by_message["unfixable half"])
+
+
 def _run_shipped_fix_pair(tmp_path: Path, source: str) -> dict[str, list[Violation]]:
     filepath = tmp_path / "module.py"
     filepath.write_text(source)
@@ -3405,7 +3452,7 @@ def test_report_prints_an_indirectly_resolved_violation_distinctly(
 
     err = capsys.readouterr().err
     assert "[RESOLVED INDIRECTLY]" in err
-    assert "another fix in this run already removed it" in err
+    assert "it disappeared as a side effect of another fix in this run" in err
     assert "Run with --fix" not in err
     assert "please report it" not in err
 

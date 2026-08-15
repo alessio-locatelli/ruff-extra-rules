@@ -114,10 +114,8 @@ def _unmatched_by_message(dropped: list[Violation], replacements: list[Violation
 
 
 def _record_indirect_resolutions(violations: list[Violation], initial_violations: dict[str, list[Violation]]) -> None:
-    """Counting a check's entries, rather than matching them, is what
-    decides how many of its violations another check's fix removed; message
-    matching only orders the candidates within a check. See
-    `docs/adr/0053-indirect-resolution-outcome.md`.
+    """See `docs/adr/0053-indirect-resolution-outcome.md` for why this
+    counts a check's entries rather than matching them.
     """
     final_by_check = _group_by_check_id(violations)
     surviving = {id(violation) for violation in violations}

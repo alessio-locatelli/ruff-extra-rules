@@ -1,4 +1,4 @@
-# Report a violation another check's fix removed as indirectly resolved
+# Report a violation that another fix removed as indirectly resolved
 
 ## Context
 
@@ -19,7 +19,9 @@ The obstacle is identity. A violation has no stable identifier across a fix: `Vi
 
 `_apply_fixes` keeps the violations it was handed, grouped by `check_id`, before any fix runs — including the non-fixable ones, since ch. 1 draws no line there and a check with no autofix at all can just as easily have its finding removed by somebody else's fix. After a fix of this run's own is known to have changed the file, `_record_indirect_resolutions` compares that snapshot against the final list. For each check, the initial entries that are no longer in the list are weighed against the entries that replaced them; any surplus is that check's count of violations nothing in this run can account for, and exactly that many are marked via `mark_resolved_indirectly()` and put back into the report. Message matching only orders the candidates within a check, so a violation whose message merely drifted keeps its single current entry rather than being reported twice.
 
-Diagnostics report the outcome as `[RESOLVED INDIRECTLY]`, distinct from `[FIXED]` (this check's own fix resolved it) and from the `[FIXABLE]`/"Run with --fix" hint, since there is nothing left for the user to run. It counts as a violation for the exit code, exactly as `[FIXED]` does: the file changed, so the working tree still needs review.
+Diagnostics report the outcome as `[RESOLVED INDIRECTLY]`, distinct from `[FIXED]` (a fix was applied for this violation and resolved it) and from the `[FIXABLE]`/"Run with --fix" hint, since there is nothing left for the user to run. It counts as a violation for the exit code, exactly as `[FIXED]` does: the file changed, so the working tree still needs review.
+
+The outcome is defined by what was applied for the violation, not by which check applied it: a check's own `fix()` can take a second violation of its own with it (one it was never asked to fix, e.g. a non-fixable one on the same line), and that violation is in exactly the same position as one a different check removed — no fix was ever applied for it. Naming a different check in the report would be a false claim in that case, and there is nothing to gain by distinguishing the two, since the user's next step is identical.
 
 An outcome a check's own `fix()` already decided always wins. A rejected, errored, failed, or aborted violation is left exactly as it was — those report something the user may need to act on, and `_refresh_stale_positions` already refuses to touch a `check_id` holding one, so no such entry can go missing in the first place.
 
