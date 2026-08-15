@@ -35,6 +35,10 @@ Check results are cached under `.cache/pre_commit_hooks/` in your project root �
 
 It will be possible to switch to `# noqa` once this is a Ruff plugin. Until then, unregistered codes will trigger "Invalid rule code in `# noqa`" warnings.
 
+### Does this catch syntax errors?
+
+Not reliably — treat that as out of scope. Run `check-ast` (from [`pre-commit/pre-commit-hooks`](https://github.com/pre-commit/pre-commit-hooks)) or `ruff check` in the same `.pre-commit-config.yaml`; either always reports a syntax error, which this tool doesn't guarantee.
+
 ### Running without prek/pre-commit
 
 Try the checks directly, with no persistent install:
@@ -44,3 +48,5 @@ uvx --from git+https://github.com/alessio-locatelli/ruff-extra-rules python -m p
 ```
 
 There are no other installable hook ids and no console-script entry point (`[project.scripts]` in `pyproject.toml` is intentionally empty) — every check runs via `python -m pre_commit_hooks.ast_checks`.
+
+Run `ruff check` (or `check-ast`) yourself alongside this, the same way `.pre-commit-config.yaml` would — see [Does this catch syntax errors?](#does-this-catch-syntax-errors).

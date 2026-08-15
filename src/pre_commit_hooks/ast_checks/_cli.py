@@ -36,14 +36,18 @@ def main(
         argv: Command-line arguments
 
     Returns:
-        0: no violations, and every requested file was read, parsed, and
+        0: no violations, and every requested file that at least one
+            enabled check's own prefilter matched was read, parsed, and
             checked without error (this includes a `--fix` run that
             resolved every violation — matching the pre-commit convention
             that a hook only reports success when the working tree needs
             no further review, not `ruff check --fix`'s own bare-CLI
-            default of exit 0 on a fully-fixed run). A selection that
-            enables no checks at all also returns 0, having checked
-            nothing, the same way `ruff check` does with `select = []`.
+            default of exit 0 on a fully-fixed run). A file no enabled
+            check's prefilter matched is never read or parsed at all and
+            still counts toward this outcome — a syntax error in it is out
+            of scope here (ADR-0052). A selection that enables no checks
+            at all also returns 0, having checked nothing, the same way
+            `ruff check` does with `select = []`.
         1: any of — a violation is present in the report (fixed, fixable,
             rejected, errored, or non-fixable; see the tags in each printed
             line); a file couldn't be read, decoded, or parsed
