@@ -974,19 +974,30 @@ def test_process_files_no_candidates_after_prefilter_returns_empty(
     assert violations == {}
 
 
-def test_process_files_prefilter_skip_forfeits_unprocessable_reporting(tmp_path: Path) -> None:
-    # ADR-0052. RedundantSuperInitCheck's own prefilter pattern doesn't
-    # match this content, unlike test_process_files_records_unprocessable_
-    # file's ExcessiveBlankLinesCheck, whose None prefilter parses (and
-    # reports) any content.
+@pytest.mark.parametrize(
+    ("check", "expect_unprocessable"),
+    [
+        pytest.param(RedundantSuperInitCheck(), False, id="prefilter-skip-forfeits-unprocessable-reporting"),
+        pytest.param(ExcessiveBlankLinesCheck(), True, id="none-prefilter-still-reports-unprocessable"),
+    ],
+)
+def test_process_files_unprocessable_reporting_is_gated_by_prefilter_match(
+    tmp_path: Path, check: ASTCheck, expect_unprocessable: bool
+) -> None:
+    # ADR-0052: whether an invalid-syntax file even reaches _check_file()
+    # -- and so whether it's reported via unprocessable_files at all --
+    # depends on whether some enabled check's own prefilter pattern
+    # matches its content. RedundantSuperInitCheck's own pattern doesn't
+    # match this content; ExcessiveBlankLinesCheck's None pattern parses
+    # (and reports) any content.
     filepath = tmp_path / "module.py"
     filepath.write_text("def foo(:\n")
 
-    orchestrator = CheckOrchestrator(checks=[RedundantSuperInitCheck()])
+    orchestrator = CheckOrchestrator(checks=[check])
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations == {}
-    assert orchestrator.unprocessable_files == []
+    assert orchestrator.unprocessable_files == ([str(filepath)] if expect_unprocessable else [])  # pytriage: TR6
 
 
 def test_process_files_none_pattern_check_still_sees_a_file_other_checks_patterns_miss(tmp_path: Path) -> None:
@@ -1053,22 +1064,6 @@ def test_process_files_unreadable_file_is_skipped(tmp_path: Path, write_file: Ca
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations == {}
-
-
-def test_process_files_records_unprocessable_file(tmp_path: Path) -> None:
-    # A file _check_file() can't parse must not vanish from the
-    # result with no trace at all — that would be indistinguishable from a
-    # clean file with zero violations. ExcessiveBlankLinesCheck has no
-    # prefilter pattern (see its get_prefilter_pattern()), so the file
-    # reaches _check_file() regardless of its content.
-    filepath = tmp_path / "module.py"
-    filepath.write_text("def foo(:\n")
-
-    orchestrator = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck()])
-    violations = orchestrator.process_files([str(filepath)])
-
-    assert violations == {}
-    assert orchestrator.unprocessable_files == [str(filepath)]  # pytriage: TR6
 
 
 def test_process_files_resets_unprocessable_files_between_calls(tmp_path: Path) -> None:
