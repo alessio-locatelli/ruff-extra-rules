@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from ._base import is_fix_aborted, is_fix_errored, is_fix_failed, is_fix_rejected, is_fixed
+from ._base import is_fix_aborted, is_fix_errored, is_fix_failed, is_fix_rejected, is_fixed, is_resolved_indirectly
 
 if TYPE_CHECKING:
     from ._base import Violation
@@ -56,8 +56,11 @@ def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Viola
             errored = is_fix_errored(v)
             failed = is_fix_failed(v)
             aborted = is_fix_aborted(v)
+            resolved_indirectly = is_resolved_indirectly(v)
             if fixed:
                 tag = "[FIXED] "
+            elif resolved_indirectly:
+                tag = "[RESOLVED INDIRECTLY] "
             elif rejected:
                 tag = "[FIX REJECTED] "
             elif errored:
@@ -70,7 +73,9 @@ def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Viola
                 tag = "[FIXABLE] "
             else:
                 tag = ""
-            if rejected:
+            if resolved_indirectly:
+                hint = " another fix in this run already removed it, so no change was applied for it."
+            elif rejected:
                 hint = (
                     " --fix produced invalid syntax, so the change was discarded — this is a bug, "
                     "please report it: https://github.com/alessio-locatelli/ruff-extra-rules/issues"

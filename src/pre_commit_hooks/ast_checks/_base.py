@@ -602,13 +602,18 @@ def find_ignored_lines_and_classify_comments(
     return ignored_lines, comment_lines - code_lines, comment_lines & code_lines
 
 
-def mark_fixed(violation: Violation) -> None:
-    """The single place that writes the `fix_data["fixed"]` convention —
-    previously three independent hand-written sites.
+def _mark(violation: Violation, outcome: str) -> None:
+    """The single place that writes the `fix_data` outcome convention every
+    `mark_*()` below shares.
     """
     if violation.fix_data is None:
         violation.fix_data = {}
-    violation.fix_data["fixed"] = True
+    violation.fix_data[outcome] = True
+
+
+def mark_fixed(violation: Violation) -> None:
+    """Record that this check's own `fix()` resolved `violation`."""
+    _mark(violation, "fixed")
 
 
 def is_fixed(violation: Violation) -> bool:
@@ -616,14 +621,25 @@ def is_fixed(violation: Violation) -> bool:
     return bool(violation.fix_data and violation.fix_data.get("fixed", False))
 
 
+def mark_resolved_indirectly(violation: Violation) -> None:
+    """Record that another check's fix in the same run removed `violation`
+    as a side effect. Distinct from `mark_fixed()`: no fix of this
+    violation's own check ever resolved it. See
+    `docs/adr/0053-indirect-resolution-outcome.md`.
+    """
+    _mark(violation, "resolved_indirectly")
+
+
+def is_resolved_indirectly(violation: Violation) -> bool:
+    """Whether `mark_resolved_indirectly()` has already been called on `violation`."""
+    return bool(violation.fix_data and violation.fix_data.get("resolved_indirectly", False))
+
+
 def mark_fix_rejected(violation: Violation) -> None:
     """Record that a fix was attempted for `violation` but rejected by
     `atomic_write_text()` because it would have produced invalid syntax.
-    Mirrors `mark_fixed()`/`is_fixed()`'s `fix_data["fixed"]` convention.
     """
-    if violation.fix_data is None:
-        violation.fix_data = {}
-    violation.fix_data["fix_rejected"] = True
+    _mark(violation, "fix_rejected")
 
 
 def is_fix_rejected(violation: Violation) -> bool:
@@ -636,11 +652,8 @@ def mark_fix_aborted(violation: Violation) -> None:
     `atomic_write_text()` because the file changed on disk after it was read
     for this fix — an external edit or a concurrent process outside this
     tool's own per-file fix lock (see `ConcurrentModificationError`).
-    Mirrors `mark_fixed()`/`is_fixed()`'s `fix_data["fixed"]` convention.
     """
-    if violation.fix_data is None:
-        violation.fix_data = {}
-    violation.fix_data["fix_aborted"] = True
+    _mark(violation, "fix_aborted")
 
 
 def is_fix_aborted(violation: Violation) -> bool:
@@ -652,12 +665,9 @@ def mark_fix_errored(violation: Violation) -> None:
     """Record that `fix()` itself raised an exception other than
     `FixValidationError` while attempting `violation` — a bug in the
     check's own fix logic, distinct from `mark_fix_rejected()` (fix() ran
-    to completion but its *output* didn't parse). Mirrors
-    `mark_fixed()`/`is_fixed()`'s `fix_data["fixed"]` convention.
+    to completion but its *output* didn't parse).
     """
-    if violation.fix_data is None:
-        violation.fix_data = {}
-    violation.fix_data["fix_errored"] = True
+    _mark(violation, "fix_errored")
 
 
 def is_fix_errored(violation: Violation) -> bool:
@@ -673,12 +683,9 @@ def mark_fix_failed(violation: Violation) -> None:
     it itself and return False"). Distinct from `mark_fix_errored()`: this
     is an environmental failure (disk full, permission denied, missing
     parent directory), not a bug in the check's own fix logic, so it must
-    not carry the same "this is a bug, please report it" hint. Mirrors
-    `mark_fixed()`/`is_fixed()`'s `fix_data["fixed"]` convention.
+    not carry the same "this is a bug, please report it" hint.
     """
-    if violation.fix_data is None:
-        violation.fix_data = {}
-    violation.fix_data["fix_failed"] = True
+    _mark(violation, "fix_failed")
 
 
 def is_fix_failed(violation: Violation) -> bool:

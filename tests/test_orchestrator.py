@@ -29,13 +29,17 @@ from pre_commit_hooks.ast_checks._base import (
     atomic_write_text,
     is_fix_aborted,
     is_fix_errored,
+    is_fix_failed,
     is_fix_rejected,
     is_fixed,
+    is_resolved_indirectly,
+    mark_fix_failed,
 )
 from pre_commit_hooks.ast_checks._cli import main
+from pre_commit_hooks.ast_checks._diagnostics import report
 from pre_commit_hooks.ast_checks._discovery import ExcludePattern, expand_directories, filter_excluded_files
 from pre_commit_hooks.ast_checks._options import CheckOption, EnumOption
-from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, load_checks
+from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, _group_by_check_id, load_checks
 from pre_commit_hooks.ast_checks._per_file_ignores import PerFileIgnore, PerFileIgnoreList
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsCheck, MeaninglessVarsLevel
@@ -1316,6 +1320,9 @@ def test_process_files_unavailable_checks_result_is_not_cached(tmp_path: Path, m
 
 
 _CLEAN_MARKER = "# marked-clean\n"
+_FLAGGED_LINE = "flagged_call()\n"
+_SECOND_FLAGGED_LINE = "flagged_other()\n"
+_UNRELATED_LINE = "unrelated_call()\n"
 
 
 def test_process_files_a_sibling_hook_names_own_write_does_not_serve_a_stale_entry_after_content_changes(
@@ -3131,6 +3138,232 @@ def test_apply_fixes_marks_nothing_fixed(
     violations = orchestrator.process_files([str(filepath)])
     v = violations[str(filepath)][0]
     assert not (v.fix_data and v.fix_data.get("fixed"))
+
+
+class _LineRemovingFixCheck(_AlwaysRerunProbeCheck):
+    """Stands in for a real check whose fix also removes a *different*
+    check's violation, which no two shipped checks currently do (see
+    `docs/adr/0053-indirect-resolution-outcome.md`).
+    """
+
+    __slots__ = ("target",)
+
+    check_id = "line-remover"
+    error_code = "ZZZ005"
+    cacheable = True
+
+    def __init__(self, target: str = _FLAGGED_LINE) -> None:
+        super().__init__()
+        self.target = target
+
+    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+        if self.target not in source:
+            return []
+        return [
+            Violation(
+                check_id=self.check_id,
+                error_code=self.error_code,
+                line=1,
+                col=0,
+                message=f"{self.target.strip()} present",
+                fixable=True,
+            )
+        ]
+
+    def fix(
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+    ) -> bool:
+        atomic_write_text(filepath, source.replace(self.target, ""), encoding, source)
+        return True
+
+
+class _LineFlaggingCheck(_AlwaysRerunProbeCheck):
+    """Never resolves anything itself, so any outcome its violations end up
+    with came from another check's fix.
+    """
+
+    __slots__ = ()
+
+    check_id = "line-flagger"
+    error_code = "ZZZ006"
+    cacheable = True
+
+    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+        return [
+            Violation(
+                check_id=self.check_id,
+                error_code=self.error_code,
+                line=number,
+                col=0,
+                message=f"{text} flagged",
+                fixable=True,
+            )
+            for number, text in enumerate(source.splitlines(), start=1)
+            if "flagged" in text
+        ]
+
+    def fix(
+        self, _filepath: Path, _violations: list[Violation], _source: str, _tree: ast.Module, _encoding: str = "utf-8"
+    ) -> bool:
+        return False
+
+
+class _UnfixableLineFlaggingCheck(_LineFlaggingCheck):
+    """A flagger with no autofix of its own at all, like
+    redundant-super-init.
+    """
+
+    __slots__ = ()
+
+    check_id = "unfixable-line-flagger"
+
+    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+        violations = super().check(filepath, tree, source)
+        for violation in violations:
+            violation.fixable = False
+        return violations
+
+
+def _run_line_probes(tmp_path: Path, checks: list[ASTCheck], source: str = "") -> dict[str, list[Violation]]:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(source or f"{_UNRELATED_LINE}{_FLAGGED_LINE}")
+
+    orchestrator = CheckOrchestrator(checks=checks, fix_mode=True, cache_dir=tmp_path / "cache")
+    violations = orchestrator.process_files([str(filepath)])
+
+    return _group_by_check_id(violations[str(filepath)])
+
+
+@pytest.mark.parametrize(
+    "remover_runs_first",
+    [True, False],
+    ids=["remover-first", "flagger-first"],
+)
+def test_apply_fixes_marks_a_violation_another_checks_fix_removed_as_resolved_indirectly(
+    tmp_path: Path, remover_runs_first: bool
+) -> None:
+    # ch. 1: "MUST distinguish between a diagnostic that was fixed and a
+    # diagnostic that disappeared as a side effect of another fix". Whichever
+    # way round the two run, the flagger's own fix() is what never resolves
+    # anything, so the outcome must not depend on that ordering.
+    remover = _LineRemovingFixCheck()
+    flagger = _LineFlaggingCheck()
+    checks: list[ASTCheck] = [remover, flagger] if remover_runs_first else [flagger, remover]
+
+    by_check = _run_line_probes(tmp_path, checks)
+    (flagged,) = by_check["line-flagger"]
+    (removed,) = by_check["line-remover"]
+
+    assert is_resolved_indirectly(flagged)
+    assert not is_fixed(flagged)
+    assert is_fixed(removed)
+    assert not is_resolved_indirectly(removed)
+
+
+def test_apply_fixes_leaves_a_surviving_violation_open_when_another_check_fixes_an_unrelated_line(
+    tmp_path: Path,
+) -> None:
+    # The file changed this run, but the flagged line is still there.
+    by_check = _run_line_probes(tmp_path, [_LineRemovingFixCheck(target=_UNRELATED_LINE), _LineFlaggingCheck()])
+    (flagged,) = by_check["line-flagger"]
+
+    assert not is_resolved_indirectly(flagged)
+    assert not is_fixed(flagged)
+    assert flagged.fix_data is None
+    assert is_fixed(by_check["line-remover"][0])
+
+
+def test_apply_fixes_marks_only_the_violation_another_checks_fix_actually_removed(tmp_path: Path) -> None:
+    # Removing the first flagged line also shifts the second one up, so the
+    # survivor is reported by a different object than the one snapshotted
+    # before the fix -- it must not be swept up with the violation that
+    # genuinely went away.
+    by_check = _run_line_probes(
+        tmp_path,
+        [_LineRemovingFixCheck(), _LineFlaggingCheck()],
+        source=f"{_FLAGGED_LINE}{_UNRELATED_LINE}{_SECOND_FLAGGED_LINE}",
+    )
+    by_message = {v.message: v for v in by_check["line-flagger"]}
+    removed = by_message[f"{_FLAGGED_LINE.strip()} flagged"]
+    survivor = by_message[f"{_SECOND_FLAGGED_LINE.strip()} flagged"]
+
+    assert is_resolved_indirectly(removed)
+    assert not is_resolved_indirectly(survivor)
+    assert survivor.fix_data is None
+    assert survivor.line == 2
+
+
+def test_apply_fixes_keeps_a_failed_fix_distinguishable_from_an_indirect_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The flagger's own fix() failed to write the file, and another check's
+    # fix then removed the violation anyway. [FIX FAILED] reports something
+    # the user may need to act on (a full disk, a read-only file), which
+    # relabeling it as resolved would hide.
+    def failing_fix(_self: object, _fp: Path, violations: list[Violation], *_args: object, **_kwargs: object) -> bool:
+        for v in violations:
+            mark_fix_failed(v)
+        return False
+
+    monkeypatch.setattr(_LineFlaggingCheck, "fix", failing_fix)
+
+    (flagged,) = _run_line_probes(tmp_path, [_LineFlaggingCheck(), _LineRemovingFixCheck()])["line-flagger"]
+
+    assert is_fix_failed(flagged)
+    assert not is_resolved_indirectly(flagged)
+    assert not is_fixed(flagged)
+
+
+def test_apply_fixes_marks_a_non_fixable_violation_another_checks_fix_removed_as_resolved_indirectly(
+    tmp_path: Path,
+) -> None:
+    # ch. 1 draws no line at fixable diagnostics.
+    (flagged,) = _run_line_probes(tmp_path, [_LineRemovingFixCheck(), _UnfixableLineFlaggingCheck()])[
+        "unfixable-line-flagger"
+    ]
+
+    assert is_resolved_indirectly(flagged)
+
+
+def test_apply_fixes_does_not_attribute_a_disappearance_to_a_fix_when_the_file_was_edited_externally(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The remover's own write aborts because something outside this run
+    # edited the file (ADR-0042), and that same edit is what removed the
+    # flagger's violation -- so there is no fix of this run's own to
+    # attribute it to (ADR-0053).
+    def racing_fix(
+        _self: object, fp: Path, _violations: object, source: str, *_args: object, **_kwargs: object
+    ) -> None:
+        fp.write_text(_UNRELATED_LINE)
+        atomic_write_text(fp, source.replace(_FLAGGED_LINE, ""), "utf-8", source)
+
+    monkeypatch.setattr(_LineRemovingFixCheck, "fix", racing_fix)
+
+    by_check = _run_line_probes(tmp_path, [_LineRemovingFixCheck(), _LineFlaggingCheck()])
+
+    assert is_fix_aborted(by_check["line-remover"][0])
+    assert "line-flagger" not in by_check
+
+
+def test_report_prints_an_indirectly_resolved_violation_distinctly(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Nothing is left for the user to run --fix for, but the report must
+    # still account for the violation it originally reported.
+    filepath = tmp_path / "module.py"
+    filepath.write_text(f"{_UNRELATED_LINE}{_FLAGGED_LINE}")
+    orchestrator = CheckOrchestrator(
+        checks=[_LineRemovingFixCheck(), _LineFlaggingCheck()], fix_mode=True, cache_dir=tmp_path / "cache"
+    )
+
+    assert report(orchestrator, orchestrator.process_files([str(filepath)])) == 1
+
+    err = capsys.readouterr().err
+    assert "[RESOLVED INDIRECTLY]" in err
+    assert "another fix in this run already removed it" in err
+    assert "Run with --fix" not in err
+    assert "please report it" not in err
 
 
 def test_load_checks_explicit_check_args_none_default() -> None:

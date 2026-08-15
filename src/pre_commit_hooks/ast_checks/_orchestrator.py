@@ -10,6 +10,7 @@ import json
 import logging
 import sys
 import tempfile
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -34,12 +35,13 @@ from ._base import (
     mark_fix_errored,
     mark_fix_rejected,
     mark_fixed,
+    mark_resolved_indirectly,
     read_source_with_encoding,
 )
 from ._per_file_ignores import PerFileIgnoreList
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable, Sequence
 
 logger = logging.getLogger("ast_checks")
 
@@ -91,6 +93,44 @@ def _replace_check_violations(
         all_violations[key] = combined
     else:
         all_violations.pop(key, None)
+
+
+def _group_by_check_id(violations: Iterable[Violation]) -> dict[str, list[Violation]]:
+    grouped: dict[str, list[Violation]] = {}
+    for violation in violations:
+        grouped.setdefault(violation.check_id, []).append(violation)
+    return grouped
+
+
+def _unmatched_by_message(dropped: list[Violation], replacements: list[Violation]) -> list[Violation]:
+    unclaimed = Counter(violation.message for violation in replacements)
+    unmatched = []
+    for violation in dropped:
+        if unclaimed[violation.message]:
+            unclaimed[violation.message] -= 1
+        else:
+            unmatched.append(violation)
+    return unmatched
+
+
+def _record_indirect_resolutions(violations: list[Violation], initial_violations: dict[str, list[Violation]]) -> None:
+    """Counting a check's entries, rather than matching them, is what
+    decides how many of its violations another check's fix removed; message
+    matching only orders the candidates within a check. See
+    `docs/adr/0053-indirect-resolution-outcome.md`.
+    """
+    final_by_check = _group_by_check_id(violations)
+    surviving = {id(violation) for violation in violations}
+    for check_id, initial in initial_violations.items():
+        initial_ids = {id(violation) for violation in initial}
+        dropped = [violation for violation in initial if id(violation) not in surviving]
+        replacements = [violation for violation in final_by_check.get(check_id, ()) if id(violation) not in initial_ids]
+        missing = len(dropped) - len(replacements)
+        if missing <= 0:
+            continue
+        for violation in _unmatched_by_message(dropped, replacements)[:missing]:
+            mark_resolved_indirectly(violation)
+            violations.append(violation)
 
 
 def _fingerprint_default(value: object) -> object:
@@ -754,7 +794,8 @@ class CheckOrchestrator:
         run, and is mutated in place: each fixable check's own stale entries
         (collected once, before any fix ran) are replaced with a freshly
         recomputed list, each marked fixed/rejected/errored/left alone
-        against the file's actual post-fix state. Matching a stale entry
+        against the file's actual post-fix state. The pre-fix entries are
+        kept aside for `_record_indirect_resolutions`. Matching a stale entry
         back to "is this the same violation, now fixed" by identity isn't
         reliable — an earlier check's own fix can shift line/col numbers,
         and two distinct violations can share an identical message (e.g. a
@@ -771,6 +812,7 @@ class CheckOrchestrator:
         final content — a fresh check() next run might disagree. See
         ADR-0044.
         """
+        initial_violations = _group_by_check_id(violations)
         fixable_check_ids = {v.check_id for v in violations if v.fixable}
 
         # Whether any check's fix() actually resolved at least one violation
@@ -779,6 +821,10 @@ class CheckOrchestrator:
         # pointing at shifted line numbers, so the final pass below is worth
         # its own extra read+parse+recheck.
         file_changed = False
+        # Once somebody else has written to the file, a violation that
+        # disappeared can no longer be attributed to a fix of this run's
+        # own. See ADR-0053.
+        externally_modified = False
 
         for check in self.checks:
             if check.check_id not in fixable_check_ids:
@@ -853,6 +899,7 @@ class CheckOrchestrator:
                     # The external edit itself can shift line numbers too,
                     # same as a successful fix. See ADR-0042.
                     file_changed = True
+                    externally_modified = True
                 except Exception:
                     # fix() itself raised — a bug in the check's own fix
                     # logic, distinct from FixValidationError (which means
@@ -938,6 +985,8 @@ class CheckOrchestrator:
 
         if file_changed:
             self._refresh_stale_positions(filepath, violations)
+            if not externally_modified:
+                _record_indirect_resolutions(violations, initial_violations)
         self._fix_changed_file = file_changed
 
     def _refresh_stale_positions(

@@ -48,9 +48,9 @@ def main(
             of scope here (ADR-0052). A selection that enables no checks
             at all also returns 0, having checked nothing, the same way
             `ruff check` does with `select = []`.
-        1: any of — a violation is present in the report (fixed, fixable,
-            rejected, errored, or non-fixable; see the tags in each printed
-            line); a file couldn't be read, decoded, or parsed
+        1: any of — a violation is present in the report, whatever its
+            outcome (see the tags in each printed line); a file couldn't be
+            read, decoded, or parsed
             (`--list-checks` and `--exclude`d files, so also `orchestrator.
             unprocessable_files`); a check raised while analyzing a file
             (`orchestrator.rule_failures`); or a check raised
