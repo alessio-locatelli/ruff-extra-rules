@@ -29,7 +29,7 @@ A single reported instance of a check failing on one file, at one line/column, o
 _Avoid_: error, issue, finding
 
 **Prefilter pattern**:
-A fixed string a check declares via `get_prefilter_pattern()` so `git grep` can cheaply skip files that can't possibly contain a violation, before the file is read or parsed.
+A fixed string a check declares via `get_prefilter_pattern()` so `git grep` can cheaply skip files that can't possibly contain a violation, before the file is read or parsed. A file no enabled check's pattern matches is never read or parsed at all — including for syntax validity, which is out of scope by design (see `docs/adr/0052-prefilter-full-skip-is-out-of-scope-for-syntax-errors.md`).
 _Avoid_: filter — the user-facing `--exclude` glob is a distinct, unrelated concept (excludes files outright; a prefilter pattern only skips _checking_, never skips reporting if matched)
 
 **Per-file ignore**:

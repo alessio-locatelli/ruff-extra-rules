@@ -474,6 +474,11 @@ class CheckOrchestrator:
         alone, never from the prefilter: a prefiltered-out check genuinely
         has nothing to report for that file, so its absence is already part
         of what a cache entry means (ADR-0049).
+
+        A file matched by no enabled check's prefilter and not named by
+        `per-file-ignores` either gets no entry at all, so it is never read
+        or parsed and a syntax error in it is never reported -- an accepted
+        scope boundary, not an oversight (ADR-0052).
         """
         # Intersected with this run's own checks: one table serves both
         # published hooks (ADR-0045), so an entry naming only the other one's
@@ -509,7 +514,9 @@ class CheckOrchestrator:
             )
             # A file `per-file-ignores` emptied out is still an input the
             # user named, and dropping it here is what would make an
-            # unreadable one vanish without a word (ch. 13).
+            # unreadable one vanish without a word (ch. 13). A file with
+            # neither -- no enabled check's prefilter matched it, nothing
+            # ignored it -- is dropped on purpose (ADR-0052).
             if applicable or ignored:
                 checks_by_file[filepath_str] = _FileChecks(
                     run=run,

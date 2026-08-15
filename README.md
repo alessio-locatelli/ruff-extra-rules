@@ -46,6 +46,8 @@ repos:
 
 `ruff-extra-rules` always excludes `redundant-type-conversion`, and `ruff-extra-rules-ty` always runs only that check. Both read the same configuration and accept the same options; a check one hook can't run is simply left out rather than rejected, so a single configuration works for both.
 
+Run `check-ast` and `ruff-check` in the same `.pre-commit-config.yaml` — syntax errors are their job, not this tool's; see the [FAQ](docs/faq.md#does-this-catch-syntax-errors).
+
 ## Configuration
 
 Settings go in your `pyproject.toml`, under `[tool.ruff-extra-rules]`:

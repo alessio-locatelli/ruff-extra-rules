@@ -974,6 +974,21 @@ def test_process_files_no_candidates_after_prefilter_returns_empty(
     assert violations == {}
 
 
+def test_process_files_prefilter_skip_forfeits_unprocessable_reporting(tmp_path: Path) -> None:
+    # ADR-0052. RedundantSuperInitCheck's own prefilter pattern doesn't
+    # match this content, unlike test_process_files_records_unprocessable_
+    # file's ExcessiveBlankLinesCheck, whose None prefilter parses (and
+    # reports) any content.
+    filepath = tmp_path / "module.py"
+    filepath.write_text("def foo(:\n")
+
+    orchestrator = CheckOrchestrator(checks=[RedundantSuperInitCheck()])
+    violations = orchestrator.process_files([str(filepath)])
+
+    assert violations == {}
+    assert orchestrator.unprocessable_files == []
+
+
 def test_process_files_none_pattern_check_still_sees_a_file_other_checks_patterns_miss(tmp_path: Path) -> None:
     # Each enabled check's own prefilter pattern must gate that check
     # individually -- combining them into one OR'd filter before running
@@ -1462,8 +1477,7 @@ class _MarkerRemovingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
 def test_fix_mode_falls_through_when_an_always_rerun_fix_invalidates_a_cached_cacheable_result(
     tmp_path: Path,
 ) -> None:
-    # See ADR-0044 (fixing a P2 finding from an earlier review of this same
-    # change): a clean cacheable-group cache hit must not be trusted once
+    # ADR-0044: a clean cacheable-group cache hit must not be trusted once
     # an always-rerun sibling's own fix changes the file this run -- that
     # fix can invalidate whatever made the cacheable group clean, so this
     # must fall through to a full recompute rather than blindly returning
@@ -1480,17 +1494,16 @@ def test_fix_mode_falls_through_when_an_always_rerun_fix_invalidates_a_cached_ca
     )
     violations = combined.process_files([str(filepath)])
 
-    # Before this fix, "c" would never appear here at all: the stale
-    # cache hit would have been returned merged with only the always-rerun
-    # check's own result, silently hiding the violation the marker-remover's
-    # own fix just introduced for "c".
+    # The stale cache hit for "c" must not be returned merged with only the
+    # always-rerun check's own result -- that would silently hide the
+    # violation the marker-remover's own fix just introduced for "c".
     by_check = {v.check_id: v for v in violations[str(filepath)]}
     assert "c" in by_check
 
-    # A second P2 finding from that same earlier review: re-running the
-    # always-rerun group a second time (as part of a naive full recompute)
-    # would find it already clean and silently lose its own [FIXED]
-    # outcome. The marker-remover's own fix must still be reported.
+    # Re-running the always-rerun group a second time as part of the
+    # recompute must not happen: it would find the file already clean and
+    # silently lose its own [FIXED] outcome. The marker-remover's own fix
+    # must still be reported.
     assert is_fixed(by_check["marker-remover"])
 
 
@@ -2335,8 +2348,7 @@ def test_fix_mode_does_not_cache_a_run_that_actually_changed_the_file(tmp_path: 
     # fixed -- a check with zero violations elsewhere in the same run is
     # never re-verified against the file's final content once some other
     # check's fix touched it, so nothing in the group is known-accurate
-    # this run. This is the fix for a P2 finding from an earlier review of
-    # this same change: caching a changed file's result let a sibling
+    # this run. Caching a changed file's result anyway would let a sibling
     # check's own stale "clean" entry survive being served after another
     # check's fix invalidated it.
     filepath = tmp_path / "module.py"
