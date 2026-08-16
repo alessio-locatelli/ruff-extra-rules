@@ -221,10 +221,9 @@ def test_autofix_skips_line_length_violation() -> None:
     assert _can_safely_inline("x", "a" * 20, 0, source_lines) is False
 
 
-def test_autofix_skips_invalid_line_indices() -> None:
-    source_lines = ["line1\n", "line2\n"]
-    assert _can_safely_inline("x", "value", -1, source_lines) is False
-    assert _can_safely_inline("x", "value", 10, source_lines) is False
+@pytest.mark.parametrize("line_index", [-1, 10], ids=["negative", "out-of-bounds"])
+def test_autofix_skips_invalid_line_indices(line_index: int) -> None:
+    assert _can_safely_inline("x", "value", line_index, ["line1\n", "line2\n"]) is False
 
 
 def test_fix_method_with_no_fixable_violations() -> None:
