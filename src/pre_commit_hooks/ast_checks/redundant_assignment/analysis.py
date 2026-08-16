@@ -82,6 +82,7 @@ class UsageInfo:
     # including when in_fstring_expression is True but the use is only
     # part of a larger field expression (e.g. `{x.attr}`).
     fstring_field_span: tuple[int, int] | None = None
+    is_keyword_argument_echo: bool = False
 
 
 @dataclass(slots=True)
@@ -895,6 +896,8 @@ class VariableTracker(ast.NodeVisitor):
         ):
             fstring_field_span = (immediate_parent.col_offset, immediate_parent.end_col_offset)
 
+        is_keyword_argument_echo = isinstance(immediate_parent, ast.keyword) and immediate_parent.arg == node.id
+
         # Name-load context isn't resolved to anything more specific than
         # "unknown" — that would need walking parent nodes with a real
         # parent-tracking system. Only the other two UsageContext values
@@ -917,6 +920,7 @@ class VariableTracker(ast.NodeVisitor):
             enclosing_stmt=self.current_stmt,
             in_fstring_expression=in_fstring_expression,
             fstring_field_span=fstring_field_span,
+            is_keyword_argument_echo=is_keyword_argument_echo,
         )
 
         key = (scope_id, node.id)

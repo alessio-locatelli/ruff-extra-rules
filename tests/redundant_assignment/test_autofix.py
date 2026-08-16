@@ -293,6 +293,31 @@ def test_autofix_simple_constant(tmp_path: Path) -> None:
     assert "result = 42 + 10" in fixed_content
 
 
+def test_autofix_keyword_argument_echo(tmp_path: Path) -> None:
+    source = """def func(days_with_routes_in_a_row: int) -> int:
+    return days_with_routes_in_a_row
+
+
+def caller() -> int:
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row=days_with_routes_in_a_row)
+"""
+    filepath = tmp_path / "source.py"
+    filepath.write_text(source)
+
+    tree = ast.parse(source)
+    check = RedundantAssignmentCheck()
+    violations = check.check(filepath, tree, source)
+
+    fixable_violations = [v for v in violations if v.fixable]
+    assert fixable_violations
+    assert check.fix(filepath, fixable_violations, source, tree) is True
+
+    fixed_content = filepath.read_text()
+    assert "days_with_routes_in_a_row = 42" not in fixed_content
+    assert "func(days_with_routes_in_a_row=42)" in fixed_content
+
+
 def test_autofix_simple_attribute(tmp_path: Path) -> None:
     source = """def f():
     v = obj.attr

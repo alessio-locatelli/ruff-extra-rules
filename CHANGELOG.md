@@ -9,6 +9,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 ### Changed
 
 - `redundant-assignment` no longer treats a file differently for living under `tests/`/`test/` or being named `test_*.py`/`*_test.py`. Such a file used to get a quieter version of the check; it now reports exactly what the same code reports anywhere else, at both levels. To keep the check off your tests, list it under `[tool.ruff-extra-rules.per-file-ignores]`. See [ADR-0055](docs/adr/0055-redundant-assignment-ignores-the-file-path.md).
+- `redundant-assignment` now reports an assignment whose only use is `func(name=name)` — a keyword argument echoing the variable's own name — at the default (conservative) level, no matter how descriptive `name` looks. The keyword already states the name at the same call site, so it can't be adding information the name alone provides. `func(name)` positional calls are unaffected. See [ADR-0056](docs/adr/0056-redundant-assignment-keyword-argument-echo.md).
 
 ## [0.0.50] - 2026-08-15
 
