@@ -86,6 +86,8 @@ For larger example files, add fixtures under `tests/fixtures/your_check/`, follo
 
 Add `docs/rules/your-check.md` (why it exists, a short example, suppression syntax — follow the format of an existing page like `docs/rules/meaningless-vars.md`), then add a row for it to the table under README.md's "Available Checks".
 
+A new check makes existing projects fail on code they have not touched, so add it under `## [Unreleased]` in `CHANGELOG.md` too — see [releases.md](releases.md).
+
 ## 5. Validate
 
 Run linters, tests, coverage.

@@ -12,7 +12,7 @@ Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside 
 - You must not bypass proper design to "make things work."
 - Don't assume unwritten rationale behind odd patterns. Before assuming a pattern here is deliberate, check whether it's covered by an ADR in `docs/adr/`. If it is not, treat it as an existing issue and report it to a user.
 - [docs/behavioral_contract.md](docs/behavioral_contract.md) is the MUST/MUST-NOT checklist. Consult it — especially before touching caching, fixing, file discovery, or anything that runs under pre-commit/prek's own parallel worker processes — rather than re-deriving requirements it already states.
-- Breaking changes are allowed and expected. Don't design backward-compatibility shims, deprecation warnings, or migration paths for this project's own hook ids/CLI surface.
+- Breaking changes are allowed and expected. Don't design backward-compatibility shims, deprecation warnings, or migration paths for this project's own hook ids/CLI surface. They are announced instead: a change a user's run can notice needs an entry under `## [Unreleased]` in `CHANGELOG.md`, in the same commit. See [docs/releases.md](docs/releases.md) for what counts and `docs/adr/0054-release-policy-versioning-and-changelog.md` for why.
 - The repository contains multiple independent checks; each focuses on one task (e.g., only fixing function naming, or only fixing code comments).
 - Checks must support being run via [prek](https://github.com/j178/prek) (a drop-in alternative to pre-commit).
 - Performance is critical. For each relevant command, measure a cold run with its setup and cache state recorded, then immediately measure a warm run of that same command. If both the direct AST-check command and prek command are relevant, collect a separate cold/warm pair for each; record every duration in the commit body for baseline comparison.
@@ -91,7 +91,7 @@ uv run python -m pre_commit_hooks.ast_checks --ignore=redundant-assignment --fix
 ```bash
 ruff check --fix .
 ruff format .
-uv run mypy src/ tests/
+uv run mypy src/ tests/ release/
 taplo fmt pyproject.toml
 npm run format --silent
 uv run -- python -m slotscheck src tests
