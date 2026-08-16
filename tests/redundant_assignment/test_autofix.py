@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -14,22 +15,47 @@ from pre_commit_hooks.ast_checks.redundant_assignment.autofix import (
 )
 from tests.factories import ViolationFactory
 
-# ---------------------------------------------------------------------------
-# fix() / apply_fixes(): file-mutation tests
-# ---------------------------------------------------------------------------
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from pre_commit_hooks.ast_checks._base import Violation
+
+    WriteSourceFn = Callable[[str], Path]
+    CheckedFn = Callable[[str], tuple[Path, ast.Module, list[Violation]]]
 
 
-def test_fix_method_with_fixable_violations(tmp_path: Path) -> None:
+@pytest.fixture
+def check() -> RedundantAssignmentCheck:
+    return RedundantAssignmentCheck()
+
+
+@pytest.fixture
+def write_source(tmp_path: Path) -> WriteSourceFn:
+    def _write(source: str) -> Path:
+        filepath = tmp_path / "source.py"
+        filepath.write_text(source)
+        return filepath
+
+    return _write
+
+
+@pytest.fixture
+def checked(write_source: WriteSourceFn, check: RedundantAssignmentCheck) -> CheckedFn:
+    def _checked(source: str) -> tuple[Path, ast.Module, list[Violation]]:
+        filepath = write_source(source)
+        tree = ast.parse(source)
+        violations = check.check(filepath, tree, source)
+        return filepath, tree, violations
+
+    return _checked
+
+
+def test_fix_method_with_fixable_violations(checked: CheckedFn, check: RedundantAssignmentCheck) -> None:
     source = """def func_scope():
     x = "foo"
     func(x=x)
 """
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
+    filepath, tree, violations = checked(source)
 
     assert len(violations) >= 1
     assert any(v.fixable for v in violations)
@@ -37,13 +63,11 @@ def test_fix_method_with_fixable_violations(tmp_path: Path) -> None:
     assert check.fix(filepath, violations, source, tree) is True
 
     fixed_content = filepath.read_text()
-
-    # The assignment should be removed and the usage inlined.
     assert "x = " not in fixed_content
     assert 'func(x="foo")' in fixed_content
 
 
-def test_fix_two_assignments_used_on_the_same_line(tmp_path: Path) -> None:
+def test_fix_two_assignments_used_on_the_same_line(checked: CheckedFn, check: RedundantAssignmentCheck) -> None:
     # Two independently-fixable assignments whose single uses
     # land on the same line must both be inlined, even when the
     # replacement text is a different length than the variable it
@@ -54,12 +78,7 @@ def test_fix_two_assignments_used_on_the_same_line(tmp_path: Path) -> None:
     y = 22
     return y + x
 """
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
+    filepath, tree, violations = checked(source)
 
     assert check.fix(filepath, violations, source, tree) is True
 
@@ -70,7 +89,7 @@ def test_fix_two_assignments_used_on_the_same_line(tmp_path: Path) -> None:
 
 
 def test_fix_chained_assignment_where_use_line_is_another_assign_line(
-    tmp_path: Path,
+    checked: CheckedFn, check: RedundantAssignmentCheck
 ) -> None:
     # `x`'s only use is on the same line as `y`'s assignment (`y
     # = x`). Applying `y`'s fix first blanks that whole line, so `x`'s own
@@ -80,12 +99,7 @@ def test_fix_chained_assignment_where_use_line_is_another_assign_line(
     y = x
     return y
 """
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
+    filepath, tree, violations = checked(source)
 
     assert check.fix(filepath, violations, source, tree) is True
 
@@ -94,7 +108,9 @@ def test_fix_chained_assignment_where_use_line_is_another_assign_line(
     assert "return x" in fixed_content
 
 
-def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_fix_write_failure_returns_false(
+    tmp_path: Path, check: RedundantAssignmentCheck, caplog: pytest.LogCaptureFixture
+) -> None:
     # apply_fixes() must catch atomic_write_text()'s OSError and return
     # False, like every other check's fix(), instead of letting it
     # propagate uncaught.
@@ -107,7 +123,6 @@ def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptu
     filepath = tmp_path / "missing_dir" / "source.py"
 
     tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
     violations = check.check(filepath, tree, source)
 
     with caplog.at_level("DEBUG"):
@@ -124,35 +139,82 @@ def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptu
     assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
-def test_autofix_skips_violation_without_fix_data(tmp_path: Path) -> None:
-    source = "x = 1\nprint(x)\n"
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    violation = ViolationFactory.build(check_id="redundant-assignment", error_code="TR5", fixable=True, fix_data=None)
-
-    check = RedundantAssignmentCheck()
-    assert check.fix(filepath, [violation], source, ast.parse(source)) is False
-
-
-def test_autofix_skips_violation_with_invalid_fix_data(tmp_path: Path) -> None:
-    source = "x = 1\nprint(x)\n"
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    # fix_data is missing 'use_line'.
+@pytest.mark.parametrize(
+    ("source", "fix_data"),
+    [
+        ("x = 1\nprint(x)\n", None),
+        ("x = 1\nprint(x)\n", {"other_key": "value"}),
+        (
+            "x = 1\nprint(x)\n",
+            {
+                "pattern": "IMMEDIATE_SINGLE_USE",
+                "assign_line": 100,  # Invalid line number.
+                "var_name": "x",
+                "rhs_source": "1",
+                "use_line": 2,
+                "use_col": 6,
+            },
+        ),
+        (
+            "x = 1\nprint(x)\n",
+            {
+                "pattern": "IMMEDIATE_SINGLE_USE",
+                "assign_line": 1,
+                "var_name": "x",
+                "rhs_source": "1",
+                "use_line": 100,  # Invalid line number.
+                "use_col": 6,
+            },
+        ),
+        (
+            # RedundantAssignmentCheck.check() leaves use_line/use_col
+            # unset whenever a lifecycle doesn't have exactly one use.
+            "x = 1\nprint(x)\nprint(x)\n",
+            {
+                "pattern": "SINGLE_USE",
+                "assign_line": 1,
+                "var_name": "x",
+                "rhs_source": "1",
+                "use_line": None,
+                "use_col": None,
+            },
+        ),
+        (
+            # Line is already 60 chars; adding a 40-char value would exceed 88.
+            "x = " + "a" * 40 + "\nresult = some_long_function_name(x, param1, param2)\n",
+            {
+                "pattern": "IMMEDIATE_SINGLE_USE",
+                "assign_line": 1,
+                "var_name": "x",
+                "rhs_source": "a" * 40,
+                "use_line": 2,
+                "use_col": 41,  # Position of 'x' in the usage line.
+            },
+        ),
+    ],
+    ids=[
+        "missing-fix-data",
+        "fix-data-missing-use-line",
+        "invalid-assignment-line",
+        "invalid-usage-line",
+        "multiple-uses-unset-position",
+        "unsafe-line-length",
+    ],
+)
+def test_autofix_declines_fix_for_invalid_or_unsafe_fix_data(
+    write_source: WriteSourceFn,
+    check: RedundantAssignmentCheck,
+    source: str,
+    fix_data: dict[str, object] | None,
+) -> None:
     violation = ViolationFactory.build(
-        check_id="redundant-assignment", error_code="TR5", fixable=True, fix_data={"other_key": "value"}
+        check_id="redundant-assignment", error_code="TR5", fixable=True, fix_data=fix_data
     )
-
-    check = RedundantAssignmentCheck()
-    assert check.fix(filepath, [violation], source, ast.parse(source)) is False
+    assert check.fix(write_source(source), [violation], source, ast.parse(source)) is False
 
 
 def test_autofix_skips_multiline_rhs() -> None:
-    # RHS with newline should not be inlined.
-    source_lines = ["result = func(x)\n"]
-    assert _can_safely_inline("result", "func(\n    arg\n)", 0, source_lines) is False
+    assert _can_safely_inline("result", "func(\n    arg\n)", 0, ["result = func(x)\n"]) is False
 
 
 def test_autofix_skips_line_length_violation() -> None:
@@ -167,101 +229,6 @@ def test_autofix_skips_invalid_line_indices() -> None:
     assert _can_safely_inline("x", "value", 10, source_lines) is False  # out of bounds
 
 
-def test_autofix_with_invalid_assignment_line(tmp_path: Path) -> None:
-    source = "x = 1\nprint(x)\n"
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    violation = ViolationFactory.build(
-        check_id="redundant-assignment",
-        error_code="TR5",
-        fixable=True,
-        fix_data={
-            "pattern": "IMMEDIATE_SINGLE_USE",
-            "assign_line": 100,  # Invalid line number
-            "var_name": "x",
-            "rhs_source": "1",
-            "use_line": 2,
-            "use_col": 6,
-        },
-    )
-
-    check = RedundantAssignmentCheck()
-    assert check.fix(filepath, [violation], source, ast.parse(source)) is False
-
-
-def test_autofix_with_invalid_usage_line(tmp_path: Path) -> None:
-    source = "x = 1\nprint(x)\n"
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    violation = ViolationFactory.build(
-        check_id="redundant-assignment",
-        error_code="TR5",
-        fixable=True,
-        fix_data={
-            "pattern": "IMMEDIATE_SINGLE_USE",
-            "assign_line": 1,
-            "var_name": "x",
-            "rhs_source": "1",
-            "use_line": 100,  # Invalid line number
-            "use_col": 6,
-        },
-    )
-
-    check = RedundantAssignmentCheck()
-    assert check.fix(filepath, [violation], source, ast.parse(source)) is False
-
-
-def test_autofix_with_multiple_uses(tmp_path: Path) -> None:
-    source = "x = 1\nprint(x)\nprint(x)\n"
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    # RedundantAssignmentCheck.check() leaves use_line/use_col unset
-    # whenever a lifecycle doesn't have exactly one use.
-    violation = ViolationFactory.build(
-        check_id="redundant-assignment",
-        error_code="TR5",
-        fixable=True,
-        fix_data={
-            "pattern": "SINGLE_USE",
-            "assign_line": 1,
-            "var_name": "x",
-            "rhs_source": "1",
-            "use_line": None,
-            "use_col": None,
-        },
-    )
-
-    check = RedundantAssignmentCheck()
-    assert check.fix(filepath, [violation], source, ast.parse(source)) is False
-
-
-def test_autofix_with_unsafe_inlining(tmp_path: Path) -> None:
-    # Line is already 60 chars; adding a 40-char value would exceed 88.
-    source = "x = " + "a" * 40 + "\nresult = some_long_function_name(x, param1, param2)\n"
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    violation = ViolationFactory.build(
-        check_id="redundant-assignment",
-        error_code="TR5",
-        fixable=True,
-        fix_data={
-            "pattern": "IMMEDIATE_SINGLE_USE",
-            "assign_line": 1,
-            "var_name": "x",
-            "rhs_source": "a" * 40,
-            "use_line": 2,
-            "use_col": 41,  # Position of 'x' in the usage line
-        },
-    )
-
-    check = RedundantAssignmentCheck()
-    assert check.fix(filepath, [violation], source, ast.parse(source)) is False
-
-
 def test_fix_method_with_no_fixable_violations() -> None:
     source = """
 x = "foo"
@@ -271,123 +238,136 @@ func(x=x)
     assert apply_fixes(Path("test.py"), [violation], source) is False
 
 
-def test_autofix_simple_constant(tmp_path: Path) -> None:
-    source = """def f():
+@pytest.mark.parametrize(
+    ("source", "removed", "kept"),
+    [
+        (
+            """def f():
     y = 42
     result = y + 10
     return result
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    fixable_violations = [v for v in violations if v.fixable]
-    assert fixable_violations
-    assert check.fix(filepath, fixable_violations, source, tree) is True
-
-    fixed_content = filepath.read_text()
-    assert "y = 42" not in fixed_content
-    assert "result = 42 + 10" in fixed_content
-
-
-def test_autofix_keyword_argument_echo(tmp_path: Path) -> None:
-    source = """def func(days_with_routes_in_a_row: int) -> int:
+""",
+            "y = 42",
+            "result = 42 + 10",
+        ),
+        (
+            """def func(days_with_routes_in_a_row: int) -> int:
     return days_with_routes_in_a_row
 
 
 def caller() -> int:
     days_with_routes_in_a_row = 42
     return func(days_with_routes_in_a_row=days_with_routes_in_a_row)
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    fixable_violations = [v for v in violations if v.fixable]
-    assert fixable_violations
-    assert check.fix(filepath, fixable_violations, source, tree) is True
-
-    fixed_content = filepath.read_text()
-    assert "days_with_routes_in_a_row = 42" not in fixed_content
-    assert "func(days_with_routes_in_a_row=42)" in fixed_content
-
-
-def test_autofix_simple_attribute(tmp_path: Path) -> None:
-    source = """def f():
+""",
+            "days_with_routes_in_a_row = 42",
+            "func(days_with_routes_in_a_row=42)",
+        ),
+        (
+            """def f():
     v = obj.attr
     use(v)
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
+""",
+            "v = obj.attr",
+            "use(obj.attr)",
+        ),
+        (
+            # A non-string RHS (e.g. a number) needs no re-quoting --
+            # `f"{5}"` is fine as-is, no quotes involved -- so the f-string
+            # splice handling must leave this path unaffected.
+            """def f():
+    n = 5
+    return f"Total: {n}"
+""",
+            "n = ",
+            'return f"Total: {5}"',
+        ),
+        (
+            # A Name RHS used as a whole f-string field (e.g. `x = obj;
+            # f"{x}"`) isn't a string-literal expression, so `rhs_source`
+            # isn't eligible for splicing -- the splice path must recognize
+            # that (via ast.literal_eval raising) and fall through to the
+            # ordinary inlining path unchanged.
+            """def f(obj):
+    x = obj
+    return f"value: {x}"
+""",
+            "x = obj",
+            'return f"value: {obj}"',
+        ),
+        (
+            # ast.col_offset is a UTF-8 byte offset, not a character
+            # offset. A non-ASCII character earlier on the use's line must
+            # not throw off the position used to locate the variable for
+            # inlining.
+            """def process():
+    data = calc()
+    return "café", data
+""",
+            "data",
+            'return "café", calc()',
+        ),
+    ],
+    ids=[
+        "simple-constant",
+        "keyword-argument-echo",
+        "simple-attribute",
+        "fstring-field-non-string-rhs",
+        "fstring-field-name-rhs",
+        "non-ascii-text-on-use-line",
+    ],
+)
+def test_autofix_inlines_simple_redundant_assignment(
+    checked: CheckedFn, check: RedundantAssignmentCheck, source: str, removed: str, kept: str
+) -> None:
+    filepath, tree, violations = checked(source)
 
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    fixable_violations = [v for v in violations if v.fixable]
-    assert fixable_violations
-    assert check.fix(filepath, fixable_violations, source, tree) is True
+    assert any(v.fixable for v in violations)
+    assert check.fix(filepath, violations, source, tree) is True
 
     fixed_content = filepath.read_text()
-    assert "v = obj.attr" not in fixed_content
-    assert "use(obj.attr)" in fixed_content
+    assert removed not in fixed_content
+    assert kept in fixed_content
 
 
-def test_autofix_word_boundaries(tmp_path: Path) -> None:
-    # `return max(x, 10)` directly (no intermediate `result =`), so `x` is
-    # the only redundant assignment in play — `result = max(x, 10); return
-    # result` would make `result` itself independently fixable too (issue
-    # #76: a 1-arg call is no longer excluded from autofix), and inlining
-    # both in a single pass is a pre-existing cascading-fix quirk (ADR-0009)
-    # unrelated to what this test checks.
-    source = """def f():
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            """def f():
     x = 5
     return max(x, 10)
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    fixable_violations = [v for v in violations if v.fixable]
-    assert fixable_violations
-    assert check.fix(filepath, fixable_violations, source, tree) is True
-
-    fixed_content = filepath.read_text()
-    # Should replace 'x' but not affect 'max'.
-    assert "return max(5, 10)" in fixed_content
-    assert "max" in fixed_content
-
-
-def test_autofix_handles_word_boundaries(tmp_path: Path) -> None:
-    source = """
+""",
+            "return max(5, 10)",
+        ),
+        (
+            """
 def func(index):
     x = 5
     return max(x, index)
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
+""",
+            "max(5, index)",
+        ),
+    ],
+    ids=["against-max", "against-index"],
+)
+def test_autofix_respects_word_boundaries(
+    checked: CheckedFn, check: RedundantAssignmentCheck, source: str, expected: str
+) -> None:
+    # `return max(x, 10)` directly (no intermediate `result =`), so `x` is
+    # the only redundant assignment in play -- `result = max(x, 10); return
+    # result` would make `result` itself independently fixable too (issue
+    # #76: a 1-arg call is no longer excluded from autofix), and inlining
+    # both in a single pass is a pre-existing cascading-fix quirk (ADR-0009)
+    # unrelated to what this test checks. A naive replace must also not
+    # corrupt `max`/`index`, which both contain the letter "x".
+    filepath, tree, violations = checked(source)
 
     assert any(v.fixable for v in violations)
-    check.fix(filepath, violations, source, tree)
-
-    # Should only replace the standalone 'x', not 'max' or 'index'.
-    assert "max(5, index)" in filepath.read_text()
+    assert check.fix(filepath, violations, source, tree) is True
+    assert expected in filepath.read_text()
 
 
-def test_autofix_respects_line_length(tmp_path: Path) -> None:
+def test_autofix_respects_line_length(checked: CheckedFn) -> None:
     # `x` and its RHS are both short enough to pass should_report_violation's
     # conservative report-time estimate, but the *actual* usage line (with
     # several other long arguments already on it) would exceed 79 chars once
@@ -399,16 +379,13 @@ def func():
     x = "hello world"
     print("first", "second", "third", "fourth", "fifth", "sixth", "seventh", x)
 """
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    violations = RedundantAssignmentCheck().check(filepath, ast.parse(source), source)
+    _filepath, _tree, violations = checked(source)
 
     assert violations
     assert all(not v.fixable for v in violations)
 
 
-def test_zero_arg_call_immediate_single_use_is_fixable(tmp_path: Path) -> None:
+def test_zero_arg_call_immediate_single_use_is_fixable(checked: CheckedFn, check: RedundantAssignmentCheck) -> None:
     # A zero-arg call has no operands whose evaluation order inlining
     # could disturb, so IMMEDIATE_SINGLE_USE allows it as a narrow
     # carve-out even though it's a Call RHS -- idiomatic test code like
@@ -418,12 +395,7 @@ def test_zero_arg_call_immediate_single_use_is_fixable(tmp_path: Path) -> None:
     check = MeaninglessVarsCheck()
     violations = check.check(Path("test.py"), tree, source)
 """
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
+    filepath, tree, violations = checked(source)
 
     check_violations = [v for v in violations if "'check'" in v.message]
     assert check_violations
@@ -437,7 +409,7 @@ def test_zero_arg_call_immediate_single_use_is_fixable(tmp_path: Path) -> None:
 
 
 def test_augmented_assignment_use_not_flagged_for_zero_arg_call(
-    tmp_path: Path,
+    checked: CheckedFn, check: RedundantAssignmentCheck
 ) -> None:
     # The zero-arg-call carve-out for IMMEDIATE_SINGLE_USE must not make
     # `x = Box(); x += 1` fixable — inlining would produce invalid syntax
@@ -446,12 +418,7 @@ def test_augmented_assignment_use_not_flagged_for_zero_arg_call(
     x = Box()
     x += 1
 """
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
+    filepath, tree, violations = checked(source)
 
     assert all("'x'" not in v.message for v in violations)
 
@@ -529,13 +496,10 @@ def test_augmented_assignment_use_not_flagged_for_zero_arg_call(
         "short-circuited-boolop",
     ],
 )
-def test_zero_arg_call_use_not_fixable(tmp_path: Path, source: str, message_filter: str) -> None:
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
+def test_zero_arg_call_use_not_fixable(
+    checked: CheckedFn, check: RedundantAssignmentCheck, source: str, message_filter: str
+) -> None:
+    filepath, tree, violations = checked(source)
 
     matching = [v for v in violations if message_filter in v.message]
     assert matching
@@ -567,17 +531,12 @@ def test_zero_arg_call_use_not_fixable(tmp_path: Path, source: str, message_filt
     ],
     ids=["immediate-before-loop", "intervening-statement-before-loop"],
 )
-def test_single_use_call_in_loop_body_not_reported(tmp_path: Path, source: str) -> None:
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, ast.parse(source), source)
-
+def test_single_use_call_in_loop_body_not_reported(checked: CheckedFn, source: str) -> None:
+    _filepath, _tree, violations = checked(source)
     assert all("'value'" not in v.message for v in violations)
 
 
-def test_call_rhs_across_await_in_same_statement_not_reported(tmp_path: Path) -> None:
+def test_call_rhs_across_await_in_same_statement_not_reported(checked: CheckedFn) -> None:
     # `await future` precedes `x` in evaluation order within this single
     # statement — inlining would run make() after the await instead of
     # before it, so this isn't a redundant assignment at all.
@@ -585,16 +544,11 @@ def test_call_rhs_across_await_in_same_statement_not_reported(tmp_path: Path) ->
     x = make()
     return sink(await future, x)
 """
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, ast.parse(source), source)
-
+    _filepath, _tree, violations = checked(source)
     assert all("'x'" not in v.message for v in violations)
 
 
-def test_autofix_preserves_blank_lines_across_file(tmp_path: Path) -> None:
+def test_autofix_preserves_blank_lines_across_file(checked: CheckedFn, check: RedundantAssignmentCheck) -> None:
     # autofix must not delete blank lines across the entire
     # file, only around the removed assignment.
     source = """class FirstClass:
@@ -620,13 +574,7 @@ class ThirdClass:
     def method_three(self):
         pass
 """
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    violations = check.check(filepath, tree, source)
+    filepath, tree, violations = checked(source)
 
     # This source always yields a fixable violation for `x`.
     assert any(v.fixable for v in violations)
@@ -644,7 +592,7 @@ class ThirdClass:
     ast.parse(fixed_content)
 
 
-def test_autofix_cleans_up_excessive_blank_lines(tmp_path: Path) -> None:
+def test_autofix_cleans_up_excessive_blank_lines(checked: CheckedFn, check: RedundantAssignmentCheck) -> None:
     source = """def function_with_redundant():
 
 
@@ -653,13 +601,7 @@ def test_autofix_cleans_up_excessive_blank_lines(tmp_path: Path) -> None:
 
     return x
 """
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    violations = check.check(filepath, tree, source)
+    filepath, tree, violations = checked(source)
 
     # This source always yields a fixable violation for `x`.
     assert any(v.fixable for v in violations)
@@ -697,7 +639,7 @@ def test_cleanup_blank_lines_only_excess_above() -> None:
     assert lines[3] == "code\n"
 
 
-def test_fix_preserves_trailing_comment_on_string_ending_in_escaped_backslash(tmp_path: Path) -> None:
+def test_fix_preserves_trailing_comment_on_string_ending_in_escaped_backslash(checked: CheckedFn) -> None:
     # A naive comment-detection heuristic would miss the
     # trailing comment on a line like `sep = "\\"  # comment` (an escaped
     # backslash right before the closing quote), so should_report_violation
@@ -707,17 +649,13 @@ def test_fix_preserves_trailing_comment_on_string_ending_in_escaped_backslash(tm
     # rule explicitly owns the relevant comment"; ch. 21: "MUST preserve
     # comments where possible").
     source = 'def get_sep() -> str:\n    sep = "\\\\"  # Windows path separator\n    return sep\n'
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, ast.parse(source), source)
+    filepath, _tree, violations = checked(source)
 
     assert violations == []
     assert filepath.read_text() == source
 
 
-def test_check_reports_assignment_after_multiline_string_with_trailing_comment(tmp_path: Path) -> None:
+def test_check_reports_assignment_after_multiline_string_with_trailing_comment(checked: CheckedFn) -> None:
     # tokenize reports a multiline STRING token's line as only
     # its start line, not every line it spans, so a comment trailing the
     # closing `"""` on a later line was misclassified as comment-only —
@@ -726,15 +664,12 @@ def test_check_reports_assignment_after_multiline_string_with_trailing_comment(t
     # (ch. 2/21: comment detection must reflect the actual parsed source,
     # not an under-counted token span).
     source = 'def f():\n    x = """\nmulti\nline\n"""  # trailing comment\n    y = 5\n    return x, y\n'
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    violations = RedundantAssignmentCheck().check(filepath, ast.parse(source), source)
+    _filepath, _tree, violations = checked(source)
 
     assert any("'y'" in v.message for v in violations)
 
 
-def test_autofix_splices_string_literal_into_fstring_field(tmp_path: Path) -> None:
+def test_autofix_splices_string_literal_into_fstring_field(checked: CheckedFn, check: RedundantAssignmentCheck) -> None:
     # Inlining a string-literal variable into an f-string replacement
     # field must splice the literal's raw text directly into the
     # surrounding string, not re-quote it inside the braces (which would
@@ -743,12 +678,7 @@ def test_autofix_splices_string_literal_into_fstring_field(tmp_path: Path) -> No
     org = "requests-cache"
     return f"https://github.com/{org}/requests-cache"
 """
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
+    filepath, tree, violations = checked(source)
 
     assert any(v.fixable for v in violations)
     assert check.fix(filepath, violations, source, tree) is True
@@ -761,99 +691,95 @@ def test_autofix_splices_string_literal_into_fstring_field(tmp_path: Path) -> No
     ast.parse(fixed_content)
 
 
-def test_autofix_declines_fstring_splice_with_unsafe_characters(tmp_path: Path) -> None:
-    # A literal containing a quote character can't be safely spliced as raw
-    # text without knowing (and re-escaping for) the f-string's own quote
-    # style — declined conservatively rather than risking broken output.
-    source = """def f():
+@pytest.mark.parametrize(
+    ("source", "message_filter"),
+    [
+        (
+            # A literal containing a quote character can't be safely
+            # spliced as raw text without knowing (and re-escaping for) the
+            # f-string's own quote style — declined conservatively rather
+            # than risking broken output.
+            """def f():
     name = "O'Brien"
     return f"Hello {name}!"
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    name_violations = [v for v in violations if "'name'" in v.message]
-    assert name_violations
-    assert all(not v.fixable for v in name_violations)
-
-    check.fix(filepath, violations, source, tree)
-    assert filepath.read_text() == source
-
-
-def test_autofix_declines_fstring_splice_with_control_character(tmp_path: Path) -> None:
-    # "\x1b[0m" (an ANSI reset code) is a valid, non-newline,
-    # non-NUL string literal, so it passed every prior unsafe-character
-    # check. Splicing it as a raw byte is syntactically fine but renders
-    # invisibly (the ESC[0m sequence produces no visible glyph), making a
-    # diff look like the value was silently dropped instead of inlined.
-    source = """def f():
+""",
+            "'name'",
+        ),
+        (
+            # "\\x1b[0m" (an ANSI reset code) is a valid, non-newline,
+            # non-NUL string literal, so it passed every prior unsafe-
+            # character check. Splicing it as a raw byte is syntactically
+            # fine but renders invisibly, making a diff look like the value
+            # was silently dropped instead of inlined.
+            """def f():
     reset = "\\x1b[0m"
     return f"{reset}"
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
+""",
+            "'reset'",
+        ),
+        (
+            # "\\x00" is a perfectly valid string literal, but Python's
+            # tokenizer rejects any *source file* containing a raw NUL
+            # byte — splicing it as literal text would turn a fixable file
+            # into an unparsable one.
+            'def f():\n    label = "\\x00"\n    return f"<{label}>"\n',
+            "'label'",
+        ),
+        (
+            # a str object can legally hold an unpaired surrogate (e.g.
+            # from a "\\ud800" escape) even though no real text encoding
+            # can represent one — splicing it as raw source text would
+            # make atomic_write_text's compile()/write() crash with an
+            # uncaught UnicodeEncodeError instead of declining the fix.
+            'def f():\n    label = "\\ud800"\n    return f"<{label}>"\n',
+            "'label'",
+        ),
+        (
+            # `{org!r}` applies repr() to the inlined literal, which is not
+            # the same as splicing its raw text into the surrounding
+            # string — must be declined rather than naively re-quoted.
+            """def f():
+    org = "requests-cache"
+    return f"{org!r}"
+""",
+            "'org'",
+        ),
+        (
+            # `org` isn't the whole replacement field here
+            # (`org.upper()` is), so there's no clean way to remove the
+            # braces and splice raw text without changing what the field
+            # expression does.
+            """def f():
+    org = "requests-cache"
+    return f"{org.upper()}"
+""",
+            "'org'",
+        ),
+    ],
+    ids=[
+        "unsafe-quote-character",
+        "control-character",
+        "nul-byte",
+        "unpaired-surrogate",
+        "conversion",
+        "nested-expression",
+    ],
+)
+def test_autofix_declines_fstring_splice(
+    checked: CheckedFn, check: RedundantAssignmentCheck, source: str, message_filter: str
+) -> None:
+    filepath, tree, violations = checked(source)
 
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    reset_violations = [v for v in violations if "'reset'" in v.message]
-    assert reset_violations
-    assert all(not v.fixable for v in reset_violations)
-
-    check.fix(filepath, violations, source, tree)
-    assert filepath.read_text() == source
-
-
-def test_autofix_declines_fstring_splice_with_nul_byte(tmp_path: Path) -> None:
-    # `"\x00"` is a perfectly valid string literal, but Python's
-    # tokenizer rejects any *source file* containing a raw NUL byte —
-    # splicing it as literal text would turn a fixable file into an
-    # unparsable one.
-    source = 'def f():\n    label = "\\x00"\n    return f"<{label}>"\n'
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    label_violations = [v for v in violations if "'label'" in v.message]
-    assert label_violations
-    assert all(not v.fixable for v in label_violations)
-
-    check.fix(filepath, violations, source, tree)
-    assert filepath.read_text() == source
-
-
-def test_autofix_declines_fstring_splice_with_unpaired_surrogate(tmp_path: Path) -> None:
-    # a str object can legally hold an unpaired surrogate (e.g.
-    # from a "\ud800" escape) even though no real text encoding can
-    # represent one — splicing it as raw source text would make
-    # atomic_write_text's compile()/write() crash with an uncaught
-    # UnicodeEncodeError instead of declining the fix.
-    source = 'def f():\n    label = "\\ud800"\n    return f"<{label}>"\n'
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    label_violations = [v for v in violations if "'label'" in v.message]
-    assert label_violations
-    assert all(not v.fixable for v in label_violations)
+    matching = [v for v in violations if message_filter in v.message]
+    assert matching
+    assert all(not v.fixable for v in matching)
 
     check.fix(filepath, violations, source, tree)
     assert filepath.read_text() == source
 
 
 def test_autofix_declines_fstring_splice_when_value_unencodable_in_declared_encoding(
-    tmp_path: Path,
+    tmp_path: Path, check: RedundantAssignmentCheck
 ) -> None:
     # A file's own declared encoding (detected upstream via a PEP 263
     # coding line, and passed in here as encoding="ascii" to isolate this
@@ -868,7 +794,6 @@ def test_autofix_declines_fstring_splice_when_value_unencodable_in_declared_enco
     filepath.write_bytes(source.encode("ascii"))
 
     tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
     violations = check.check(filepath, tree, source)
 
     label_violations = [v for v in violations if "'label'" in v.message]
@@ -881,101 +806,9 @@ def test_autofix_declines_fstring_splice_when_value_unencodable_in_declared_enco
     assert filepath.read_bytes() == source.encode("ascii")
 
 
-def test_autofix_declines_fstring_splice_with_conversion(tmp_path: Path) -> None:
-    # `{org!r}` applies repr() to the inlined literal, which is not the
-    # same as splicing its raw text into the surrounding string — must be
-    # declined rather than naively re-quoted.
-    source = """def f():
-    org = "requests-cache"
-    return f"{org!r}"
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    org_violations = [v for v in violations if "'org'" in v.message]
-    assert org_violations
-    assert all(not v.fixable for v in org_violations)
-
-    check.fix(filepath, violations, source, tree)
-    assert filepath.read_text() == source
-
-
-def test_autofix_declines_fstring_splice_for_nested_expression(tmp_path: Path) -> None:
-    # `org` isn't the whole replacement field here (`org.upper()` is), so
-    # there's no clean way to remove the braces and splice raw text without
-    # changing what the field expression does.
-    source = """def f():
-    org = "requests-cache"
-    return f"{org.upper()}"
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    org_violations = [v for v in violations if "'org'" in v.message]
-    assert org_violations
-    assert all(not v.fixable for v in org_violations)
-
-    check.fix(filepath, violations, source, tree)
-    assert filepath.read_text() == source
-
-
-def test_autofix_fstring_field_unaffected_for_non_string_rhs(tmp_path: Path) -> None:
-    # A non-string RHS (e.g. a number) needs no re-quoting — `f"{5}"` is
-    # fine as-is, no quotes involved — so the f-string splice handling
-    # must leave this path unaffected.
-    source = """def f():
-    n = 5
-    return f"Total: {n}"
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    assert any(v.fixable for v in violations)
-    assert check.fix(filepath, violations, source, tree) is True
-
-    fixed_content = filepath.read_text()
-    assert "n = " not in fixed_content
-    assert 'return f"Total: {5}"' in fixed_content
-
-
-def test_autofix_fstring_field_unaffected_for_name_rhs(tmp_path: Path) -> None:
-    # A Name RHS used as a whole f-string field (e.g. `x = obj; f"{x}"`)
-    # isn't a string-literal expression, so `rhs_source` isn't eligible
-    # for splicing — the splice path must recognize that (via
-    # ast.literal_eval raising) and fall through to the ordinary inlining
-    # path unchanged.
-    source = """def f(obj):
-    x = obj
-    return f"value: {x}"
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    assert any(v.fixable for v in violations)
-    assert check.fix(filepath, violations, source, tree) is True
-
-    fixed_content = filepath.read_text()
-    assert "x = obj" not in fixed_content
-    assert 'return f"value: {obj}"' in fixed_content
-
-
-def test_autofix_fstring_splice_declines_when_earlier_fix_lengthens_line(tmp_path: Path) -> None:
+def test_autofix_fstring_splice_declines_when_earlier_fix_lengthens_line(
+    checked: CheckedFn, check: RedundantAssignmentCheck
+) -> None:
     # same-line violations are applied rightmost-first, so a
     # fix processed before this one can lengthen the line beyond what
     # should_autofix saw at check() time (see exceeds_line_length_when_inlined's
@@ -984,12 +817,7 @@ def test_autofix_fstring_splice_declines_when_earlier_fix_lengthens_line(tmp_pat
     # leaving both the assignment and the f-string field untouched — rather
     # than emit an over-long line.
     source = 'def f():\n    o = "cccc"\n    p = "xxxx"\n    return "' + "a" * 48 + '" + f"{o}" + p\n'
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
+    filepath, tree, violations = checked(source)
 
     o_violations = [v for v in violations if "'o'" in v.message]
     p_violations = [v for v in violations if "'p'" in v.message]
@@ -1007,29 +835,3 @@ def test_autofix_fstring_splice_declines_when_earlier_fix_lengthens_line(tmp_pat
     assert '    o = "cccc"' in fixed_content
     assert "{o}" in fixed_content
     assert 'p = "xxxx"' not in fixed_content
-
-
-def test_fix_inlines_use_on_line_with_non_ascii_text(tmp_path: Path) -> None:
-    # ast.col_offset is a UTF-8 byte offset, not a character
-    # offset. A non-ASCII character earlier on the use's line must not
-    # throw off the position used to locate the variable for inlining.
-    # `data`'s use must stay on the very next statement (issue #76 requires
-    # an Attribute/Call RHS use to be immediate — see
-    # test_should_autofix_rejects_non_immediate_attribute_or_call_use).
-    source = """def process():
-    data = calc()
-    return "café", data
-"""
-    filepath = tmp_path / "source.py"
-    filepath.write_text(source)
-
-    tree = ast.parse(source)
-    check = RedundantAssignmentCheck()
-    violations = check.check(filepath, tree, source)
-
-    assert any(v.fixable for v in violations)
-    assert check.fix(filepath, violations, source, tree) is True
-
-    fixed_content = filepath.read_text()
-    assert "data" not in fixed_content
-    assert 'return "café", calc()' in fixed_content
