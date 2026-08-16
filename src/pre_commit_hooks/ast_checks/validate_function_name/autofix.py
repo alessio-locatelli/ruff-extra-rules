@@ -119,7 +119,7 @@ def _repository_reference_status(filepath: Path, name: str) -> RepositoryReferen
         return "unavailable"
 
     try:
-        root_result = subprocess.run(  # noqa: S603
+        root_result = subprocess.run(
             [git, "-C", filepath.parent, "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
@@ -138,7 +138,7 @@ def _repository_reference_status(filepath: Path, name: str) -> RepositoryReferen
 
     root = Path(root_result.stdout.strip())
     try:
-        reference_result = subprocess.run(  # noqa: S603
+        reference_result = subprocess.run(
             [
                 git,
                 "-C",

@@ -96,6 +96,8 @@ ignore = [
   "FBT001",
 ]
 "tests/performance/**" = ["S603"]
+"src/pre_commit_hooks/ast_checks/validate_function_name/autofix.py" = ["S603"]
+"tests/validate_function_name/test_check.py" = ["S603"]
 
 [tool.pytest.ini_options]
 addopts = "--benchmark-skip"
