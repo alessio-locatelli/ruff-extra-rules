@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pre_commit_hooks.ast_checks._base import is_fix_failed
+from pre_commit_hooks.ast_checks._cli import main
 from pre_commit_hooks.ast_checks.misplaced_comment import MisplacedCommentCheck
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "misplaced_comments"
@@ -55,6 +56,40 @@ def test_check_detects_trailing_comment(source: str, line: int, *, fixable: bool
 )
 def test_check_returns_no_violations(source: str) -> None:
     assert MisplacedCommentCheck().check(Path("test.py"), ast.parse(source), source) == []
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_source", "expected_exit_code"),
+    [
+        (
+            "value = make_value(\n    argument\n)  #: Description\n",
+            "value = make_value(\n    argument\n)  #: Description\n",
+            0,
+        ),
+        (
+            "value: object = make_value(\n    argument\n)  #: Description\n",
+            "value: object = make_value(\n    argument\n)  #: Description\n",
+            0,
+        ),
+        (
+            "def make_value():\n    process(\n        argument\n    )  #: Description\n",
+            "def make_value():\n    process(\n        argument  #: Description\n    )\n",
+            1,
+        ),
+    ],
+    ids=["module-level-assignment", "module-level-annotated-assignment", "nested-expression"],
+)
+def test_cli_fix_handles_sphinx_attribute_comments(
+    source: str,
+    expected_source: str,
+    expected_exit_code: int,
+    tmp_path: Path,
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(source)
+
+    assert main(["--select", "misplaced-comment", "--fix", str(filepath)]) == expected_exit_code
+    assert filepath.read_text() == expected_source
 
 
 @pytest.mark.parametrize(

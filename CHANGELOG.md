@@ -6,6 +6,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Changed
+
+- `misplaced-comment` leaves Sphinx `#:` variable documentation comments trailing multiline module-level assignments, where Sphinx recognizes them, instead of moving them into the expression.
+
 ## [0.0.51] - 2026-08-16
 
 ### Changed
