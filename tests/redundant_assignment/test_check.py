@@ -1227,20 +1227,21 @@ def func_scope():
     assert "x" in violation.message
 
 
-def test_check_does_not_report_sibling_assignments_with_identical_rhs() -> None:
-    source = """
+@pytest.mark.parametrize(
+    ("source", "expected_lines"),
+    [
+        (
+            """
 def compare_results():
     a = func()
     b = func()
     c = func()
     assert a == b == c
-"""
-
-    assert _check(source) == []
-
-
-def test_check_reports_identical_rhs_in_different_scopes() -> None:
-    source = """
+""",
+            [],
+        ),
+        (
+            """
 def outer():
     a = func()
     use(a)
@@ -1248,9 +1249,24 @@ def outer():
     def inner():
         b = func()
         use(b)
+""",
+            [3, 7],
+        ),
+    ],
+    ids=["sibling-assignments", "different-scopes"],
+)
+def test_check_handles_identical_rhs_in_each_scope(source: str, expected_lines: list[int]) -> None:
+    assert [violation.line for violation in _check(source)] == expected_lines
+
+
+def test_check_does_not_report_lambda_capture() -> None:
+    source = """
+def f():
+    a = func()
+    return lambda: a
 """
 
-    assert len(_check(source)) == 2
+    assert _check(source) == []
 
 
 @pytest.mark.parametrize(

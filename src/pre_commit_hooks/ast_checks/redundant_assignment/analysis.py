@@ -1225,7 +1225,7 @@ def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
 
     # Variables captured by closures should NEVER be considered redundant.
     for use in lifecycle.uses:
-        if use.scope_id != lifecycle.assignment.scope_id:
+        if use.scope_id != lifecycle.assignment.scope_id or use.in_lambda:
             return None
 
     # A Call/Attribute RHS with its single textual use inside a loop the
