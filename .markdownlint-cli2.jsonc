@@ -13,6 +13,15 @@
   },
   "overrides": [
     {
+      // Every release section repeats the same "Added"/"Changed"/"Fixed"
+      // headings, one level under its own version.
+      "filter": ["CHANGELOG.md"],
+      "config": {
+        "MD024": { "siblings_only": true },
+      },
+      "combine": "merge",
+    },
+    {
       "filter": ["CLAUDE.md"],
       "config": {
         "MD041": false,
