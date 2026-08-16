@@ -180,7 +180,8 @@ def test_fix_write_failure_returns_false(
             },
         ),
         (
-            # Line is already 60 chars; adding a 40-char value would exceed 88.
+            # The usage line is 51 chars; replacing the 1-char var with a
+            # 40-char value pushes it to 90, past the 79-char guard.
             "x = " + "a" * 40 + "\nresult = some_long_function_name(x, param1, param2)\n",
             {
                 "pattern": "IMMEDIATE_SINGLE_USE",
@@ -188,7 +189,7 @@ def test_fix_write_failure_returns_false(
                 "var_name": "x",
                 "rhs_source": "a" * 40,
                 "use_line": 2,
-                "use_col": 41,  # Position of 'x' in the usage line.
+                "use_col": 33,  # Position of 'x' in the usage line.
             },
         ),
     ],
@@ -218,7 +219,8 @@ def test_autofix_skips_multiline_rhs() -> None:
 
 
 def test_autofix_skips_line_length_violation() -> None:
-    # Current line is 80 chars, adding 20 more would exceed 88.
+    # Line is 84 chars; replacing the 1-char var with a 20-char value would
+    # push it to 103, past the 79-char guard.
     source_lines = ["x = " + "a" * 80 + "\n"]
     assert _can_safely_inline("x", "a" * 20, 0, source_lines) is False
 
