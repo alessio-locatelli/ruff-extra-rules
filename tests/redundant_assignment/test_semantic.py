@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 
 import pytest
 
@@ -16,7 +15,6 @@ from pre_commit_hooks.ast_checks.redundant_assignment.semantic import (
     _is_generic_call_result_name,
     _is_named_constant_pattern,
     _is_named_string_constant_pattern,
-    _is_test_file,
     _would_require_parentheses,
     calculate_semantic_value,
     should_autofix,
@@ -382,37 +380,6 @@ def test_calculate_semantic_value_chained_attributes() -> None:
     assert calculate_semantic_value("result", rhs_source, rhs_node, has_type_annotation=False) >= 20
 
 
-@pytest.mark.parametrize(
-    ("var_name", "rhs_source", "minimum"),
-    [
-        # Rule 10 intercepts variables used solely inside comprehensions
-        # before they reach calculate_semantic_value, so these need a
-        # direct test: multi-part name (+30) + "some" in
-        # test_semantic_words (+25) + list bonus (+25).
-        ("some_european_airports", '["AES", "BYJ", "BTS"]', 25),
-        ("my_mapping", '{"key": "value"}', 25),
-        # multi-part name (+30) + no test_semantic_words match (+0) +
-        # range bonus (+25).
-        ("days_with_routes_in_a_row", "range(70)", 25),
-        # Covers the False branch of the test_semantic_words check: no
-        # semantic test words present.
-        ("flight_count", "42", 0),
-    ],
-    ids=[
-        "test-context-list-literal",
-        "test-context-dict-literal",
-        "test-context-range-call",
-        "test-context-no-semantic-word",
-    ],
-)
-def test_calculate_semantic_value_test_context(var_name: str, rhs_source: str, minimum: int) -> None:
-    rhs_node = ast.parse(rhs_source, mode="eval").body
-    assert (
-        calculate_semantic_value(var_name, rhs_source, rhs_node, has_type_annotation=False, is_test_context=True)
-        >= minimum
-    )
-
-
 # ---------------------------------------------------------------------------
 # _adds_verbosity_or_context
 # ---------------------------------------------------------------------------
@@ -534,44 +501,6 @@ def test_is_named_constant_pattern(var_name: str, rhs_source: str, *, expected: 
 def test_is_named_string_constant_pattern(var_name: str, rhs_source: str, *, expected: bool) -> None:
     node = ast.parse(rhs_source, mode="eval").body
     assert _is_named_string_constant_pattern(var_name, node) is expected
-
-
-# ---------------------------------------------------------------------------
-# _is_test_file
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("path", "expected"),
-    [
-        (Path("tests/test_something.py"), True),
-        (Path("tests/utils/test_helpers.py"), True),
-        (Path("test/test_foo.py"), True),
-        (Path("test_example.py"), True),
-        (Path("src/test_module.py"), True),
-        (Path("example_test.py"), True),
-        (Path("src/module_test.py"), True),
-        (Path("src/module.py"), False),
-        (Path("main.py"), False),
-        (Path("setup.py"), False),
-        (None, False),
-    ],
-    ids=[
-        "tests-directory",
-        "nested-tests-directory",
-        "singular-test-directory",
-        "test-prefix",
-        "test-prefix-nested",
-        "test-suffix",
-        "test-suffix-nested",
-        "plain-module",
-        "main",
-        "setup",
-        "none",
-    ],
-)
-def test_is_test_file(path: Path | None, *, expected: bool) -> None:
-    assert _is_test_file(path) is expected
 
 
 # ---------------------------------------------------------------------------

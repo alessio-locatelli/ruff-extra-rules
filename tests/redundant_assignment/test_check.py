@@ -750,35 +750,6 @@ def get_user(data):
         ),
         (
             """
-def test_camel_to_under():
-    camel_case_sample = "RandomClassName"
-    assert camel_to_under(camel_case_sample) == "random_class_name"
-""",
-            "tests/test_utils.py",
-            "camel_case_sample",
-        ),
-        (
-            """
-def test_translate_templates():
-    templates = ["Hello", "Goodbye"]
-    translator = MockTranslator(templates)
-    assert translator.templates == templates
-""",
-            "test_translator.py",
-            "templates",
-        ),
-        (
-            """
-def test_landmark_equal_to_none():
-    landmark = Landmark(name="Tower", long_lat=(2.0, 48.0), score=0.9)
-    result = landmark.__eq__(None)
-    assert result is NotImplemented
-""",
-            "tests/test_model.py",
-            "result",
-        ),
-        (
-            """
 def test_prepare_photo():
     mock_image = MagicMock()
     mock_vision.Image.return_value = mock_image
@@ -787,30 +758,6 @@ def test_prepare_photo():
 """,
             "tests/test_vision.py",
             "mock_image",
-        ),
-        (
-            """
-def test_airport_connectivity():
-    some_european_airports = ["AES", "BYJ", "BTS"]
-    assert all(
-        iata in airport_connectivity.airports_by_continent
-        for iata in some_european_airports
-    )
-""",
-            "tests/test_kiwi_api.py",
-            "some_european_airports",
-        ),
-        (
-            """
-def generate_price_data():
-    days_with_routes_in_a_row = range(70)
-    return [
-        faker.pyint(min_value=50, max_value=MAX_PRICE_EUR)
-        for _ in days_with_routes_in_a_row
-    ]
-""",
-            "tests/test_flight_prices.py",
-            "days_with_routes_in_a_row",
         ),
         (
             """
@@ -1033,12 +980,7 @@ def func(c):
         "descriptive-suffix-size",
         "descriptive-suffix-length",
         "descriptive-suffix-id",
-        "test-file-detection-by-path",
-        "test-file-detection-by-name",
-        "test-result-variable",
-        "test-mock-object",
-        "semantic-test-data-list",
-        "range-with-descriptive-name",
+        "non-generic-call-result-name",
         "context-manager-assignment-inside-usage-outside",
         "with-block-if-condition-pattern",
         "with-block-match-subject-pattern",
@@ -1286,15 +1228,25 @@ def call_it():
     assert any(v.line == 3 and "'x'" in v.message for v in violations)
 
 
-def test_non_test_file_still_flags_simple_assignments() -> None:
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tests/test_processor.py",
+        "spec/processor_spec.py",
+        "__tests__/processor.py",
+    ],
+)
+@pytest.mark.parametrize("level", [AggressivenessLevel.CONSERVATIVE, AggressivenessLevel.PERMISSIVE])
+def test_reporting_does_not_depend_on_the_file_path(path: str, level: AggressivenessLevel) -> None:
     source = """
-def process_data():
-    x = "foo"
-    return x
+def test_landmark_equal_to_none():
+    landmark = Landmark(name="Tower", long_lat=(2.0, 48.0), score=0.9)
+    result = landmark.__eq__(None)
+    assert result is NotImplemented
 """
-    violations = _check(source, "src/processor.py")
-    assert len(violations) > 0
-    assert any("x" in v.message for v in violations)
+    violations = _check(source, path, level=level)
+    assert [v.message for v in violations] == [v.message for v in _check(source, "src/processor.py", level=level)]
+    assert any("'result'" in v.message for v in violations)
 
 
 # ---------------------------------------------------------------------------

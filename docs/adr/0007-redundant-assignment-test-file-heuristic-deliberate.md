@@ -1,5 +1,7 @@
 # redundant_assignment's test-file path heuristic is a deliberate, scoped convention
 
+**Superseded by [ADR-0055](0055-redundant-assignment-ignores-the-file-path.md).** The "no outside consumers" premise this decision rests on no longer holds, and the heuristic is removed rather than kept or made configurable; TR5 now judges an assignment without consulting the file's path.
+
 `redundant_assignment/semantic.py:_is_test_file()` (lines 11-30) relaxes TR5's semantic-value threshold when a file's path contains `tests`/`test` or its filename matches `test_*`/`*_test.py`. Unlike the structurally similar `VariableTracker` scope-tracking decision (`docs/adr/0002-redundant-assignment-scope-tracker-not-unified.md`), this heuristic had no ADR recording it as intentional — it read as an implicit, undocumented coupling between TR5's output and a file's location in the tree, and `README.md` never mentions it exists.
 
 This project's own `CLAUDE.md` states it is a personal hobby project not used by anyone else, and explicitly rules out designing for hypothetical future requirements. `_is_test_file()`'s hardcoded conventions happen to match this repo's own layout (`tests/`, `test_*.py`); a hypothetical outside consumer with a different layout (`spec/`, `__tests__/`) would get silently different behavior with no way to configure it — but no such consumer currently exists.
