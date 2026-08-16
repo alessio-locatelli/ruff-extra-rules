@@ -228,6 +228,7 @@ def test_versions_rejects_a_distribution_of_another_project(tmp_path: Path, misn
             "exactly one wheel",
         ),
         (["ruff_extra_rules-0.1.0-py3-none-any.whl", "ruff_extra_rules-0.1.0.tar.gz", "left.txt"], "left.txt"),
+        (["ruff_extra_rules-0.1.0-py3-none-any.whl", "ruff_extra_rules-0.1.0.tar.gz", ".stray"], ".stray"),
     ],
 )
 def test_versions_rejects_an_unexpected_dist_directory(tmp_path: Path, filenames: list[str], expected: str) -> None:

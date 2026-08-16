@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date
 
 UNRELEASED = "Unreleased"
 
@@ -57,13 +58,20 @@ def _split_sections(text: str) -> list[_Section]:
     ]
 
 
+def _needs_a_date(label: str) -> ValueError:
+    return ValueError(f"`## [{label}]` needs a `- YYYY-MM-DD` date after the version.")
+
+
 def _release(section: _Section) -> Release:
     if not _VERSION.match(section.label):
         message = f"`## [{section.label}]` must be a MAJOR.MINOR.PATCH version, not `{section.label}`."
         raise ValueError(message)
     if section.date is None or not _DATE.match(section.date):
-        message = f"`## [{section.label}]` needs a `- YYYY-MM-DD` date after the version."
-        raise ValueError(message)
+        raise _needs_a_date(section.label)
+    try:
+        date.fromisoformat(section.date)
+    except ValueError as error:
+        raise _needs_a_date(section.label) from error
     return Release(body=section.body, date=section.date, version=section.label)
 
 

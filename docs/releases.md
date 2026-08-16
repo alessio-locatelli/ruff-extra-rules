@@ -6,8 +6,8 @@ A release is a git tag (`v0.1.0`), a [GitHub release](https://github.com/alessio
 
 Versions are `0.MINOR.PATCH`.
 
-- **MINOR** — a run can come out differently on code you have not touched: a new check, a check that reports more than it used to, a renamed or removed hook id, flag, configuration key or check id, or a different edit from `--fix`.
-- **PATCH** — nothing changes for a run that was already passing: fixes for crashes and wrong results, performance, documentation.
+- **MINOR** — a run can come out differently on code you have not touched: a new check, a check that reports something it used to miss, a renamed or removed hook id, flag, configuration key or check id, or a different edit from `--fix`. A bug fix counts: what decides this is what your run does afterwards, not why it changed.
+- **PATCH** — a run that was already passing comes out the same: a crash fixed, a false report dropped, performance, documentation.
 
 Anything that can turn a green run red, or rewrite your code differently, gets a MINOR release. There are no compatibility shims and no deprecation period, so the release notes are the migration path — every such change is written up before it ships. The `--fix` reporting change in [0.0.50](../CHANGELOG.md) is what one looks like.
 

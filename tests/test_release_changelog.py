@@ -53,6 +53,7 @@ def test_notes_rejects_an_unknown_version() -> None:
         ("## [Unreleased]\n\n## [Unreleased]\n", "more than one"),
         ("## [Unreleased]\n\n## [0.1.0]\n", "needs a `- YYYY-MM-DD` date"),
         ("## [Unreleased]\n\n## [0.1.0] - 01-08-2026\n", "needs a `- YYYY-MM-DD` date"),
+        ("## [Unreleased]\n\n## [0.1.0] - 2026-02-30\n", "needs a `- YYYY-MM-DD` date"),
         ("## [Unreleased]\n\n## [v0.1.0] - 2026-08-01\n", "not `v0.1.0`"),
         ("## [Unreleased]\n\n## [0.1] - 2026-08-01\n", "not `0.1`"),
         (
