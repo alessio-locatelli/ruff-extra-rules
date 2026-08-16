@@ -377,6 +377,57 @@ def func():
     assert all(not use.in_comprehension for use in lifecycle.uses)
 
 
+@pytest.mark.parametrize(
+    ("source", "var_name", "expected"),
+    [
+        (
+            """
+def func(days_with_routes_in_a_row):
+    return days_with_routes_in_a_row
+
+
+def caller():
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row=days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
+            True,
+        ),
+        (
+            """
+def caller():
+    x = 42
+    return func(other=x)
+""",
+            "x",
+            False,
+        ),
+        (
+            """
+def caller():
+    x = 42
+    return func(x)
+""",
+            "x",
+            False,
+        ),
+        (
+            """
+def caller():
+    x = 42
+    return func(x=x + 1)
+""",
+            "x",
+            False,
+        ),
+    ],
+    ids=["keyword-echo", "different-keyword", "positional", "expression-value"],
+)
+def test_is_keyword_argument_echo(source: str, var_name: str, *, expected: bool) -> None:
+    lifecycle = _lifecycle_for(source, var_name)
+    assert lifecycle.uses[0].is_keyword_argument_echo is expected
+
+
 def test_for_iterator_use_is_not_in_loop() -> None:
     # `node.iter` evaluates exactly once, before any iteration — unlike a
     # use inside the loop body, it must not be marked in_loop.

@@ -1354,6 +1354,79 @@ def func_scope():
     assert "x" in violation.message
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        """
+def func(days_with_routes_in_a_row: int) -> int:
+    return days_with_routes_in_a_row
+
+
+def caller() -> int:
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row=days_with_routes_in_a_row)
+""",
+        """
+def func(days_with_routes_in_a_row: str) -> str:
+    return days_with_routes_in_a_row
+
+
+def caller() -> str:
+    days_with_routes_in_a_row = "foo"
+    return func(days_with_routes_in_a_row=days_with_routes_in_a_row)
+""",
+    ],
+    ids=["numeric-literal", "string-literal"],
+)
+def test_keyword_argument_echo_reported_at_conservative_level(source: str) -> None:
+    violations = _check(source)
+    assert any("days_with_routes_in_a_row" in v.message for v in violations)
+
+
+def test_keyword_argument_echo_reported_despite_descriptive_prefix_and_call_rhs() -> None:
+    source = """
+def caller():
+    has_permission = check_something()
+    return func(has_permission=has_permission)
+"""
+    violations = _check(source)
+    assert any("has_permission" in v.message for v in violations)
+
+
+def test_descriptive_name_not_echoed_as_own_keyword_keeps_exemption() -> None:
+    source = """
+def caller() -> int:
+    days_with_routes_in_a_row = 42
+    return func(total_days=days_with_routes_in_a_row)
+"""
+    violations = _check(source)
+    assert all("days_with_routes_in_a_row" not in v.message for v in violations)
+
+
+def test_call_rhs_generic_name_guard_still_applies_when_not_a_keyword_echo() -> None:
+    source = """
+def caller():
+    has_permission = check_something()
+    return func(has_permission)
+"""
+    violations = _check(source)
+    assert all("has_permission" not in v.message for v in violations)
+
+
+def test_positional_argument_matching_parameter_name_not_flagged() -> None:
+    source = """
+def func(days_with_routes_in_a_row: int) -> int:
+    return days_with_routes_in_a_row
+
+
+def caller() -> int:
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row)
+"""
+    violations = _check(source)
+    assert all("days_with_routes_in_a_row" not in v.message for v in violations)
+
+
 def test_annotated_assignment_tracked() -> None:
     source = """
 def example():
