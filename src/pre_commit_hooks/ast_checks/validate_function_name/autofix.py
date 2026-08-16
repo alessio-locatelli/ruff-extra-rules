@@ -5,7 +5,10 @@ from __future__ import annotations
 import ast
 import logging
 import re
-from typing import TYPE_CHECKING
+import shutil
+import subprocess
+from pathlib import Path
+from typing import Literal
 
 from pre_commit_hooks.ast_checks._base import (
     atomic_write_text,
@@ -17,14 +20,12 @@ from pre_commit_hooks.ast_checks._scope import iter_within_scope
 
 from .analysis import IGNORE_PATTERN, Suggestion, attach_parents, read_source
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 logger = logging.getLogger("validate-function-name")
 
 _FuncNode = ast.FunctionDef | ast.AsyncFunctionDef
 
 type SourcePosition = tuple[int, int]  # (1-indexed line, 0-indexed character column)
+type RepositoryReferenceStatus = Literal["safe", "external", "unavailable"]
 
 
 def _count_nesting_depth(func_node: _FuncNode) -> int:
@@ -109,6 +110,64 @@ def should_autofix(filepath: Path, suggestion: Suggestion) -> bool:
 
     attach_parents(tree)
     return is_autofix_safe(index_function_nodes(tree), suggestion)
+
+
+def _repository_reference_status(filepath: Path, name: str) -> RepositoryReferenceStatus:
+    git = shutil.which("git")
+    if git is None:
+        logger.warning("Could not safely search repository references because git is unavailable")
+        return "unavailable"
+
+    try:
+        root_result = subprocess.run(  # noqa: S603
+            [git, "-C", filepath.parent, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.SubprocessError, FileNotFoundError, subprocess.TimeoutExpired:
+        logger.warning("Could not safely establish repository scope for %s", filepath)
+        return "unavailable"
+
+    if root_result.returncode != 0 or root_result.stderr:
+        if root_result.returncode == 128 and "not a git repository" in root_result.stderr:
+            return "safe"
+        logger.warning("Could not safely establish repository scope for %s", filepath)
+        return "unavailable"
+
+    root = Path(root_result.stdout.strip())
+    try:
+        reference_result = subprocess.run(  # noqa: S603
+            [
+                git,
+                "-C",
+                root,
+                "grep",
+                "--files-with-matches",
+                "--null",
+                "--fixed-strings",
+                "-e",
+                name,
+                "--",
+                ":(glob)**/*.py",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except subprocess.SubprocessError, FileNotFoundError, subprocess.TimeoutExpired:
+        logger.warning("Could not safely search repository references for %s", name)
+        return "unavailable"
+
+    if reference_result.returncode not in (0, 1) or reference_result.stderr:
+        logger.warning("Could not safely search repository references for %s", name)
+        return "unavailable"
+
+    if any((root / path).resolve() != filepath.resolve() for path in reference_result.stdout.split("\0") if path):
+        return "external"
+    return "safe"
 
 
 def is_autofix_safe(function_index: FunctionIndex, suggestion: Suggestion) -> bool:

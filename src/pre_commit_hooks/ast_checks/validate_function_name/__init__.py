@@ -46,7 +46,13 @@ from pre_commit_hooks.ast_checks._base import (
 )
 
 from .analysis import Suggestion, collect_suggestions
-from .autofix import apply_fix, index_function_nodes, is_autofix_safe, should_autofix
+from .autofix import (
+    _repository_reference_status,
+    apply_fix,
+    index_function_nodes,
+    is_autofix_safe,
+    should_autofix,
+)
 
 if TYPE_CHECKING:
     import ast
@@ -88,6 +94,8 @@ class ValidateFunctionNameCheck(BaseCheck):
 
         violations = []
         for suggestion in suggestions:
+            auto_fixable = not suggestion.requires_property and is_autofix_safe(function_index, suggestion)
+            reference_status = _repository_reference_status(filepath, suggestion.func_name) if auto_fixable else "safe"
             if suggestion.requires_property:
                 message = (
                     f"Function '{suggestion.func_name}' should use @property "
@@ -98,6 +106,10 @@ class ValidateFunctionNameCheck(BaseCheck):
                     f"Function '{suggestion.func_name}' should be renamed to "
                     f"'{suggestion.suggested_name}' ({suggestion.reason})"
                 )
+            if reference_status == "external":
+                message += "; manual rename required because the existing name occurs elsewhere in the repository"
+            elif reference_status == "unavailable":
+                message += "; manual rename required because repository references could not be checked"
 
             fix_data: ValidateFunctionNameFixData = {"suggestion": suggestion}
             violations.append(
@@ -107,7 +119,7 @@ class ValidateFunctionNameCheck(BaseCheck):
                     line=suggestion.lineno,
                     col=0,
                     message=message,
-                    fixable=not suggestion.requires_property and is_autofix_safe(function_index, suggestion),
+                    fixable=auto_fixable and reference_status == "safe",
                     # Violation.fix_data is intentionally untyped (dict[str,
                     # Any]) at this boundary; see ValidateFunctionNameFixData
                     # above for the shape check()/fix() actually agree on.
@@ -149,7 +161,10 @@ class ValidateFunctionNameCheck(BaseCheck):
             if not suggestion or suggestion.requires_property:
                 continue
 
-            if should_autofix(filepath, suggestion):
+            if (
+                should_autofix(filepath, suggestion)
+                and _repository_reference_status(filepath, suggestion.func_name) == "safe"
+            ):
                 try:
                     if apply_fix(filepath, suggestion):
                         applied_any = True
