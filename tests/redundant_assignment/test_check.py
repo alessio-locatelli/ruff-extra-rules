@@ -1354,6 +1354,32 @@ def func_scope():
     assert "x" in violation.message
 
 
+def test_check_does_not_report_sibling_assignments_with_identical_rhs() -> None:
+    source = """
+def compare_results():
+    a = func()
+    b = func()
+    c = func()
+    assert a == b == c
+"""
+
+    assert _check(source) == []
+
+
+def test_check_reports_identical_rhs_in_different_scopes() -> None:
+    source = """
+def outer():
+    a = func()
+    use(a)
+
+    def inner():
+        b = func()
+        use(b)
+"""
+
+    assert len(_check(source)) == 2
+
+
 @pytest.mark.parametrize(
     ("source", "var_name", "reported"),
     [
