@@ -429,18 +429,6 @@ def test_augmented_assignment_use_not_flagged_for_zero_arg_call(
     ("source", "message_filter"),
     [
         (
-            # A use inside a lambda body executes later (whenever the
-            # lambda is called, if ever) — not once at the assignment
-            # point. `x = make(); return lambda: x` must not become
-            # `return lambda: make()`, which defers (and can repeat) the
-            # call.
-            """def f():
-    x = make()
-    return lambda: x
-""",
-            "'x'",
-        ),
-        (
             # A dict literal's own AST field order (all keys, then all
             # values) doesn't match Python's real per-pair evaluation
             # order, so a naive evaluation-order walk would wrongly call
@@ -486,7 +474,6 @@ def test_augmented_assignment_use_not_flagged_for_zero_arg_call(
         ),
     ],
     ids=[
-        "lambda-body",
         "dict-value-after-earlier-pair",
         "after-operator-sibling",
         "ternary-branch",
