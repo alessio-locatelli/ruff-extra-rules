@@ -12,10 +12,6 @@ from tests.redundant_assignment._helpers import _check
 if TYPE_CHECKING:
     from pathlib import Path
 
-# ---------------------------------------------------------------------------
-# Check metadata
-# ---------------------------------------------------------------------------
-
 
 def test_check_id_and_error_code() -> None:
     check = RedundantAssignmentCheck()
@@ -28,13 +24,6 @@ def test_prefilter_pattern() -> None:
 
 
 def test_check_reports_character_offset_not_byte_offset_before_multibyte_text() -> None:
-    # ast.col_offset is a UTF-8 *byte* offset, not a character
-    # offset -- storing it on Violation.col directly reports a column too
-    # far right on any line with non-ASCII text before the violation
-    # (ch. 7: "MUST report ... column information accurately"; ch. 20:
-    # "MUST handle multibyte Unicode characters correctly"). "    café; " is
-    # 10 characters but 11 UTF-8 bytes ('é' is 2 bytes), so a byte-offset
-    # column would over-count "x"'s own position by one.
     source = 'def f():\n    café; x = "foo"\n    func(x=x)\n'
     violations = _check(source)
 
@@ -87,11 +76,6 @@ def test_check_does_not_report_assignments_protected_by_try_handlers(source: str
     assert _check(source, level=AggressivenessLevel.PERMISSIVE) == []
 
 
-# ---------------------------------------------------------------------------
-# check(): reports no violations at all
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     "source",
     [
@@ -114,23 +98,18 @@ func(x=x)
 x = "foo"  # PYTRIAGE: TR5
 func(x=x)
 """,
-        # fmt: off wrapping the assignment line -- see
-        # docs/adr/0050-format-suppression-pragmas.md.
         """
 # fmt: off
 x = "foo"
 # fmt: on
 func(x=x)
 """,
-        # fmt: off wrapping only the use line, not the assignment -- see
-        # docs/adr/0050-format-suppression-pragmas.md.
         """
 x = "foo"
 # fmt: off
 func(x=x)
 # fmt: on
 """,
-        # Same, via this project's own inline ignore comment on the use line.
         """
 x = "foo"
 func(x=x)  # pytriage: TR5
@@ -162,9 +141,6 @@ def example():
     calculated_value = expensive_operation()
     return calculated_value
 """,
-        # `error` is assigned multiple times (once per except branch), so it
-        # is skipped entirely rather than risk autofix producing
-        # concatenated nonsense like "value_errortype_errorkey_error".
         """def fetch_data():
     error = None
     try:
@@ -177,27 +153,17 @@ def example():
         error = key_error
     raise error
 """,
-        # `service_name` is assigned inside an `if` block but used outside
-        # it, so it is skipped entirely rather than risk autofix changing
-        # program logic (e.g. turning it into "if not
-        # get_caller_module_name():").
         """def configure(service_name=None):
     if not service_name:
         service_name = get_caller_module_name()
     return configure_service(service_name)
 """,
-        # "Snapshot the old value before reassigning it" (issue #74):
-        # inlining `old_value` as `value` after `value` has been rebound
-        # would silently read the new value instead of the one captured at
-        # assignment time.
         """
 def func(value):
     old_value = value
     value = compute_new()
     use(old_value)
 """,
-        # Same hazard for an Attribute RHS: `obj.attr` is reassigned
-        # between the tracked assignment and its use.
         """
 def func(obj):
     old_attr = obj.attr
@@ -218,10 +184,6 @@ async def test_json(client):
     response = await get_test_response(client, '/null_content')
     assert await response.json() is None
 """,
-        # Inlining await expressions often requires parentheses, making
-        # code bulky: `json_resp = await resp.json(); return
-        # json_resp['key']` would become `return (await
-        # resp.json())['key']`.
         """
 async def test_func():
     x = await get_value()
@@ -239,8 +201,6 @@ def func(condition):
     value = "yes" if condition else "no"
     return value
 """,
-        # The heuristic checks if len(rhs_source) >= 25 or len_diff > 15;
-        # len(rhs_source) = 49 >= 25, so this should not be flagged.
         """
 def func():
     variable = compute_something_with_very_long_function_name()
@@ -366,9 +326,6 @@ def func():
     global x
     x += 1
 """,
-        # A `nonlocal` binding captures the outer variable, so an
-        # augmented assignment through it is a real subsequent use, not a
-        # redundant local assignment.
         """
 def outer():
     x = 1
@@ -376,8 +333,6 @@ def outer():
         nonlocal x
         x += 1
 """,
-        # A `nonlocal` binding on an annotated reassignment is likewise a
-        # real use of the outer name.
         """
 def outer():
     x: str = "outer"
@@ -385,10 +340,6 @@ def outer():
         nonlocal x
         x: str = "modified"
 """,
-        # Long variable names (>10 chars) are excluded from autofix as a
-        # conservative proxy for lines that would grow too long when
-        # inlined — the assignment is skipped entirely, not merely marked
-        # unfixable.
         """
 very_long_descriptive_name = 42
 use(very_long_descriptive_name)
@@ -451,11 +402,6 @@ def func(depot_data, depots):
 )
 def test_check_reports_no_violations(source: str) -> None:
     assert _check(source) == []
-
-
-# ---------------------------------------------------------------------------
-# check(): a specific variable is never mentioned (other violations may exist)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -626,11 +572,6 @@ def test_retry():
             "decorated_mock_func",
         ),
         (
-            # An augmented-assignment target (`x += 1`) is a mutation, not
-            # a read-then-pass-through — and even if it were flagged,
-            # inlining it would produce invalid syntax (`x = 5; x += 1` ->
-            # `5 += 1`). It must never be reported, let alone marked
-            # fixable.
             """
 def f():
     x = 5
@@ -651,8 +592,6 @@ def get_cache_file(cache):
             "redirects_file",
         ),
         (
-            # A variable modified via `nonlocal` in a nested function must
-            # not be treated as a candidate for removal.
             """
 async def test_websocket():
     cancelled = False
@@ -717,8 +656,6 @@ def func(condition):
             "result",
         ),
         (
-            # `large_payload_size = len(large_payload)` clarifies what the
-            # value represents.
             """
 def test_flow_control_binary(protocol, out_low_limit, parser_low_limit):
     large_payload = b"b" * (1 + 16 * 2)
@@ -772,10 +709,6 @@ def load_config():
             "config",
         ),
         (
-            # A statement's own test always evaluates unconditionally when
-            # the statement is reached — only its body/branches are
-            # conditional. The with-block exception must apply here just
-            # like it does for a plain statement use (issue #73).
             """
 def load_config():
     with open("config.toml", "rb") as file:
@@ -856,9 +789,6 @@ def load_with_fallback():
             "data",
         ),
         (
-            # This caches an attribute lookup for reuse inside a
-            # comprehension filter; inlining would re-evaluate
-            # depot_data.iso_country on every iteration.
             """
 def find_routes(depot_data, depots):
     depot_iso_country = depot_data.iso_country
@@ -904,9 +834,6 @@ def total_score(config, players):
             "bonus",
         ),
         (
-            # A variable used both inside AND outside a comprehension has
-            # multiple uses, so detect_redundancy returns None and it is
-            # never flagged regardless.
             """
 def example(obj, items):
     val = obj.attr
@@ -917,10 +844,6 @@ def example(obj, items):
             "val",
         ),
         (
-            # The decorator expression is evaluated in the outer scope, so
-            # any variable referenced there counts as a use. 'app' is used
-            # twice: once in @app.get(...) and once in 'return app', so it
-            # is not single-use and must not be flagged.
             """
 def _make_app():
     app = FastAPI()
@@ -944,8 +867,6 @@ def func():
             "'x'",
         ),
         (
-            # A ternary expression short enough (<25 chars) to pass the
-            # line-length check but still excluded by the IfExp guard.
             """
 def func(c):
     x = 1 if c else 0
@@ -1003,20 +924,10 @@ def test_check_never_flags_variable(source: str, path: str, excluded: str) -> No
     assert all(excluded not in v.message for v in _check(source, path))
 
 
-# ---------------------------------------------------------------------------
-# check(): issue #76 calibration cases — the conservative (default) level
-# must not flag these, even though each scores low enough to have qualified
-# under TR5's old single reporting threshold.
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("source", "excluded"),
     [
         (
-            # Named color constants collected into one list, all at module
-            # scope — already covered by the global-scope rule (skipped
-            # unless `_`-prefixed), regardless of level.
             """
 RED = "red"
 GREEN = "green"
@@ -1026,9 +937,6 @@ COLORS = [RED, GREEN, BLUE]
             "'RED'",
         ),
         (
-            # A single-purpose accessor assigned then immediately mutated:
-            # the sole use is a write, never a read, so it isn't a
-            # redundant pass-through (see detect_redundancy).
             """
 def configure(me):
     state = me.state(State)
@@ -1037,9 +945,6 @@ def configure(me):
             "'state'",
         ),
         (
-            # A locally-renamed constructor call used immediately after —
-            # the variable name doesn't restate the callee (`CIMultiDict`),
-            # so it's presumed to be deliberately descriptive.
             """
 def format_headers(headers):
     ci_headers = CIMultiDict(headers)
@@ -1048,8 +953,6 @@ def format_headers(headers):
             "'ci_headers'",
         ),
         (
-            # A descriptively-named variable capturing a non-obvious return
-            # value, used once in the very next assertion.
             """
 def check_warning(conn):
     warning = conn.recv()
@@ -1058,10 +961,6 @@ def check_warning(conn):
             "'warning'",
         ),
         (
-            # A single "private" (underscore-prefixed),
-            # SCREAMING_SNAKE_CASE module-level string constant used only
-            # once elsewhere in the file reads as a deliberate, reusable
-            # declaration (Rule 12), even though it's genuinely single-use.
             """
 _GREY = "rgb(201, 203, 207)"
 config = {"colors": [_GREY]}
@@ -1082,9 +981,6 @@ def test_conservative_level_calibration_cases_not_flagged(source: str, excluded:
 
 
 def test_screaming_snake_case_string_constant_still_flagged_at_permissive_level() -> None:
-    # Rule 12 (see should_report_violation) is conservative-only, matching
-    # Rule 11's precedent — permissive still reports every single-use
-    # string assignment TR5 always used to, name shape included.
     source = """
 _GREY = "rgb(201, 203, 207)"
 config = {"colors": [_GREY]}
@@ -1095,8 +991,6 @@ config = {"colors": [_GREY]}
 
 @pytest.mark.parametrize("level", [AggressivenessLevel.CONSERVATIVE, AggressivenessLevel.PERMISSIVE])
 def test_dunder_assignment_never_flagged(level: AggressivenessLevel) -> None:
-    # A dunder assignment is metadata read via attribute access from
-    # outside the file, so unlike Rule 12 this exclusion isn't level-scoped.
     source = """
 __author__ = "Hynek Schlawack"
 __copyright__ = "Copyright (c) 2013 " + __author__
@@ -1112,7 +1006,6 @@ def func():
     return a + b + c
 """
     violations = _check(source)
-    # Multiple assignment targets are skipped entirely.
     assert all("'a'" not in v.message for v in violations)
     assert all("'b'" not in v.message for v in violations)
     assert all("'c'" not in v.message for v in violations)
@@ -1122,10 +1015,6 @@ def func():
     ("source", "excluded_names"),
     [
         (
-            # A tuple-unpacking target (`user, passwd =
-            # parse_userinfo(...)`) must be tracked as a reassignment —
-            # otherwise `--fix` would blank `user = None` and inline `None`
-            # at the return statement, discarding the real value.
             """
 def parse(host_part):
     user = None
@@ -1141,7 +1030,6 @@ def parse(host_part):
             ("user",),
         ),
         (
-            # Same hazard, via a chained assignment target (`a = b = value`).
             """
 def func(cond):
     a = None
@@ -1152,7 +1040,6 @@ def func(cond):
             ("a",),
         ),
         (
-            # Same hazard, via a simple for-loop target.
             """
 def func(items):
     x = None
@@ -1163,7 +1050,6 @@ def func(items):
             ("x",),
         ),
         (
-            # Same hazard, via a tuple-unpacked for-loop target.
             """
 def func(pairs):
     y = None
@@ -1175,7 +1061,6 @@ def func(pairs):
             ("y", "z"),
         ),
         (
-            # Same hazard, via a simple with-as target.
             """
 def func(ctx_factory):
     x = None
@@ -1186,7 +1071,6 @@ def func(ctx_factory):
             ("x",),
         ),
         (
-            # Same hazard, via a tuple-unpacked with-as target.
             """
 def func(ctx_factory):
     a = None
@@ -1213,12 +1097,6 @@ def test_untracked_rebinding_not_flagged_as_redundant(source: str, excluded_name
 
 
 def test_ignore_marker_inside_string_literal_does_not_suppress_violation() -> None:
-    # A string literal that merely contains the suppression-marker text is
-    # not a real suppression comment and must not hide a violation on that
-    # line. Ignore detection must be tokenize-based, matching only genuine
-    # COMMENT tokens — a plain text search over raw source lines can't
-    # distinguish a string literal containing '# pytriage: TR5' text from
-    # an actual comment.
     source = """
 def call_it():
     x = "foo"; note = "# pytriage: TR5"
@@ -1247,11 +1125,6 @@ def test_landmark_equal_to_none():
     violations = _check(source, path, level=level)
     assert [v.message for v in violations] == [v.message for v in _check(source, "src/processor.py", level=level)]
     assert any("'result'" in v.message for v in violations)
-
-
-# ---------------------------------------------------------------------------
-# check(): reports a flagged violation
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -1473,10 +1346,6 @@ def example():
     x: str = "foo"
     func(x)
 """
-    # Type annotation adds 15 points, putting the semantic score (15) above
-    # the conservative level's report ceiling (10) but still under the
-    # permissive level's (49) — so this is tracked (not silently skipped
-    # entirely), just not reported by default.
     assert _check(source) == []
     assert len(_check(source, level=AggressivenessLevel.PERMISSIVE)) >= 1
 
@@ -1488,16 +1357,10 @@ def func_scope():
     func(x=x)
 """
     violations = _check(source)
-    # Simple case: constant assignment, immediate use, short name, no
-    # control flow.
     assert any(v.fixable for v in violations)
 
 
 def test_fixable_violation_message_has_no_embedded_tags() -> None:
-    # [FIXABLE] and 'Run with --fix' are presentation concerns emitted by
-    # the output layer (main()), not part of the machine-readable
-    # violation message. Embedding them in the message caused '[FIXED]
-    # [FIXABLE] ... Run with --fix...' output when --fix was already used.
     source = """
 def func():
     x = "foo"
@@ -1566,9 +1429,6 @@ def example():
 
 
 def test_autofix_only_simple_rhs() -> None:
-    # A call with more than 2 args is still too complex to inline (issue
-    # #76 kept this cap — unlike the removed semantic-score/var-name-length
-    # ceilings, it isn't superseded by a more accurate check elsewhere).
     source = """
 def example():
     result = func(arg1, arg2, arg3)
@@ -1581,9 +1441,6 @@ def example():
 
 
 def test_async_with_body_assignment_flagged_but_not_fixable() -> None:
-    # An `async with` body, like a plain `with`, always runs exactly once,
-    # so the assignment inside it is still redundant — but it's tracked as
-    # control flow, so it isn't marked fixable.
     source = """
 async def process():
     async with context() as ctx:
@@ -1595,15 +1452,7 @@ async def process():
     assert violations[0].fixable is False
 
 
-# ---------------------------------------------------------------------------
-# Orchestrator integration
-# ---------------------------------------------------------------------------
-
-
 def test_orchestrator_skips_file_with_invalid_syntax(tmp_path: Path) -> None:
-    # Files with invalid syntax must not crash the check pipeline. Syntax
-    # errors are caught by CheckOrchestrator._check_file (it parses the
-    # AST once for all checks), not by RedundantAssignmentCheck itself.
     filepath = tmp_path / "broken.py"
     filepath.write_text("x = (((")
 
