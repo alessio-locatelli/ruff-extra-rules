@@ -9,6 +9,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 ### Changed
 
 - `misplaced-comment` leaves Sphinx `#:` variable documentation comments trailing multiline module-level assignments, where Sphinx recognizes them, instead of moving them into the expression.
+- `redundant-assignment` keeps separately named variables with identical right-hand-side expressions in the same scope, so comparisons can show results from independent evaluations without reports.
 
 ## [0.0.51] - 2026-08-16
 

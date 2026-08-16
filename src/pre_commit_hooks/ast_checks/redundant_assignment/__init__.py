@@ -30,6 +30,7 @@ Examples:
 
 from __future__ import annotations
 
+import ast
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pre_commit_hooks.ast_checks._base import (
@@ -46,7 +47,6 @@ from .autofix import RedundantAssignmentFixData, apply_fixes
 from .semantic import AggressivenessLevel, should_autofix, should_report_violation
 
 if TYPE_CHECKING:
-    import ast
     from pathlib import Path
 
     from pre_commit_hooks.ast_checks._options import CheckOption
@@ -133,12 +133,28 @@ class RedundantAssignmentCheck(BaseCheck):
             key = (lifecycle.assignment.scope_id, lifecycle.assignment.var_name)
             assignment_counts[key] = assignment_counts.get(key, 0) + 1
 
+        rhs_assignment_names: dict[tuple[int, str], set[str]] = {}
+        for lifecycle in lifecycles:
+            assignment = lifecycle.assignment
+            rhs_key = (assignment.scope_id, ast.dump(assignment.rhs_node, include_attributes=False))
+            rhs_assignment_names.setdefault(rhs_key, set()).add(assignment.var_name)
+
+        repeated_rhs_names = {
+            (scope_id, var_name)
+            for (scope_id, _), names in rhs_assignment_names.items()
+            for var_name in names
+            if len(names) > 1
+        }
+
         violations: list[Violation] = []
 
         for lifecycle in lifecycles:
             # Skip if variable has multiple assignments (state tracking pattern)
             key = (lifecycle.assignment.scope_id, lifecycle.assignment.var_name)
             if assignment_counts[key] > 1:
+                continue
+
+            if key in repeated_rhs_names:
                 continue
 
             # See AssignmentInfo.is_rebinding_marker / _record_compound_target_rebindings.
