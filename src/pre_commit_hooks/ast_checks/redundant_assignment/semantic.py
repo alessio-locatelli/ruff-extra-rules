@@ -4,12 +4,8 @@ from __future__ import annotations
 
 import ast
 from enum import Enum, auto
-from typing import TYPE_CHECKING
 
 from .analysis import PatternType, UsageInfo, VariableLifecycle, is_preceded_by_call
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 class AggressivenessLevel(Enum):
@@ -17,18 +13,6 @@ class AggressivenessLevel(Enum):
 
     CONSERVATIVE = auto()
     PERMISSIVE = auto()
-
-
-def _is_test_file(filepath: Path | None) -> bool:
-    if filepath is None:
-        return False
-
-    parts = filepath.parts
-    if "tests" in parts or "test" in parts:
-        return True
-
-    filename = filepath.name
-    return filename.startswith("test_") or filename.endswith("_test.py")
 
 
 # Transformative verbs that indicate semantic value
@@ -245,8 +229,6 @@ def calculate_semantic_value(
     rhs_node: ast.expr,
     *,
     has_type_annotation: bool = False,
-    is_test_context: bool = False,
-    filepath: Path | None = None,
 ) -> int:
     """The score ranges from 0-100:
     - 0-20: No semantic value (redundant assignment, can auto-fix)
@@ -254,52 +236,6 @@ def calculate_semantic_value(
     - 50-100: Clear value (skip entirely)
     """
     score = 0
-
-    # Test code benefits more from named intermediate variables for clarity,
-    # so apply a higher semantic value to descriptive variables here.
-    if is_test_context or (filepath and _is_test_file(filepath)):
-        if len(var_name.split("_")) >= 2:
-            # e.g. "camel_case_sample", "duffel_route", "mock_image"
-            score += 30
-
-        test_semantic_words = {
-            "mock",
-            "fake",
-            "sample",
-            "expected",
-            "actual",
-            "result",
-            "fixture",
-            "data",
-            "template",
-            "response",
-            "request",
-            "some",
-            "example",
-            "test",
-        }
-        var_lower = var_name.lower()
-        if any(word in var_lower for word in test_semantic_words):
-            score += 25
-
-        # A common pattern for making assertions clearer.
-        # Example: result = landmark.__eq__(None); assert result is NotImplemented  # noqa: ERA001
-        if isinstance(rhs_node, ast.Call) and var_lower in {
-            "result",
-            "output",
-            "value",
-            "response",
-            "landmark",
-        }:
-            score += 30
-
-        # Example: some_european_airports = ["AES", "BYJ", "BTS"]  # noqa: ERA001
-        if isinstance(rhs_node, ast.List | ast.Dict | ast.Set):
-            score += 25
-
-        # Example: days_with_routes_in_a_row = range(70)  # noqa: ERA001
-        if isinstance(rhs_node, ast.Call) and isinstance(rhs_node.func, ast.Name) and rhs_node.func.id == "range":
-            score += 25
 
     # e.g. "raw_headers = kwargs.get('headers')".
     if _adds_verbosity_or_context(var_name, rhs_source, rhs_node):
@@ -541,7 +477,6 @@ def _is_named_string_constant_pattern(var_name: str, rhs_node: ast.expr) -> bool
 def should_report_violation(
     lifecycle: VariableLifecycle,
     pattern: PatternType,
-    filepath: Path | None = None,
     level: AggressivenessLevel = AggressivenessLevel.CONSERVATIVE,
 ) -> bool:
     assignment = lifecycle.assignment
@@ -670,7 +605,6 @@ def should_report_violation(
         rhs_source=assignment.rhs_source,
         rhs_node=assignment.rhs_node,
         has_type_annotation=assignment.has_type_annotation,
-        filepath=filepath,
     )
 
     return semantic_score <= _report_score_ceiling(level, pattern)

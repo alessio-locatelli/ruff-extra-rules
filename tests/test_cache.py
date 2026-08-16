@@ -62,9 +62,7 @@ def test_cache_hit_after_set(cache_manager: CacheManager, sample_file: Path, cal
 
 
 def test_cache_invalidated_on_content_change(cache_manager: CacheManager, sample_file: Path) -> None:
-    test_result: dict[str, list[str]] = {"violations": []}
-
-    cache_manager.set_cached_result(sample_file, "test-hook", test_result)
+    cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
     assert cache_manager.get_cached_result(sample_file, "test-hook") is not None
 
     sample_file.write_text("def bar():\n    return 42\n")
@@ -75,9 +73,8 @@ def test_cache_invalidated_on_content_change(cache_manager: CacheManager, sample
 
 def test_mtime_changed_but_content_same(cache_manager: CacheManager, sample_file: Path) -> None:
     original_content = sample_file.read_text()
-    test_result: dict[str, list[str]] = {"violations": []}
 
-    cache_manager.set_cached_result(sample_file, "test-hook", test_result)
+    cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
 
     time.sleep(0.01)  # ensure mtime changes
     sample_file.write_text(original_content)
@@ -187,8 +184,7 @@ def test_compute_tree_hash(tmp_path: Path, mutate: Callable[[Path], object], *, 
 
 
 def test_atomic_write(cache_manager: CacheManager, sample_file: Path) -> None:
-    test_result: dict[str, list[str]] = {"violations": []}
-    cache_manager.set_cached_result(sample_file, "test-hook", test_result)
+    cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
 
     tmp_files = list(cache_manager.cache_dir.rglob("*.tmp"))
     assert len(tmp_files) == 0

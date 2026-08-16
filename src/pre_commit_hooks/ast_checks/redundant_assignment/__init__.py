@@ -115,7 +115,7 @@ class RedundantAssignmentCheck(BaseCheck):
     def get_prefilter_pattern(self) -> list[str] | None:
         return [" = "]
 
-    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
         # Tokenized once and reused for both lookups below, rather than
         # each independently tokenizing the whole file (see
         # find_ignored_lines_and_classify_comments).
@@ -154,7 +154,7 @@ class RedundantAssignmentCheck(BaseCheck):
             if lifecycle.assignment.line in ignored_lines or any(use.line in ignored_lines for use in lifecycle.uses):
                 continue
 
-            if not should_report_violation(lifecycle, pattern, filepath, level=self._level):
+            if not should_report_violation(lifecycle, pattern, level=self._level):
                 continue
 
             # Pass the real source lines so the line-length check matches
