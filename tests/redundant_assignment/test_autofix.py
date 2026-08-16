@@ -148,7 +148,7 @@ def test_fix_write_failure_returns_false(
             "x = 1\nprint(x)\n",
             {
                 "pattern": "IMMEDIATE_SINGLE_USE",
-                "assign_line": 100,  # Invalid line number.
+                "assign_line": 100,
                 "var_name": "x",
                 "rhs_source": "1",
                 "use_line": 2,
@@ -162,7 +162,7 @@ def test_fix_write_failure_returns_false(
                 "assign_line": 1,
                 "var_name": "x",
                 "rhs_source": "1",
-                "use_line": 100,  # Invalid line number.
+                "use_line": 100,
                 "use_col": 6,
             },
         ),
@@ -180,8 +180,6 @@ def test_fix_write_failure_returns_false(
             },
         ),
         (
-            # The usage line is 51 chars; replacing the 1-char var with a
-            # 40-char value pushes it to 90, past the 79-char guard.
             "x = " + "a" * 40 + "\nresult = some_long_function_name(x, param1, param2)\n",
             {
                 "pattern": "IMMEDIATE_SINGLE_USE",
@@ -189,7 +187,7 @@ def test_fix_write_failure_returns_false(
                 "var_name": "x",
                 "rhs_source": "a" * 40,
                 "use_line": 2,
-                "use_col": 33,  # Position of 'x' in the usage line.
+                "use_col": 33,
             },
         ),
     ],
@@ -219,16 +217,14 @@ def test_autofix_skips_multiline_rhs() -> None:
 
 
 def test_autofix_skips_line_length_violation() -> None:
-    # Line is 84 chars; replacing the 1-char var with a 20-char value would
-    # push it to 103, past the 79-char guard.
     source_lines = ["x = " + "a" * 80 + "\n"]
     assert _can_safely_inline("x", "a" * 20, 0, source_lines) is False
 
 
 def test_autofix_skips_invalid_line_indices() -> None:
     source_lines = ["line1\n", "line2\n"]
-    assert _can_safely_inline("x", "value", -1, source_lines) is False  # negative index
-    assert _can_safely_inline("x", "value", 10, source_lines) is False  # out of bounds
+    assert _can_safely_inline("x", "value", -1, source_lines) is False
+    assert _can_safely_inline("x", "value", 10, source_lines) is False
 
 
 def test_fix_method_with_no_fixable_violations() -> None:
