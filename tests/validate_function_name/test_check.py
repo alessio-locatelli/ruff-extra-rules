@@ -23,18 +23,18 @@ if TYPE_CHECKING:
 def _repository_with_fixable_target(tmp_path: Path) -> tuple[str, Path, str]:
     git = shutil.which("git")
     assert git is not None
-    subprocess.run([git, "init", "-q"], check=True, cwd=tmp_path)  # noqa: S603
+    subprocess.run([git, "init", "-q"], check=True, cwd=tmp_path)
 
     filepath = tmp_path / "definitions.py"
     source = "def get_data() -> bool:\n    return True\n"
     filepath.write_text(source)
-    subprocess.run([git, "add", "definitions.py"], check=True, cwd=tmp_path)  # noqa: S603
+    subprocess.run([git, "add", "definitions.py"], check=True, cwd=tmp_path)
     return git, filepath, source
 
 
 def _add_external_reference(filepath: Path, git: str) -> None:
     (filepath.parent / "consumer.py").write_text("from definitions import get_data\n\nvalue = get_data()\n")
-    subprocess.run([git, "add", "consumer.py"], check=True, cwd=filepath.parent)  # noqa: S603
+    subprocess.run([git, "add", "consumer.py"], check=True, cwd=filepath.parent)
 
 
 def _check_fixability(tmp_path: Path) -> bool:
