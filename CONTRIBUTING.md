@@ -1,8 +1,6 @@
 # Contributing
 
-This is a personal hobby project maintained solo, entirely through coding agents. It isn't set up to take third-party pull requests.
-
-Opening an issue is welcome — bug reports, questions, suggestions — and will be looked at on a best-effort basis, with no guaranteed response time.
+PRs are welcome! If you plan to contribute a major change, please open an issue or discussion first to ensure we share a common understanding of the intended submission. See `AGENTS.md` for linting requirements, testing guidelines, and the expected quality baseline.
 
 For the technical walkthrough of how checks are built (if you're forking this or just curious), see [docs/adding-a-check.md](docs/adding-a-check.md).
 
