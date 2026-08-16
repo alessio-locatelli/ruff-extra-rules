@@ -6,11 +6,14 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-16
+
 ### Changed
 
 - `misplaced-comment` leaves Sphinx `#:` variable documentation comments trailing multiline module-level assignments, where Sphinx recognizes them, instead of moving them into the expression.
 - `redundant-assignment` keeps separately named variables with identical right-hand-side expressions in the same scope, so comparisons can show results from independent evaluations without reports.
 - `redundant-assignment` no longer reports a value used only inside a lambda, preserving its capture and evaluation timing.
+- `validate-function-name` keeps a rename report-only when the existing name occurs in another tracked Python file, preventing a `--fix` run from leaving cross-file references stale.
 
 ## [0.0.51] - 2026-08-16
 

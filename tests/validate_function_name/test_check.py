@@ -1,20 +1,47 @@
 from __future__ import annotations
 
 import ast
+import shutil
+import subprocess
 from typing import TYPE_CHECKING
 
 import pytest
 
 import pre_commit_hooks.ast_checks.validate_function_name as module
 from pre_commit_hooks.ast_checks._base import FixValidationError, is_fix_errored, is_fix_rejected
-from pre_commit_hooks.ast_checks.validate_function_name import ValidateFunctionNameCheck
+from pre_commit_hooks.ast_checks.validate_function_name import ValidateFunctionNameCheck, autofix
 from tests._helpers import raises, restricted_permissions
 from tests.factories import ViolationFactory
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
 
     from pre_commit_hooks.ast_checks.validate_function_name.analysis import Suggestion
+
+
+def _repository_with_fixable_target(tmp_path: Path) -> tuple[str, Path, str]:
+    git = shutil.which("git")
+    assert git is not None
+    subprocess.run([git, "init", "-q"], check=True, cwd=tmp_path)  # noqa: S603
+
+    filepath = tmp_path / "definitions.py"
+    source = "def get_data() -> bool:\n    return True\n"
+    filepath.write_text(source)
+    subprocess.run([git, "add", "definitions.py"], check=True, cwd=tmp_path)  # noqa: S603
+    return git, filepath, source
+
+
+def _add_external_reference(filepath: Path, git: str) -> None:
+    (filepath.parent / "consumer.py").write_text("from definitions import get_data\n\nvalue = get_data()\n")
+    subprocess.run([git, "add", "consumer.py"], check=True, cwd=filepath.parent)  # noqa: S603
+
+
+def _check_fixability(tmp_path: Path) -> bool:
+    source = "def get_data() -> bool:\n    return True\n"
+    violations = ValidateFunctionNameCheck().check(tmp_path / "definitions.py", ast.parse(source), source)
+    assert len(violations) == 1
+    return violations[0].fixable
 
 
 def test_check_uses_given_tree_and_source_not_disk(tmp_path: Path) -> None:
@@ -157,6 +184,103 @@ def test_check_does_not_mark_unfixable_violation_fixable(tmp_path: Path) -> None
 
     assert len(violations) == 1
     assert violations[0].fixable is False
+
+
+def test_check_marks_rename_unfixable_when_git_is_unavailable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(autofix.shutil, "which", lambda _name: None)
+
+    with caplog.at_level("WARNING"):
+        assert _check_fixability(tmp_path) is False
+
+    assert "git is unavailable" in caplog.text
+
+
+def test_check_marks_rename_unfixable_when_repository_root_lookup_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    monkeypatch.setattr(autofix.subprocess, "run", raises(subprocess.SubprocessError, "simulated root lookup failure"))
+
+    with caplog.at_level("WARNING"):
+        assert _check_fixability(tmp_path) is False
+
+    assert "Could not safely establish repository scope" in caplog.text
+
+
+def test_check_marks_rename_unfixable_when_repository_root_lookup_returns_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / ".git").mkdir()
+    monkeypatch.setattr(
+        autofix.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 2, "", "simulated root lookup error"),
+    )
+
+    with caplog.at_level("WARNING"):
+        assert _check_fixability(tmp_path) is False
+
+    assert "Could not safely establish repository scope" in caplog.text
+
+
+def test_check_marks_rename_unfixable_when_repository_reference_search_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def fail_reference_search(command: Sequence[str | Path], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "rev-parse" in command:
+            return subprocess.CompletedProcess(command, 0, str(tmp_path), "")
+        raise subprocess.SubprocessError("simulated reference search failure")
+
+    monkeypatch.setattr(autofix.subprocess, "run", fail_reference_search)
+
+    with caplog.at_level("WARNING"):
+        assert _check_fixability(tmp_path) is False
+
+    assert "Could not safely search repository references" in caplog.text
+
+
+def test_check_marks_rename_unfixable_when_repository_search_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    def repository_search_error(command: Sequence[str | Path], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if "rev-parse" in command:
+            return subprocess.CompletedProcess(command, 0, str(tmp_path), "")
+        return subprocess.CompletedProcess(command, 2, "", "simulated search error")
+
+    monkeypatch.setattr(autofix.subprocess, "run", repository_search_error)
+
+    with caplog.at_level("WARNING"):
+        assert _check_fixability(tmp_path) is False
+
+    assert "Could not safely search repository references" in caplog.text
+
+
+def test_fix_refuses_a_rename_referenced_by_another_repository_file(tmp_path: Path) -> None:
+    git, filepath, source = _repository_with_fixable_target(tmp_path)
+    _add_external_reference(filepath, git)
+
+    check = ValidateFunctionNameCheck()
+    violations = check.check(filepath, ast.parse(source), source)
+
+    assert len(violations) == 1
+    assert violations[0].fixable is False
+    assert check.fix(filepath, violations, source, ast.parse(source)) is False
+    assert filepath.read_text() == source
+
+
+def test_fix_rechecks_repository_references_before_writing(tmp_path: Path) -> None:
+    git, filepath, source = _repository_with_fixable_target(tmp_path)
+
+    check = ValidateFunctionNameCheck()
+    violations = check.check(filepath, ast.parse(source), source)
+    assert len(violations) == 1
+    assert violations[0].fixable is True
+
+    _add_external_reference(filepath, git)
+
+    assert check.fix(filepath, violations, source, ast.parse(source)) is False
+    assert filepath.read_text() == source
 
 
 def test_fix_returns_false_when_apply_fix_fails_without_raising(
