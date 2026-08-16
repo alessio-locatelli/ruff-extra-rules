@@ -36,7 +36,7 @@ Add to your `.pre-commit-config.yaml` — the same file [prek](https://github.co
 ```yaml
 repos:
   - repo: https://github.com/alessio-locatelli/ruff-extra-rules
-    rev: <tag-or-commit-sha> # pin a specific tag or commit; see the repo's tags for available versions
+    rev: <tag> # pin a release tag; see the CHANGELOG for what each one changes
     hooks:
       - id: ruff-extra-rules
       - id: ruff-extra-rules-ty # optional: adds redundant-type-conversion (TR6), see below
@@ -75,6 +75,10 @@ The nearest `pyproject.toml` with a `[tool.ruff-extra-rules]` table, searching u
 Use `# pytriage: <code>` (e.g., `# pytriage: TR1`), or a comma-separated list to suppress more than one check on the same line (`# pytriage: TR1,TR5`).
 
 `ruff format`'s own `# fmt: off` / `# fmt: on`, `# fmt: skip`, and YAPF's `# yapf: disable` / `# yapf: enable` are honored the same way: a line they cover is never reported and never fixed by any check.
+
+## Releases
+
+Every release has notes in the [changelog](CHANGELOG.md). [Releases](docs/releases.md) explains what a version number tells you about an upgrade.
 
 ---
 

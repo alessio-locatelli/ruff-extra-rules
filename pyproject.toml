@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ruff-extra-rules"
-version = "0.0.37"
+dynamic = ["version"]
 description = "Extra Python rule checks and fixups for pre-commit/prek, meant to run alongside ruff"
 readme = "README.md"
 requires-python = ">=3.14"
@@ -40,6 +40,9 @@ dev = [
   "ty>=0.0.64",
   "pytest-benchmark>=5.2.3",
 ]
+
+[tool.setuptools.dynamic]
+version = { attr = "pre_commit_hooks.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]

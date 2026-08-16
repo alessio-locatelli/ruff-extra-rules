@@ -6,6 +6,21 @@ Opening an issue is welcome — bug reports, questions, suggestions — and will
 
 For the technical walkthrough of how checks are built (if you're forking this or just curious), see [docs/adding-a-check.md](docs/adding-a-check.md).
 
+## Cutting a release
+
+[docs/releases.md](docs/releases.md) is the policy this checklist implements; read it first to pick the number.
+
+1. Move the `## [Unreleased]` notes in [CHANGELOG.md](CHANGELOG.md) into a `## [X.Y.Z] - YYYY-MM-DD` section.
+2. Set `__version__` in `src/pre_commit_hooks/__init__.py` to the same version. Nothing else records it.
+3. Commit, then tag `vX.Y.Z` and push the tag.
+
+The tag runs `.github/workflows/release.yaml`, which refuses to publish unless the tag, the built distributions and the newest changelog section agree, and then creates the GitHub release from that section. To check before tagging:
+
+```bash
+uv build
+uv run python -m release.validate vX.Y.Z
+```
+
 ## Performance benchmarks
 
 The benchmark suite measures the direct ast-check invocation and the equivalent local `prek` hook against small, typical, and large Python files. Each path is measured with an empty check cache and with a populated one.
