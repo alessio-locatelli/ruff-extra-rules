@@ -257,22 +257,10 @@ def test_check_marks_rename_unfixable_when_repository_search_errors(
     assert "Could not safely search repository references" in caplog.text
 
 
-def test_fix_refuses_a_rename_referenced_by_another_repository_file(tmp_path: Path) -> None:
+@pytest.mark.parametrize("tracked", [True, False], ids=["tracked", "untracked"])
+def test_fix_refuses_a_rename_referenced_by_another_repository_file(tmp_path: Path, *, tracked: bool) -> None:
     git, filepath, source = _repository_with_fixable_target(tmp_path)
-    _add_external_reference(filepath, git)
-
-    check = ValidateFunctionNameCheck()
-    violations = check.check(filepath, ast.parse(source), source)
-
-    assert len(violations) == 1
-    assert violations[0].fixable is False
-    assert check.fix(filepath, violations, source, ast.parse(source)) is False
-    assert filepath.read_text() == source
-
-
-def test_fix_refuses_a_rename_referenced_by_an_untracked_repository_file(tmp_path: Path) -> None:
-    git, filepath, source = _repository_with_fixable_target(tmp_path)
-    _add_external_reference(filepath, git, tracked=False)
+    _add_external_reference(filepath, git, tracked=tracked)
 
     check = ValidateFunctionNameCheck()
     violations = check.check(filepath, ast.parse(source), source)
