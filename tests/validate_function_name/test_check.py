@@ -32,9 +32,10 @@ def _repository_with_fixable_target(tmp_path: Path) -> tuple[str, Path, str]:
     return git, filepath, source
 
 
-def _add_external_reference(filepath: Path, git: str) -> None:
+def _add_external_reference(filepath: Path, git: str, *, tracked: bool = True) -> None:
     (filepath.parent / "consumer.py").write_text("from definitions import get_data\n\nvalue = get_data()\n")
-    subprocess.run([git, "add", "consumer.py"], check=True, cwd=filepath.parent)
+    if tracked:
+        subprocess.run([git, "add", "consumer.py"], check=True, cwd=filepath.parent)
 
 
 def _check_fixability(tmp_path: Path) -> bool:
@@ -259,6 +260,19 @@ def test_check_marks_rename_unfixable_when_repository_search_errors(
 def test_fix_refuses_a_rename_referenced_by_another_repository_file(tmp_path: Path) -> None:
     git, filepath, source = _repository_with_fixable_target(tmp_path)
     _add_external_reference(filepath, git)
+
+    check = ValidateFunctionNameCheck()
+    violations = check.check(filepath, ast.parse(source), source)
+
+    assert len(violations) == 1
+    assert violations[0].fixable is False
+    assert check.fix(filepath, violations, source, ast.parse(source)) is False
+    assert filepath.read_text() == source
+
+
+def test_fix_refuses_a_rename_referenced_by_an_untracked_repository_file(tmp_path: Path) -> None:
+    git, filepath, source = _repository_with_fixable_target(tmp_path)
+    _add_external_reference(filepath, git, tracked=False)
 
     check = ValidateFunctionNameCheck()
     violations = check.check(filepath, ast.parse(source), source)

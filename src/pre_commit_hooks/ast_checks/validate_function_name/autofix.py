@@ -146,6 +146,7 @@ def _repository_reference_status(filepath: Path, name: str) -> RepositoryReferen
                 "grep",
                 "--files-with-matches",
                 "--null",
+                "--untracked",
                 "--fixed-strings",
                 "-e",
                 name,
