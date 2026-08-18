@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from pre_commit_hooks.ast_checks._base import is_fix_failed
+from pre_commit_hooks.ast_checks._base import FixOutcome
 from pre_commit_hooks.ast_checks.meaningless_vars import (
     MeaninglessVarsCheck,
     MeaninglessVarsLevel,
@@ -582,7 +582,7 @@ def fetch_users():
         assert violations[0].fixable
 
         success = check.fix(filepath, violations, source, tree)
-        assert success
+        assert success.outcomes == (FixOutcome.APPLIED,)
 
         fixed_content = filepath.read_text()
 
@@ -612,7 +612,7 @@ def fetch_users():
     assert violations[0].fixable
 
     success = check.fix(filepath, violations, source, tree)
-    assert success is False
+    assert success.outcomes == (FixOutcome.DECLINED,)
     assert filepath.read_text() == source
 
 
@@ -632,7 +632,7 @@ def test_autofix_no_fixable_violations() -> None:
         non_fixable = [v for v in violations if not v.fixable]
 
         success = check.fix(filepath, non_fixable, source, tree)
-        assert not success
+        assert success.outcomes == (FixOutcome.DECLINED,) * len(non_fixable)
 
 
 def test_autofix_follows_closure_reference_into_nested_function() -> None:
@@ -657,7 +657,7 @@ def test_autofix_follows_closure_reference_into_nested_function() -> None:
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -687,7 +687,7 @@ def test_autofix_follows_closure_reference_into_lambda() -> None:
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -707,7 +707,7 @@ def test_autofix_follows_closure_reference_into_comprehension() -> None:
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -736,7 +736,7 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is False
+        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -869,7 +869,7 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1091,7 +1091,7 @@ def test_autofix_does_not_rename_shadowed_reference_in_nested_scope(source: str,
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1135,7 +1135,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
         assert violations
         assert all(not v.fixable for v in violations)
 
-        assert check.fix(filepath, violations, source, tree) is False
+        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1273,7 +1273,7 @@ def test_autofix_never_offered_when_same_scope_rebinds_via_non_name_construct(so
         assert violations
         assert all(not v.fixable for v in violations)
 
-        assert check.fix(filepath, violations, source, tree) is False
+        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1347,7 +1347,7 @@ def test_autofix_avoids_cross_scope_suggestion_collision() -> None:
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is False
+        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1375,7 +1375,7 @@ def test_autofix_avoids_suggestion_colliding_with_existing_nested_name() -> None
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is False
+        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1402,7 +1402,7 @@ def test_autofix_avoids_suggestion_colliding_with_nested_parameter_name() -> Non
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is False
+        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1435,7 +1435,7 @@ def outer(response):
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is False
+        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1466,7 +1466,7 @@ def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_sco
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1509,7 +1509,7 @@ def test_autofix_follows_closure_through_scope_that_itself_contains_a_shadowing_
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1548,7 +1548,7 @@ def test_autofix_avoids_suggestion_collision_when_nested_closure_precedes_captur
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is False
+        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1583,7 +1583,7 @@ def outer(response):
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1621,7 +1621,7 @@ def test_autofix_still_follows_annotation_closure_without_deferred_annotations()
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1715,7 +1715,7 @@ def test_autofix_follows_closure_into_type_parameter_bound_and_default() -> None
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1760,7 +1760,7 @@ def test_autofix_does_not_rename_type_parameter_bound_referencing_a_peer_type_pa
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1804,7 +1804,7 @@ def test_autofix_does_not_reuse_a_nested_functions_own_mapping_for_its_default()
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1843,7 +1843,7 @@ def test_autofix_does_not_rename_a_nested_functions_own_type_parameter_bound_via
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is False
+        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1873,7 +1873,7 @@ def test_autofix_does_not_rename_type_alias_bound_referencing_a_peer_type_parame
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1915,7 +1915,7 @@ def test_autofix_follows_closure_into_type_alias_value() -> None:
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -1963,7 +1963,7 @@ def test_autofix_follows_closure_into_generic_functions_own_annotation_despite_b
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -2008,7 +2008,7 @@ def test_autofix_does_not_rename_generic_functions_own_annotation_referencing_a_
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -2052,7 +2052,7 @@ def outer(response):
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -2081,7 +2081,7 @@ def test_scope_names_ignore_unnamed_except_and_match_captures() -> None:
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -2228,7 +2228,7 @@ def process():
         violations = check.check(filepath, tree, source)
         assert len(violations) == 1
 
-        assert check.fix(filepath, violations, source, tree) is True
+        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
         fixed_content = filepath.read_text()
 
@@ -2254,7 +2254,7 @@ def test_check_reports_character_offset_not_byte_offset_before_multibyte_text() 
     assert violations[0].col == 6
 
 
-def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_fix_write_failure_reports_failed_outcome(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     source = """import requests
 
 def process():
@@ -2279,19 +2279,14 @@ def other():
     assert {v.fixable for v in violations} == {True, False}
 
     with caplog.at_level("DEBUG"):
-        assert check.fix(filepath, violations, source, tree) is False
+        fix_result = check.fix(filepath, violations, source, tree)
     # the write failure must be attributed to the violations it
     # actually affected, not left indistinguishable from "never attempted"
     # — the orchestrator's own report otherwise misleadingly suggests
     # re-running --fix, which would just fail identically again. A
     # non-fixable violation was never part of this attempt at all, so it
     # must be left alone rather than also marked failed.
-    for v in violations:
-        assert is_fix_failed(v) is v.fixable
-    # mark_fix_failed() above already reports this cleanly; a raw traceback
-    # on stderr by default would just be redundant noise (ch. 7: "MUST NOT
-    # emit uncontrolled human-oriented text into a machine-readable output
-    # stream").
+    assert fix_result.outcomes == tuple(FixOutcome.FAILED if v.fixable else FixOutcome.DECLINED for v in violations)
     assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 

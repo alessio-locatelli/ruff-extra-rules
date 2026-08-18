@@ -10,6 +10,7 @@ import stat
 import tempfile
 import tokenize
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
@@ -17,6 +18,25 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
     from ._options import CheckOption
+
+
+class FixOutcome(Enum):
+    APPLIED = "applied"
+    DECLINED = "declined"
+    REJECTED = "rejected"
+    ABORTED = "aborted"
+    ERRORED = "errored"
+    FAILED = "failed"
+    RESOLVED_INDIRECTLY = "resolved_indirectly"
+
+
+@dataclass(frozen=True, slots=True)
+class FixResult:
+    outcomes: tuple[FixOutcome, ...]
+
+    @classmethod
+    def for_violations(cls, violations: list[Violation], outcome: FixOutcome) -> FixResult:
+        return cls((outcome,) * len(violations))
 
 
 @dataclass(slots=True)
@@ -35,6 +55,7 @@ class Violation:
     message: str
     fixable: bool
     fix_data: dict[str, Any] | None = None
+    fix_outcome: FixOutcome | None = None
 
 
 class ASTCheck(Protocol):
@@ -104,7 +125,7 @@ class ASTCheck(Protocol):
         source: str,
         tree: ast.Module,
         encoding: str = "utf-8",
-    ) -> bool:
+    ) -> FixResult:
         """`encoding` must match what `filepath` was originally read as, so a
         PEP 263 declaration round-trips correctly.
 
@@ -115,22 +136,17 @@ class ASTCheck(Protocol):
         rejection to every violation passed in. A check that writes more
         than once per `fix()` call (looping over violations individually,
         like `validate_function_name`) should instead catch
-        `FixValidationError` around each individual write and call
-        `mark_fix_rejected()` on that specific violation, so a later write
-        in the same call still gets attempted.
+        `FixValidationError` around each individual write and return a
+        rejected outcome for that specific violation, so a later write in
+        the same call still gets attempted.
 
         `ConcurrentModificationError` (also raised by `atomic_write_text()`)
         follows the same split as `FixValidationError` above: propagate
         uncaught for a single-write `fix()`, or catch it around each
-        individual write and call `mark_fix_aborted()` on that specific
+        individual write and return an aborted outcome for that specific
         violation for a multi-write one. See `docs/adr/0042-abort-fixes-on-concurrent-source-modification.md`.
 
-        `OSError` from `atomic_write_text()` (missing parent directory,
-        permission denied, disk full) is different: every implementation
-        must catch it itself and return `False`, matching this method's own
-        "`True`/`False`, never raises" contract — `CheckOrchestrator`'s own
-        outer `except Exception` only protects the full pipeline, not a
-        caller that calls a check's `fix()` directly.
+        Every returned result contains one outcome for each input violation.
         """
         ...
 
@@ -600,94 +616,3 @@ def find_ignored_lines_and_classify_comments(
 
     ignored_lines |= scanner.finalize()
     return ignored_lines, comment_lines - code_lines, comment_lines & code_lines
-
-
-def _mark(violation: Violation, outcome: str) -> None:
-    """The single place that writes the `fix_data` outcome convention every
-    `mark_*()` below shares.
-    """
-    if violation.fix_data is None:
-        violation.fix_data = {}
-    violation.fix_data[outcome] = True
-
-
-def mark_fixed(violation: Violation) -> None:
-    """Record that this check's own `fix()` resolved `violation`."""
-    _mark(violation, "fixed")
-
-
-def is_fixed(violation: Violation) -> bool:
-    """Whether `mark_fixed()` has already been called on `violation`."""
-    return bool(violation.fix_data and violation.fix_data.get("fixed", False))
-
-
-def mark_resolved_indirectly(violation: Violation) -> None:
-    """Record that some other fix in the same run removed `violation` as a
-    side effect. Distinct from `mark_fixed()`: no fix was ever applied for
-    this violation itself, whichever check's fix took it away. See
-    `docs/adr/0053-indirect-resolution-outcome.md`.
-    """
-    _mark(violation, "resolved_indirectly")
-
-
-def is_resolved_indirectly(violation: Violation) -> bool:
-    """Whether `mark_resolved_indirectly()` has already been called on `violation`."""
-    return bool(violation.fix_data and violation.fix_data.get("resolved_indirectly", False))
-
-
-def mark_fix_rejected(violation: Violation) -> None:
-    """Record that a fix was attempted for `violation` but rejected by
-    `atomic_write_text()` because it would have produced invalid syntax.
-    """
-    _mark(violation, "fix_rejected")
-
-
-def is_fix_rejected(violation: Violation) -> bool:
-    """Whether `mark_fix_rejected()` has already been called on `violation`."""
-    return bool(violation.fix_data and violation.fix_data.get("fix_rejected", False))
-
-
-def mark_fix_aborted(violation: Violation) -> None:
-    """Record that a fix was attempted for `violation` but discarded by
-    `atomic_write_text()` because the file changed on disk after it was read
-    for this fix — an external edit or a concurrent process outside this
-    tool's own per-file fix lock (see `ConcurrentModificationError`).
-    """
-    _mark(violation, "fix_aborted")
-
-
-def is_fix_aborted(violation: Violation) -> bool:
-    """Whether `mark_fix_aborted()` has already been called on `violation`."""
-    return bool(violation.fix_data and violation.fix_data.get("fix_aborted", False))
-
-
-def mark_fix_errored(violation: Violation) -> None:
-    """Record that `fix()` itself raised an exception other than
-    `FixValidationError` while attempting `violation` — a bug in the
-    check's own fix logic, distinct from `mark_fix_rejected()` (fix() ran
-    to completion but its *output* didn't parse).
-    """
-    _mark(violation, "fix_errored")
-
-
-def is_fix_errored(violation: Violation) -> bool:
-    """Whether `mark_fix_errored()` has already been called on `violation`."""
-    return bool(violation.fix_data and violation.fix_data.get("fix_errored", False))
-
-
-def mark_fix_failed(violation: Violation) -> None:
-    """Record that `fix()` returned `False` (without raising) for
-    `violation` because it caught an `OSError` while writing the file back —
-    exactly the third outcome `ASTCheck.fix()`'s own docstring documents
-    ("OSError from atomic_write_text() ... every implementation must catch
-    it itself and return False"). Distinct from `mark_fix_errored()`: this
-    is an environmental failure (disk full, permission denied, missing
-    parent directory), not a bug in the check's own fix logic, so it must
-    not carry the same "this is a bug, please report it" hint.
-    """
-    _mark(violation, "fix_failed")
-
-
-def is_fix_failed(violation: Violation) -> bool:
-    """Whether `mark_fix_failed()` has already been called on `violation`."""
-    return bool(violation.fix_data and violation.fix_data.get("fix_failed", False))

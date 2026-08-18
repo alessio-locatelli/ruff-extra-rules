@@ -8,7 +8,14 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
-from pre_commit_hooks.ast_checks._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
+from pre_commit_hooks.ast_checks._base import (
+    BaseCheck,
+    FixOutcome,
+    FixResult,
+    Violation,
+    find_ignored_lines,
+    ignore_pattern_for,
+)
 from pre_commit_hooks.ast_checks._options import EnumOption
 
 from .analysis import decide_candidates
@@ -147,8 +154,8 @@ class RedundantTypeConversionCheck(BaseCheck):
         _source: str,
         _tree: ast.Module,
         _encoding: str = "utf-8",
-    ) -> bool:
-        return False
+    ) -> FixResult:
+        return FixResult.for_violations(_violations, FixOutcome.DECLINED)
 
     def reconcile_direct_inputs(self, _direct_inputs: list[Path]) -> list[Path]:
         session = peek_session()

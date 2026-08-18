@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING
 
-from ._base import is_fix_aborted, is_fix_errored, is_fix_failed, is_fix_rejected, is_fixed, is_resolved_indirectly
+from ._base import FixOutcome
 
 if TYPE_CHECKING:
     from ._base import Violation
@@ -51,51 +51,51 @@ def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Viola
 
     for filepath, violations in sorted(all_violations.items()):
         for v in violations:
-            fixed = is_fixed(v)
-            rejected = is_fix_rejected(v)
-            errored = is_fix_errored(v)
-            failed = is_fix_failed(v)
-            aborted = is_fix_aborted(v)
-            resolved_indirectly = is_resolved_indirectly(v)
-            if fixed:
+            if v.fix_outcome is FixOutcome.APPLIED:
                 tag = "[FIXED] "
-            elif resolved_indirectly:
+            elif v.fix_outcome is FixOutcome.RESOLVED_INDIRECTLY:
                 tag = "[RESOLVED INDIRECTLY] "
-            elif rejected:
+            elif v.fix_outcome is FixOutcome.REJECTED:
                 tag = "[FIX REJECTED] "
-            elif errored:
+            elif v.fix_outcome is FixOutcome.ERRORED:
                 tag = "[FIX ERRORED] "
-            elif failed:
+            elif v.fix_outcome is FixOutcome.FAILED:
                 tag = "[FIX FAILED] "
-            elif aborted:
+            elif v.fix_outcome is FixOutcome.ABORTED:
                 tag = "[FIX ABORTED] "
+            elif v.fix_outcome is FixOutcome.DECLINED:
+                tag = "[FIX DECLINED] "
             elif v.fixable:
                 tag = "[FIXABLE] "
             else:
                 tag = ""
-            if resolved_indirectly:
+            if v.fix_outcome is FixOutcome.RESOLVED_INDIRECTLY:
                 hint = " it disappeared as a side effect of another fix in this run; nothing was applied for it."
-            elif rejected:
+            elif v.fix_outcome is FixOutcome.APPLIED:
+                hint = ""
+            elif v.fix_outcome is FixOutcome.REJECTED:
                 hint = (
                     " --fix produced invalid syntax, so the change was discarded — this is a bug, "
                     "please report it: https://github.com/alessio-locatelli/ruff-extra-rules/issues"
                 )
-            elif errored:
+            elif v.fix_outcome is FixOutcome.ERRORED:
                 hint = (
                     " --fix raised an unexpected internal error and was not applied — this is a bug, "
                     "please report it: https://github.com/alessio-locatelli/ruff-extra-rules/issues"
                 )
-            elif failed:
+            elif v.fix_outcome is FixOutcome.FAILED:
                 hint = (
                     " --fix could not write the file — check file permissions and available disk "
                     "space, then run with --fix again."
                 )
-            elif aborted:
+            elif v.fix_outcome is FixOutcome.ABORTED:
                 hint = (
                     " the file changed on disk while --fix was running, so the change was discarded — "
                     "run with --fix again."
                 )
-            elif v.fixable and not fixed:
+            elif v.fix_outcome is FixOutcome.DECLINED:
+                hint = " --fix left the source unchanged because this change is not safe to apply automatically."
+            elif v.fixable:
                 hint = " Run with --fix to inline automatically."
             else:
                 hint = ""

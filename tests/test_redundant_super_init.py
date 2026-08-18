@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from pre_commit_hooks.ast_checks._base import FixOutcome
 from pre_commit_hooks.ast_checks.redundant_super_init import RedundantSuperInitCheck
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "redundant_super_init"
@@ -52,12 +53,14 @@ def test_get_prefilter_pattern() -> None:
     assert RedundantSuperInitCheck().get_prefilter_pattern() == ["super().__init__"]
 
 
-def test_fix_always_returns_false() -> None:
+def test_fix_always_declines() -> None:
     source = "class Foo:\n    pass\n"
     tree = ast.parse(source)
     check = RedundantSuperInitCheck()
     violations = check.check(Path("test.py"), tree, source)
-    assert check.fix(Path("test.py"), violations, source, tree, "utf-8") is False
+    assert check.fix(Path("test.py"), violations, source, tree, "utf-8").outcomes == (FixOutcome.DECLINED,) * len(
+        violations
+    )
 
 
 def test_violation_has_expected_line_and_no_fixable() -> None:

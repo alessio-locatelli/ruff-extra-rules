@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 import pre_commit_hooks.ast_checks.validate_function_name as module
-from pre_commit_hooks.ast_checks._base import FixValidationError, is_fix_errored, is_fix_rejected
+from pre_commit_hooks.ast_checks._base import FixOutcome, FixValidationError
 from pre_commit_hooks.ast_checks.validate_function_name import ValidateFunctionNameCheck, autofix
 from tests._helpers import raises, restricted_permissions
 from tests.factories import ViolationFactory
@@ -69,12 +69,12 @@ def test_get_prefilter_pattern() -> None:
     assert ValidateFunctionNameCheck().get_prefilter_pattern() == ["def get_"]
 
 
-def test_fix_with_no_violations_returns_false(tmp_path: Path) -> None:
+def test_fix_with_no_violations_declines(tmp_path: Path) -> None:
     filepath = tmp_path / "mod.py"
     filepath.write_text("x = 1\n")
 
     check = ValidateFunctionNameCheck()
-    assert check.fix(filepath, [], "x = 1\n", ast.parse("x = 1\n")) is False
+    assert FixOutcome.APPLIED not in check.fix(filepath, [], "x = 1\n", ast.parse("x = 1\n")).outcomes
 
 
 @pytest.mark.parametrize(
@@ -89,7 +89,7 @@ def test_fix_skips_violation_missing_suggestion(fix_data: dict[str, int] | None,
     violation = ViolationFactory.build(check_id="validate-function-name", error_code="TR4", fix_data=fix_data)
 
     check = ValidateFunctionNameCheck()
-    assert check.fix(filepath, [violation], "x = 1\n", ast.parse("x = 1\n")) is False
+    assert FixOutcome.APPLIED not in check.fix(filepath, [violation], "x = 1\n", ast.parse("x = 1\n")).outcomes
 
 
 def test_fix_applies_safe_suggestion(tmp_path: Path) -> None:
@@ -105,7 +105,7 @@ def test_fix_applies_safe_suggestion(tmp_path: Path) -> None:
     # Marking a violation "fixed" is the orchestrator's responsibility
     # (CheckOrchestrator._apply_fixes), not this check's own fix() — calling
     # fix() directly, as this test does, never sets it.
-    assert check.fix(filepath, violations, source, tree) is True
+    assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
     assert violations[0].fix_data is not None
     assert "def is_data() -> bool:" in filepath.read_text()
 
@@ -131,7 +131,7 @@ def test_fix_applies_context_manager_rename(tmp_path: Path) -> None:
 
     assert len(violations) == 1
     assert violations[0].fixable is True
-    assert check.fix(filepath, violations, source, tree) is True
+    assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
     assert "async def tempfile_session()" in filepath.read_text()
     assert "async with tempfile_session() as session:" in filepath.read_text()
 
@@ -156,7 +156,7 @@ def test_sync_lazy_accessor_property_suggestion_is_not_fixable(tmp_path: Path) -
     assert violations[0].message == (
         "Function 'get_connection' should use @property 'connection' (synchronous lazy accessor)"
     )
-    assert check.fix(filepath, violations, source, tree) is False
+    assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
     assert filepath.read_text() == source
 
 
@@ -171,7 +171,7 @@ def test_fix_skips_unsafe_suggestion(tmp_path: Path) -> None:
     violations = check.check(filepath, tree, source)
     assert len(violations) == 1
 
-    assert check.fix(filepath, violations, source, tree) is False
+    assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
     assert filepath.read_text() == source
 
 
@@ -267,7 +267,7 @@ def test_fix_refuses_a_rename_referenced_by_another_repository_file(tmp_path: Pa
 
     assert len(violations) == 1
     assert violations[0].fixable is False
-    assert check.fix(filepath, violations, source, ast.parse(source)) is False
+    assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, ast.parse(source)).outcomes
     assert filepath.read_text() == source
 
 
@@ -281,15 +281,15 @@ def test_fix_rechecks_repository_references_before_writing(tmp_path: Path) -> No
 
     _add_external_reference(filepath, git)
 
-    assert check.fix(filepath, violations, source, ast.parse(source)) is False
+    assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, ast.parse(source)).outcomes
     assert filepath.read_text() == source
 
 
-def test_fix_returns_false_when_apply_fix_fails_without_raising(
+def test_fix_returns_a_failure_outcome_when_apply_fix_fails_without_raising(
     tmp_path: Path,
 ) -> None:
     # apply_fix() can fail internally (e.g. a write error) and simply
-    # return False rather than raising; that must not be reported as
+    # return a declined outcome rather than raising; that must not be reported as
     # fixed. The write goes through atomic_write_text's
     # temp-file-then-rename, which only needs the parent directory to be
     # writable (not the target file itself, since rename() doesn't check
@@ -305,16 +305,16 @@ def test_fix_returns_false_when_apply_fix_fails_without_raising(
     assert len(violations) == 1
 
     with restricted_permissions(tmp_path, 0o555, restore=0o755):
-        assert check.fix(filepath, violations, source, tree) is False
+        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
-    assert not (violations[0].fix_data and violations[0].fix_data.get("fixed"))
+    assert filepath.read_text() == source
 
 
 def test_fix_marks_violation_errored_and_continues_when_apply_fix_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     # A rename that raises something other than FixValidationError is a bug
-    # in apply_fix() itself. Must be marked distinctly (mark_fix_errored)
+    # in apply_fix() itself. It must be reported distinctly
     # so main() reports [FIX ERRORED] with a "this is a bug" hint rather
     # than the ordinary [FIXABLE]/"Run with --fix" — CheckOrchestrator's own
     # equivalent handling in _apply_fixes never even sees this, since it
@@ -331,14 +331,9 @@ def test_fix_marks_violation_errored_and_continues_when_apply_fix_raises(
     monkeypatch.setattr(module, "apply_fix", raises(RuntimeError, "simulated apply_fix failure"))
 
     with caplog.at_level("DEBUG"):
-        assert check.fix(filepath, violations, source, tree) is False
-    assert is_fix_errored(violations[0])
-    assert not is_fix_rejected(violations[0])
+        fix_result = check.fix(filepath, violations, source, tree)
+    assert fix_result.outcomes == (FixOutcome.ERRORED,)
     assert filepath.read_text() == source
-    # mark_fix_errored() above already reports this cleanly; a raw
-    # traceback on stderr by default would just be redundant noise (ch. 7:
-    # "MUST NOT emit uncontrolled human-oriented text into a
-    # machine-readable output stream").
     assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
@@ -357,13 +352,13 @@ def test_fix_marks_violation_rejected_when_apply_fix_raises_fix_validation_error
     violations = check.check(filepath, tree, source)
     assert len(violations) == 1
 
-    def raise_fix_validation_error(*_args: object, **_kws: object) -> bool:
+    def raise_fix_validation_error(*_args: object, **_kws: object) -> FixOutcome:
         raise FixValidationError(filepath, SyntaxError("simulated"))
 
     monkeypatch.setattr(module, "apply_fix", raise_fix_validation_error)
 
-    assert check.fix(filepath, violations, source, tree) is False
-    assert is_fix_rejected(violations[0])
+    fix_result = check.fix(filepath, violations, source, tree)
+    assert fix_result.outcomes == (FixOutcome.REJECTED,)
     assert filepath.read_text() == source
 
 
@@ -392,19 +387,18 @@ def test_fix_rejects_only_the_violation_whose_write_produces_invalid_syntax(
 
     original_apply_fix = module.apply_fix
 
-    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
+    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> FixOutcome:
         if suggestion.func_name == "get_active":
             raise FixValidationError(fp, SyntaxError("simulated"))
         return original_apply_fix(fp, suggestion)
 
     monkeypatch.setattr(module, "apply_fix", flaky_apply_fix)
 
-    assert check.fix(filepath, violations, source, tree) is True
+    fix_result = check.fix(filepath, violations, source, tree)
+    assert FixOutcome.APPLIED in fix_result.outcomes
 
-    by_func_name = {v.fix_data["suggestion"].func_name: v for v in violations if v.fix_data}
     fixed_content = filepath.read_text()
 
     assert "def get_config" not in fixed_content
     assert 'def get_active(user: dict) -> bool:\n    return user.get("status") == "active"\n' in fixed_content
-    assert not is_fix_rejected(by_func_name["get_config"])
-    assert is_fix_rejected(by_func_name["get_active"])
+    assert fix_result.outcomes == (FixOutcome.APPLIED, FixOutcome.REJECTED)

@@ -38,11 +38,10 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 from pre_commit_hooks.ast_checks._base import (
     BaseCheck,
     ConcurrentModificationError,
+    FixOutcome,
+    FixResult,
     FixValidationError,
     Violation,
-    mark_fix_aborted,
-    mark_fix_errored,
-    mark_fix_rejected,
 )
 
 from .analysis import Suggestion, collect_suggestions
@@ -136,7 +135,7 @@ class ValidateFunctionNameCheck(BaseCheck):
         _source: str,
         _tree: ast.Module,
         _encoding: str = "utf-8",
-    ) -> bool:
+    ) -> FixResult:
         """Apply fixes for function naming violations.
 
         Note: apply_fix() re-reads the file itself (and detects its own
@@ -148,11 +147,11 @@ class ValidateFunctionNameCheck(BaseCheck):
         just-written file to stay correct against the current file state.
         """
         if not violations:
-            return False
+            return FixResult.for_violations(violations, FixOutcome.DECLINED)
 
-        applied_any = False
+        outcomes = [FixOutcome.DECLINED] * len(violations)
 
-        for violation in violations:
+        for index, violation in enumerate(violations):
             if not violation.fix_data:
                 continue
 
@@ -161,45 +160,33 @@ class ValidateFunctionNameCheck(BaseCheck):
             if not suggestion or suggestion.requires_property:
                 continue
 
-            if (
-                should_autofix(filepath, suggestion)
-                and _repository_reference_status(filepath, suggestion.func_name) == "safe"
-            ):
-                try:
-                    if apply_fix(filepath, suggestion):
-                        applied_any = True
-                except FixValidationError:
-                    # Reject only this rename; a rename earlier in this loop
-                    # already committed and stays, and a later one is still
-                    # attempted (mark_fix_rejected() lets the orchestrator's
-                    # post-fix re-check attribute the rejection to this
-                    # specific violation instead of the whole batch).
-                    mark_fix_rejected(violation)
-                except ConcurrentModificationError:
-                    # The file changed on disk between should_autofix()'s own
-                    # read above and apply_fix()'s write -- not a bug, so
-                    # distinct from the Exception branch below. Same
-                    # per-violation scoping as FixValidationError: a rename
-                    # earlier in this loop already committed and stays, and a
-                    # later one is still attempted.
-                    mark_fix_aborted(violation)
-                except Exception:
-                    # A bug in apply_fix() itself, distinct from
-                    # FixValidationError above: mark it so the orchestrator's
-                    # post-fix re-check reports this specific violation as
-                    # [FIX ERRORED] rather than an ordinary, retryable
-                    # [FIXABLE] — re-running --fix would just fail here
-                    # identically again.
-                    # Debug-only: mark_fix_errored() below already reports
-                    # this cleanly as [FIX ERRORED] — an ERROR-level
-                    # .exception() call here would just leak a redundant raw
-                    # traceback onto the user's stderr by default (nothing
-                    # in this codebase configures logging, so Python's own
-                    # lastResort handler prints WARNING+ straight to
-                    # stderr).
-                    logger_check.debug(
-                        "Failed to apply fix for %s in %s", suggestion.func_name, filepath, exc_info=True
-                    )
-                    mark_fix_errored(violation)
+            outcome = should_autofix(filepath, suggestion)
+            if outcome is not FixOutcome.APPLIED:
+                outcomes[index] = outcome
+                continue
+            if _repository_reference_status(filepath, suggestion.func_name) != "safe":
+                continue
+            try:
+                outcomes[index] = apply_fix(filepath, suggestion)
+            except FixValidationError:
+                outcomes[index] = FixOutcome.REJECTED
+            except ConcurrentModificationError:
+                outcomes[index] = FixOutcome.ABORTED
+            except Exception:
+                # A bug in apply_fix() itself, distinct from
+                # FixValidationError above: mark it so the orchestrator's
+                # post-fix re-check reports this specific violation as
+                # [FIX ERRORED] rather than an ordinary, retryable
+                # [FIXABLE] — re-running --fix would just fail here
+                # identically again.
+                # Debug-only: the outcome assignment below already reports
+                # this cleanly as [FIX ERRORED] — an ERROR-level
+                # .exception() call here would just leak a redundant raw
+                # traceback onto the user's stderr by default (nothing
+                # in this codebase configures logging, so Python's own
+                # lastResort handler prints WARNING+ straight to
+                # stderr).
+                logger_check.debug("Failed to apply fix for %s in %s", suggestion.func_name, filepath, exc_info=True)
+                outcomes[index] = FixOutcome.ERRORED
 
-        return applied_any
+        return FixResult(tuple(outcomes))

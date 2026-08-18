@@ -25,21 +25,21 @@ from pre_commit_hooks._lsp import LSPError
 from pre_commit_hooks.ast_checks import ALL_CHECKS, _cli, _discovery, _orchestrator
 from pre_commit_hooks.ast_checks._base import (
     CheckUnavailableError,
+    FixOutcome,
+    FixResult,
     Violation,
     atomic_write_text,
-    is_fix_aborted,
-    is_fix_errored,
-    is_fix_failed,
-    is_fix_rejected,
-    is_fixed,
-    is_resolved_indirectly,
-    mark_fix_failed,
 )
 from pre_commit_hooks.ast_checks._cli import main
 from pre_commit_hooks.ast_checks._diagnostics import report
 from pre_commit_hooks.ast_checks._discovery import ExcludePattern, expand_directories, filter_excluded_files
 from pre_commit_hooks.ast_checks._options import CheckOption, EnumOption
-from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator, _group_by_check_id, load_checks
+from pre_commit_hooks.ast_checks._orchestrator import (
+    CheckOrchestrator,
+    _group_by_check_id,
+    _set_fix_outcomes,
+    load_checks,
+)
 from pre_commit_hooks.ast_checks._per_file_ignores import PerFileIgnore, PerFileIgnoreList
 from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLinesCheck
 from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsCheck, MeaninglessVarsLevel
@@ -647,10 +647,8 @@ def test_apply_fixes_handles_utf8_bom(tmp_path: Path) -> None:
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()], fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
-    fix_data = violations[str(filepath)][0].fix_data
 
-    assert fix_data is not None
-    assert fix_data["fixed"] is True
+    assert violations[str(filepath)][0].fix_outcome is FixOutcome.APPLIED
     assert filepath.read_bytes().startswith(b"\xef\xbb\xbf")
     assert filepath.read_text(encoding="utf-8-sig") == (
         "import requests\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n"
@@ -674,8 +672,7 @@ def test_apply_fixes_recomputes_stale_positions(tmp_path: Path) -> None:
     violations = orchestrator.process_files([str(filepath)])
 
     redundant_assignment_fixed = any(
-        v.check_id == "redundant-assignment" and v.fix_data and v.fix_data.get("fixed")
-        for v in violations[str(filepath)]
+        v.check_id == "redundant-assignment" and v.fix_outcome is FixOutcome.APPLIED for v in violations[str(filepath)]
     )
     assert redundant_assignment_fixed
 
@@ -823,7 +820,7 @@ def test_apply_fixes_refreshes_a_participating_checks_own_left_open_violation(tm
     method_violation = next(
         v for v in violations[str(filepath)] if v.check_id == "validate-function-name" and "get_active" in v.message
     )
-    assert not is_fixed(method_violation)
+    assert method_violation.fix_outcome is not FixOutcome.APPLIED
     assert method_violation.line == actual_method_line
 
 
@@ -849,10 +846,10 @@ def test_refresh_stale_positions_never_drops_an_unrelated_open_violation_sharing
     # different scopes would produce identical violation text.
     shared_message = "Meaningless variable name 'data' found. Consider renaming to 'response'."
     terminal = ViolationFactory.build(
-        check_id="meaningless-vars", message=shared_message, fixable=True, fix_data={"fix_failed": True}
+        check_id="meaningless-vars", message=shared_message, fixable=True, fix_outcome=FixOutcome.FAILED
     )
     open_violation = ViolationFactory.build(
-        check_id="meaningless-vars", message=shared_message, fixable=True, fix_data=None
+        check_id="meaningless-vars", message=shared_message, fixable=True, fix_outcome=FixOutcome.DECLINED
     )
     violations = [terminal, open_violation]
 
@@ -905,7 +902,9 @@ def test_refresh_stale_positions_records_rule_failure_when_check_raises(
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
     # A still-open (unmarked) violation for this check_id, so there's
     # something for the reconciliation pass to actually attempt refreshing.
-    stale_violation = ViolationFactory.build(check_id="meaningless-vars", fixable=True, fix_data=None)
+    stale_violation = ViolationFactory.build(
+        check_id="meaningless-vars", fixable=True, fix_data=None, fix_outcome=FixOutcome.DECLINED
+    )
     violations = [stale_violation]
 
     orchestrator._refresh_stale_positions(filepath, violations)
@@ -914,6 +913,46 @@ def test_refresh_stale_positions_records_rule_failure_when_check_raises(
     # Left exactly as it was -- the check crashed before it could report
     # anything current to replace it with.
     assert violations == [stale_violation]
+
+
+def test_fix_result_requires_one_outcome_per_violation() -> None:
+    violations = [ViolationFactory.build(), ViolationFactory.build()]
+
+    with pytest.raises(ValueError, match="one outcome per violation"):
+        _set_fix_outcomes(violations, FixResult((FixOutcome.APPLIED,)))
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [FixOutcome.REJECTED, FixOutcome.ERRORED, FixOutcome.DECLINED],
+)
+def test_post_fix_verification_preserves_a_reported_outcome_when_the_file_cannot_be_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: FixOutcome
+) -> None:
+    filepath = tmp_path / "module.py"
+    violation = ViolationFactory.build(fix_outcome=outcome)
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
+    monkeypatch.setattr(CheckOrchestrator, "_read_source", lambda _self, _filepath: None)
+
+    assert orchestrator._mark_resolved_and_get_still_present(filepath, MeaninglessVarsCheck(), [violation]) == {
+        (violation.line, violation.col, violation.message)
+    }
+    assert violation.fix_outcome is outcome
+
+
+def test_post_fix_verification_declines_an_unconfirmed_applied_outcome(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    source = "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
+    filepath.write_text(source)
+    check = MeaninglessVarsCheck()
+    (violation,) = check.check(filepath, ast.parse(source), source)
+    violation.fix_outcome = FixOutcome.APPLIED
+    orchestrator = CheckOrchestrator(checks=[check])
+
+    assert orchestrator._mark_resolved_and_get_still_present(filepath, check, [violation]) == {
+        (violation.line, violation.col, violation.message)
+    }
+    assert violation.fix_outcome is FixOutcome.DECLINED
 
 
 def test_fix_honors_pep263_encoding_declaration(tmp_path: Path) -> None:
@@ -927,7 +966,7 @@ def test_fix_honors_pep263_encoding_declaration(tmp_path: Path) -> None:
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
-    assert violations[str(filepath)][0].fix_data == {"fixed": True}
+    assert violations[str(filepath)][0].fix_outcome is FixOutcome.APPLIED
     fixed_content = filepath.read_bytes().decode("latin-1")
     assert "x  # caf\xe9" in fixed_content
     assert ")\n" in fixed_content
@@ -942,7 +981,7 @@ def test_fix_preserves_crlf_line_endings(tmp_path: Path) -> None:
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
 
-    assert violations[str(filepath)][0].fix_data == {"fixed": True}
+    assert violations[str(filepath)][0].fix_outcome is FixOutcome.APPLIED
     fixed_content = filepath.read_bytes()
     assert b"\r\nother = 1\r\n" in fixed_content
     assert b"x  # comment" in fixed_content
@@ -1400,8 +1439,8 @@ class _AlwaysRerunProbeCheck:
 
     def fix(
         self, _filepath: Path, _violations: list[Violation], _source: str, _tree: ast.Module, _encoding: str = "utf-8"
-    ) -> bool:
-        return False
+    ) -> FixResult:
+        return FixResult.for_violations(_violations, FixOutcome.DECLINED)
 
     def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
         return []
@@ -1441,9 +1480,9 @@ class _MarkerFixableCheck(_AlwaysRerunProbeCheck):
 
     def fix(
         self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
-    ) -> bool:
+    ) -> FixResult:
         atomic_write_text(filepath, source + _CLEAN_MARKER, encoding, source)
-        return True
+        return FixResult.for_violations(_violations, FixOutcome.APPLIED)
 
 
 class _MarkerRemovingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
@@ -1473,9 +1512,9 @@ class _MarkerRemovingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
 
     def fix(
         self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
-    ) -> bool:
+    ) -> FixResult:
         atomic_write_text(filepath, source.replace(_CLEAN_MARKER, ""), encoding, source)
-        return True
+        return FixResult.for_violations(_violations, FixOutcome.APPLIED)
 
 
 def test_fix_mode_falls_through_when_an_always_rerun_fix_invalidates_a_cached_cacheable_result(
@@ -1508,7 +1547,7 @@ def test_fix_mode_falls_through_when_an_always_rerun_fix_invalidates_a_cached_ca
     # recompute must not happen: it would find the file already clean and
     # silently lose its own [FIXED] outcome. The marker-remover's own fix
     # must still be reported.
-    assert is_fixed(by_check["marker-remover"])
+    assert by_check["marker-remover"].fix_outcome is FixOutcome.APPLIED
 
 
 def test_always_rerun_probe_check_fix_is_a_no_op(tmp_path: Path) -> None:
@@ -1518,7 +1557,7 @@ def test_always_rerun_probe_check_fix_is_a_no_op(tmp_path: Path) -> None:
     # convention for a check with no autofix (e.g.
     # RedundantTypeConversionCheck's own test_fix_never_applies_a_fix).
     probe = _AlwaysRerunProbeCheck()
-    assert probe.fix(tmp_path / "module.py", [], "x = 1\n", ast.parse("x = 1\n")) is False
+    assert probe.fix(tmp_path / "module.py", [], "x = 1\n", ast.parse("x = 1\n")).outcomes == ()
 
 
 class _DrainingProbeCheck(_AlwaysRerunProbeCheck):
@@ -1973,11 +2012,11 @@ class _AppendingFixCheck(_AlwaysRerunProbeCheck):
 
     def fix(
         self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
-    ) -> bool:
+    ) -> FixResult:
         if self.write_delay_seconds:
             time.sleep(self.write_delay_seconds)
         atomic_write_text(filepath, f"{source}# {self.marker}\n", encoding, source)
-        return True
+        return FixResult.for_violations(_violations, FixOutcome.APPLIED)
 
 
 def test_check_file_serializes_concurrent_fixes_to_the_same_file_across_orchestrators(
@@ -2040,11 +2079,11 @@ class _ExternallyModifiedFixCheck(_AlwaysRerunProbeCheck):
 
     def fix(
         self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
-    ) -> bool:
+    ) -> FixResult:
         if self.simulate_external_edit:
             filepath.write_text(f"{source}# external edit\n", encoding=encoding)
         atomic_write_text(filepath, f"{source}# my fix\n", encoding, source)
-        return True
+        return FixResult.for_violations(_violations, FixOutcome.APPLIED)
 
 
 def test_apply_fixes_applies_normally_when_nothing_else_touches_the_file(tmp_path: Path) -> None:
@@ -2058,7 +2097,7 @@ def test_apply_fixes_applies_normally_when_nothing_else_touches_the_file(tmp_pat
     violations = orchestrator.process_files([str(filepath)])
 
     violation = violations[str(filepath)][0]
-    assert violation.fix_data == {"fixed": True}
+    assert violation.fix_outcome is FixOutcome.APPLIED
     assert filepath.read_text() == "x = 1\n# my fix\n"
 
 
@@ -2071,10 +2110,10 @@ def test_apply_fixes_aborts_when_file_is_externally_modified_during_fix(tmp_path
     violations = orchestrator.process_files([str(filepath)])
 
     violation = violations[str(filepath)][0]
-    assert is_fix_aborted(violation)
-    assert not is_fix_rejected(violation)
-    assert not is_fix_errored(violation)
-    assert not (violation.fix_data and violation.fix_data.get("fixed"))
+    assert violation.fix_outcome is FixOutcome.ABORTED
+    assert violation.fix_outcome is not FixOutcome.REJECTED
+    assert violation.fix_outcome is not FixOutcome.ERRORED
+    assert violation.fix_outcome is not FixOutcome.APPLIED
     # The check's own fix was discarded; the externally written content
     # (what a real concurrent editor/process would have left behind) is what
     # survives on disk, not a silent merge of both writes.
@@ -2411,7 +2450,7 @@ def test_fix_mode_does_not_cache_a_check_id_with_a_rejected_fix(
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck()], fix_mode=True)
     violations = orchestrator.process_files([str(filepath)])
-    assert is_fix_rejected(violations[str(filepath)][0])
+    assert violations[str(filepath)][0].fix_outcome is FixOutcome.REJECTED
 
     assert orchestrator.cache.get_cached_result(filepath, orchestrator.cache.hook_name) is None
 
@@ -2569,9 +2608,7 @@ def test_apply_fixes_skips_check_with_no_fixable_violations(tmp_path: Path) -> N
     violations = orchestrator.process_files([str(filepath)])
 
     by_check = {v.check_id: v for v in violations[str(filepath)]}
-    meaningless_vars_fix_data = by_check["meaningless-vars"].fix_data
-    assert meaningless_vars_fix_data is not None
-    assert meaningless_vars_fix_data.get("fixed") is True
+    assert by_check["meaningless-vars"].fix_outcome is FixOutcome.APPLIED
     assert by_check["redundant-super-init"].fixable is False
 
 
@@ -2601,12 +2638,8 @@ def test_apply_fixes_does_not_mark_fixed_a_violation_fix_left_untouched(tmp_path
 
     by_func_name = {v.fix_data["suggestion"].func_name: v for v in violations[str(filepath)] if v.fix_data}
 
-    get_config_fix_data = by_func_name["get_config"].fix_data
-    get_data_fix_data = by_func_name["get_data"].fix_data
-    assert get_config_fix_data is not None
-    assert get_data_fix_data is not None
-    assert get_config_fix_data["fixed"] is True
-    assert not get_data_fix_data.get("fixed")
+    assert by_func_name["get_config"].fix_outcome is FixOutcome.APPLIED
+    assert by_func_name["get_data"].fix_outcome is not FixOutcome.APPLIED
     fixed_content = filepath.read_text()
     assert "def get_config" not in fixed_content
     assert "def get_data(self):" in fixed_content
@@ -2639,12 +2672,8 @@ def test_apply_fixes_distinguishes_violations_with_identical_messages(tmp_path: 
     by_line = {v.line: v for v in violations[str(filepath)]}
     assert by_line[1].message == by_line[7].message
 
-    free_function_fix_data = by_line[1].fix_data
-    method_fix_data = by_line[7].fix_data
-    assert free_function_fix_data is not None
-    assert method_fix_data is not None
-    assert free_function_fix_data.get("fixed") is True
-    assert not method_fix_data.get("fixed")
+    assert by_line[1].fix_outcome is FixOutcome.APPLIED
+    assert by_line[7].fix_outcome is not FixOutcome.APPLIED
     assert "def load_data():" in filepath.read_text()
     assert "def get_data(self):" in filepath.read_text()
 
@@ -2678,10 +2707,10 @@ def test_apply_fixes_marks_violation_rejected_when_fix_produces_invalid_syntax(
     meaningless_vars_violation = by_check["meaningless-vars"]
     blank_lines_violation = by_check["excessive-blank-lines"]
 
-    assert is_fix_rejected(meaningless_vars_violation)
-    assert not (meaningless_vars_violation.fix_data and meaningless_vars_violation.fix_data.get("fixed"))
-    assert not is_fix_rejected(blank_lines_violation)
-    assert blank_lines_violation.fix_data == {"fixed": True}
+    assert meaningless_vars_violation.fix_outcome is FixOutcome.REJECTED
+    assert meaningless_vars_violation.fix_outcome is not FixOutcome.APPLIED
+    assert blank_lines_violation.fix_outcome is not FixOutcome.REJECTED
+    assert blank_lines_violation.fix_outcome is FixOutcome.APPLIED
     assert "data = requests.get(url)" in filepath.read_text()
 
 
@@ -2712,11 +2741,11 @@ def test_apply_fixes_marks_violation_errored_when_fix_raises_unexpectedly(
     meaningless_vars_violation = by_check["meaningless-vars"]
     blank_lines_violation = by_check["excessive-blank-lines"]
 
-    assert is_fix_errored(meaningless_vars_violation)
-    assert not is_fix_rejected(meaningless_vars_violation)
-    assert not (meaningless_vars_violation.fix_data and meaningless_vars_violation.fix_data.get("fixed"))
-    assert not is_fix_errored(blank_lines_violation)
-    assert blank_lines_violation.fix_data == {"fixed": True}
+    assert meaningless_vars_violation.fix_outcome is FixOutcome.ERRORED
+    assert meaningless_vars_violation.fix_outcome is not FixOutcome.REJECTED
+    assert meaningless_vars_violation.fix_outcome is not FixOutcome.APPLIED
+    assert blank_lines_violation.fix_outcome is not FixOutcome.ERRORED
+    assert blank_lines_violation.fix_outcome is FixOutcome.APPLIED
     assert "data = requests.get(url)" in filepath.read_text()
 
 
@@ -2769,12 +2798,11 @@ def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
     data_violation = by_line[4]
     result_violation = by_line[8]
 
-    assert data_violation.fix_data is not None
-    assert data_violation.fix_data.get("fixed") is True
-    assert not is_fix_errored(data_violation)
+    assert data_violation.fix_outcome is FixOutcome.APPLIED
+    assert data_violation.fix_outcome is not FixOutcome.ERRORED
 
-    assert is_fix_errored(result_violation)
-    assert not (result_violation.fix_data and result_violation.fix_data.get("fixed"))
+    assert result_violation.fix_outcome is FixOutcome.ERRORED
+    assert result_violation.fix_outcome is not FixOutcome.APPLIED
 
     fixed_content = filepath.read_text()
     assert "response = requests.get(url)" in fixed_content
@@ -2812,9 +2840,8 @@ def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everyt
     violations = orchestrator.process_files([str(filepath)])
 
     violation = violations[str(filepath)][0]
-    assert violation.fix_data is not None
-    assert violation.fix_data.get("fixed") is True
-    assert not is_fix_errored(violation)
+    assert violation.fix_outcome is FixOutcome.APPLIED
+    assert violation.fix_outcome is not FixOutcome.ERRORED
     assert orchestrator.rule_failures == [(str(filepath), "meaningless-vars")]  # pytriage: TR6
     assert filepath.read_text() == (
         "import requests\n\ndef request():\n    response = requests.get(url)\n    return response.status_code\n"
@@ -2837,7 +2864,7 @@ def _write_get_config_and_get_active_module(tmp_path: Path) -> Path:
 def _run_vfn_fix_with_patched_apply_fix(
     filepath: Path,
     monkeypatch: pytest.MonkeyPatch,
-    flaky_apply_fix: Callable[[Path, Suggestion], bool],
+    flaky_apply_fix: Callable[[Path, Suggestion], FixOutcome],
 ) -> dict[str, Violation]:
     monkeypatch.setattr(vfn_module, "apply_fix", flaky_apply_fix)
 
@@ -2859,7 +2886,7 @@ def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
     filepath = _write_get_config_and_get_active_module(tmp_path)
     original_apply_fix = vfn_module.apply_fix
 
-    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
+    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> FixOutcome:
         if suggestion.func_name == "get_active":
             atomic_write_text(fp, "def broken(:\n", "utf-8", fp.read_text())
         return original_apply_fix(fp, suggestion)
@@ -2867,13 +2894,10 @@ def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
     by_func_name = _run_vfn_fix_with_patched_apply_fix(filepath, monkeypatch, flaky_apply_fix)
     get_config_violation = by_func_name["get_config"]
     get_active_violation = by_func_name["get_active"]
-    get_config_fix_data = get_config_violation.fix_data
-    assert get_config_fix_data is not None
-
-    assert get_config_fix_data.get("fixed") is True
-    assert not is_fix_rejected(get_config_violation)
-    assert is_fix_rejected(get_active_violation)
-    assert not (get_active_violation.fix_data and get_active_violation.fix_data.get("fixed"))
+    assert get_config_violation.fix_outcome is FixOutcome.APPLIED
+    assert get_config_violation.fix_outcome is not FixOutcome.REJECTED
+    assert get_active_violation.fix_outcome is FixOutcome.REJECTED
+    assert get_active_violation.fix_outcome is not FixOutcome.APPLIED
 
     fixed_content = filepath.read_text()
     assert "def get_config" not in fixed_content
@@ -2891,7 +2915,7 @@ def test_apply_fixes_marks_only_the_aborted_violation_of_a_multi_write_check(
     filepath = _write_get_config_and_get_active_module(tmp_path)
     original_apply_fix = vfn_module.apply_fix
 
-    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
+    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> FixOutcome:
         if suggestion.func_name == "get_active":
             atomic_write_text(fp, "def get_active(user):\n    pass\n", "utf-8", "not the real current content")
         return original_apply_fix(fp, suggestion)
@@ -2899,13 +2923,10 @@ def test_apply_fixes_marks_only_the_aborted_violation_of_a_multi_write_check(
     by_func_name = _run_vfn_fix_with_patched_apply_fix(filepath, monkeypatch, flaky_apply_fix)
     get_config_violation = by_func_name["get_config"]
     get_active_violation = by_func_name["get_active"]
-    get_config_fix_data = get_config_violation.fix_data
-    assert get_config_fix_data is not None
-
-    assert get_config_fix_data.get("fixed") is True
-    assert not is_fix_aborted(get_config_violation)
-    assert is_fix_aborted(get_active_violation)
-    assert not (get_active_violation.fix_data and get_active_violation.fix_data.get("fixed"))
+    assert get_config_violation.fix_outcome is FixOutcome.APPLIED
+    assert get_config_violation.fix_outcome is not FixOutcome.ABORTED
+    assert get_active_violation.fix_outcome is FixOutcome.ABORTED
+    assert get_active_violation.fix_outcome is not FixOutcome.APPLIED
 
     fixed_content = filepath.read_text()
     assert "def get_config" not in fixed_content
@@ -2925,7 +2946,7 @@ def test_apply_fixes_keeps_aborted_violation_aborted_even_when_the_external_edit
     filepath = _write_get_config_and_get_active_module(tmp_path)
     original_apply_fix = vfn_module.apply_fix
 
-    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
+    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> FixOutcome:
         if suggestion.func_name == "get_active":
             stale_source = fp.read_text()
             # Simulate a concurrent process independently renaming the
@@ -2937,12 +2958,11 @@ def test_apply_fixes_keeps_aborted_violation_aborted_even_when_the_external_edit
 
     by_func_name = _run_vfn_fix_with_patched_apply_fix(filepath, monkeypatch, flaky_apply_fix)
     get_active_violation = by_func_name["get_active"]
-    assert is_fix_aborted(get_active_violation)
-    assert not (get_active_violation.fix_data and get_active_violation.fix_data.get("fixed"))
+    assert get_active_violation.fix_outcome is FixOutcome.ABORTED
+    assert get_active_violation.fix_outcome is not FixOutcome.APPLIED
 
     get_config_violation = by_func_name["get_config"]
-    assert get_config_violation.fix_data is not None
-    assert get_config_violation.fix_data.get("fixed") is True
+    assert get_config_violation.fix_outcome is FixOutcome.APPLIED
 
     assert 'def is_active(user: dict) -> bool:\n    return user.get("status") == "active"\n' in filepath.read_text()
 
@@ -2964,7 +2984,7 @@ def test_apply_fixes_keeps_aborted_violation_aborted_when_the_external_edit_leav
     filepath = _write_get_config_and_get_active_module(tmp_path)
     original_apply_fix = vfn_module.apply_fix
 
-    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
+    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> FixOutcome:
         if suggestion.func_name == "get_active":
             fp.write_text("this is not valid python (((\n")
             atomic_write_text(fp, "def get_active(user):\n    pass\n", "utf-8", "stale content that won't match")
@@ -2972,13 +2992,13 @@ def test_apply_fixes_keeps_aborted_violation_aborted_when_the_external_edit_leav
 
     by_func_name = _run_vfn_fix_with_patched_apply_fix(filepath, monkeypatch, flaky_apply_fix)
     get_active_violation = by_func_name["get_active"]
-    assert is_fix_aborted(get_active_violation)
-    assert not is_fix_errored(get_active_violation)
-    assert not (get_active_violation.fix_data and get_active_violation.fix_data.get("fixed"))
+    assert get_active_violation.fix_outcome is FixOutcome.ABORTED
+    assert get_active_violation.fix_outcome is not FixOutcome.ERRORED
+    assert get_active_violation.fix_outcome is not FixOutcome.APPLIED
 
     get_config_violation = by_func_name["get_config"]
-    assert not is_fix_errored(get_config_violation)
-    assert not (get_config_violation.fix_data and get_config_violation.fix_data.get("fixed"))
+    assert get_config_violation.fix_outcome is not FixOutcome.ERRORED
+    assert get_config_violation.fix_outcome is not FixOutcome.APPLIED
 
     assert filepath.read_text() == "this is not valid python (((\n"
 
@@ -2996,7 +3016,7 @@ def test_apply_fixes_marks_errored_violation_of_a_multi_write_check_when_apply_f
     filepath = _write_get_config_and_get_active_module(tmp_path)
     original_apply_fix = vfn_module.apply_fix
 
-    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> bool:
+    def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> FixOutcome:
         if suggestion.func_name == "get_active":
             raise RuntimeError("simulated apply_fix bug")
         return original_apply_fix(fp, suggestion)
@@ -3004,14 +3024,11 @@ def test_apply_fixes_marks_errored_violation_of_a_multi_write_check_when_apply_f
     by_func_name = _run_vfn_fix_with_patched_apply_fix(filepath, monkeypatch, flaky_apply_fix)
     get_config_violation = by_func_name["get_config"]
     get_active_violation = by_func_name["get_active"]
-    get_config_fix_data = get_config_violation.fix_data
-    assert get_config_fix_data is not None
-
-    assert get_config_fix_data.get("fixed") is True
-    assert not is_fix_errored(get_config_violation)
-    assert is_fix_errored(get_active_violation)
-    assert not is_fix_rejected(get_active_violation)
-    assert not (get_active_violation.fix_data and get_active_violation.fix_data.get("fixed"))
+    assert get_config_violation.fix_outcome is FixOutcome.APPLIED
+    assert get_config_violation.fix_outcome is not FixOutcome.ERRORED
+    assert get_active_violation.fix_outcome is FixOutcome.ERRORED
+    assert get_active_violation.fix_outcome is not FixOutcome.REJECTED
+    assert get_active_violation.fix_outcome is not FixOutcome.APPLIED
 
     fixed_content = filepath.read_text()
     assert "def get_config" not in fixed_content
@@ -3092,10 +3109,13 @@ def _recompute_raises(
     monkeypatch.setattr(MeaninglessVarsCheck, "check", flaky_check)
 
 
-def _fix_returns_false(
+def _fix_declines(
     _orchestrator: CheckOrchestrator, _meaningless_vars: MeaninglessVarsCheck, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(MeaninglessVarsCheck, "fix", lambda *_a, **_k: False)
+    def decline_fix(_self: object, _filepath: Path, violations: list[Violation], *_args: object) -> FixResult:
+        return FixResult.for_violations(violations, FixOutcome.DECLINED)
+
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", decline_fix)
 
 
 def _fix_raises(
@@ -3111,7 +3131,7 @@ def _fix_raises(
         _disappear_after_fix,
         _recompute_finds_no_fixable_violations,
         _recompute_raises,
-        _fix_returns_false,
+        _fix_declines,
         _fix_raises,
     ],
     ids=[
@@ -3119,7 +3139,7 @@ def _fix_raises(
         "file-disappears-after-fix",
         "recompute-finds-no-fixable-violations",
         "recompute-raises",
-        "fix-returns-false",
+        "fix-declines",
         "fix-raises",
     ],
 )
@@ -3139,7 +3159,7 @@ def test_apply_fixes_marks_nothing_fixed(
 
     violations = orchestrator.process_files([str(filepath)])
     v = violations[str(filepath)][0]
-    assert not (v.fix_data and v.fix_data.get("fixed"))
+    assert v.fix_outcome is not FixOutcome.APPLIED
 
 
 class _LineRemovingFixCheck(_AlwaysRerunProbeCheck):
@@ -3174,9 +3194,9 @@ class _LineRemovingFixCheck(_AlwaysRerunProbeCheck):
 
     def fix(
         self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
-    ) -> bool:
+    ) -> FixResult:
         atomic_write_text(filepath, source.replace(self.target, ""), encoding, source)
-        return True
+        return FixResult.for_violations(_violations, FixOutcome.APPLIED)
 
 
 class _LineFlaggingCheck(_AlwaysRerunProbeCheck):
@@ -3206,8 +3226,8 @@ class _LineFlaggingCheck(_AlwaysRerunProbeCheck):
 
     def fix(
         self, _filepath: Path, _violations: list[Violation], _source: str, _tree: ast.Module, _encoding: str = "utf-8"
-    ) -> bool:
-        return False
+    ) -> FixResult:
+        return FixResult.for_violations(_violations, FixOutcome.DECLINED)
 
 
 class _UnfixableLineFlaggingCheck(_LineFlaggingCheck):
@@ -3255,9 +3275,9 @@ class _PairFlaggingFixCheck(_AlwaysRerunProbeCheck):
 
     def fix(
         self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
-    ) -> bool:
+    ) -> FixResult:
         atomic_write_text(filepath, source.replace(_FLAGGED_LINE, ""), encoding, source)
-        return True
+        return FixResult.for_violations(_violations, FixOutcome.APPLIED)
 
 
 def _run_line_probes(tmp_path: Path, checks: list[ASTCheck], source: str = "") -> dict[str, list[Violation]]:
@@ -3290,10 +3310,10 @@ def test_apply_fixes_marks_a_violation_another_checks_fix_removed_as_resolved_in
     (flagged,) = by_check["line-flagger"]
     (removed,) = by_check["line-remover"]
 
-    assert is_resolved_indirectly(flagged)
-    assert not is_fixed(flagged)
-    assert is_fixed(removed)
-    assert not is_resolved_indirectly(removed)
+    assert flagged.fix_outcome is FixOutcome.RESOLVED_INDIRECTLY
+    assert flagged.fix_outcome is not FixOutcome.APPLIED
+    assert removed.fix_outcome is FixOutcome.APPLIED
+    assert removed.fix_outcome is not FixOutcome.RESOLVED_INDIRECTLY
 
 
 def test_apply_fixes_leaves_a_surviving_violation_open_when_another_check_fixes_an_unrelated_line(
@@ -3303,10 +3323,10 @@ def test_apply_fixes_leaves_a_surviving_violation_open_when_another_check_fixes_
     by_check = _run_line_probes(tmp_path, [_LineRemovingFixCheck(target=_UNRELATED_LINE), _LineFlaggingCheck()])
     (flagged,) = by_check["line-flagger"]
 
-    assert not is_resolved_indirectly(flagged)
-    assert not is_fixed(flagged)
+    assert flagged.fix_outcome is not FixOutcome.RESOLVED_INDIRECTLY
+    assert flagged.fix_outcome is not FixOutcome.APPLIED
     assert flagged.fix_data is None
-    assert is_fixed(by_check["line-remover"][0])
+    assert by_check["line-remover"][0].fix_outcome is FixOutcome.APPLIED
 
 
 def test_apply_fixes_marks_only_the_violation_another_checks_fix_actually_removed(tmp_path: Path) -> None:
@@ -3323,8 +3343,8 @@ def test_apply_fixes_marks_only_the_violation_another_checks_fix_actually_remove
     removed = by_message[f"{_FLAGGED_LINE.strip()} flagged"]
     survivor = by_message[f"{_SECOND_FLAGGED_LINE.strip()} flagged"]
 
-    assert is_resolved_indirectly(removed)
-    assert not is_resolved_indirectly(survivor)
+    assert removed.fix_outcome is FixOutcome.RESOLVED_INDIRECTLY
+    assert survivor.fix_outcome is not FixOutcome.RESOLVED_INDIRECTLY
     assert survivor.fix_data is None
     assert survivor.line == 2
 
@@ -3336,18 +3356,18 @@ def test_apply_fixes_keeps_a_failed_fix_distinguishable_from_an_indirect_resolut
     # fix then removed the violation anyway. [FIX FAILED] reports something
     # the user may need to act on (a full disk, a read-only file), which
     # relabeling it as resolved would hide.
-    def failing_fix(_self: object, _fp: Path, violations: list[Violation], *_args: object, **_kwargs: object) -> bool:
-        for v in violations:
-            mark_fix_failed(v)
-        return False
+    def failing_fix(
+        _self: object, _fp: Path, violations: list[Violation], *_args: object, **_kwargs: object
+    ) -> FixResult:
+        return FixResult.for_violations(violations, FixOutcome.FAILED)
 
     monkeypatch.setattr(_LineFlaggingCheck, "fix", failing_fix)
 
     (flagged,) = _run_line_probes(tmp_path, [_LineFlaggingCheck(), _LineRemovingFixCheck()])["line-flagger"]
 
-    assert is_fix_failed(flagged)
-    assert not is_resolved_indirectly(flagged)
-    assert not is_fixed(flagged)
+    assert flagged.fix_outcome is FixOutcome.FAILED
+    assert flagged.fix_outcome is not FixOutcome.RESOLVED_INDIRECTLY
+    assert flagged.fix_outcome is not FixOutcome.APPLIED
 
 
 def test_apply_fixes_marks_a_non_fixable_violation_another_checks_fix_removed_as_resolved_indirectly(
@@ -3358,7 +3378,7 @@ def test_apply_fixes_marks_a_non_fixable_violation_another_checks_fix_removed_as
         "unfixable-line-flagger"
     ]
 
-    assert is_resolved_indirectly(flagged)
+    assert flagged.fix_outcome is FixOutcome.RESOLVED_INDIRECTLY
 
 
 def test_apply_fixes_does_not_attribute_a_disappearance_to_a_fix_when_the_file_was_edited_externally(
@@ -3378,7 +3398,7 @@ def test_apply_fixes_does_not_attribute_a_disappearance_to_a_fix_when_the_file_w
 
     by_check = _run_line_probes(tmp_path, [_LineRemovingFixCheck(), _LineFlaggingCheck()])
 
-    assert is_fix_aborted(by_check["line-remover"][0])
+    assert by_check["line-remover"][0].fix_outcome is FixOutcome.ABORTED
     assert "line-flagger" not in by_check
 
 
@@ -3390,9 +3410,9 @@ def test_apply_fixes_marks_a_violation_its_own_checks_fix_took_with_it(tmp_path:
     # must not name a different check (ADR-0053).
     by_message = {v.message: v for v in _run_line_probes(tmp_path, [_PairFlaggingFixCheck()])["pair-flagger"]}
 
-    assert is_fixed(by_message["fixable half"])
-    assert is_resolved_indirectly(by_message["unfixable half"])
-    assert not is_fixed(by_message["unfixable half"])
+    assert by_message["fixable half"].fix_outcome is FixOutcome.APPLIED
+    assert by_message["unfixable half"].fix_outcome is FixOutcome.RESOLVED_INDIRECTLY
+    assert by_message["unfixable half"].fix_outcome is not FixOutcome.APPLIED
 
 
 def _run_shipped_fix_pair(tmp_path: Path, source: str) -> dict[str, list[Violation]]:
@@ -3417,9 +3437,9 @@ def test_apply_fixes_marks_a_shipped_checks_violation_another_shipped_fix_remove
     )
     (meaningless,) = by_check["meaningless-vars"]
 
-    assert is_resolved_indirectly(meaningless)
-    assert not is_fixed(meaningless)
-    assert is_fixed(by_check["redundant-assignment"][0])
+    assert meaningless.fix_outcome is FixOutcome.RESOLVED_INDIRECTLY
+    assert meaningless.fix_outcome is not FixOutcome.APPLIED
+    assert by_check["redundant-assignment"][0].fix_outcome is FixOutcome.APPLIED
 
 
 def test_apply_fixes_does_not_double_report_a_violation_whose_message_another_fix_rewrote(tmp_path: Path) -> None:
@@ -3433,8 +3453,10 @@ def test_apply_fixes_does_not_double_report_a_violation_whose_message_another_fi
         tmp_path, "import requests\n\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    assert [is_fixed(v) for violations in by_check.values() for v in violations] == [True, True]
-    assert not any(is_resolved_indirectly(v) for violations in by_check.values() for v in violations)
+    assert [v.fix_outcome is FixOutcome.APPLIED for violations in by_check.values() for v in violations] == [True, True]
+    assert not any(
+        v.fix_outcome is FixOutcome.RESOLVED_INDIRECTLY for violations in by_check.values() for v in violations
+    )
 
 
 def test_report_prints_an_indirectly_resolved_violation_distinctly(
@@ -3453,7 +3475,8 @@ def test_report_prints_an_indirectly_resolved_violation_distinctly(
     err = capsys.readouterr().err
     assert "[RESOLVED INDIRECTLY]" in err
     assert "it disappeared as a side effect of another fix in this run" in err
-    assert "Run with --fix" not in err
+    indirect_line = next(line for line in err.splitlines() if "[RESOLVED INDIRECTLY]" in line)
+    assert "Run with --fix" not in indirect_line
     assert "please report it" not in err
 
 
@@ -3717,7 +3740,6 @@ def test_main_reports_non_fixable_violation(tmp_path: Path, capsys: pytest.Captu
     assert "TR3" in err
     assert "[FIXABLE]" not in err
     assert "[FIXED]" not in err
-    assert "Run with --fix" not in err
 
 
 def test_main_reports_column_alongside_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -3761,7 +3783,8 @@ def test_main_fix_flag_marks_violation_fixed(tmp_path: Path, capsys: pytest.Capt
 
     err = capsys.readouterr().err
     assert "[FIXED]" in err
-    assert "Run with --fix" not in err
+    fixed_line = next(line for line in err.splitlines() if "[FIXED]" in line)
+    assert "Run with --fix" not in fixed_line
     # ch. 32: "MUST verify that the reported result matches the actual final
     # file state" -- the rejected/errored/failed variants of this test
     # already assert the file stays untouched; only the success path was
@@ -3852,7 +3875,7 @@ def test_main_fix_flag_reports_failed_fix(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
     # A fix() that catches its own OSError (disk full, permission denied)
-    # and returns False per ASTCheck.fix()'s own documented contract must
+    # and returns a failure outcome must
     # be reported distinctly from [FIXED] and the ordinary [FIXABLE]/"Run
     # with --fix" hint -- re-running --fix would just fail identically
     # again, and unlike [FIX ERRORED] this isn't a bug in the check's own
@@ -3874,12 +3897,36 @@ def test_main_fix_flag_reports_failed_fix(
     assert "[FIX ERRORED]" not in err
     assert "[FIX REJECTED]" not in err
     assert "Run with --fix" not in err
+    assert "could not write the file" in err
     assert "data = requests.get(url)" in filepath.read_text()
     # [FIX FAILED] above already reports this; a raw traceback alongside it
     # on stderr would just be redundant noise (ch. 7: "MUST NOT emit
     # uncontrolled human-oriented text into a machine-readable output
     # stream").
     assert all(record.levelname == "DEBUG" for record in caplog.records)
+
+
+def test_main_fix_flag_reports_declined_fix_without_operational_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def declined_fix(
+        _self: object, _fp: Path, violations: list[Violation], *_args: object, **_kwargs: object
+    ) -> FixResult:
+        return FixResult.for_violations(violations, FixOutcome.DECLINED)
+
+    monkeypatch.setattr(MeaninglessVarsCheck, "fix", declined_fix)
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
+    )
+
+    assert main([str(filepath), "--select", "meaningless-vars", "--fix"]) == 1
+
+    err = capsys.readouterr().err
+    assert "[FIX DECLINED]" in err
+    assert "not safe to apply automatically" in err
+    assert "could not write the file" not in err
+    assert "file permissions" not in err
 
 
 def test_main_fix_flag_reports_aborted_fix(
@@ -3984,8 +4031,8 @@ def test_main_reports_rule_failure_when_reread_fails_mid_fix_loop(
     assert (str(filepath), "meaningless-vars") in orchestrator.rule_failures  # pytriage: TR6
     meaningless_vars_violation = next(v for v in violations[str(filepath)] if v.check_id == "meaningless-vars")
     super_init_violation = next(v for v in violations[str(filepath)] if v.check_id == "redundant-super-init")
-    assert is_fix_errored(meaningless_vars_violation)
-    assert not is_fix_errored(super_init_violation)
+    assert meaningless_vars_violation.fix_outcome is FixOutcome.ERRORED
+    assert super_init_violation.fix_outcome is not FixOutcome.ERRORED
     # The re-read failure means nothing was ever written back.
     assert "data = requests.get(url)" in filepath.read_text()
 
@@ -4517,7 +4564,7 @@ def test_process_files_handles_a_large_file(tmp_path: Path) -> None:
 
     assert orchestrator.unprocessable_files == []
     assert orchestrator.rule_failures == []
-    fixed = [v for v in violations[str(filepath)] if is_fixed(v)]
+    fixed = [v for v in violations[str(filepath)] if v.fix_outcome is FixOutcome.APPLIED]
     assert len(fixed) == function_count
     assert "data = requests.get" not in filepath.read_text(encoding="utf-8")
 

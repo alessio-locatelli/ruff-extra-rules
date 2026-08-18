@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+import pre_commit_hooks.ast_checks.validate_function_name.autofix as autofix_module
+from pre_commit_hooks.ast_checks._base import ConcurrentModificationError, FixOutcome, FixValidationError
 from pre_commit_hooks.ast_checks.validate_function_name.analysis import (
     Suggestion,
     process_file,
@@ -186,7 +188,7 @@ def test_should_autofix(
     tmp_path: Path, make_case: Callable[[Path], tuple[Path, Suggestion]], *, expected: bool
 ) -> None:
     filepath, suggestion = make_case(tmp_path)
-    assert should_autofix(filepath, suggestion) is expected
+    assert (should_autofix(filepath, suggestion) is FixOutcome.APPLIED) is expected
 
 
 def test_apply_fix_does_not_corrupt_unrelated_string_literal(tmp_path: Path) -> None:
@@ -205,7 +207,7 @@ def test_apply_fix_does_not_corrupt_unrelated_string_literal(tmp_path: Path) -> 
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     assert f"def {suggestion.suggested_name}(self):" in file_content
@@ -234,7 +236,7 @@ def test_apply_fix_does_not_rename_unrelated_class_method(tmp_path: Path) -> Non
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
@@ -261,7 +263,7 @@ def test_apply_fix_renames_recursive_call(tmp_path: Path) -> None:
         suggested_name="fetch_data",
         reason="test",
     )
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
@@ -289,7 +291,7 @@ def test_apply_fix_updates_call_site_of_nested_target_function(tmp_path: Path) -
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
@@ -311,7 +313,7 @@ def test_apply_fix_updates_free_function_call_sites(tmp_path: Path) -> None:
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
@@ -338,7 +340,7 @@ def test_apply_fix_refuses_when_a_call_site_line_is_format_suppressed(tmp_path: 
     suggestion = _suggestion_for(test_file, "get_data")
     original_content = test_file.read_text()
 
-    assert apply_fix(test_file, suggestion) is False
+    assert apply_fix(test_file, suggestion) is FixOutcome.DECLINED
     assert test_file.read_text() == original_content
 
 
@@ -360,7 +362,7 @@ def test_apply_fix_renames_call_site_on_line_with_non_ascii_text(
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
@@ -388,7 +390,7 @@ def test_apply_fix_leaves_subclass_super_call_untouched(tmp_path: Path) -> None:
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
@@ -423,7 +425,7 @@ def test_apply_fix_does_not_rename_nested_shadowing_function(tmp_path: Path) -> 
 
     suggestion = _suggestion_for(test_file, "get_data")
     assert suggestion.lineno == 1
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
@@ -451,7 +453,7 @@ def test_apply_fix_does_not_rename_parameter_shadowed_call(tmp_path: Path) -> No
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
@@ -476,7 +478,7 @@ def test_apply_fix_does_not_rename_lambda_parameter_shadowed_reference(
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
@@ -500,7 +502,7 @@ def test_apply_fix_renames_reference_inside_non_shadowing_lambda(
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
@@ -526,7 +528,7 @@ def test_apply_fix_does_not_rename_call_shadowed_by_nested_class(
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     assert "    class get_data:\n        pass\n    return get_data()\n" in file_content
@@ -549,7 +551,7 @@ def test_apply_fix_does_not_rename_call_shadowed_by_local_import(
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     assert "    from other_module import get_data\n    return get_data()\n" in file_content
@@ -573,7 +575,7 @@ def test_apply_fix_does_not_rename_call_shadowed_by_nested_async_function(
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     assert "    async def get_data():\n        return 2\n    return await get_data()\n" in file_content
@@ -600,7 +602,7 @@ def test_apply_fix_does_not_rename_call_shadowed_by_nested_assignment(
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     assert "        get_data = compute()\n        return get_data\n" in file_content
@@ -624,7 +626,7 @@ def test_apply_fix_renames_reference_inside_non_shadowing_async_function(
     )
 
     suggestion = _suggestion_for(test_file, "get_data")
-    assert apply_fix(test_file, suggestion)
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
 
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
@@ -720,7 +722,32 @@ def test_apply_fix_refuses(
     filepath, suggestion = make_case(tmp_path)
     original = filepath.read_text() if filepath.exists() else None
 
-    assert apply_fix(filepath, suggestion) is False
+    assert apply_fix(filepath, suggestion) is not FixOutcome.APPLIED
 
     if check_unchanged:
         assert filepath.read_text() == original
+
+
+@pytest.mark.parametrize(
+    ("outcome", "failure"),
+    [
+        (FixOutcome.REJECTED, lambda filepath: FixValidationError(filepath, SyntaxError("invalid output"))),
+        (FixOutcome.ABORTED, ConcurrentModificationError),
+    ],
+)
+def test_apply_fix_reports_write_outcomes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: FixOutcome,
+    failure: Callable[[Path], Exception],
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text('def get_data():\n    f = open("f.txt")\n    return f.read()\n')
+    suggestion = _suggestion_for(filepath, "get_data")
+
+    def fail_write(path: Path, *_args: object) -> None:
+        raise failure(path)
+
+    monkeypatch.setattr(autofix_module, "atomic_write_text", fail_write)
+
+    assert apply_fix(filepath, suggestion) is outcome
