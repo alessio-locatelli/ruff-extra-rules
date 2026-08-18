@@ -100,7 +100,7 @@ repos:
         args: ["--redundant-type-conversion-level=permissive"]
 
   - repo: https://github.com/alessio-locatelli/ruff-extra-rules
-    rev: v0.0.50
+    rev: v0.1.0
     hooks:
       - id: ruff-extra-rules
         exclude: ^tests/fixtures/
