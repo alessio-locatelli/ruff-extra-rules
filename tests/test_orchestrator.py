@@ -577,6 +577,172 @@ def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: 
         assert "TR1" in capsys.readouterr().err
 
 
+def test_main_fix_renames_enclosing_references_in_class_bodies_and_methods(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def outer(response):\n"
+        "    data: Payload = response.json()\n"
+        "\n"
+        "    class CapturesOuter:\n"
+        "        captured = data\n"
+        "\n"
+        "        def method(self):\n"
+        "            return data\n"
+        "\n"
+        "    class OwnAttribute:\n"
+        "        data = 'class value'\n"
+        "\n"
+        "        def method(self):\n"
+        "            return data\n"
+        "\n"
+        "    return CapturesOuter().method(), CapturesOuter.captured, OwnAttribute().method()\n"
+    )
+
+    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+
+    assert filepath.read_text() == (
+        "def outer(response):\n"
+        "    payload: Payload = response.json()\n"
+        "\n"
+        "    class CapturesOuter:\n"
+        "        captured = payload\n"
+        "\n"
+        "        def method(self):\n"
+        "            return payload\n"
+        "\n"
+        "    class OwnAttribute:\n"
+        "        data = 'class value'\n"
+        "\n"
+        "        def method(self):\n"
+        "            return payload\n"
+        "\n"
+        "    return CapturesOuter().method(), CapturesOuter.captured, OwnAttribute().method()\n"
+    )
+
+    namespace: dict[str, Any] = {}
+    exec(compile(filepath.read_text(), filepath, "exec"), namespace)  # noqa: S102
+
+    class Response:
+        def json(self) -> str:
+            return "payload"
+
+    assert namespace["outer"](Response()) == ("payload", "payload", "payload")
+
+
+def test_main_fix_assigns_distinct_names_to_reverse_order_nested_closures(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def outer(response, response2):\n"
+        "    def inner():\n"
+        "        result: Payload = response2.json()\n"
+        "        return data, result\n"
+        "\n"
+        "    data: Payload = response.json()\n"
+        "    return inner()\n"
+    )
+
+    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+
+    assert filepath.read_text() == (
+        "def outer(response, response2):\n"
+        "    def inner():\n"
+        "        payload_2: Payload = response2.json()\n"
+        "        return payload, payload_2\n"
+        "\n"
+        "    payload: Payload = response.json()\n"
+        "    return inner()\n"
+    )
+
+
+def test_main_fix_preserves_class_bindings_in_generic_method_annotations(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def outer(response):\n"
+        "    data: Payload = response.json()\n"
+        "\n"
+        "    class Container:\n"
+        "        data = int\n"
+        "\n"
+        "        def method[T: data](self, value: data) -> data:\n"
+        "            return data\n"
+        "\n"
+        "    return Container\n"
+    )
+
+    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+
+    assert filepath.read_text() == (
+        "def outer(response):\n"
+        "    payload: Payload = response.json()\n"
+        "\n"
+        "    class Container:\n"
+        "        data = int\n"
+        "\n"
+        "        def method[T: data](self, value: data) -> data:\n"
+        "            return payload\n"
+        "\n"
+        "    return Container\n"
+    )
+
+
+def test_main_fix_preserves_lambda_local_bindings_in_class_bodies(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def outer(response):\n"
+        "    data: Payload = response.json()\n"
+        "\n"
+        "    class Container:\n"
+        "        thunk = lambda: (data := 'lambda value')\n"
+        "        captured = data\n"
+        "\n"
+        "    return Container.captured\n"
+    )
+
+    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+
+    assert filepath.read_text() == (
+        "def outer(response):\n"
+        "    payload: Payload = response.json()\n"
+        "\n"
+        "    class Container:\n"
+        "        thunk = lambda: (data := 'lambda value')\n"
+        "        captured = payload\n"
+        "\n"
+        "    return Container.captured\n"
+    )
+
+
+def test_main_fix_preserves_class_bindings_from_method_defaults(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def outer(response):\n"
+        "    data: Payload = response.json()\n"
+        "\n"
+        "    class Container:\n"
+        "        def method(value=(data := 'class value')):\n"
+        "            return value\n"
+        "\n"
+        "        captured = data\n"
+        "\n"
+        "    return Container.data, Container.captured\n"
+    )
+
+    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+
+    assert filepath.read_text() == (
+        "def outer(response):\n"
+        "    payload: Payload = response.json()\n"
+        "\n"
+        "    class Container:\n"
+        "        def method(value=(data := 'class value')):\n"
+        "            return value\n"
+        "\n"
+        "        captured = data\n"
+        "\n"
+        "    return Container.data, Container.captured\n"
+    )
+
+
 def test_main_directory_argument_matches_explicit_file_argument_for_untracked_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
