@@ -8,6 +8,7 @@ import pytest
 
 import pre_commit_hooks.ast_checks.redundant_type_conversion as tri006_module
 import pre_commit_hooks.ast_checks.redundant_type_conversion.daemon as daemon_module
+from pre_commit_hooks.ast_checks._base import FixOutcome, Violation
 from pre_commit_hooks.ast_checks._cli import main
 from pre_commit_hooks.ast_checks.redundant_type_conversion import RedundantTypeConversionCheck
 from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import ConfidenceLevel
@@ -78,7 +79,10 @@ def test_prefilter_pattern_matches_the_configured_levels_eligible_constructors(
 
 def test_fix_always_declines() -> None:
     check = RedundantTypeConversionCheck()
-    assert check.fix(Path("test.py"), [], "x = 1\n", ast.parse("x = 1\n")).outcomes == ()
+    violation = Violation(
+        check_id="redundant-type-conversion", error_code="TR6", line=1, col=0, message="x", fixable=False
+    )
+    assert check.fix(Path("test.py"), [violation], "x = 1\n", ast.parse("x = 1\n")).outcomes == (FixOutcome.DECLINED,)
 
 
 def test_check_never_calls_get_session_when_the_file_has_no_real_candidate(monkeypatch: pytest.MonkeyPatch) -> None:

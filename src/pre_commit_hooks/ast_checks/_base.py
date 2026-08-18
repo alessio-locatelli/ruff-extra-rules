@@ -125,30 +125,7 @@ class ASTCheck(Protocol):
         source: str,
         tree: ast.Module,
         encoding: str = "utf-8",
-    ) -> FixResult:
-        """`encoding` must match what `filepath` was originally read as, so a
-        PEP 263 declaration round-trips correctly.
-
-        A check with a single write per `fix()` call needs no special
-        handling: let `FixValidationError` (raised by `atomic_write_text()`
-        if the fix would produce invalid syntax) propagate uncaught —
-        `CheckOrchestrator._apply_fixes` catches it and attributes the
-        rejection to every violation passed in. A check that writes more
-        than once per `fix()` call (looping over violations individually,
-        like `validate_function_name`) should instead catch
-        `FixValidationError` around each individual write and return a
-        rejected outcome for that specific violation, so a later write in
-        the same call still gets attempted.
-
-        `ConcurrentModificationError` (also raised by `atomic_write_text()`)
-        follows the same split as `FixValidationError` above: propagate
-        uncaught for a single-write `fix()`, or catch it around each
-        individual write and return an aborted outcome for that specific
-        violation for a multi-write one. See `docs/adr/0042-abort-fixes-on-concurrent-source-modification.md`.
-
-        Every returned result contains one outcome for each input violation.
-        """
-        ...
+    ) -> FixResult: ...
 
     OPTIONS: ClassVar[tuple[CheckOption, ...]]
     """This check's own configurable options, each named by the `__init__`

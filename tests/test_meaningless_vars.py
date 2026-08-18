@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from pre_commit_hooks.ast_checks._base import FixOutcome
+from pre_commit_hooks.ast_checks._base import FixOutcome, Violation
 from pre_commit_hooks.ast_checks.meaningless_vars import (
     MeaninglessVarsCheck,
     MeaninglessVarsLevel,
@@ -581,8 +581,8 @@ def fetch_users():
         assert len(violations) == 1
         assert violations[0].fixable
 
-        success = check.fix(filepath, violations, source, tree)
-        assert success.outcomes == (FixOutcome.APPLIED,)
+        fix_result = check.fix(filepath, violations, source, tree)
+        assert fix_result.outcomes == (FixOutcome.APPLIED,)
 
         fixed_content = filepath.read_text()
 
@@ -611,9 +611,35 @@ def fetch_users():
     assert len(violations) == 1
     assert violations[0].fixable
 
-    success = check.fix(filepath, violations, source, tree)
-    assert success.outcomes == (FixOutcome.DECLINED,)
+    fix_result = check.fix(filepath, violations, source, tree)
+    assert fix_result.outcomes == (FixOutcome.DECLINED,)
     assert filepath.read_text() == source
+
+
+def test_autofix_declines_fixable_violation_without_fix_data(tmp_path: Path) -> None:
+    source = """import requests
+
+def fetch_users():
+    data = requests.get(url)
+    return data.status_code
+"""
+    filepath = tmp_path / "test.py"
+    filepath.write_text(source)
+    tree = ast.parse(source)
+    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+    (candidate,) = check.check(filepath, tree, source)
+    stale_violation = Violation(
+        check_id=candidate.check_id,
+        error_code=candidate.error_code,
+        line=candidate.line,
+        col=candidate.col,
+        message=candidate.message,
+        fixable=True,
+    )
+
+    fix_result = check.fix(filepath, [candidate, stale_violation], source, tree)
+
+    assert fix_result.outcomes == (FixOutcome.APPLIED, FixOutcome.DECLINED)
 
 
 def test_autofix_no_fixable_violations() -> None:
@@ -2277,6 +2303,17 @@ def other():
     # included specifically so the marking loop below has both a fixable
     # and a non-fixable violation to distinguish between.
     assert {v.fixable for v in violations} == {True, False}
+    candidate = next(violation for violation in violations if violation.fixable)
+    violations.append(
+        Violation(
+            check_id=candidate.check_id,
+            error_code=candidate.error_code,
+            line=candidate.line,
+            col=candidate.col,
+            message=candidate.message,
+            fixable=True,
+        )
+    )
 
     with caplog.at_level("DEBUG"):
         fix_result = check.fix(filepath, violations, source, tree)
@@ -2286,7 +2323,9 @@ def other():
     # re-running --fix, which would just fail identically again. A
     # non-fixable violation was never part of this attempt at all, so it
     # must be left alone rather than also marked failed.
-    assert fix_result.outcomes == tuple(FixOutcome.FAILED if v.fixable else FixOutcome.DECLINED for v in violations)
+    assert fix_result.outcomes == tuple(
+        FixOutcome.FAILED if violation is candidate else FixOutcome.DECLINED for violation in violations
+    )
     assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 

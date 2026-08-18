@@ -54,10 +54,14 @@ def test_get_prefilter_pattern() -> None:
 
 
 def test_fix_always_declines() -> None:
-    source = "class Foo:\n    pass\n"
+    source = (
+        "class Base:\n    def __init__(self):\n        pass\n\n\n"
+        "class Child(Base):\n    def __init__(self, **kwargs):\n        super().__init__(**kwargs)\n"
+    )
     tree = ast.parse(source)
     check = RedundantSuperInitCheck()
     violations = check.check(Path("test.py"), tree, source)
+    assert violations
     assert check.fix(Path("test.py"), violations, source, tree, "utf-8").outcomes == (FixOutcome.DECLINED,) * len(
         violations
     )

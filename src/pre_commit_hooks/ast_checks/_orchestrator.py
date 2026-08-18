@@ -57,14 +57,6 @@ def _fix_lock_path(filepath: Path) -> Path:
 
 
 def _has_terminal_fix_state(violation: Violation) -> bool:
-    """Whether `violation` already carries a rejected/errored/failed/aborted
-    outcome from a check's own per-violation `fix()` handling this run --
-    i.e. the outcome is already decided and must never be second-guessed by
-    a later, broader recheck (e.g. relabeled `[FIXED]` just because it's no
-    longer detected). Deliberately excludes an applied outcome: a fixed violation
-    is a normal, non-terminal-in-this-sense outcome each call site here
-    already handles on its own.
-    """
     return violation.fix_outcome in {
         FixOutcome.REJECTED,
         FixOutcome.ERRORED,
@@ -862,14 +854,6 @@ class CheckOrchestrator:
                 try:
                     fix_result = check.fix(filepath, fresh_violations, current_source, current_tree, encoding)
                 except FixValidationError:
-                    # atomic_write_text() refused to write — the file is
-                    # untouched, so every violation this check just tried to
-                    # fix is still exactly as it was. This is a bug in the
-                    # check's fix logic, not an expected outcome. Debug-only
-                    # — the returned outcome already reports this
-                    # cleanly as [FIX REJECTED]; see _read_source's own
-                    # docstring for why ERROR-level .exception() logging
-                    # here would just be redundant noise.
                     logger.debug(
                         "Fix for %s produced invalid syntax on %s; the file was left untouched.",
                         check.check_id,
@@ -879,15 +863,6 @@ class CheckOrchestrator:
                     fix_result = FixResult.for_violations(fresh_violations, FixOutcome.REJECTED)
                     _set_fix_outcomes(fresh_violations, fix_result)
                 except ConcurrentModificationError:
-                    # atomic_write_text() refused to write — the file is
-                    # untouched, but this time it's not a bug in the check's
-                    # fix logic: something else (an editor, a concurrent
-                    # process outside this run's own per-file fix lock)
-                    # modified the file after current_source was read above.
-                    # Debug-only — the returned outcome already reports
-                    # this cleanly as [FIX ABORTED]; see _read_source's own
-                    # docstring for why ERROR-level .exception() logging here
-                    # would just be redundant noise.
                     logger.debug(
                         "File %s changed on disk while fixing %s; the fix was discarded.",
                         filepath,
@@ -896,45 +871,15 @@ class CheckOrchestrator:
                     )
                     fix_result = FixResult.for_violations(fresh_violations, FixOutcome.ABORTED)
                     _set_fix_outcomes(fresh_violations, fix_result)
-                    # The external edit itself can shift line numbers too,
-                    # same as a successful fix. See ADR-0042.
                     file_changed = True
                     externally_modified = True
                 except Exception:
-                    # fix() itself raised — a bug in the check's own fix
-                    # logic, distinct from FixValidationError (which means
-                    # fix() ran to completion but atomic_write_text()
-                    # rejected its output). Caught here, specifically around
-                    # the fix() call, rather than only by this method's
-                    # outer except Exception below: that outer handler also
-                    # covers benign races (e.g. the file disappearing before
-                    # a re-read), which must not be reported as a fix bug.
-                    #
-                    # A check that writes more than once per fix() call
-                    # (looping over violations individually, like
-                    # validate_function_name) can have already committed some
-                    # of fresh_violations before this exception interrupted a
-                    # later one — re-check against the file's real state
-                    # rather than assuming every violation in this batch is
-                    # still broken, the same way the success path below
-                    # already must (the returned outcomes are more precise
-                    # either).
-                    # Debug-only — rule_failures/the outcome assignment below
-                    # already report this cleanly; see _read_source's own
-                    # docstring for why ERROR-level .exception() logging
-                    # here would just be redundant noise.
                     logger.debug(
                         "Fix for %s raised an unexpected exception on %s.",
                         check.check_id,
                         filepath,
                         exc_info=True,
                     )
-                    # Always recorded, even if every fresh_violations entry
-                    # turns out resolved below (e.g. fix() committed its
-                    # edits, then raised afterwards during unrelated
-                    # cleanup): an exception genuinely happened here, and
-                    # that must never become invisible to the user just
-                    # because nothing is left to mark [FIX ERRORED].
                     self.rule_failures.append((str(filepath), check.check_id))
                     still_present = self._mark_resolved_and_get_still_present(filepath, check, fresh_violations)
                     if len(still_present) < len(fresh_violations):
@@ -943,39 +888,13 @@ class CheckOrchestrator:
                         if (v.line, v.col, v.message) in still_present:
                             v.fix_outcome = FixOutcome.ERRORED
                 else:
-                    # The reported outcome alone is not enough to know
-                    # which violations were actually resolved: a
-                    # per-violation guard (e.g. validate_function_name's
-                    # should_autofix) can skip some violations while fixing
-                    # others in the same call. Re-check against the file's
-                    # real post-fix state instead of trusting the return
-                    # value.
                     _set_fix_outcomes(fresh_violations, fix_result)
                     still_present = self._mark_resolved_and_get_still_present(filepath, check, fresh_violations)
                     if len(still_present) < len(fresh_violations):
                         file_changed = True
-                    # else: still present — either rejected (already marked
-                    # by the check's multi-write per-violation loop) or left
-                    # alone by a
-                    # per-violation guard; either way, not fixed.
-
-                # fresh_violations replaces this check_id's stale entries
-                # wholesale: its positions are accurate as of just before
-                # this fix() call, strictly more current than the very
-                # first, pre-any-fix snapshot in `violations`.
                 violations[:] = [v for v in violations if v.check_id != check.check_id or not v.fixable]
                 violations.extend(fresh_violations)
             except Exception:
-                # Anything not already handled above: e.g. the re-parse or
-                # the fresh_violations recompute itself raising. Isolated
-                # per-check like every other failure here (ch. 5), but must
-                # still be surfaced — without a rule_failure + marking, this
-                # check's violations keep their stale pre-fix snapshot and
-                # get reported as ordinary [FIXABLE], as if --fix had never
-                # even been attempted for them. Debug-only — rule_failures/
-                # the outcome assignment below already report this cleanly; see
-                # _read_source's own docstring for why ERROR-level
-                # .exception() logging here would just be redundant noise.
                 logger.debug("Fix failed for %s on %s", check.check_id, filepath, exc_info=True)
                 self.rule_failures.append((str(filepath), check.check_id))
                 for v in violations:
@@ -1071,27 +990,6 @@ class CheckOrchestrator:
         check: ASTCheck,
         fresh_violations: list[Violation],
     ) -> set[ViolationKey]:
-        """Re-check `filepath` against its actual current on-disk content
-        and retain or assign an applied outcome for every violation in `fresh_violations`
-        that's no longer present there — regardless of whether `check.fix()`
-        returned normally or raised partway through. A check that writes
-        more than once per `fix()` call (looping over violations
-        individually, like `validate_function_name`) can have already
-        committed some violations before a later one failed or raised;
-        matching by `ViolationKey` against the file's real state, rather
-        than trusting the reported outcome alone, is what
-        catches that.
-
-        Returns the keys of `fresh_violations` still present, so a caller
-        with more context (e.g. "fix() itself raised for this check") can
-        mark those specifically, distinct from the ones already resolved by
-        this call. If the file couldn't be re-read or no longer parses,
-        conservatively returns every key unresolved rather than raising —
-        nothing is marked fixed on an unverifiable outcome. Never marks
-        fixed a violation already carrying a rejected/errored/failed/aborted
-        outcome from the check's own per-violation loop. See
-        `docs/adr/0042-abort-fixes-on-concurrent-source-modification.md`.
-        """
         post_read_result = self._read_source(filepath)
         if post_read_result is None:
             for violation in fresh_violations:

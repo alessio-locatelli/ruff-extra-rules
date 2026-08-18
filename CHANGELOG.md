@@ -8,7 +8,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ### Changed
 
-- `--fix` reports whether each fix was applied, declined for safety, rejected, interrupted, or failed to write, so an operational failure is visible without being confused with a safety decision.
+- `--fix` reports whether each fix was applied, declined for safety, rejected, aborted, errored, or failed to write, so an operational failure is visible without being confused with a safety decision.
 
 ## [0.1.0] - 2026-08-16
 
