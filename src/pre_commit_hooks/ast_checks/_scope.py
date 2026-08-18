@@ -93,3 +93,126 @@ def collect_scope_names(scope: ast.AST) -> set[str]:
     matching Python's own scoping rules.
     """
     return {node.id for node in iter_within_scope(scope) if isinstance(node, ast.Name)}
+
+
+def class_scope_binding_names(node: ast.ClassDef) -> set[str]:
+    names = {
+        type_param.name
+        for type_param in node.type_params
+        if isinstance(type_param, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple)
+    }
+
+    class Visitor(ast.NodeVisitor):
+        def visit_FunctionDef(self, child: ast.FunctionDef) -> None:
+            names.add(child.name)
+            self._visit_function_header(child)
+
+        def visit_AsyncFunctionDef(self, child: ast.AsyncFunctionDef) -> None:
+            names.add(child.name)
+            self._visit_function_header(child)
+
+        def visit_ClassDef(self, child: ast.ClassDef) -> None:
+            names.add(child.name)
+            for decorator in child.decorator_list:
+                self.visit(decorator)
+            for base in child.bases:
+                self.visit(base)
+            for keyword in child.keywords:
+                self.visit(keyword.value)
+            for type_param in child.type_params:
+                self.visit(type_param)
+
+        def _visit_function_header(self, child: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+            for decorator in child.decorator_list:
+                self.visit(decorator)
+            for default in [*child.args.defaults, *child.args.kw_defaults]:
+                if default is not None:
+                    self.visit(default)
+            for argument in [
+                *child.args.posonlyargs,
+                *child.args.args,
+                *child.args.kwonlyargs,
+                *([child.args.vararg] if child.args.vararg else []),
+                *([child.args.kwarg] if child.args.kwarg else []),
+            ]:
+                if argument.annotation is not None:
+                    self.visit(argument.annotation)
+            if child.returns is not None:
+                self.visit(child.returns)
+            for type_param in child.type_params:
+                self.visit(type_param)
+
+        def visit_Lambda(self, _child: ast.Lambda) -> None:
+            return
+
+        def visit_ListComp(self, _child: ast.ListComp) -> None:
+            return
+
+        def visit_SetComp(self, _child: ast.SetComp) -> None:
+            return
+
+        def visit_DictComp(self, _child: ast.DictComp) -> None:
+            return
+
+        def visit_GeneratorExp(self, _child: ast.GeneratorExp) -> None:
+            return
+
+        def visit_Name(self, child: ast.Name) -> None:
+            if isinstance(child.ctx, ast.Store | ast.Del):
+                names.add(child.id)
+
+        def visit_Import(self, child: ast.Import) -> None:
+            names.update(alias.asname or alias.name.split(".")[0] for alias in child.names)
+
+        def visit_ImportFrom(self, child: ast.ImportFrom) -> None:
+            names.update(alias.asname or alias.name for alias in child.names)
+
+        def visit_ExceptHandler(self, child: ast.ExceptHandler) -> None:
+            if child.name is not None:
+                names.add(child.name)
+            self.generic_visit(child)
+
+        def visit_MatchAs(self, child: ast.MatchAs) -> None:
+            if child.name is not None:
+                names.add(child.name)
+            self.generic_visit(child)
+
+        def visit_MatchStar(self, child: ast.MatchStar) -> None:
+            if child.name is not None:
+                names.add(child.name)
+            self.generic_visit(child)
+
+        def visit_MatchMapping(self, child: ast.MatchMapping) -> None:
+            if child.rest is not None:
+                names.add(child.rest)
+            self.generic_visit(child)
+
+    visitor = Visitor()
+    for statement in node.body:
+        visitor.visit(statement)
+    return names
+
+
+def class_scope_global_or_nonlocal_names(node: ast.ClassDef) -> set[str]:
+    names: set[str] = set()
+
+    class Visitor(ast.NodeVisitor):
+        def visit_FunctionDef(self, _child: ast.FunctionDef) -> None:
+            return
+
+        def visit_AsyncFunctionDef(self, _child: ast.AsyncFunctionDef) -> None:
+            return
+
+        def visit_ClassDef(self, _child: ast.ClassDef) -> None:
+            return
+
+        def visit_Global(self, child: ast.Global) -> None:
+            names.update(child.names)
+
+        def visit_Nonlocal(self, child: ast.Nonlocal) -> None:
+            names.update(child.names)
+
+    visitor = Visitor()
+    for statement in node.body:
+        visitor.visit(statement)
+    return names

@@ -1349,14 +1349,7 @@ def reader():
     assert fixed_content == source
 
 
-def test_autofix_avoids_cross_scope_suggestion_collision() -> None:
-    # Two *independent* violations in different (but nested,
-    # non-shadowing) scopes that happen to generate the same suggested
-    # name must not both become that name, once the outer one's rename is
-    # followed into the inner scope via closure-following. Here both
-    # `data` and the inner `result` match the same `.json()` autofix
-    # pattern ("payload") — `return data, result` must not become `return
-    # payload, payload`, silently making both returned values identical.
+def test_autofix_assigns_distinct_names_to_cross_scope_suggestions() -> None:
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1373,11 +1366,13 @@ def test_autofix_avoids_cross_scope_suggestion_collision() -> None:
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
+        assert all(outcome is FixOutcome.APPLIED for outcome in check.fix(filepath, violations, source, tree).outcomes)
 
         fixed_content = filepath.read_text()
 
-    assert fixed_content == source
+    assert "payload: Payload = response.json()" in fixed_content
+    assert "payload_2: Payload = response2.json()" in fixed_content
+    assert "return payload, payload_2" in fixed_content
 
 
 def test_autofix_avoids_suggestion_colliding_with_existing_nested_name() -> None:
@@ -1550,15 +1545,7 @@ def test_autofix_follows_closure_through_scope_that_itself_contains_a_shadowing_
     assert module_namespace["outer"](FakeResponse()) == ("closure value", "unrelated local")
 
 
-def test_autofix_avoids_suggestion_collision_when_nested_closure_precedes_captured_assignment() -> None:
-    # Suggestions must not be assigned in AST visit (textual)
-    # order, or a nested closure defined *before* the outer variable it
-    # will eventually capture (valid Python — closures resolve names at
-    # call time) could get its own, unrelated violation's suggestion
-    # chosen first, unaware of what the outer scope would later pick for
-    # the same RHS pattern. assign_suggestions() processes violations in
-    # ascending scope-depth order instead, so the outer scope's own
-    # violation is always assigned first regardless of source order.
+def test_autofix_assigns_outer_name_first_when_nested_closure_precedes_assignment() -> None:
     source = """def outer(response, response2):
     def inner():
         result: Payload = response2.json()
@@ -1574,11 +1561,13 @@ def test_autofix_avoids_suggestion_collision_when_nested_closure_precedes_captur
         tree = ast.parse(source)
         check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
         violations = check.check(filepath, tree, source)
-        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
+        assert all(outcome is FixOutcome.APPLIED for outcome in check.fix(filepath, violations, source, tree).outcomes)
 
         fixed_content = filepath.read_text()
 
-    assert fixed_content == source
+    assert "payload_2: Payload = response2.json()" in fixed_content
+    assert "return payload, payload_2" in fixed_content
+    assert "payload: Payload = response.json()" in fixed_content
 
 
 def test_autofix_does_not_rename_annotation_under_deferred_annotations() -> None:
@@ -2198,16 +2187,41 @@ def func2():
         assert "def func2():" in fixed_content
 
 
-def test_scope_replacement_helpers_skip_class_bodies_and_support_modules() -> None:
+def test_scope_replacement_helpers_support_class_bodies_and_modules() -> None:
     class_tree = ast.parse("class Container:\n    value = data\n")
     module_tree = ast.parse("data = value\n")
 
-    assert _collect_replacements(class_tree.body[0], {"data": "payload"}, has_future_annotations=False) == []
+    assert _collect_replacements(class_tree.body[0], {"data": "payload"}, has_future_annotations=False) == [
+        (2, 12, "data", "payload")
+    ]
     assert _collect_scope_replacements(
         module_tree,
         {"data": "payload"},
         has_future_annotations=False,
     ) == [(1, 0, "data", "payload")]
+
+
+def test_scope_replacement_helpers_support_generic_class_headers_and_methods() -> None:
+    source = """@data
+class Container[T: data](data, key=data):
+    value = data
+
+    class Nested:
+        value = data
+
+    def method[V: data](self, value: data = data) -> data:
+        return data
+"""
+    tree = ast.parse(source)
+
+    assert len(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False)) == 11
+    assert len(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=True)) == 9
+
+
+def test_scope_replacement_helpers_support_generic_methods_without_return_annotations() -> None:
+    tree = ast.parse("class Container:\n    def method[T: data](self, value: data):\n        return data\n")
+
+    assert len(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False)) == 3
 
 
 def test_repeated_binding_leaves_the_file_unchanged() -> None:

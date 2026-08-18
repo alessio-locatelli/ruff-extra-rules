@@ -5,9 +5,11 @@ import builtins
 import keyword
 import re
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING
+
+from pre_commit_hooks.ast_checks._scope import class_scope_global_or_nonlocal_names
 
 from .pymongo import call_candidate, collection_attributes, suppresses_producer_tail
 from .syntax import _annotation_terminal
@@ -56,7 +58,7 @@ class ScopeInfo:
     children: list[ScopeInfo] = field(default_factory=list)
     has_reflection: bool = False
     reachable_names: set[str] | None = None
-    class_references: set[str] = field(default_factory=set)
+    class_global_or_nonlocal: set[str] = field(default_factory=set)
     mongodb_collection_attributes: frozenset[str] = frozenset()
 
 
@@ -114,9 +116,7 @@ class _Index:
 
     def add_class(self, node: ast.ClassDef, parent: ScopeInfo) -> None:
         parent.bindings[node.name].append(node)
-        parent.class_references.update(
-            child.id for child in ast.walk(node) if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)
-        )
+        parent.class_global_or_nonlocal.update(class_scope_global_or_nonlocal_names(node))
         class_type_parameters = tuple(
             type_parameter
             for type_parameter in node.type_params
@@ -591,7 +591,11 @@ def _registry_name(qname: tuple[str, ...] | None, node: ast.Call, scope: ScopeIn
 def _eligible(assignment: Assignment) -> bool:
     scope = assignment.scope
     name = assignment.target.id
-    if name in scope.global_or_nonlocal or name in scope.class_references or _declared_in_descendant(scope, name):
+    if (
+        name in scope.global_or_nonlocal
+        or name in scope.class_global_or_nonlocal
+        or _declared_in_descendant(scope, name)
+    ):
         return False
     return len(scope.bindings[name]) == 1 and scope.bindings[name][0] is assignment.target
 
@@ -604,7 +608,6 @@ def _remove_collisions(
     planned: list[_PlannedProposal],
     meaningless_names: set[str],
 ) -> dict[TargetKey, RenameProposal]:
-    rejected: set[int] = set()
     proposals_by_scope: dict[int, list[int]] = defaultdict(list)
     scopes: dict[int, ScopeInfo] = {}
     for index, planned_proposal in enumerate(planned):
@@ -613,22 +616,20 @@ def _remove_collisions(
         proposals_by_scope[scope_id].append(index)
         scopes[scope_id] = scope
 
-    def visit(scope: ScopeInfo, active: dict[str, list[int]]) -> None:
+    assigned: dict[int, RenameProposal] = {}
+
+    def visit(scope: ScopeInfo, active: set[str]) -> None:
         scope_id = id(scope)
-        added: list[str] = []
+        added: set[str] = set()
         for index in proposals_by_scope.get(scope_id, []):
-            name = planned[index].proposal.name
-            if name in active:
-                rejected.update(active[name])
-                rejected.add(index)
-            active.setdefault(name, []).append(index)
-            added.append(name)
+            proposal = planned[index].proposal
+            name = _available_name(proposal.name, active)
+            assigned[index] = replace(proposal, name=name)
+            active.add(name)
+            added.add(name)
         for child in scope.children:
             visit(child, active)
-        for name in reversed(added):
-            active[name].pop()
-            if not active[name]:
-                del active[name]
+        active.difference_update(added)
 
     root_scopes: dict[int, ScopeInfo] = {}
     for scope in scopes.values():
@@ -637,12 +638,21 @@ def _remove_collisions(
             root = root.parent
         root_scopes[id(root)] = root
     for root_scope in root_scopes.values():
-        visit(root_scope, {})
+        visit(root_scope, set())
     return {
-        _target_key(planned_proposal.assignment.target): planned_proposal.proposal
+        _target_key(planned_proposal.assignment.target): assigned[index]
         for index, planned_proposal in enumerate(planned)
-        if index not in rejected and _is_valid_name(planned_proposal.proposal.name, meaningless_names)
+        if _is_valid_name(assigned[index].name, meaningless_names)
     }
+
+
+def _available_name(name: str, active: set[str]) -> str:
+    if name not in active:
+        return name
+    index = 2
+    while f"{name}_{index}" in active:
+        index += 1
+    return f"{name}_{index}"
 
 
 def _parametrize_result_proposals(

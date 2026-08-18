@@ -583,12 +583,30 @@ def test_ambiguous_semantics_do_not_produce_names(source: str) -> None:
         "def f():\n    data: Payload = get_payload()\n    data = get_payload()\n",
         "def f():\n    data: Payload = get_payload()\n    del data\n",
         "def f():\n    data: Payload = get_payload()\n    def nested():\n        nonlocal data\n        return data\n",
-        "def f():\n    data: Payload = get_payload()\n    class Nested:\n        value = data\n",
         "def f(payload):\n    data: Payload = get_payload()\n    return data\n",
         "data: Payload = get_payload()\n",
     ],
 )
 def test_unsafe_bindings_collisions_and_module_scope_do_not_produce_names(source: str) -> None:
+    _assert_plan_for(source, "data", None, None)
+
+
+def test_class_body_reference_produces_a_name() -> None:
+    source = "def f():\n    data: Payload = get_payload()\n    class Nested:\n        value = data\n"
+
+    _assert_plan_for(source, "data", "payload", Confidence.AUTO_FIX)
+
+
+@pytest.mark.parametrize("declaration", ["global data", "nonlocal data"])
+def test_class_body_global_or_nonlocal_declaration_prevents_a_name(declaration: str) -> None:
+    source = (
+        "def f():\n"
+        "    data: Payload = get_payload()\n"
+        "    class Nested:\n"
+        f"        {declaration}\n"
+        "        data = get_payload()\n"
+    )
+
     _assert_plan_for(source, "data", None, None)
 
 
@@ -598,7 +616,7 @@ def test_ignored_binding_is_not_planned() -> None:
     assert _plans(source, {2}) == {}
 
 
-def test_reachable_scopes_reject_only_equal_names() -> None:
+def test_reachable_scopes_assign_distinct_names() -> None:
     source = """def outer():
     data: Payload = get_payload()
 
@@ -609,7 +627,26 @@ def test_reachable_scopes_reject_only_equal_names() -> None:
     return data, inner
 """
 
-    assert _plans(source) == {}
+    assert {proposal.name for proposal in _plans(source).values()} == {"payload", "payload_2"}
+
+
+def test_nested_scopes_allocate_incrementing_names() -> None:
+    source = """def outer():
+    data: Payload = get_payload()
+
+    def middle():
+        result: Payload = get_payload()
+
+        def inner():
+            data: Payload = get_payload()
+            return data
+
+        return result, inner
+
+    return data, middle
+"""
+
+    assert {proposal.name for proposal in _plans(source).values()} == {"payload", "payload_2", "payload_3"}
 
 
 def test_sibling_scopes_can_use_distinct_names() -> None:

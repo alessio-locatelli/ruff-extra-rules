@@ -4,7 +4,12 @@ import ast
 
 import pytest
 
-from pre_commit_hooks.ast_checks._scope import collect_scope_names, iter_within_scope
+from pre_commit_hooks.ast_checks._scope import (
+    class_scope_binding_names,
+    class_scope_global_or_nonlocal_names,
+    collect_scope_names,
+    iter_within_scope,
+)
 
 
 def test_iter_within_scope_yields_direct_children() -> None:
@@ -117,3 +122,117 @@ def test_collect_scope_names(source: str, names: set[str], *, use_module_root: b
         assert isinstance(root, ast.FunctionDef)
 
     assert collect_scope_names(root) == names
+
+
+def test_class_scope_binding_names_excludes_nested_scopes_and_comprehensions() -> None:
+    node = ast.parse(
+        "class Container:\n"
+        "    value = 1\n"
+        "    def method():\n"
+        "        pass\n"
+        "    def defaulted(value=(default_value := 1)):\n"
+        "        pass\n"
+        "    def required_keyword(*, required):\n"
+        "        pass\n"
+        "    @(method_decorator := decorator)\n"
+        "    def decorated():\n"
+        "        pass\n"
+        "    def annotated(value: annotation_value) -> return_annotation:\n"
+        "        pass\n"
+        "    def generic[T: type_param_bound]():\n"
+        "        pass\n"
+        "    async def async_method():\n"
+        "        pass\n"
+        "    class Nested:\n"
+        "        pass\n"
+        "    @(class_decorator := decorator)\n"
+        "    class Decorated:\n"
+        "        pass\n"
+        "    class NestedWithHeader((nested_header := object)):\n"
+        "        pass\n"
+        "    class Keyworded(key=(class_keyword := value)):\n"
+        "        pass\n"
+        "    class Generic[T: type_bound]:\n"
+        "        pass\n"
+        "    thunk = lambda: (lambda_local := 1)\n"
+        "    listed = [item for item in ()]\n"
+        "    setted = {item for item in ()}\n"
+        "    mapped = {item: item for item in ()}\n"
+        "    generated = (item for item in ())\n"
+        "    import package.module as imported\n"
+        "    from package import member as imported_member\n"
+        "    try:\n"
+        "        pass\n"
+        "    except ValueError:\n"
+        "        pass\n"
+        "    except TypeError as caught:\n"
+        "        pass\n"
+        "    match value:\n"
+        "        case _:\n"
+        "            pass\n"
+        "    match value:\n"
+        "        case captured:\n"
+        "            pass\n"
+        "    match value:\n"
+        "        case [*_]:\n"
+        "            pass\n"
+        "    match value:\n"
+        "        case [*rest]:\n"
+        "            pass\n"
+        "    match value:\n"
+        "        case {'item': _}:\n"
+        "            pass\n"
+        "    match value:\n"
+        "        case {**remaining}:\n"
+        "            pass\n"
+    ).body[0]
+    assert isinstance(node, ast.ClassDef)
+
+    assert class_scope_binding_names(node) == {
+        "value",
+        "method",
+        "defaulted",
+        "default_value",
+        "required_keyword",
+        "decorated",
+        "method_decorator",
+        "annotated",
+        "generic",
+        "async_method",
+        "Nested",
+        "Decorated",
+        "class_decorator",
+        "NestedWithHeader",
+        "nested_header",
+        "Keyworded",
+        "class_keyword",
+        "Generic",
+        "thunk",
+        "listed",
+        "setted",
+        "mapped",
+        "generated",
+        "imported",
+        "imported_member",
+        "caught",
+        "captured",
+        "rest",
+        "remaining",
+    }
+
+
+def test_class_scope_global_or_nonlocal_names_excludes_nested_scopes() -> None:
+    node = ast.parse(
+        "class Container:\n"
+        "    global module_name\n"
+        "    nonlocal enclosing_name\n"
+        "    def method():\n"
+        "        global method_name\n"
+        "    async def async_method():\n"
+        "        nonlocal async_name\n"
+        "    class Nested:\n"
+        "        global nested_name\n"
+    ).body[0]
+    assert isinstance(node, ast.ClassDef)
+
+    assert class_scope_global_or_nonlocal_names(node) == {"module_name", "enclosing_name"}
