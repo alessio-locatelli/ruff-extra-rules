@@ -60,9 +60,9 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
 @pytest.mark.parametrize(
     ("make_case", "expected"),
     [
-        (_from_fixture("safe_small.py", "get_config"), True),
-        (_from_fixture("safe_small.py", "get_active"), True),
-        (_from_fixture("safe_small.py", "get_items"), True),
+        (_from_fixture("safe_small.py", "get_config"), FixOutcome.APPLIED),
+        (_from_fixture("safe_small.py", "get_active"), FixOutcome.APPLIED),
+        (_from_fixture("safe_small.py", "get_items"), FixOutcome.APPLIED),
         # Neither function matches a naming heuristic strongly enough for
         # process_file to suggest a rename, so should_autofix is exercised
         # directly with a hand-built Suggestion instead.
@@ -74,7 +74,7 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
                 suggested_name="renamed_get_value",
                 reason="test",
             ),
-            False,
+            FixOutcome.FAILED,
         ),
         (
             _with_suggestion(
@@ -84,9 +84,9 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
                 suggested_name="renamed_get_result",
                 reason="test",
             ),
-            False,
+            FixOutcome.FAILED,
         ),
-        (_from_fixture("unsafe_large.py", "get_user_data"), False),
+        (_from_fixture("unsafe_large.py", "get_user_data"), FixOutcome.DECLINED),
         # apply_fix can only find self.x/cls.x call sites within the same
         # class body, not external calls through a differently-named
         # receiver (e.g. reader.get_report() in a free function elsewhere
@@ -98,7 +98,7 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
                 'class Reader:\n    def get_data(self):\n        f = open("f.txt")\n        return f.read()\n\n\n'
                 "def helper(reader):\n    return reader.get_data()\n"
             ),
-            False,
+            FixOutcome.DECLINED,
         ),
         (
             _with_suggestion(
@@ -108,7 +108,7 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
                 suggested_name="get_data",
                 reason="no confident suggestion",
             ),
-            False,
+            FixOutcome.DECLINED,
         ),
         (
             _with_suggestion(
@@ -118,7 +118,7 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
                 suggested_name="load_data",
                 reason="reads data from disk",
             ),
-            False,
+            FixOutcome.FAILED,
         ),
         (
             _with_suggestion(
@@ -128,7 +128,7 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
                 suggested_name="load_missing",
                 reason="reads data from disk",
             ),
-            False,
+            FixOutcome.DECLINED,
         ),
         # A function with 20+ lines of code (excluding docstring) is too
         # large to safely auto-fix.
@@ -140,7 +140,7 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
                 suggested_name="fetch_data",
                 reason="test",
             ),
-            False,
+            FixOutcome.DECLINED,
         ),
         # A function with control-flow nesting depth > 1 is too complex to
         # safely auto-fix.
@@ -157,7 +157,7 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
                 suggested_name="find_data",
                 reason="test",
             ),
-            False,
+            FixOutcome.DECLINED,
         ),
         # A docstring's own lines don't count against the size limit.
         (
@@ -165,7 +165,7 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
                 'def get_data():\n    """A short docstring\n    spanning two lines.\n    """\n'
                 '    f = open("f.txt")\n    return f.read()\n'
             ),
-            True,
+            FixOutcome.APPLIED,
         ),
     ],
     ids=[
@@ -185,10 +185,10 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
     ],
 )
 def test_should_autofix(
-    tmp_path: Path, make_case: Callable[[Path], tuple[Path, Suggestion]], *, expected: bool
+    tmp_path: Path, make_case: Callable[[Path], tuple[Path, Suggestion]], *, expected: FixOutcome
 ) -> None:
     filepath, suggestion = make_case(tmp_path)
-    assert (should_autofix(filepath, suggestion) is FixOutcome.APPLIED) is expected
+    assert should_autofix(filepath, suggestion) is expected
 
 
 def test_apply_fix_does_not_corrupt_unrelated_string_literal(tmp_path: Path) -> None:

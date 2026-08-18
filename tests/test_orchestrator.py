@@ -3453,7 +3453,9 @@ def test_apply_fixes_does_not_double_report_a_violation_whose_message_another_fi
         tmp_path, "import requests\n\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
-    assert [v.fix_outcome is FixOutcome.APPLIED for violations in by_check.values() for v in violations] == [True, True]
+    outcomes = [v.fix_outcome for violations in by_check.values() for v in violations]
+    assert len(outcomes) == 2
+    assert all(outcome is FixOutcome.APPLIED for outcome in outcomes)
     assert not any(
         v.fix_outcome is FixOutcome.RESOLVED_INDIRECTLY for violations in by_check.values() for v in violations
     )

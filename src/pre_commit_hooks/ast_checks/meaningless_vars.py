@@ -901,10 +901,13 @@ class MeaninglessVarsCheck(BaseCheck):
         tree: ast.Module,
         encoding: str = "utf-8",
     ) -> FixResult:
-        fixable = [cast("MeaninglessVarsFixData", v.fix_data) for v in violations if v.fixable and v.fix_data]
+        fixable_violations = [v for v in violations if v.fixable and v.fix_data]
+        fixable = [cast("MeaninglessVarsFixData", v.fix_data) for v in fixable_violations]
 
         if not fixable:
             return FixResult.for_violations(violations, FixOutcome.DECLINED)
+
+        fixable_ids = {id(violation) for violation in fixable_violations}
 
         # Re-derived fresh, like check() does, rather than threaded through
         # fix_data: a stale ignored_lines snapshot from check()-time could
@@ -922,6 +925,13 @@ class MeaninglessVarsCheck(BaseCheck):
             # logging, so Python's own lastResort handler prints WARNING+
             # straight to stderr).
             logger.debug("Failed to apply fixes to %s", filepath, exc_info=True)
-            return FixResult(tuple(FixOutcome.FAILED if v.fixable else FixOutcome.DECLINED for v in violations))
+            return FixResult(
+                tuple(
+                    FixOutcome.FAILED if id(violation) in fixable_ids else FixOutcome.DECLINED
+                    for violation in violations
+                )
+            )
         else:
-            return FixResult(tuple(outcome if v.fixable else FixOutcome.DECLINED for v in violations))
+            return FixResult(
+                tuple(outcome if id(violation) in fixable_ids else FixOutcome.DECLINED for violation in violations)
+            )

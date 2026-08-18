@@ -62,6 +62,7 @@ _Avoid_: fix error, fix rejection — "failed" is the CLI term; unlike a fix err
 
 **Fix outcome**:
 Each `fix()` call returns a `FixResult` with one `FixOutcome` for every input violation. The outcomes are applied, declined, rejected, aborted, errored, failed, and resolved indirectly. A declined fix is safe to leave unchanged and is reported as `[FIX DECLINED]` without an operational failure hint.
+_Avoid_: skipped — use "declined" for `[FIX DECLINED]` because the check made a safety decision, not a generic omission
 
 **Indirect resolution**:
 The outcome when a violation is gone from the file's final state because some other fix removed it along the way, with no fix ever applied for the violation itself — usually a different check's fix, but a check's own fix can equally take a second violation of its own with it. Reported as `[RESOLVED INDIRECTLY]`, distinct from `[FIXED]` (a fix was applied for this violation and resolved it) and from an unfixed `[FIXABLE]` (there is nothing left to run `--fix` for). See `docs/adr/0053-indirect-resolution-outcome.md`.

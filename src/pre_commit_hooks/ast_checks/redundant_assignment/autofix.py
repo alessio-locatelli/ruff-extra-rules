@@ -172,12 +172,6 @@ def apply_fixes(
         try:
             atomic_write_text(filepath, new_source, encoding, source)
         except OSError:
-            # Debug-only: the returned outcome already reports this
-            # cleanly as [FIX FAILED] — an ERROR-level .exception() call
-            # here would just leak a redundant raw traceback onto the
-            # user's stderr by default (nothing in this codebase configures
-            # logging, so Python's own lastResort handler prints WARNING+
-            # straight to stderr).
             logger.debug("Failed to write %s", filepath, exc_info=True)
             applied_ids = {id(violation) for violation in applied_violations}
             return FixResult(
