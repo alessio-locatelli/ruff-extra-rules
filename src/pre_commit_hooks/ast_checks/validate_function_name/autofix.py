@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Literal
 
 from pre_commit_hooks.ast_checks._base import (
+    ConcurrentModificationError,
+    FixOutcome,
+    FixValidationError,
     atomic_write_text,
     byte_col_to_char_col,
     find_ignored_lines,
@@ -92,7 +95,7 @@ def index_function_nodes(tree: ast.Module) -> FunctionIndex:
     }
 
 
-def should_autofix(filepath: Path, suggestion: Suggestion) -> bool:
+def should_autofix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
     """Re-reads and re-parses `filepath` from disk, then defers to `is_autofix_safe`.
 
     Only used by `fix()`, which needs the file's current on-disk state (an
@@ -106,10 +109,10 @@ def should_autofix(filepath: Path, suggestion: Suggestion) -> bool:
         tree = ast.parse(read_source(filepath))
     except (OSError, SyntaxError, UnicodeDecodeError, LookupError) as error:
         logger.warning("Filepath: %s. Error: %s", filepath, repr(error))
-        return False
+        return FixOutcome.FAILED
 
     attach_parents(tree)
-    return is_autofix_safe(index_function_nodes(tree), suggestion)
+    return FixOutcome.APPLIED if is_autofix_safe(index_function_nodes(tree), suggestion) else FixOutcome.DECLINED
 
 
 def _repository_reference_status(filepath: Path, name: str) -> RepositoryReferenceStatus:
@@ -400,7 +403,7 @@ def _resolve_rename_scope(tree: ast.Module, func_node: _FuncNode) -> tuple[ast.A
     return tree, False
 
 
-def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
+def apply_fix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
     """AST-scoped rename: renames the function definition itself plus true
     call-site references (`Name`/`Attribute` nodes reached via normal AST
     traversal) within the scope the function is visible in. Never touches
@@ -411,19 +414,19 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
         source, encoding = read_source_with_encoding(filepath)
     except (OSError, SyntaxError, UnicodeDecodeError, LookupError) as error:
         logger.warning("Filepath: %s. Error: %s", filepath, repr(error))
-        return False
+        return FixOutcome.FAILED
 
     try:
         tree = ast.parse(source)
     except SyntaxError as syntax_error:
         logger.warning("Filepath: %s. Error: %s", filepath, repr(syntax_error))
-        return False
+        return FixOutcome.FAILED
 
     attach_parents(tree)
 
     func_node = _find_function_node(tree, suggestion.func_name, suggestion.lineno)
     if func_node is None:
-        return False
+        return FixOutcome.DECLINED
 
     lines = source.splitlines(keepends=True)
 
@@ -435,7 +438,7 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
     # same scope means some Load references may no longer point at this
     # function; refuse to rename call sites we can't safely tell apart.
     if not is_method and _is_rebound_in_scope(scope_node, func_node.name, func_node):
-        return False
+        return FixOutcome.DECLINED
 
     collector = _ReferenceCollector(func_node.name, func_node, lines, is_method=is_method)
     collector.visit(scope_node)
@@ -446,7 +449,7 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
     # docs/adr/0050-format-suppression-pragmas.md.
     ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
     if any(line_num in ignored_lines for line_num, _col in positions):
-        return False
+        return FixOutcome.DECLINED
 
     old_name = func_node.name
     new_name = suggestion.suggested_name
@@ -467,8 +470,12 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> bool:
 
     try:
         atomic_write_text(filepath, new_source, encoding, source)
-    except OSError as os_error:
-        logger.warning("Filepath: %s. Error: %s", filepath, repr(os_error))
-        return False
+    except OSError as error:
+        logger.warning("Filepath: %s. Error: %s", filepath, repr(error))
+        return FixOutcome.FAILED
+    except FixValidationError:
+        return FixOutcome.REJECTED
+    except ConcurrentModificationError:
+        return FixOutcome.ABORTED
     else:
-        return True
+        return FixOutcome.APPLIED

@@ -15,12 +15,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 
 from ._base import (
     BaseCheck,
+    FixOutcome,
+    FixResult,
     Violation,
     atomic_write_text,
     byte_col_to_char_col,
     find_ignored_lines,
     ignore_pattern_for,
-    mark_fix_failed,
     split_lines_like_ast,
 )
 from ._options import EnumOption
@@ -736,7 +737,7 @@ def _apply_fixes(
     *,
     ignored_lines: set[int],
     encoding: str = "utf-8",
-) -> bool:
+) -> FixOutcome:
     """Scope-aware: groups violations by scope and replaces ALL uses of a
     variable within that scope, not just the assignment position.
 
@@ -791,7 +792,7 @@ def _apply_fixes(
             all_replacements.extend(items)
 
     if not all_replacements:
-        return False
+        return FixOutcome.DECLINED
 
     # Step 4: Sort reverse and apply replacements
     all_replacements.sort(key=lambda x: (x[0], x[1]), reverse=True)
@@ -812,7 +813,7 @@ def _apply_fixes(
         lines[line_idx] = line[:col] + new_name + line[col + name_len :]
 
     atomic_write_text(filepath, "".join(lines), encoding, source)
-    return True
+    return FixOutcome.APPLIED
 
 
 class MeaninglessVarsCheck(BaseCheck):
@@ -899,11 +900,11 @@ class MeaninglessVarsCheck(BaseCheck):
         source: str,
         tree: ast.Module,
         encoding: str = "utf-8",
-    ) -> bool:
+    ) -> FixResult:
         fixable = [cast("MeaninglessVarsFixData", v.fix_data) for v in violations if v.fixable and v.fix_data]
 
         if not fixable:
-            return False
+            return FixResult.for_violations(violations, FixOutcome.DECLINED)
 
         # Re-derived fresh, like check() does, rather than threaded through
         # fix_data: a stale ignored_lines snapshot from check()-time could
@@ -912,16 +913,15 @@ class MeaninglessVarsCheck(BaseCheck):
         ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
 
         try:
-            return _apply_fixes(filepath, fixable, source, tree, ignored_lines=ignored_lines, encoding=encoding)
+            outcome = _apply_fixes(filepath, fixable, source, tree, ignored_lines=ignored_lines, encoding=encoding)
         except OSError:
-            # Debug-only: mark_fix_failed() below already reports this
+            # Debug-only: the returned outcome already reports this
             # cleanly as [FIX FAILED] — an ERROR-level .exception() call
             # here would just leak a redundant raw traceback onto the
             # user's stderr by default (nothing in this codebase configures
             # logging, so Python's own lastResort handler prints WARNING+
             # straight to stderr).
             logger.debug("Failed to apply fixes to %s", filepath, exc_info=True)
-            for v in violations:
-                if v.fixable:
-                    mark_fix_failed(v)
-            return False
+            return FixResult(tuple(FixOutcome.FAILED if v.fixable else FixOutcome.DECLINED for v in violations))
+        else:
+            return FixResult(tuple(outcome if v.fixable else FixOutcome.DECLINED for v in violations))

@@ -50,16 +50,19 @@ _Avoid_: autofix is fine informally; "fix" is the protocol method name
 
 **Fix rejection**:
 The outcome when `atomic_write_text()` refuses a fix because the content it was asked to write doesn't parse as valid Python. Reported as `[FIX REJECTED]`, distinct from `[FIXED]`/`[FIXABLE]` — it signals a bug in the check's own fix logic, not something re-running `--fix` will resolve.
-_Avoid_: failed fix, broken fix — "rejected" is the term the CLI output and `is_fix_rejected()`/`mark_fix_rejected()` use
+_Avoid_: failed fix, broken fix — "rejected" is the CLI term
 
 **Fix error**:
 The outcome when a check's own `fix()` raises an exception other than `FixValidationError` — a bug in the check's fix logic itself, distinct from a fix rejection (which means `fix()` ran to completion but its _output_ didn't parse). Reported as `[FIX ERRORED]`, also not something re-running `--fix` will resolve (see `docs/adr/0012-behavioral-contract-audit-internal-errors-exit-codes.md`).
-_Avoid_: fix rejection, crash — "errored" is the term the CLI output and `is_fix_errored()`/`mark_fix_errored()` use; a fix rejection never reaches this path since it's a normal, expected outcome, not an unhandled exception
+_Avoid_: fix rejection, crash — "errored" is the CLI term; a fix rejection never reaches this path since it's a normal, expected outcome, not an unhandled exception
 
 **Fix failure**:
-The outcome when a check's own `fix()` catches an `OSError` from `atomic_write_text()` itself (disk full, permission denied, missing parent directory) and returns `False` without raising — an environmental failure, distinct from a fix error (which means `fix()` itself raised, a bug in the check's own logic). Reported as `[FIX FAILED]`, with a hint about checking permissions/disk space rather than `[FIX ERRORED]`'s "this is a bug, please report it" (see `docs/adr/0017-behavioral-contract-audit-diagnostics-fix-modes-user-trust.md`).
-_Avoid_: fix error, fix rejection — "failed" is the term the CLI output and `is_fix_failed()`/`mark_fix_failed()` use; unlike a fix error, retrying `--fix` after fixing the underlying environmental issue may actually succeed
+The outcome when a check's own `fix()` catches an `OSError` from `atomic_write_text()` itself (disk full, permission denied, missing parent directory) and returns `FixOutcome.FAILED` — an environmental failure, distinct from a fix error (which means `fix()` itself raised, a bug in the check's own logic). Reported as `[FIX FAILED]`, with a hint about checking permissions/disk space rather than `[FIX ERRORED]`'s "this is a bug, please report it" (see `docs/adr/0017-behavioral-contract-audit-diagnostics-fix-modes-user-trust.md`).
+_Avoid_: fix error, fix rejection — "failed" is the CLI term; unlike a fix error, retrying `--fix` after fixing the underlying environmental issue may actually succeed
+
+**Fix outcome**:
+Each `fix()` call returns a `FixResult` with one `FixOutcome` for every input violation. The outcomes are applied, declined, rejected, aborted, errored, failed, and resolved indirectly. A declined fix is safe to leave unchanged and is reported as `[FIX DECLINED]` without an operational failure hint.
 
 **Indirect resolution**:
 The outcome when a violation is gone from the file's final state because some other fix removed it along the way, with no fix ever applied for the violation itself — usually a different check's fix, but a check's own fix can equally take a second violation of its own with it. Reported as `[RESOLVED INDIRECTLY]`, distinct from `[FIXED]` (a fix was applied for this violation and resolved it) and from an unfixed `[FIXABLE]` (there is nothing left to run `--fix` for). See `docs/adr/0053-indirect-resolution-outcome.md`.
-_Avoid_: side effect, collateral fix — "resolved indirectly" is the term the CLI output and `is_resolved_indirectly()`/`mark_resolved_indirectly()` use; also avoid calling it a fix, since no fix was applied for it
+_Avoid_: side effect, collateral fix — "resolved indirectly" is the CLI term; also avoid calling it a fix, since no fix was applied for it

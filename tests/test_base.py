@@ -9,6 +9,8 @@ import pytest
 
 from pre_commit_hooks.ast_checks._base import (
     ConcurrentModificationError,
+    FixOutcome,
+    FixResult,
     FixValidationError,
     atomic_write_text,
     byte_col_to_char_col,
@@ -18,15 +20,7 @@ from pre_commit_hooks.ast_checks._base import (
     find_ignored_lines_and_classify_comments,
     ignore_pattern_for,
     ignored_lines_from_tokens,
-    is_fix_aborted,
-    is_fix_errored,
-    is_fix_failed,
-    is_fix_rejected,
     line_terminator,
-    mark_fix_aborted,
-    mark_fix_errored,
-    mark_fix_failed,
-    mark_fix_rejected,
     normalize_for_tokenize,
     split_lines_like_ast,
     tokenize_source,
@@ -51,6 +45,12 @@ def test_byte_col_to_char_col(line: str, needle: bytes) -> None:
     byte_offset = line.encode("utf-8").index(needle)
     char_offset = line.index(needle.decode())
     assert byte_col_to_char_col(line, byte_offset) == char_offset
+
+
+def test_fix_result_keeps_a_distinct_outcome_for_each_violation() -> None:
+    fix_result = FixResult((FixOutcome.APPLIED, FixOutcome.DECLINED, FixOutcome.FAILED))
+
+    assert fix_result.outcomes == (FixOutcome.APPLIED, FixOutcome.DECLINED, FixOutcome.FAILED)
 
 
 @pytest.mark.parametrize(
@@ -526,100 +526,10 @@ def test_atomic_write_text_aborts_when_disk_content_no_longer_decodes(tmp_path: 
     assert target.read_bytes() == b"x = \xff\xfe broken bytes\n"
 
 
-@pytest.mark.parametrize(
-    "fix_data",
-    [None, {"other_key": 1}],
-    ids=["no-fix-data", "existing-fix-data"],
-)
-def test_mark_fix_rejected(fix_data: dict[str, int] | None) -> None:
-    violation = ViolationFactory.build(fix_data=fix_data)
-    assert not is_fix_rejected(violation)
+def test_violation_stores_terminal_fix_outcome_separately_from_fix_data() -> None:
+    violation = ViolationFactory.build(fix_data={"other_key": 1})
 
-    mark_fix_rejected(violation)
+    violation.fix_outcome = FixOutcome.FAILED
 
-    assert is_fix_rejected(violation)
-    assert violation.fix_data is not None
-    if fix_data is not None:
-        assert violation.fix_data["other_key"] == 1
-
-
-def test_is_fix_rejected_false_when_only_marked_fixed() -> None:
-    violation = ViolationFactory.build(fix_data={"fixed": True})
-    assert not is_fix_rejected(violation)
-
-
-@pytest.mark.parametrize(
-    "fix_data",
-    [None, {"other_key": 1}],
-    ids=["no-fix-data", "existing-fix-data"],
-)
-def test_mark_fix_errored(fix_data: dict[str, int] | None) -> None:
-    violation = ViolationFactory.build(fix_data=fix_data)
-    assert not is_fix_errored(violation)
-
-    mark_fix_errored(violation)
-
-    assert is_fix_errored(violation)
-    assert violation.fix_data is not None
-    if fix_data is not None:
-        assert violation.fix_data["other_key"] == 1
-
-
-def test_is_fix_errored_false_when_only_marked_rejected() -> None:
-    # mark_fix_rejected() and mark_fix_errored() record distinct outcomes
-    # (fix() ran but produced invalid syntax, vs. fix() itself raised) —
-    # neither must be conflated with the other.
-    violation = ViolationFactory.build(fix_data={"fix_rejected": True})
-    assert not is_fix_errored(violation)
-
-
-@pytest.mark.parametrize(
-    "fix_data",
-    [None, {"other_key": 1}],
-    ids=["no-fix-data", "existing-fix-data"],
-)
-def test_mark_fix_failed(fix_data: dict[str, int] | None) -> None:
-    violation = ViolationFactory.build(fix_data=fix_data)
-    assert not is_fix_failed(violation)
-
-    mark_fix_failed(violation)
-
-    assert is_fix_failed(violation)
-    assert violation.fix_data is not None
-    if fix_data is not None:
-        assert violation.fix_data["other_key"] == 1
-
-
-def test_is_fix_failed_false_when_only_marked_errored() -> None:
-    # mark_fix_errored() (fix() itself raised — a bug) and mark_fix_failed()
-    # (fix() caught its own OSError and returned False — an environmental
-    # failure) record distinct outcomes; neither must be conflated with the
-    # other.
-    violation = ViolationFactory.build(fix_data={"fix_errored": True})
-    assert not is_fix_failed(violation)
-
-
-@pytest.mark.parametrize(
-    "fix_data",
-    [None, {"other_key": 1}],
-    ids=["no-fix-data", "existing-fix-data"],
-)
-def test_mark_fix_aborted(fix_data: dict[str, int] | None) -> None:
-    violation = ViolationFactory.build(fix_data=fix_data)
-    assert not is_fix_aborted(violation)
-
-    mark_fix_aborted(violation)
-
-    assert is_fix_aborted(violation)
-    assert violation.fix_data is not None
-    if fix_data is not None:
-        assert violation.fix_data["other_key"] == 1
-
-
-def test_is_fix_aborted_false_when_only_marked_failed() -> None:
-    # mark_fix_failed() (fix() caught its own OSError, e.g. disk full) and
-    # mark_fix_aborted() (atomic_write_text() detected the file changed on
-    # disk mid-fix) record distinct outcomes; neither must be conflated with
-    # the other.
-    violation = ViolationFactory.build(fix_data={"fix_failed": True})
-    assert not is_fix_aborted(violation)
+    assert violation.fix_outcome is FixOutcome.FAILED
+    assert violation.fix_data == {"other_key": 1}

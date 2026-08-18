@@ -76,9 +76,9 @@ def test_prefilter_pattern_matches_the_configured_levels_eligible_constructors(
     assert set(pattern) == expected  # pytriage: TR6
 
 
-def test_fix_never_applies_a_fix() -> None:
+def test_fix_always_declines() -> None:
     check = RedundantTypeConversionCheck()
-    assert check.fix(Path("test.py"), [], "x = 1\n", ast.parse("x = 1\n")) is False
+    assert check.fix(Path("test.py"), [], "x = 1\n", ast.parse("x = 1\n")).outcomes == ()
 
 
 def test_check_never_calls_get_session_when_the_file_has_no_real_candidate(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pre_commit_hooks.ast_checks._base import (
     BaseCheck,
+    FixResult,
     Violation,
     byte_col_to_char_col,
     find_ignored_lines_and_classify_comments,
@@ -173,5 +174,5 @@ class RedundantAssignmentCheck(BaseCheck):
         source: str,
         _tree: ast.Module,
         encoding: str = "utf-8",
-    ) -> bool:
+    ) -> FixResult:
         return apply_fixes(filepath, violations, source, encoding)

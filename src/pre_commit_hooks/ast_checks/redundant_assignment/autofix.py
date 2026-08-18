@@ -7,7 +7,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, TypedDict, cast
 
-from pre_commit_hooks.ast_checks._base import Violation, atomic_write_text, byte_col_to_char_col, mark_fix_failed
+from pre_commit_hooks.ast_checks._base import FixOutcome, FixResult, Violation, atomic_write_text, byte_col_to_char_col
 
 from .semantic import exceeds_line_length_when_inlined, is_safe_to_splice_into_fstring
 
@@ -43,7 +43,7 @@ def apply_fixes(
     violations: list[Violation],
     source: str,
     encoding: str = "utf-8",
-) -> bool:
+) -> FixResult:
     """A VERY conservative implementation that only fixes violations marked as
     fixable by strict semantic analysis. It only handles the simplest cases:
     - Not in loops or control flow
@@ -55,7 +55,7 @@ def apply_fixes(
     fixable_violations = [v for v in violations if v.fixable]
 
     if not fixable_violations:
-        return False
+        return FixResult.for_violations(violations, FixOutcome.DECLINED)
 
     source_lines = source.splitlines(keepends=True)
 
@@ -172,19 +172,21 @@ def apply_fixes(
         try:
             atomic_write_text(filepath, new_source, encoding, source)
         except OSError:
-            # Debug-only: mark_fix_failed() below already reports this
+            # Debug-only: the returned outcome already reports this
             # cleanly as [FIX FAILED] — an ERROR-level .exception() call
             # here would just leak a redundant raw traceback onto the
             # user's stderr by default (nothing in this codebase configures
             # logging, so Python's own lastResort handler prints WARNING+
             # straight to stderr).
             logger.debug("Failed to write %s", filepath, exc_info=True)
-            for v in applied_violations:
-                mark_fix_failed(v)
-            return False
-        return True
+            applied_ids = {id(violation) for violation in applied_violations}
+            return FixResult(
+                tuple(FixOutcome.FAILED if id(v) in applied_ids else FixOutcome.DECLINED for v in violations)
+            )
+        applied_ids = {id(violation) for violation in applied_violations}
+        return FixResult(tuple(FixOutcome.APPLIED if id(v) in applied_ids else FixOutcome.DECLINED for v in violations))
 
-    return False
+    return FixResult.for_violations(violations, FixOutcome.DECLINED)
 
 
 def _cleanup_blank_lines_around_removals(source_lines: list[str], removed_lines: set[int]) -> None:

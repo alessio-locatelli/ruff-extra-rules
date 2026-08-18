@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from pre_commit_hooks.ast_checks._base import is_fix_failed
+from pre_commit_hooks.ast_checks._base import FixOutcome
 from pre_commit_hooks.ast_checks.excessive_blank_lines import (
     ExcessiveBlankLinesCheck,
     fix_file_content,
@@ -109,7 +109,7 @@ def test_fix_ignores_stale_violation(source: str, tmp_path: Path) -> None:
     # rather than trusting it.
     stale_violation = ViolationFactory.build(check_id=check.check_id, error_code=check.error_code)
 
-    assert check.fix(test_file, [stale_violation], source, ast.parse(source)) is False
+    assert FixOutcome.APPLIED not in check.fix(test_file, [stale_violation], source, ast.parse(source)).outcomes
     assert test_file.read_text() == source
 
 
@@ -117,13 +117,13 @@ def test_fix_file_content_empty_source_returns_unchanged() -> None:
     assert fix_file_content("", ast.parse("")) == ""
 
 
-def test_fix_with_no_violations_returns_false(tmp_path: Path) -> None:
+def test_fix_with_no_violations_declines(tmp_path: Path) -> None:
     source = "x = 1\n"
     test_file = tmp_path / "module.py"
     test_file.write_text(source)
 
     check = ExcessiveBlankLinesCheck()
-    assert check.fix(test_file, [], source, ast.parse(source)) is False
+    assert FixOutcome.APPLIED not in check.fix(test_file, [], source, ast.parse(source)).outcomes
 
 
 def test_fix_leading_blank_lines_before_first_code_with_no_header(
@@ -136,11 +136,11 @@ def test_fix_leading_blank_lines_before_first_code_with_no_header(
 
     check = ExcessiveBlankLinesCheck()
     violations = check.check(test_file, tree, source)
-    assert check.fix(test_file, violations, source, tree)
+    assert FixOutcome.APPLIED in check.fix(test_file, violations, source, tree).outcomes
     assert test_file.read_text() == "\nimport os\n"
 
 
-def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_fix_write_failure_reports_failed_outcome(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     bad_source = (FIXTURES_DIR / "bad" / "header_spacing.py").read_text()
 
     # Point at a path inside a directory that doesn't exist so write_text()
@@ -151,16 +151,13 @@ def test_fix_write_failure_returns_false(tmp_path: Path, caplog: pytest.LogCaptu
     check = ExcessiveBlankLinesCheck()
     violations = check.check(test_file, tree, bad_source)
     with caplog.at_level("DEBUG"):
-        assert check.fix(test_file, violations, bad_source, tree) is False
+        fix_result = check.fix(test_file, violations, bad_source, tree)
+    assert FixOutcome.APPLIED not in fix_result.outcomes
     # The write failure must be attributed to the violations it
     # actually affected, not left indistinguishable from "never attempted"
     # — the orchestrator's own report otherwise misleadingly suggests
     # re-running --fix, which would just fail identically again.
-    assert all(is_fix_failed(v) for v in violations)
-    # mark_fix_failed() above already reports this cleanly; a raw traceback
-    # on stderr by default would just be redundant noise (ch. 7: "MUST NOT
-    # emit uncontrolled human-oriented text into a machine-readable output
-    # stream").
+    assert fix_result.outcomes == (FixOutcome.FAILED,) * len(violations)
     assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
@@ -174,6 +171,6 @@ def test_fix_collapses_header_blank_lines(tmp_path: Path) -> None:
     tree = ast.parse(bad_source)
     check = ExcessiveBlankLinesCheck()
     violations = check.check(test_file, tree, bad_source)
-    assert check.fix(test_file, violations, bad_source, tree)
+    assert FixOutcome.APPLIED in check.fix(test_file, violations, bad_source, tree).outcomes
 
     assert test_file.read_text() == good_source

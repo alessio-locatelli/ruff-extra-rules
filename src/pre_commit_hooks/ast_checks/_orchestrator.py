@@ -24,18 +24,10 @@ from ._base import (
     ASTCheck,
     CheckUnavailableError,
     ConcurrentModificationError,
+    FixOutcome,
+    FixResult,
     FixValidationError,
     Violation,
-    is_fix_aborted,
-    is_fix_errored,
-    is_fix_failed,
-    is_fix_rejected,
-    is_fixed,
-    mark_fix_aborted,
-    mark_fix_errored,
-    mark_fix_rejected,
-    mark_fixed,
-    mark_resolved_indirectly,
     read_source_with_encoding,
 )
 from ._per_file_ignores import PerFileIgnoreList
@@ -69,13 +61,16 @@ def _has_terminal_fix_state(violation: Violation) -> bool:
     outcome from a check's own per-violation `fix()` handling this run --
     i.e. the outcome is already decided and must never be second-guessed by
     a later, broader recheck (e.g. relabeled `[FIXED]` just because it's no
-    longer detected). Deliberately excludes `is_fixed()`: a fixed violation
+    longer detected). Deliberately excludes an applied outcome: a fixed violation
     is a normal, non-terminal-in-this-sense outcome each call site here
     already handles on its own.
     """
-    return (
-        is_fix_rejected(violation) or is_fix_errored(violation) or is_fix_failed(violation) or is_fix_aborted(violation)
-    )
+    return violation.fix_outcome in {
+        FixOutcome.REJECTED,
+        FixOutcome.ERRORED,
+        FixOutcome.FAILED,
+        FixOutcome.ABORTED,
+    }
 
 
 def _replace_check_violations(
@@ -125,8 +120,15 @@ def _record_indirect_resolutions(violations: list[Violation], initial_violations
         if missing <= 0:
             continue
         for violation in _unmatched_by_message(dropped, replacements)[:missing]:
-            mark_resolved_indirectly(violation)
+            violation.fix_outcome = FixOutcome.RESOLVED_INDIRECTLY
             violations.append(violation)
+
+
+def _set_fix_outcomes(violations: list[Violation], fix_result: FixResult) -> None:
+    if len(fix_result.outcomes) != len(violations):
+        raise ValueError("fix result did not include one outcome per violation")
+    for violation, outcome in zip(violations, fix_result.outcomes, strict=True):
+        violation.fix_outcome = outcome
 
 
 def _fingerprint_default(value: object) -> object:
@@ -487,7 +489,9 @@ class CheckOrchestrator:
         if cacheable_ids and not (incomplete_ids & cacheable_ids) and not self._fix_changed_file:
             # A violation marked fixed no longer exists in the file's
             # current content, so it must never be cached as still present.
-            cacheable_violations = [v for v in violations if v.check_id in cacheable_ids and not is_fixed(v)]
+            cacheable_violations = [
+                v for v in violations if v.check_id in cacheable_ids and v.fix_outcome is not FixOutcome.APPLIED
+            ]
             self._cache_violations(filepath, hook_name, cacheable_violations)
 
         return violations + extra_violations if extra_violations else violations
@@ -841,7 +845,7 @@ class CheckOrchestrator:
                     self.rule_failures.append((str(filepath), check.check_id))
                     for v in violations:
                         if v.check_id == check.check_id and v.fixable:
-                            mark_fix_errored(v)
+                            v.fix_outcome = FixOutcome.ERRORED
                     continue
                 current_source, encoding = read_result
                 current_tree = ast.parse(current_source, filename=filepath)
@@ -856,13 +860,13 @@ class CheckOrchestrator:
                     continue
 
                 try:
-                    check.fix(filepath, fresh_violations, current_source, current_tree, encoding)
+                    fix_result = check.fix(filepath, fresh_violations, current_source, current_tree, encoding)
                 except FixValidationError:
                     # atomic_write_text() refused to write — the file is
                     # untouched, so every violation this check just tried to
                     # fix is still exactly as it was. This is a bug in the
                     # check's fix logic, not an expected outcome. Debug-only
-                    # — mark_fix_rejected() below already reports this
+                    # — the returned outcome already reports this
                     # cleanly as [FIX REJECTED]; see _read_source's own
                     # docstring for why ERROR-level .exception() logging
                     # here would just be redundant noise.
@@ -872,15 +876,15 @@ class CheckOrchestrator:
                         filepath,
                         exc_info=True,
                     )
-                    for v in fresh_violations:
-                        mark_fix_rejected(v)
+                    fix_result = FixResult.for_violations(fresh_violations, FixOutcome.REJECTED)
+                    _set_fix_outcomes(fresh_violations, fix_result)
                 except ConcurrentModificationError:
                     # atomic_write_text() refused to write — the file is
                     # untouched, but this time it's not a bug in the check's
                     # fix logic: something else (an editor, a concurrent
                     # process outside this run's own per-file fix lock)
                     # modified the file after current_source was read above.
-                    # Debug-only — mark_fix_aborted() below already reports
+                    # Debug-only — the returned outcome already reports
                     # this cleanly as [FIX ABORTED]; see _read_source's own
                     # docstring for why ERROR-level .exception() logging here
                     # would just be redundant noise.
@@ -890,8 +894,8 @@ class CheckOrchestrator:
                         check.check_id,
                         exc_info=True,
                     )
-                    for v in fresh_violations:
-                        mark_fix_aborted(v)
+                    fix_result = FixResult.for_violations(fresh_violations, FixOutcome.ABORTED)
+                    _set_fix_outcomes(fresh_violations, fix_result)
                     # The external edit itself can shift line numbers too,
                     # same as a successful fix. See ADR-0042.
                     file_changed = True
@@ -913,9 +917,9 @@ class CheckOrchestrator:
                     # later one — re-check against the file's real state
                     # rather than assuming every violation in this batch is
                     # still broken, the same way the success path below
-                    # already must (a bool return isn't precise enough
+                    # already must (the returned outcomes are more precise
                     # either).
-                    # Debug-only — rule_failures/mark_fix_errored() below
+                    # Debug-only — rule_failures/the outcome assignment below
                     # already report this cleanly; see _read_source's own
                     # docstring for why ERROR-level .exception() logging
                     # here would just be redundant noise.
@@ -937,23 +941,22 @@ class CheckOrchestrator:
                         file_changed = True
                     for v in fresh_violations:
                         if (v.line, v.col, v.message) in still_present:
-                            mark_fix_errored(v)
-                        # else: already resolved (mark_fixed() already called
-                        # by the re-check above) before fix() raised.
+                            v.fix_outcome = FixOutcome.ERRORED
                 else:
-                    # A check's own bool return isn't precise enough to know
+                    # The reported outcome alone is not enough to know
                     # which violations were actually resolved: a
                     # per-violation guard (e.g. validate_function_name's
                     # should_autofix) can skip some violations while fixing
                     # others in the same call. Re-check against the file's
                     # real post-fix state instead of trusting the return
                     # value.
+                    _set_fix_outcomes(fresh_violations, fix_result)
                     still_present = self._mark_resolved_and_get_still_present(filepath, check, fresh_violations)
                     if len(still_present) < len(fresh_violations):
                         file_changed = True
                     # else: still present — either rejected (already marked
-                    # via mark_fix_rejected() inside a multi-write check's
-                    # own per-violation loop) or left alone by a
+                    # by the check's multi-write per-violation loop) or left
+                    # alone by a
                     # per-violation guard; either way, not fixed.
 
                 # fresh_violations replaces this check_id's stale entries
@@ -970,14 +973,14 @@ class CheckOrchestrator:
                 # check's violations keep their stale pre-fix snapshot and
                 # get reported as ordinary [FIXABLE], as if --fix had never
                 # even been attempted for them. Debug-only — rule_failures/
-                # mark_fix_errored() below already report this cleanly; see
+                # the outcome assignment below already report this cleanly; see
                 # _read_source's own docstring for why ERROR-level
                 # .exception() logging here would just be redundant noise.
                 logger.debug("Fix failed for %s on %s", check.check_id, filepath, exc_info=True)
                 self.rule_failures.append((str(filepath), check.check_id))
                 for v in violations:
                     if v.check_id == check.check_id and v.fixable:
-                        mark_fix_errored(v)
+                        v.fix_outcome = FixOutcome.ERRORED
 
         if file_changed:
             self._refresh_stale_positions(filepath, violations)
@@ -1044,7 +1047,7 @@ class CheckOrchestrator:
             if not check_entries or any(_has_terminal_fix_state(v) for v in check_entries):
                 continue
 
-            stale = [v for v in check_entries if not is_fixed(v)]
+            stale = [v for v in check_entries if v.fix_outcome is not FixOutcome.APPLIED]
             if not stale:
                 continue
 
@@ -1069,14 +1072,14 @@ class CheckOrchestrator:
         fresh_violations: list[Violation],
     ) -> set[ViolationKey]:
         """Re-check `filepath` against its actual current on-disk content
-        and call `mark_fixed()` on every violation in `fresh_violations`
+        and retain or assign an applied outcome for every violation in `fresh_violations`
         that's no longer present there — regardless of whether `check.fix()`
         returned normally or raised partway through. A check that writes
         more than once per `fix()` call (looping over violations
         individually, like `validate_function_name`) can have already
         committed some violations before a later one failed or raised;
         matching by `ViolationKey` against the file's real state, rather
-        than trusting a bool return or "fix() didn't raise", is what
+        than trusting the reported outcome alone, is what
         catches that.
 
         Returns the keys of `fresh_violations` still present, so a caller
@@ -1091,19 +1094,27 @@ class CheckOrchestrator:
         """
         post_read_result = self._read_source(filepath)
         if post_read_result is None:
+            for violation in fresh_violations:
+                if violation.fix_outcome is FixOutcome.APPLIED:
+                    violation.fix_outcome = FixOutcome.DECLINED
             return {(v.line, v.col, v.message) for v in fresh_violations}
 
         post_source, _post_encoding = post_read_result
         try:
             post_tree = ast.parse(post_source, filename=filepath)
         except SyntaxError:
+            for violation in fresh_violations:
+                if violation.fix_outcome is FixOutcome.APPLIED:
+                    violation.fix_outcome = FixOutcome.DECLINED
             return {(v.line, v.col, v.message) for v in fresh_violations}
         still_present: set[ViolationKey] = {
             (v.line, v.col, v.message) for v in check.check(filepath, post_tree, post_source) if v.fixable
         }
         for v in fresh_violations:
-            if (v.line, v.col, v.message) not in still_present and not _has_terminal_fix_state(v):
-                mark_fixed(v)
+            if (v.line, v.col, v.message) not in still_present and v.fix_outcome is None:
+                v.fix_outcome = FixOutcome.APPLIED
+            elif (v.line, v.col, v.message) in still_present and v.fix_outcome is FixOutcome.APPLIED:
+                v.fix_outcome = FixOutcome.DECLINED
         return still_present
 
 

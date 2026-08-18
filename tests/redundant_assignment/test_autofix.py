@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pre_commit_hooks.ast_checks._base import is_fix_failed
+from pre_commit_hooks.ast_checks._base import FixOutcome
 from pre_commit_hooks.ast_checks.redundant_assignment import RedundantAssignmentCheck
 from pre_commit_hooks.ast_checks.redundant_assignment.autofix import (
     _can_safely_inline,
@@ -60,7 +60,7 @@ def test_fix_method_with_fixable_violations(checked: CheckedFn, check: Redundant
     assert len(violations) >= 1
     assert any(v.fixable for v in violations)
 
-    assert check.fix(filepath, violations, source, tree) is True
+    assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
     fixed_content = filepath.read_text()
     assert "x = " not in fixed_content
@@ -80,7 +80,7 @@ def test_fix_two_assignments_used_on_the_same_line(checked: CheckedFn, check: Re
 """
     filepath, tree, violations = checked(source)
 
-    assert check.fix(filepath, violations, source, tree) is True
+    assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
     fixed_content = filepath.read_text()
     assert "x = " not in fixed_content
@@ -101,18 +101,18 @@ def test_fix_chained_assignment_where_use_line_is_another_assign_line(
 """
     filepath, tree, violations = checked(source)
 
-    assert check.fix(filepath, violations, source, tree) is True
+    assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
     fixed_content = filepath.read_text()
     assert "y = " not in fixed_content
     assert "return x" in fixed_content
 
 
-def test_fix_write_failure_returns_false(
+def test_fix_write_failure_reports_failed_outcome(
     tmp_path: Path, check: RedundantAssignmentCheck, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # apply_fixes() must catch atomic_write_text()'s OSError and return
-    # False, like every other check's fix(), instead of letting it
+    # apply_fixes() must catch atomic_write_text()'s OSError and return a
+    # failed outcome instead of letting it
     # propagate uncaught.
     source = """def func_scope():
     x = "foo"
@@ -126,16 +126,13 @@ def test_fix_write_failure_returns_false(
     violations = check.check(filepath, tree, source)
 
     with caplog.at_level("DEBUG"):
-        assert check.fix(filepath, violations, source, tree) is False
+        fix_result = check.fix(filepath, violations, source, tree)
+    assert FixOutcome.APPLIED not in fix_result.outcomes
     # The write failure must be attributed to the violations it
     # actually affected, not left indistinguishable from "never attempted"
     # — the orchestrator's own report otherwise misleadingly suggests
     # re-running --fix, which would just fail identically again.
-    assert all(is_fix_failed(v) for v in violations)
-    # mark_fix_failed() above already reports this cleanly; a raw traceback
-    # on stderr by default would just be redundant noise (ch. 7: "MUST NOT
-    # emit uncontrolled human-oriented text into a machine-readable output
-    # stream").
+    assert fix_result.outcomes == (FixOutcome.FAILED,) * len(violations)
     assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
@@ -209,7 +206,7 @@ def test_autofix_declines_fix_for_invalid_or_unsafe_fix_data(
     violation = ViolationFactory.build(
         check_id="redundant-assignment", error_code="TR5", fixable=True, fix_data=fix_data
     )
-    assert check.fix(write_source(source), [violation], source, ast.parse(source)) is False
+    assert FixOutcome.APPLIED not in check.fix(write_source(source), [violation], source, ast.parse(source)).outcomes
 
 
 def test_autofix_skips_multiline_rhs() -> None:
@@ -232,7 +229,7 @@ x = "foo"
 func(x=x)
 """
     violation = ViolationFactory.build(check_id="redundant-assignment", error_code="TR5", fixable=False, fix_data=None)
-    assert apply_fixes(Path("test.py"), [violation], source) is False
+    assert FixOutcome.APPLIED not in apply_fixes(Path("test.py"), [violation], source).outcomes
 
 
 @pytest.mark.parametrize(
@@ -319,7 +316,7 @@ def test_autofix_inlines_simple_redundant_assignment(
     filepath, tree, violations = checked(source)
 
     assert any(v.fixable for v in violations)
-    assert check.fix(filepath, violations, source, tree) is True
+    assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
     fixed_content = filepath.read_text()
     assert removed not in fixed_content
@@ -360,7 +357,7 @@ def test_autofix_respects_word_boundaries(
     filepath, tree, violations = checked(source)
 
     assert any(v.fixable for v in violations)
-    assert check.fix(filepath, violations, source, tree) is True
+    assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
     assert expected in filepath.read_text()
 
 
@@ -398,7 +395,7 @@ def test_zero_arg_call_immediate_single_use_is_fixable(checked: CheckedFn, check
     assert check_violations
     assert all(v.fixable for v in check_violations)
 
-    assert check.fix(filepath, violations, source, tree) is True
+    assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
     fixed_content = filepath.read_text()
     assert "check = " not in fixed_content
@@ -665,7 +662,7 @@ def test_autofix_splices_string_literal_into_fstring_field(checked: CheckedFn, c
     filepath, tree, violations = checked(source)
 
     assert any(v.fixable for v in violations)
-    assert check.fix(filepath, violations, source, tree) is True
+    assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
     fixed_content = filepath.read_text()
     assert "org = " not in fixed_content

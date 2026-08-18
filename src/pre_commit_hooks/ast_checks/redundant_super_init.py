@@ -13,7 +13,7 @@ import ast
 import logging
 from typing import TYPE_CHECKING
 
-from ._base import BaseCheck, Violation, find_ignored_lines, ignore_pattern_for
+from ._base import BaseCheck, FixOutcome, FixResult, Violation, find_ignored_lines, ignore_pattern_for
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -169,6 +169,6 @@ class RedundantSuperInitCheck(BaseCheck):
         _source: str,
         _tree: ast.Module,
         _encoding: str = "utf-8",
-    ) -> bool:
+    ) -> FixResult:
         """No autofix support."""
-        return False
+        return FixResult.for_violations(_violations, FixOutcome.DECLINED)

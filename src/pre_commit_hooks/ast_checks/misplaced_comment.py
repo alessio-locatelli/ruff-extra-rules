@@ -20,12 +20,13 @@ from typing import TYPE_CHECKING
 
 from ._base import (
     BaseCheck,
+    FixOutcome,
+    FixResult,
     Violation,
     atomic_write_text,
     ignore_pattern_for,
     ignored_lines_from_tokens,
     line_terminator,
-    mark_fix_failed,
     tokenize_source,
 )
 
@@ -193,15 +194,16 @@ class MisplacedCommentCheck(BaseCheck):
         source: str,
         tree: ast.Module,
         encoding: str = "utf-8",
-    ) -> bool:
+    ) -> FixResult:
         tokens = tuple(tokenize_source(source))
         found = _scan_misplaced_comments(tokens, tree)
         if not found:
-            return False
+            return FixResult.for_violations(violations, FixOutcome.DECLINED)
 
         ignored_lines = ignored_lines_from_tokens(tokens, IGNORE_PATTERN)
         lines = source.splitlines(keepends=True)
         fixed_any = False
+        fixed_lines: set[int] = set()
 
         for item in found:
             if item.bracket_line in ignored_lines:
@@ -230,20 +232,23 @@ class MisplacedCommentCheck(BaseCheck):
             bracket_terminator = line_terminator(lines[bracket_line_idx])
             lines[bracket_line_idx] = lines[bracket_line_idx][: item.comment_col].rstrip() + bracket_terminator
             fixed_any = True
+            fixed_lines.add(item.bracket_line)
 
         if fixed_any:
             try:
                 atomic_write_text(filepath, "".join(lines), encoding, source)
             except OSError:
-                # Debug-only: mark_fix_failed() below already reports this
+                # Debug-only: the returned outcome already reports this
                 # cleanly as [FIX FAILED] — an ERROR-level .exception() call
                 # here would just leak a redundant raw traceback onto the
                 # user's stderr by default (nothing in this codebase
                 # configures logging, so Python's own lastResort handler
                 # prints WARNING+ straight to stderr).
                 logger.debug("Failed to write %s", filepath, exc_info=True)
-                for v in violations:
-                    mark_fix_failed(v)
-                return False
+                return FixResult(
+                    tuple(FixOutcome.FAILED if v.line in fixed_lines else FixOutcome.DECLINED for v in violations)
+                )
 
-        return fixed_any
+        return FixResult(
+            tuple(FixOutcome.APPLIED if v.line in fixed_lines else FixOutcome.DECLINED for v in violations)
+        )
