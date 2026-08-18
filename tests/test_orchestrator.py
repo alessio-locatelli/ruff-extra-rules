@@ -743,6 +743,54 @@ def test_main_fix_preserves_class_bindings_from_method_defaults(tmp_path: Path) 
     )
 
 
+def test_main_fix_preserves_class_bindings_in_nested_class_headers_and_comprehension_iterables(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def outer(response):\n"
+        "    data: Payload = response.json()\n"
+        "\n"
+        "    class Container:\n"
+        "        data = int\n"
+        "\n"
+        "        class Nested(data):\n"
+        "            value = data\n"
+        "\n"
+        "        thunk = lambda: data\n"
+        "\n"
+        "        values = [data for _ in (data,)]\n"
+        "\n"
+        "    return Container.Nested.__bases__[0], Container.Nested.value, Container.thunk(), Container.values\n"
+    )
+
+    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+
+    assert filepath.read_text() == (
+        "def outer(response):\n"
+        "    payload: Payload = response.json()\n"
+        "\n"
+        "    class Container:\n"
+        "        data = int\n"
+        "\n"
+        "        class Nested(data):\n"
+        "            value = payload\n"
+        "\n"
+        "        thunk = lambda: payload\n"
+        "\n"
+        "        values = [payload for _ in (data,)]\n"
+        "\n"
+        "    return Container.Nested.__bases__[0], Container.Nested.value, Container.thunk(), Container.values\n"
+    )
+
+    namespace: dict[str, Any] = {}
+    exec(compile(filepath.read_text(), filepath, "exec"), namespace)  # noqa: S102
+
+    class Response:
+        def json(self) -> str:
+            return "payload"
+
+    assert namespace["outer"](Response()) == (int, "payload", "payload", ["payload"])
+
+
 def test_main_directory_argument_matches_explicit_file_argument_for_untracked_file(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
