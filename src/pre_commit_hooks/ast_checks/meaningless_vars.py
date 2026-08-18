@@ -525,7 +525,11 @@ def _iter_own_scope_descendants(
 
 
 def _collect_replacements(
-    node: ast.AST, replace_names: dict[VariableName, VariableName], *, has_future_annotations: bool
+    node: ast.AST,
+    replace_names: dict[VariableName, VariableName],
+    *,
+    outer_replace_names: dict[VariableName, VariableName] | None = None,
+    has_future_annotations: bool,
 ) -> list[tuple[int, int, VariableName, VariableName]]:
     """Find (line, col, old_name, new_name) for every `Name` node at or
     below `node` whose id is being replaced — including `node` itself
@@ -595,6 +599,9 @@ def _collect_replacements(
     so a same-named parameter is never matched here — only actual variable
     references are.
     """
+    if outer_replace_names is None:
+        outer_replace_names = replace_names
+
     if isinstance(node, ast.Name):
         if node.id in replace_names:
             return [(node.lineno, node.col_offset, node.id, replace_names[node.id])]
@@ -604,7 +611,12 @@ def _collect_replacements(
         replacements: list[tuple[int, int, VariableName, VariableName]] = []
         for outer_child in _outer_scope_children(node, has_future_annotations=has_future_annotations):
             replacements.extend(
-                _collect_replacements(outer_child, replace_names, has_future_annotations=has_future_annotations)
+                _collect_replacements(
+                    outer_child,
+                    replace_names,
+                    outer_replace_names=outer_replace_names,
+                    has_future_annotations=has_future_annotations,
+                )
             )
 
         if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.type_params:
@@ -612,7 +624,12 @@ def _collect_replacements(
             if bound_default_names:
                 for expr in _type_param_defaults_and_bounds(node.type_params):
                     replacements.extend(
-                        _collect_replacements(expr, bound_default_names, has_future_annotations=has_future_annotations)
+                        _collect_replacements(
+                            expr,
+                            bound_default_names,
+                            outer_replace_names=outer_replace_names,
+                            has_future_annotations=has_future_annotations,
+                        )
                     )
 
             if not has_future_annotations:
@@ -620,20 +637,35 @@ def _collect_replacements(
                 if annotation_names:
                     for expr in _signature_annotations(node.args):
                         replacements.extend(
-                            _collect_replacements(expr, annotation_names, has_future_annotations=has_future_annotations)
+                            _collect_replacements(
+                                expr,
+                                annotation_names,
+                                outer_replace_names=outer_replace_names,
+                                has_future_annotations=has_future_annotations,
+                            )
                         )
                     if node.returns is not None:
                         replacements.extend(
                             _collect_replacements(
-                                node.returns, annotation_names, has_future_annotations=has_future_annotations
+                                node.returns,
+                                annotation_names,
+                                outer_replace_names=outer_replace_names,
+                                has_future_annotations=has_future_annotations,
                             )
                         )
 
-        nested_names = {name: new for name, new in replace_names.items() if not _binds_name_in_nested_scope(node, name)}
+        nested_names = {
+            name: new for name, new in outer_replace_names.items() if not _binds_name_in_nested_scope(node, name)
+        }
         if nested_names:
             for own_child in _own_scope_children(node):
                 replacements.extend(
-                    _collect_replacements(own_child, nested_names, has_future_annotations=has_future_annotations)
+                    _collect_replacements(
+                        own_child,
+                        nested_names,
+                        outer_replace_names=nested_names,
+                        has_future_annotations=has_future_annotations,
+                    )
                 )
         return replacements
 
@@ -660,84 +692,65 @@ def _collect_replacements(
     if isinstance(node, ast.ClassDef):
         class_replacements: list[tuple[int, int, VariableName, VariableName]] = []
         class_names = class_scope_binding_names(node)
-        class_replace_names = {name: new for name, new in replace_names.items() if name not in class_names}
+        class_replace_names = {name: new for name, new in outer_replace_names.items() if name not in class_names}
         for decorator in node.decorator_list:
             class_replacements.extend(
-                _collect_replacements(decorator, replace_names, has_future_annotations=has_future_annotations)
+                _collect_replacements(
+                    decorator,
+                    replace_names,
+                    outer_replace_names=outer_replace_names,
+                    has_future_annotations=has_future_annotations,
+                )
             )
         header_names = _peer_filtered_replace_names(node.type_params, replace_names)
         for base in node.bases:
             class_replacements.extend(
-                _collect_replacements(base, header_names, has_future_annotations=has_future_annotations)
+                _collect_replacements(
+                    base,
+                    header_names,
+                    outer_replace_names=outer_replace_names,
+                    has_future_annotations=has_future_annotations,
+                )
             )
         for keyword in node.keywords:
             class_replacements.extend(
-                _collect_replacements(keyword.value, header_names, has_future_annotations=has_future_annotations)
+                _collect_replacements(
+                    keyword.value,
+                    header_names,
+                    outer_replace_names=outer_replace_names,
+                    has_future_annotations=has_future_annotations,
+                )
             )
         for expression in _type_param_defaults_and_bounds(node.type_params):
             class_replacements.extend(
-                _collect_replacements(expression, header_names, has_future_annotations=has_future_annotations)
+                _collect_replacements(
+                    expression,
+                    header_names,
+                    outer_replace_names=outer_replace_names,
+                    has_future_annotations=has_future_annotations,
+                )
             )
         for child in node.body:
-            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
-                class_replacements.extend(
-                    _collect_class_function_replacements(
-                        child,
-                        replace_names,
-                        class_replace_names,
-                        has_future_annotations=has_future_annotations,
-                    )
+            class_replacements.extend(
+                _collect_replacements(
+                    child,
+                    class_replace_names,
+                    outer_replace_names=outer_replace_names,
+                    has_future_annotations=has_future_annotations,
                 )
-            elif isinstance(child, (*_CROSSABLE_SCOPE_NODES, ast.ClassDef)):
-                class_replacements.extend(
-                    _collect_replacements(child, replace_names, has_future_annotations=has_future_annotations)
-                )
-            else:
-                class_replacements.extend(
-                    _collect_replacements(child, class_replace_names, has_future_annotations=has_future_annotations)
-                )
+            )
         return class_replacements
 
     return [
         replacement
         for child in ast.iter_child_nodes(node)
-        for replacement in _collect_replacements(child, replace_names, has_future_annotations=has_future_annotations)
+        for replacement in _collect_replacements(
+            child,
+            replace_names,
+            outer_replace_names=outer_replace_names,
+            has_future_annotations=has_future_annotations,
+        )
     ]
-
-
-def _collect_class_function_replacements(
-    node: ast.FunctionDef | ast.AsyncFunctionDef,
-    replace_names: dict[VariableName, VariableName],
-    class_replace_names: dict[VariableName, VariableName],
-    *,
-    has_future_annotations: bool,
-) -> list[tuple[int, int, VariableName, VariableName]]:
-    replacements: list[tuple[int, int, VariableName, VariableName]] = []
-    for outer_child in _outer_scope_children(node, has_future_annotations=has_future_annotations):
-        replacements.extend(
-            _collect_replacements(outer_child, class_replace_names, has_future_annotations=has_future_annotations)
-        )
-    if node.type_params:
-        type_param_names = _peer_filtered_replace_names(node.type_params, class_replace_names)
-        for expression in _type_param_defaults_and_bounds(node.type_params):
-            replacements.extend(
-                _collect_replacements(expression, type_param_names, has_future_annotations=has_future_annotations)
-            )
-        if not has_future_annotations:
-            for expression in _signature_annotations(node.args):
-                replacements.extend(
-                    _collect_replacements(expression, type_param_names, has_future_annotations=has_future_annotations)
-                )
-            if node.returns is not None:
-                replacements.extend(
-                    _collect_replacements(node.returns, type_param_names, has_future_annotations=has_future_annotations)
-                )
-    nested_names = {name: new for name, new in replace_names.items() if not _binds_name_in_nested_scope(node, name)}
-    for own_child in _own_scope_children(node):
-        replacements.extend(
-            _collect_replacements(own_child, nested_names, has_future_annotations=has_future_annotations)
-        )
-    return replacements
 
 
 def _collect_scope_replacements(
