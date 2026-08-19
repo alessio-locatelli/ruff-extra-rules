@@ -59,6 +59,7 @@ class ScopeInfo:
     has_reflection: bool = False
     reachable_names: set[str] | None = None
     bound_names: set[str] | None = None
+    descendant_declared_names: set[str] | None = None
     class_global_or_nonlocal: set[str] = field(default_factory=set)
     mongodb_collection_attributes: frozenset[str] = frozenset()
 
@@ -601,12 +602,18 @@ def _eligible(assignment: Assignment) -> bool:
 
 
 def _declared_in_descendant(scope: ScopeInfo, name: str) -> bool:
-    return any(
-        name in child.global_or_nonlocal
-        or name in child.class_global_or_nonlocal
-        or _declared_in_descendant(child, name)
-        for child in scope.children
-    )
+    return name in _descendant_declared_names(scope)
+
+
+def _descendant_declared_names(scope: ScopeInfo) -> set[str]:
+    if scope.descendant_declared_names is None:
+        scope.descendant_declared_names = set().union(
+            *(
+                child.global_or_nonlocal | child.class_global_or_nonlocal | _descendant_declared_names(child)
+                for child in scope.children
+            )
+        )
+    return scope.descendant_declared_names
 
 
 def _remove_collisions(
