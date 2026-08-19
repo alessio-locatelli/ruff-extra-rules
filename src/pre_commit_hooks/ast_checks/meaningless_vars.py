@@ -691,54 +691,32 @@ def _collect_replacements(
 
     if isinstance(node, ast.ClassDef):
         class_replacements: list[tuple[int, int, VariableName, VariableName]] = []
+
+        def collect(target: ast.AST, replacements: dict[VariableName, VariableName]) -> None:
+            class_replacements.extend(
+                _collect_replacements(
+                    target,
+                    replacements,
+                    outer_replace_names=outer_replace_names,
+                    has_future_annotations=has_future_annotations,
+                )
+            )
+
         class_names = class_scope_binding_names(node)
         class_replace_names = {name: new for name, new in outer_replace_names.items() if name not in class_names}
-        for decorator in node.decorator_list:
-            class_replacements.extend(
-                _collect_replacements(
-                    decorator,
-                    replace_names,
-                    outer_replace_names=outer_replace_names,
-                    has_future_annotations=has_future_annotations,
-                )
-            )
+        if replace_names:
+            for decorator in node.decorator_list:
+                collect(decorator, replace_names)
         header_names = _peer_filtered_replace_names(node.type_params, replace_names)
-        for base in node.bases:
-            class_replacements.extend(
-                _collect_replacements(
-                    base,
-                    header_names,
-                    outer_replace_names=outer_replace_names,
-                    has_future_annotations=has_future_annotations,
-                )
-            )
-        for keyword in node.keywords:
-            class_replacements.extend(
-                _collect_replacements(
-                    keyword.value,
-                    header_names,
-                    outer_replace_names=outer_replace_names,
-                    has_future_annotations=has_future_annotations,
-                )
-            )
-        for expression in _type_param_defaults_and_bounds(node.type_params):
-            class_replacements.extend(
-                _collect_replacements(
-                    expression,
-                    header_names,
-                    outer_replace_names=outer_replace_names,
-                    has_future_annotations=has_future_annotations,
-                )
-            )
+        if header_names:
+            for base in node.bases:
+                collect(base, header_names)
+            for keyword in node.keywords:
+                collect(keyword.value, header_names)
+            for expression in _type_param_defaults_and_bounds(node.type_params):
+                collect(expression, header_names)
         for child in node.body:
-            class_replacements.extend(
-                _collect_replacements(
-                    child,
-                    class_replace_names,
-                    outer_replace_names=outer_replace_names,
-                    has_future_annotations=has_future_annotations,
-                )
-            )
+            collect(child, class_replace_names)
         return class_replacements
 
     return [

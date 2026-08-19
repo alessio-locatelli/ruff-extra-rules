@@ -655,93 +655,83 @@ def test_main_fix_assigns_distinct_names_to_reverse_order_nested_closures(tmp_pa
     )
 
 
-def test_main_fix_preserves_class_bindings_in_generic_method_annotations(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            "def outer(response):\n"
+            "    data: Payload = response.json()\n"
+            "\n"
+            "    class Container:\n"
+            "        data = int\n"
+            "\n"
+            "        def method[T: data](self, value: data) -> data:\n"
+            "            return data\n"
+            "\n"
+            "    return Container\n",
+            "def outer(response):\n"
+            "    payload: Payload = response.json()\n"
+            "\n"
+            "    class Container:\n"
+            "        data = int\n"
+            "\n"
+            "        def method[T: data](self, value: data) -> data:\n"
+            "            return payload\n"
+            "\n"
+            "    return Container\n",
+            id="generic-method-annotations",
+        ),
+        pytest.param(
+            "def outer(response):\n"
+            "    data: Payload = response.json()\n"
+            "\n"
+            "    class Container:\n"
+            "        thunk = lambda: (data := 'lambda value')\n"
+            "        captured = data\n"
+            "\n"
+            "    return Container.captured\n",
+            "def outer(response):\n"
+            "    payload: Payload = response.json()\n"
+            "\n"
+            "    class Container:\n"
+            "        thunk = lambda: (data := 'lambda value')\n"
+            "        captured = payload\n"
+            "\n"
+            "    return Container.captured\n",
+            id="lambda-local-binding",
+        ),
+        pytest.param(
+            "def outer(response):\n"
+            "    data: Payload = response.json()\n"
+            "\n"
+            "    class Container:\n"
+            "        def method(value=(data := 'class value')):\n"
+            "            return value\n"
+            "\n"
+            "        captured = data\n"
+            "\n"
+            "    return Container.data, Container.captured\n",
+            "def outer(response):\n"
+            "    payload: Payload = response.json()\n"
+            "\n"
+            "    class Container:\n"
+            "        def method(value=(data := 'class value')):\n"
+            "            return value\n"
+            "\n"
+            "        captured = data\n"
+            "\n"
+            "    return Container.data, Container.captured\n",
+            id="method-default-binding",
+        ),
+    ],
+)
+def test_main_fix_preserves_class_bindings(tmp_path: Path, source: str, expected: str) -> None:
     filepath = tmp_path / "module.py"
-    filepath.write_text(
-        "def outer(response):\n"
-        "    data: Payload = response.json()\n"
-        "\n"
-        "    class Container:\n"
-        "        data = int\n"
-        "\n"
-        "        def method[T: data](self, value: data) -> data:\n"
-        "            return data\n"
-        "\n"
-        "    return Container\n"
-    )
+    filepath.write_text(source)
 
     assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
 
-    assert filepath.read_text() == (
-        "def outer(response):\n"
-        "    payload: Payload = response.json()\n"
-        "\n"
-        "    class Container:\n"
-        "        data = int\n"
-        "\n"
-        "        def method[T: data](self, value: data) -> data:\n"
-        "            return payload\n"
-        "\n"
-        "    return Container\n"
-    )
-
-
-def test_main_fix_preserves_lambda_local_bindings_in_class_bodies(tmp_path: Path) -> None:
-    filepath = tmp_path / "module.py"
-    filepath.write_text(
-        "def outer(response):\n"
-        "    data: Payload = response.json()\n"
-        "\n"
-        "    class Container:\n"
-        "        thunk = lambda: (data := 'lambda value')\n"
-        "        captured = data\n"
-        "\n"
-        "    return Container.captured\n"
-    )
-
-    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
-
-    assert filepath.read_text() == (
-        "def outer(response):\n"
-        "    payload: Payload = response.json()\n"
-        "\n"
-        "    class Container:\n"
-        "        thunk = lambda: (data := 'lambda value')\n"
-        "        captured = payload\n"
-        "\n"
-        "    return Container.captured\n"
-    )
-
-
-def test_main_fix_preserves_class_bindings_from_method_defaults(tmp_path: Path) -> None:
-    filepath = tmp_path / "module.py"
-    filepath.write_text(
-        "def outer(response):\n"
-        "    data: Payload = response.json()\n"
-        "\n"
-        "    class Container:\n"
-        "        def method(value=(data := 'class value')):\n"
-        "            return value\n"
-        "\n"
-        "        captured = data\n"
-        "\n"
-        "    return Container.data, Container.captured\n"
-    )
-
-    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
-
-    assert filepath.read_text() == (
-        "def outer(response):\n"
-        "    payload: Payload = response.json()\n"
-        "\n"
-        "    class Container:\n"
-        "        def method(value=(data := 'class value')):\n"
-        "            return value\n"
-        "\n"
-        "        captured = data\n"
-        "\n"
-        "    return Container.data, Container.captured\n"
-    )
+    assert filepath.read_text() == expected
 
 
 def test_main_fix_preserves_class_bindings_in_nested_class_headers_and_comprehension_iterables(tmp_path: Path) -> None:
