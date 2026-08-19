@@ -58,6 +58,8 @@ if TYPE_CHECKING:
 
 
 class _Response:
+    __slots__ = ()
+
     def json(self) -> str:
         return "payload"
 
