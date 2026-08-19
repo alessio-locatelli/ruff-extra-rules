@@ -128,6 +128,8 @@ def test_class_scope_binding_names_excludes_nested_scopes_and_comprehensions() -
     node = ast.parse(
         "class Container:\n"
         "    value = 1\n"
+        "    (class_walrus := 1)\n"
+        "    type ClassAlias = int\n"
         "    def method():\n"
         "        pass\n"
         "    def defaulted(value=(default_value := 1)):\n"
@@ -191,6 +193,8 @@ def test_class_scope_binding_names_excludes_nested_scopes_and_comprehensions() -
 
     assert class_scope_binding_names(node) == {
         "value",
+        "class_walrus",
+        "ClassAlias",
         "method",
         "defaulted",
         "default_value",

@@ -25,7 +25,7 @@ from ._base import (
     split_lines_like_ast,
 )
 from ._options import EnumOption
-from ._scope import class_scope_binding_names, iter_within_scope_from
+from ._scope import class_scope_binding_names, iter_binding_names, iter_within_scope_from
 from .meaningless_vars_suggestions import Confidence, plan_suggestions
 
 if TYPE_CHECKING:
@@ -263,24 +263,7 @@ def _binds_name_in_nested_scope(scope_node: ast.AST, name: VariableName) -> bool
         for child in _iter_own_scope_descendants(scope_node):
             if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and child.name == name:
                 return True
-            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store | ast.Del) and child.id == name:
-                return True
-            # A dotted `import a.b.c` (no `as`) binds only the first
-            # component ("a") in the local namespace — alias.name is the
-            # full dotted path "a.b.c", which never equals a bare `name`.
-            # ImportFrom aliases never contain a dot (`from x import y`
-            # only ever binds "y"/its "as" alias), so no split is needed.
-            if isinstance(child, ast.Import) and any(
-                (alias.asname or alias.name.split(".")[0]) == name for alias in child.names
-            ):
-                return True
-            if isinstance(child, ast.ImportFrom) and any((alias.asname or alias.name) == name for alias in child.names):
-                return True
-            if isinstance(child, ast.ExceptHandler) and child.name == name:
-                return True
-            if isinstance(child, ast.MatchAs | ast.MatchStar) and child.name == name:
-                return True
-            if isinstance(child, ast.MatchMapping) and child.rest == name:
+            if name in iter_binding_names(child):
                 return True
         return False
 
