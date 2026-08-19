@@ -584,6 +584,7 @@ def test_ambiguous_semantics_do_not_produce_names(source: str) -> None:
         "def f():\n    data: Payload = get_payload()\n    data = get_payload()\n",
         "def f():\n    data: Payload = get_payload()\n    del data\n",
         "def f():\n    data: Payload = get_payload()\n    def nested():\n        nonlocal data\n        return data\n",
+        "def f():\n    data: Payload = get_payload()\n    payload()\n",
         "data: Payload = get_payload()\n",
     ],
 )
