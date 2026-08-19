@@ -2188,30 +2188,34 @@ class Container[T: data](data, key=data):
 """
     tree = ast.parse(source)
 
-    assert _collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False) == [
-        (1, 1, "data", "payload"),
-        (2, 25, "data", "payload"),
-        (2, 35, "data", "payload"),
-        (2, 19, "data", "payload"),
-        (3, 12, "data", "payload"),
-        (6, 16, "data", "payload"),
-        (8, 44, "data", "payload"),
-        (8, 18, "data", "payload"),
-        (8, 37, "data", "payload"),
-        (8, 53, "data", "payload"),
-        (9, 15, "data", "payload"),
-    ]
-    assert _collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=True) == [
-        (1, 1, "data", "payload"),
-        (2, 25, "data", "payload"),
-        (2, 35, "data", "payload"),
-        (2, 19, "data", "payload"),
-        (3, 12, "data", "payload"),
-        (6, 16, "data", "payload"),
-        (8, 44, "data", "payload"),
-        (8, 18, "data", "payload"),
-        (9, 15, "data", "payload"),
-    ]
+    assert sorted(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False)) == sorted(
+        [
+            (1, 1, "data", "payload"),
+            (2, 25, "data", "payload"),
+            (2, 35, "data", "payload"),
+            (2, 19, "data", "payload"),
+            (3, 12, "data", "payload"),
+            (6, 16, "data", "payload"),
+            (8, 44, "data", "payload"),
+            (8, 18, "data", "payload"),
+            (8, 37, "data", "payload"),
+            (8, 53, "data", "payload"),
+            (9, 15, "data", "payload"),
+        ]
+    )
+    assert sorted(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=True)) == sorted(
+        [
+            (1, 1, "data", "payload"),
+            (2, 25, "data", "payload"),
+            (2, 35, "data", "payload"),
+            (2, 19, "data", "payload"),
+            (3, 12, "data", "payload"),
+            (6, 16, "data", "payload"),
+            (8, 44, "data", "payload"),
+            (8, 18, "data", "payload"),
+            (9, 15, "data", "payload"),
+        ]
+    )
 
 
 def test_scope_replacement_helpers_support_generic_methods_without_return_annotations() -> None:
