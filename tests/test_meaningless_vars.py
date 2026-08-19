@@ -2186,7 +2186,18 @@ def test_scope_replacement_helpers_support_class_bodies_and_modules() -> None:
     ) == [(1, 0, "data", "payload")]
 
 
-def test_scope_replacement_helpers_support_generic_class_headers_and_methods() -> None:
+@pytest.mark.parametrize(
+    ("has_future_annotations", "annotation_replacements"),
+    [
+        (False, [(8, 37, "data", "payload"), (8, 53, "data", "payload")]),
+        (True, []),
+    ],
+    ids=["eager-annotations", "deferred-annotations"],
+)
+def test_scope_replacement_helpers_support_generic_class_headers_and_methods(
+    has_future_annotations: bool,
+    annotation_replacements: list[tuple[int, int, str, str]],
+) -> None:
     source = """@data
 class Container[T: data](data, key=data):
     value = data
@@ -2197,36 +2208,27 @@ class Container[T: data](data, key=data):
     def method[V: data](self, value: data = data) -> data:
         return data
 """
-    tree = ast.parse(source)
 
-    assert sorted(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False)) == sorted(
-        [
-            (1, 1, "data", "payload"),
-            (2, 25, "data", "payload"),
-            (2, 35, "data", "payload"),
-            (2, 19, "data", "payload"),
-            (3, 12, "data", "payload"),
-            (6, 16, "data", "payload"),
-            (8, 44, "data", "payload"),
-            (8, 18, "data", "payload"),
-            (8, 37, "data", "payload"),
-            (8, 53, "data", "payload"),
-            (9, 15, "data", "payload"),
-        ]
-    )
-    assert sorted(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=True)) == sorted(
-        [
-            (1, 1, "data", "payload"),
-            (2, 25, "data", "payload"),
-            (2, 35, "data", "payload"),
-            (2, 19, "data", "payload"),
-            (3, 12, "data", "payload"),
-            (6, 16, "data", "payload"),
-            (8, 44, "data", "payload"),
-            (8, 18, "data", "payload"),
-            (9, 15, "data", "payload"),
-        ]
-    )
+    expected = [
+        (1, 1, "data", "payload"),
+        (2, 25, "data", "payload"),
+        (2, 35, "data", "payload"),
+        (2, 19, "data", "payload"),
+        (3, 12, "data", "payload"),
+        (6, 16, "data", "payload"),
+        (8, 44, "data", "payload"),
+        (8, 18, "data", "payload"),
+        (9, 15, "data", "payload"),
+        *annotation_replacements,
+    ]
+
+    assert sorted(
+        _collect_replacements(
+            ast.parse(source).body[0],
+            {"data": "payload"},
+            has_future_annotations=has_future_annotations,
+        )
+    ) == sorted(expected)
 
 
 def test_scope_replacement_helpers_support_generic_methods_without_return_annotations() -> None:
