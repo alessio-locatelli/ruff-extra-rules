@@ -10,6 +10,7 @@ from pre_commit_hooks.ast_checks.meaningless_vars_suggestions.analysis import (
     RenameProposal,
     _annotation_constraints,
     _annotation_name,
+    _bound_names,
     _comprehension_name,
     _Index,
     _is_command_shape,
@@ -583,12 +584,62 @@ def test_ambiguous_semantics_do_not_produce_names(source: str) -> None:
         "def f():\n    data: Payload = get_payload()\n    data = get_payload()\n",
         "def f():\n    data: Payload = get_payload()\n    del data\n",
         "def f():\n    data: Payload = get_payload()\n    def nested():\n        nonlocal data\n        return data\n",
-        "def f(payload):\n    data: Payload = get_payload()\n    return data\n",
         "data: Payload = get_payload()\n",
     ],
 )
 def test_unsafe_bindings_collisions_and_module_scope_do_not_produce_names(source: str) -> None:
     _assert_plan_for(source, "data", None, None)
+
+
+def test_name_collision_with_parameter_uses_suffix() -> None:
+    _assert_plan_for(
+        "def f(payload):\n    data: Payload = get_payload()\n    return data\n",
+        "data",
+        "payload_2",
+        Confidence.AUTO_FIX,
+    )
+
+
+def test_bound_names_include_every_supported_binding_form() -> None:
+    source = """def outer(nonlocal_name):
+    global global_name
+    import package.payload as imported
+    from package import imported_from
+    try:
+        pass
+    except RuntimeError as caught:
+        pass
+    try:
+        pass
+    except ValueError:
+        pass
+    match value:
+        case {"key": captured, **rest}:
+            pass
+        case [*starred]:
+            pass
+    def generic[T]():
+        pass
+    def inner():
+        nonlocal nonlocal_name
+"""
+    root = _Index(ast.parse(source)).root
+
+    names = _bound_names(root)
+
+    assert {
+        "nonlocal_name",
+        "global_name",
+        "imported",
+        "imported_from",
+        "caught",
+        "captured",
+        "rest",
+        "starred",
+        "generic",
+        "T",
+    } <= names
+    assert _bound_names(root) is names
 
 
 def test_class_body_reference_produces_a_name() -> None:

@@ -4,7 +4,7 @@ import ast
 import tempfile
 import typing
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -16,6 +16,9 @@ from pre_commit_hooks.ast_checks.meaningless_vars import (
     _collect_scope_replacements,
     _function_name_describes_parameter,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 @pytest.mark.parametrize(
@@ -496,7 +499,7 @@ def test_model_validator_decorator_skips_arg_check() -> None:
     assert len(violations) == 1
 
 
-def test_name_collision_suppresses_suggestion() -> None:
+def test_name_collision_suffixes_suggestion() -> None:
     source = """def process():
     response = 1
     response_2 = 2
@@ -513,9 +516,9 @@ def test_name_collision_suppresses_suggestion() -> None:
         )
 
         assert len(violations) == 1
-        assert not violations[0].fixable
+        assert violations[0].fixable
         assert violations[0].fix_data is not None
-        assert violations[0].fix_data["suggestion"] is None
+        assert violations[0].fix_data["suggestion"] == "response_3"
 
 
 def test_tokenize_error_handling() -> None:
@@ -1349,7 +1352,27 @@ def reader():
     assert fixed_content == source
 
 
-def test_autofix_assigns_distinct_names_to_cross_scope_suggestions() -> None:
+@pytest.fixture
+def autofix_meaningless_vars(tmp_path: Path) -> Callable[[str], str]:
+    def apply(source: str) -> str:
+        filepath = tmp_path / "test.py"
+        filepath.write_text(source)
+
+        tree = ast.parse(source)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        violations = check.check(filepath, tree, source)
+        outcomes = check.fix(filepath, violations, source, tree).outcomes
+
+        assert all(outcome is FixOutcome.APPLIED for outcome in outcomes)
+
+        return filepath.read_text()
+
+    return apply
+
+
+def test_autofix_assigns_distinct_names_to_cross_scope_suggestions(
+    autofix_meaningless_vars: Callable[[str], str],
+) -> None:
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1359,27 +1382,16 @@ def test_autofix_assigns_distinct_names_to_cross_scope_suggestions() -> None:
 
     return inner(response)
 """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.py"
-        filepath.write_text(source)
-
-        tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
-        violations = check.check(filepath, tree, source)
-        assert all(outcome is FixOutcome.APPLIED for outcome in check.fix(filepath, violations, source, tree).outcomes)
-
-        fixed_content = filepath.read_text()
+    fixed_content = autofix_meaningless_vars(source)
 
     assert "payload: Payload = response.json()" in fixed_content
     assert "payload_2: Payload = response2.json()" in fixed_content
     assert "return payload, payload_2" in fixed_content
 
 
-def test_autofix_avoids_suggestion_colliding_with_existing_nested_name() -> None:
-    # _get_scope_names() walks the *entire* subtree (not just the
-    # immediate scope) so a suggestion also avoids an already-existing
-    # identifier that lives in a nested scope, not just a colliding future
-    # suggestion.
+def test_autofix_suffixes_suggestion_colliding_with_existing_nested_name(
+    autofix_meaningless_vars: Callable[[str], str],
+) -> None:
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1389,25 +1401,15 @@ def test_autofix_avoids_suggestion_colliding_with_existing_nested_name() -> None
 
     return inner()
 """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.py"
-        filepath.write_text(source)
+    fixed_content = autofix_meaningless_vars(source)
 
-        tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
-        violations = check.check(filepath, tree, source)
-        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
-
-        fixed_content = filepath.read_text()
-
-    assert fixed_content == source
+    assert "payload_2: Payload = response.json()" in fixed_content
+    assert "return payload, payload_2" in fixed_content
 
 
-def test_autofix_avoids_suggestion_colliding_with_nested_parameter_name() -> None:
-    # _get_scope_names() must also see *parameter* names (never
-    # `ast.Name` nodes), not just already-bound locals, or a suggestion can
-    # collide with a nested function's own parameter and silently rebind a
-    # closure read to that parameter instead of the renamed outer variable.
+def test_autofix_suffixes_suggestion_colliding_with_nested_parameter_name(
+    autofix_meaningless_vars: Callable[[str], str],
+) -> None:
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1416,28 +1418,15 @@ def test_autofix_avoids_suggestion_colliding_with_nested_parameter_name() -> Non
 
     return inner(5)
 """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.py"
-        filepath.write_text(source)
+    fixed_content = autofix_meaningless_vars(source)
 
-        tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
-        violations = check.check(filepath, tree, source)
-        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
-
-        fixed_content = filepath.read_text()
-
-    assert fixed_content == source
+    assert "payload_2: Payload = response.json()" in fixed_content
+    assert "return payload_2" in fixed_content
 
 
-def test_autofix_avoids_suggestion_colliding_with_nested_global_declaration() -> None:
-    # A name declared `global`/`nonlocal` in a nested scope is
-    # stored as a plain string (`ast.Global.names`), never an `ast.Name`
-    # node, so `_get_scope_names()` must still see it as reserved. A
-    # suggestion equal to such a name would otherwise turn what was a
-    # closure read into a lookup of the unrelated global/nonlocal binding
-    # instead, once the closure-following rename reached that nested
-    # scope.
+def test_autofix_suffixes_suggestion_colliding_with_nested_global_declaration(
+    autofix_meaningless_vars: Callable[[str], str],
+) -> None:
     source = """payload = "module-level unrelated value"
 
 def outer(response):
@@ -1449,18 +1438,10 @@ def outer(response):
 
     return inner()
 """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.py"
-        filepath.write_text(source)
+    fixed_content = autofix_meaningless_vars(source)
 
-        tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
-        violations = check.check(filepath, tree, source)
-        assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
-
-        fixed_content = filepath.read_text()
-
-    assert fixed_content == source
+    assert "payload_2: Payload = response.json()" in fixed_content
+    assert "return payload_2" in fixed_content
 
 
 def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_scope() -> None:
