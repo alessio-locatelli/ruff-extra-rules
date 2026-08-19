@@ -1526,7 +1526,9 @@ def test_autofix_follows_closure_through_scope_that_itself_contains_a_shadowing_
     assert module_namespace["outer"](FakeResponse()) == ("closure value", "unrelated local")
 
 
-def test_autofix_assigns_outer_name_first_when_nested_closure_precedes_assignment() -> None:
+def test_autofix_assigns_outer_name_first_when_nested_closure_precedes_assignment(
+    autofix_meaningless_vars: Callable[[str], str],
+) -> None:
     source = """def outer(response, response2):
     def inner():
         result: Payload = response2.json()
@@ -1535,16 +1537,7 @@ def test_autofix_assigns_outer_name_first_when_nested_closure_precedes_assignmen
     data: Payload = response.json()
     return inner()
 """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.py"
-        filepath.write_text(source)
-
-        tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
-        violations = check.check(filepath, tree, source)
-        assert all(outcome is FixOutcome.APPLIED for outcome in check.fix(filepath, violations, source, tree).outcomes)
-
-        fixed_content = filepath.read_text()
+    fixed_content = autofix_meaningless_vars(source)
 
     assert "payload_2: Payload = response2.json()" in fixed_content
     assert "return payload, payload_2" in fixed_content
@@ -2195,14 +2188,40 @@ class Container[T: data](data, key=data):
 """
     tree = ast.parse(source)
 
-    assert len(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False)) == 11
-    assert len(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=True)) == 9
+    assert _collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False) == [
+        (1, 1, "data", "payload"),
+        (2, 25, "data", "payload"),
+        (2, 35, "data", "payload"),
+        (2, 19, "data", "payload"),
+        (3, 12, "data", "payload"),
+        (6, 16, "data", "payload"),
+        (8, 44, "data", "payload"),
+        (8, 18, "data", "payload"),
+        (8, 37, "data", "payload"),
+        (8, 53, "data", "payload"),
+        (9, 15, "data", "payload"),
+    ]
+    assert _collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=True) == [
+        (1, 1, "data", "payload"),
+        (2, 25, "data", "payload"),
+        (2, 35, "data", "payload"),
+        (2, 19, "data", "payload"),
+        (3, 12, "data", "payload"),
+        (6, 16, "data", "payload"),
+        (8, 44, "data", "payload"),
+        (8, 18, "data", "payload"),
+        (9, 15, "data", "payload"),
+    ]
 
 
 def test_scope_replacement_helpers_support_generic_methods_without_return_annotations() -> None:
     tree = ast.parse("class Container:\n    def method[T: data](self, value: data):\n        return data\n")
 
-    assert len(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False)) == 3
+    assert _collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False) == [
+        (2, 18, "data", "payload"),
+        (2, 37, "data", "payload"),
+        (3, 15, "data", "payload"),
+    ]
 
 
 def test_repeated_binding_leaves_the_file_unchanged() -> None:
