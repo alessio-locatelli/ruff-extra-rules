@@ -2228,6 +2228,16 @@ def test_scope_replacement_helpers_support_generic_methods_without_return_annota
     ]
 
 
+def test_scope_replacement_helpers_preserve_generic_class_header_peer_names() -> None:
+    tree = ast.parse("class Container[data](lambda: (data, result)):\n    pass\n")
+
+    assert _collect_replacements(
+        tree.body[0],
+        {"data": "payload", "result": "value"},
+        has_future_annotations=False,
+    ) == [(1, 37, "result", "value")]
+
+
 def test_repeated_binding_leaves_the_file_unchanged() -> None:
     source = """def process():
     data: Payload = get_payload()
