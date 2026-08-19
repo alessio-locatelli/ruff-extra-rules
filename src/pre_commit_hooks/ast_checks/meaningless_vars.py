@@ -711,7 +711,7 @@ def _collect_replacements(
             target: ast.AST,
             replacements: dict[VariableName, VariableName],
             *,
-            outer_names: dict[VariableName, VariableName] = outer_replace_names,
+            outer_names: dict[VariableName, VariableName],
         ) -> None:
             class_replacements.extend(
                 _collect_replacements(
@@ -726,7 +726,7 @@ def _collect_replacements(
         class_replace_names = {name: new for name, new in outer_replace_names.items() if name not in class_names}
         if replace_names:
             for decorator in node.decorator_list:
-                collect(decorator, replace_names)
+                collect(decorator, replace_names, outer_names=outer_replace_names)
         header_names = _peer_filtered_replace_names(node.type_params, replace_names)
         if header_names:
             for base in node.bases:
@@ -736,7 +736,7 @@ def _collect_replacements(
             for expression in _type_param_defaults_and_bounds(node.type_params):
                 collect(expression, header_names, outer_names=header_names)
         for child in node.body:
-            collect(child, class_replace_names)
+            collect(child, class_replace_names, outer_names=outer_replace_names)
         return class_replacements
 
     return [
