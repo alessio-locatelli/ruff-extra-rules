@@ -62,6 +62,12 @@ class _Response:
         return "payload"
 
 
+def _exec_module(source: str) -> dict[str, Any]:
+    namespace: dict[str, Any] = {}
+    exec(compile(source, "<orchestrator-fixture>", "exec", dont_inherit=True), namespace)  # noqa: S102
+    return namespace
+
+
 # Every expectation below was measured against `ruff 0.16.1`'s own
 # `exclude` handling before being written down; see ADR-0046.
 @pytest.mark.parametrize(
@@ -624,8 +630,7 @@ def test_main_fix_renames_enclosing_references_in_class_bodies_and_methods(tmp_p
         "    return CapturesOuter().method(), CapturesOuter.captured, OwnAttribute().method()\n"
     )
 
-    namespace: dict[str, Any] = {}
-    exec(compile(filepath.read_text(), "<orchestrator-fixture>", "exec", dont_inherit=True), namespace)  # noqa: S102
+    namespace = _exec_module(filepath.read_text())
 
     assert namespace["outer"](_Response()) == ("payload", "payload", "payload")
 
@@ -748,10 +753,7 @@ def test_main_fix_preserves_class_bindings(
 
 
 def test_generic_method_annotations_preserve_class_binding_at_runtime() -> None:
-    namespace: dict[str, Any] = {}
-    exec(  # noqa: S102
-        compile(_GENERIC_METHOD_ANNOTATIONS_EXPECTED, "<orchestrator-fixture>", "exec", dont_inherit=True), namespace
-    )
+    namespace = _exec_module(_GENERIC_METHOD_ANNOTATIONS_EXPECTED)
 
     container = namespace["outer"](_Response())
     method = container.method
@@ -799,8 +801,7 @@ def test_main_fix_preserves_class_bindings_in_nested_class_headers_and_comprehen
         "    return Container.Nested.__bases__[0], Container.Nested.value, Container.thunk(), Container.values\n"
     )
 
-    namespace: dict[str, Any] = {}
-    exec(compile(filepath.read_text(), "<orchestrator-fixture>", "exec", dont_inherit=True), namespace)  # noqa: S102
+    namespace = _exec_module(filepath.read_text())
 
     assert namespace["outer"](_Response()) == (int, "payload", "payload", ["payload"])
 
