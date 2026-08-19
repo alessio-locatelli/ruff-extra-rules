@@ -1363,6 +1363,7 @@ def autofix_meaningless_vars(tmp_path: Path) -> Callable[[str], str]:
         violations = check.check(filepath, tree, source)
         outcomes = check.fix(filepath, violations, source, tree).outcomes
 
+        assert outcomes
         assert all(outcome is FixOutcome.APPLIED for outcome in outcomes)
 
         return filepath.read_text()
@@ -1444,7 +1445,9 @@ def outer(response):
     assert "return payload_2" in fixed_content
 
 
-def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_scope() -> None:
+def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_scope(
+    autofix_meaningless_vars: Callable[[str], str],
+) -> None:
     # `_binds_name_in_nested_scope()` must scan only the nested
     # function's *own* scope, not its `_outer_scope_children()` (decorators,
     # defaults, annotations without type params) — those run in the
@@ -1461,16 +1464,7 @@ def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_sco
 
     return inner()
 """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.py"
-        filepath.write_text(source)
-
-        tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
-        violations = check.check(filepath, tree, source)
-        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
-
-        fixed_content = filepath.read_text()
+    fixed_content = autofix_meaningless_vars(source)
 
     assert "data" not in fixed_content
     module_namespace: dict[str, Any] = {}
@@ -2221,11 +2215,13 @@ class Container[T: data](data, key=data):
 def test_scope_replacement_helpers_support_generic_methods_without_return_annotations() -> None:
     tree = ast.parse("class Container:\n    def method[T: data](self, value: data):\n        return data\n")
 
-    assert _collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False) == [
-        (2, 18, "data", "payload"),
-        (2, 37, "data", "payload"),
-        (3, 15, "data", "payload"),
-    ]
+    assert sorted(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False)) == sorted(
+        [
+            (2, 18, "data", "payload"),
+            (2, 37, "data", "payload"),
+            (3, 15, "data", "payload"),
+        ]
+    )
 
 
 def test_scope_replacement_helpers_preserve_generic_class_header_peer_names() -> None:
