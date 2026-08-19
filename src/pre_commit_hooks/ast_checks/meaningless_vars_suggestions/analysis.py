@@ -9,7 +9,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from pre_commit_hooks.ast_checks._scope import class_scope_global_or_nonlocal_names
+from pre_commit_hooks.ast_checks._scope import class_scope_global_or_nonlocal_names, iter_binding_names
 
 from .pymongo import call_candidate, collection_attributes, suppresses_producer_tail
 from .syntax import _annotation_terminal
@@ -160,8 +160,7 @@ class _ScopeVisitor(ast.NodeVisitor):
         self._bind_named_expressions(node)
 
     def visit_Import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            bound_name = alias.asname or alias.name.split(".")[0]
+        for alias, bound_name in zip(node.names, iter_binding_names(node), strict=True):
             self.scope.bindings[bound_name].append(node)
             self.scope.imports[bound_name] = tuple(alias.name.split(".")) if alias.asname else (bound_name,)
             self.scope.explicit_modules.add(tuple(alias.name.split(".")))
@@ -181,10 +180,8 @@ class _ScopeVisitor(ast.NodeVisitor):
             return
         module = tuple(node.module.split("."))
         self.scope.explicit_modules.add(module)
-        for alias in node.names:
-            if alias.name == "*":
-                continue
-            bound_name = alias.asname or alias.name
+        aliases = (alias for alias in node.names if alias.name != "*")
+        for alias, bound_name in zip(aliases, iter_binding_names(node), strict=True):
             self.scope.bindings[bound_name].append(node)
             self.scope.imports[bound_name] = (*module, alias.name)
             if module == ("urllib",) and alias.name == "request":
@@ -197,28 +194,27 @@ class _ScopeVisitor(ast.NodeVisitor):
         self.scope.global_or_nonlocal.update(node.names)
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
-        if node.name is not None:
-            self.scope.bindings[node.name].append(node)
+        self._record_bindings(node)
         self.generic_visit(node)
 
     def visit_MatchAs(self, node: ast.MatchAs) -> None:
-        if node.name is not None:
-            self.scope.bindings[node.name].append(node)
+        self._record_bindings(node)
         self.generic_visit(node)
 
     def visit_MatchStar(self, node: ast.MatchStar) -> None:
-        if node.name is not None:
-            self.scope.bindings[node.name].append(node)
+        self._record_bindings(node)
         self.generic_visit(node)
 
     def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
-        if node.rest is not None:
-            self.scope.bindings[node.rest].append(node)
+        self._record_bindings(node)
         self.generic_visit(node)
 
     def visit_Name(self, node: ast.Name) -> None:
-        if isinstance(node.ctx, ast.Store | ast.Del):
-            self.scope.bindings[node.id].append(node)
+        self._record_bindings(node)
+
+    def _record_bindings(self, node: ast.AST) -> None:
+        for name in iter_binding_names(node):
+            self.scope.bindings[name].append(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if isinstance(node.value, ast.Name) and isinstance(node.value.ctx, ast.Load):

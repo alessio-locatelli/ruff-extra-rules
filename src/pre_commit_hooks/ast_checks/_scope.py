@@ -95,6 +95,19 @@ def collect_scope_names(scope: ast.AST) -> set[str]:
     return {node.id for node in iter_within_scope(scope) if isinstance(node, ast.Name)}
 
 
+def iter_binding_names(node: ast.AST) -> Iterator[str]:
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+        yield node.id
+    elif isinstance(node, ast.Import):
+        yield from (alias.asname or alias.name.split(".")[0] for alias in node.names)
+    elif isinstance(node, ast.ImportFrom):
+        yield from (alias.asname or alias.name for alias in node.names if alias.name != "*")
+    elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name is not None:
+        yield node.name
+    elif isinstance(node, ast.MatchMapping) and node.rest is not None:
+        yield node.rest
+
+
 def class_scope_binding_names(node: ast.ClassDef) -> set[str]:
     names = {
         type_param.name
@@ -160,33 +173,28 @@ def class_scope_binding_names(node: ast.ClassDef) -> set[str]:
             return
 
         def visit_Name(self, child: ast.Name) -> None:
-            if isinstance(child.ctx, ast.Store | ast.Del):
-                names.add(child.id)
+            names.update(iter_binding_names(child))
 
         def visit_Import(self, child: ast.Import) -> None:
-            names.update(alias.asname or alias.name.split(".")[0] for alias in child.names)
+            names.update(iter_binding_names(child))
 
         def visit_ImportFrom(self, child: ast.ImportFrom) -> None:
-            names.update(alias.asname or alias.name for alias in child.names)
+            names.update(iter_binding_names(child))
 
         def visit_ExceptHandler(self, child: ast.ExceptHandler) -> None:
-            if child.name is not None:
-                names.add(child.name)
+            names.update(iter_binding_names(child))
             self.generic_visit(child)
 
         def visit_MatchAs(self, child: ast.MatchAs) -> None:
-            if child.name is not None:
-                names.add(child.name)
+            names.update(iter_binding_names(child))
             self.generic_visit(child)
 
         def visit_MatchStar(self, child: ast.MatchStar) -> None:
-            if child.name is not None:
-                names.add(child.name)
+            names.update(iter_binding_names(child))
             self.generic_visit(child)
 
         def visit_MatchMapping(self, child: ast.MatchMapping) -> None:
-            if child.rest is not None:
-                names.add(child.rest)
+            names.update(iter_binding_names(child))
             self.generic_visit(child)
 
     visitor = Visitor()
