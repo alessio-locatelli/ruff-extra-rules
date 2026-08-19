@@ -693,7 +693,10 @@ def test_reachable_scopes_assign_distinct_names() -> None:
     return data, inner
 """
 
-    assert {proposal.name for proposal in _plans(source).values()} == {"payload", "payload_2"}
+    assert {position: proposal.name for position, proposal in _plans(source).items()} == {
+        (2, 4): "payload",
+        (5, 8): "payload_2",
+    }
 
 
 def test_nested_scopes_allocate_incrementing_names() -> None:
@@ -712,7 +715,11 @@ def test_nested_scopes_allocate_incrementing_names() -> None:
     return data, middle
 """
 
-    assert {proposal.name for proposal in _plans(source).values()} == {"payload", "payload_2", "payload_3"}
+    assert {position: proposal.name for position, proposal in _plans(source).items()} == {
+        (2, 4): "payload",
+        (5, 8): "payload_2",
+        (8, 12): "payload_3",
+    }
 
 
 def test_sibling_scopes_can_use_distinct_names() -> None:
