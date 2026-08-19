@@ -58,6 +58,7 @@ class ScopeInfo:
     children: list[ScopeInfo] = field(default_factory=list)
     has_reflection: bool = False
     reachable_names: set[str] | None = None
+    bound_names: set[str] | None = None
     class_global_or_nonlocal: set[str] = field(default_factory=set)
     mongodb_collection_attributes: frozenset[str] = frozenset()
 
@@ -388,9 +389,8 @@ def _proposal_for(assignment: Assignment, meaningless_names: set[str]) -> Rename
     name, evidence = next(iter(candidates.items()))
     if not _is_valid_name(name, meaningless_names):
         return None
-    if name in _reachable_names(assignment.scope):
+    if name in _reachable_names(assignment.scope) and name not in _bound_names(assignment.scope):
         return None
-
     confidence = Confidence.AUTO_FIX if "annotation" in evidence or len(evidence) >= 2 else Confidence.SUGGESTION_ONLY
     if confidence is Confidence.AUTO_FIX and assignment.scope.has_reflection:
         confidence = Confidence.SUGGESTION_ONLY
@@ -620,16 +620,16 @@ def _remove_collisions(
 
     def visit(scope: ScopeInfo, active: set[str]) -> None:
         scope_id = id(scope)
-        added: set[str] = set()
-        for index in proposals_by_scope.get(scope_id, []):
+        proposal_indexes = proposals_by_scope.get(scope_id, [])
+        if proposal_indexes:
+            active = active | _reachable_names(scope)
+        for index in proposal_indexes:
             proposal = planned[index].proposal
             name = _available_name(proposal.name, active)
             assigned[index] = replace(proposal, name=name)
             active.add(name)
-            added.add(name)
         for child in scope.children:
             visit(child, active)
-        active.difference_update(added)
 
     root_scopes: dict[int, ScopeInfo] = {}
     for scope in scopes.values():
@@ -961,6 +961,32 @@ def _reachable_names(scope: ScopeInfo) -> set[str]:
         elif isinstance(node, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple):
             names.add(node.name)
     scope.reachable_names = names
+    return names
+
+
+def _bound_names(scope: ScopeInfo) -> set[str]:
+    if scope.bound_names is not None:
+        return scope.bound_names
+    names: set[str] = set()
+    for node in ast.walk(scope.node):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            names.add(node.id)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            names.add(node.name)
+        elif isinstance(node, ast.alias):
+            names.add(node.asname or node.name.split(".")[0])
+        elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar):
+            if node.name is not None:
+                names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest is not None:
+            names.add(node.rest)
+        elif isinstance(node, ast.Global | ast.Nonlocal):
+            names.update(node.names)
+        elif isinstance(node, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple):
+            names.add(node.name)
+    scope.bound_names = names
     return names
 
 
