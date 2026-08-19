@@ -661,6 +661,20 @@ def test_class_body_global_or_nonlocal_declaration_prevents_a_name(declaration: 
     _assert_plan_for(source, "data", None, None)
 
 
+def test_nested_class_nonlocal_declaration_prevents_an_outer_name() -> None:
+    source = """def outer():
+    data: Payload = get_payload()
+
+    def inner():
+        class Nested:
+            nonlocal data
+            value = data
+        return Nested
+"""
+
+    _assert_plan_for(source, "data", None, None)
+
+
 def test_ignored_binding_is_not_planned() -> None:
     source = "def f():\n    data: Payload = get_payload()\n"
 

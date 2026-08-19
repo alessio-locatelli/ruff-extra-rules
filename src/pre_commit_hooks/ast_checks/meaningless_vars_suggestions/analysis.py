@@ -601,7 +601,12 @@ def _eligible(assignment: Assignment) -> bool:
 
 
 def _declared_in_descendant(scope: ScopeInfo, name: str) -> bool:
-    return any(name in child.global_or_nonlocal or _declared_in_descendant(child, name) for child in scope.children)
+    return any(
+        name in child.global_or_nonlocal
+        or name in child.class_global_or_nonlocal
+        or _declared_in_descendant(child, name)
+        for child in scope.children
+    )
 
 
 def _remove_collisions(
