@@ -688,7 +688,7 @@ def _collect_replacements(
                     _collect_replacements(
                         expr,
                         filtered_names,
-                        outer_replace_names=outer_replace_names,
+                        outer_replace_names=filtered_names,
                         has_future_annotations=has_future_annotations,
                     )
                 )
@@ -696,7 +696,7 @@ def _collect_replacements(
                 _collect_replacements(
                     node.value,
                     filtered_names,
-                    outer_replace_names=outer_replace_names,
+                    outer_replace_names=filtered_names,
                     has_future_annotations=has_future_annotations,
                 )
             )
