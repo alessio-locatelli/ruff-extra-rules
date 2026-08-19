@@ -1874,6 +1874,23 @@ def test_autofix_does_not_rename_type_alias_bound_referencing_a_peer_type_parame
     assert type_var_t.__bound__ is peer_data
 
 
+def test_autofix_preserves_type_alias_peer_reference_inside_nested_lambda(
+    autofix_meaningless_vars: Callable[[str], str],
+) -> None:
+    source = """def outer(response):
+    data: Payload = response.json()
+    result: SecondaryPayload = response.json()
+
+    type Alias[data] = lambda: (data, result)
+
+    return Alias
+"""
+
+    fixed_content = autofix_meaningless_vars(source)
+
+    assert "type Alias[data] = lambda: (data, secondary_payload)" in fixed_content
+
+
 def test_autofix_follows_closure_into_type_alias_value() -> None:
     # A `type` alias's own `value` expression is lazily evaluated but still
     # closes over its enclosing scope for any name that isn't one of its own

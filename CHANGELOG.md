@@ -10,6 +10,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 - `--fix` reports whether each fix was applied, declined for safety, rejected, aborted, errored, or failed to write, so an operational failure is visible without being confused with a safety decision.
 - `meaningless-vars --fix` now renames enclosing references in class bodies and methods, assigns distinct names to related nested renames, and declines class scopes whose `global` or `nonlocal` declarations cannot be safely rewritten.
+- `meaningless-vars --fix` preserves type-alias peer type parameters referenced inside nested scopes while still renaming unrelated enclosing variables.
 
 ## [0.1.0] - 2026-08-16
 
