@@ -142,8 +142,10 @@ def class_scope_binding_names(node: ast.ClassDef) -> set[str]:
             for type_param in child.type_params:
                 self.visit(type_param)
 
-        def visit_Lambda(self, _child: ast.Lambda) -> None:
-            return
+        def visit_Lambda(self, child: ast.Lambda) -> None:
+            for default in [*child.args.defaults, *child.args.kw_defaults]:
+                if default is not None:
+                    self.visit(default)
 
         def visit_ListComp(self, _child: ast.ListComp) -> None:
             return

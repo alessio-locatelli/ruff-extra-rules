@@ -154,7 +154,8 @@ def test_class_scope_binding_names_excludes_nested_scopes_and_comprehensions() -
         "        pass\n"
         "    class Generic[T: type_bound]:\n"
         "        pass\n"
-        "    thunk = lambda: (lambda_local := 1)\n"
+        "    thunk = lambda value=(lambda_default := 1): (lambda_local := 1)\n"
+        "    required_thunk = lambda *, required: None\n"
         "    listed = [item for item in ()]\n"
         "    setted = {item for item in ()}\n"
         "    mapped = {item: item for item in ()}\n"
@@ -208,6 +209,8 @@ def test_class_scope_binding_names_excludes_nested_scopes_and_comprehensions() -
         "class_keyword",
         "Generic",
         "thunk",
+        "lambda_default",
+        "required_thunk",
         "listed",
         "setted",
         "mapped",
