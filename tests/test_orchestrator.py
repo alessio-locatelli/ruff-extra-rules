@@ -61,7 +61,7 @@ class _Response:
     __slots__ = ()
 
     def json(self) -> str:
-        return "payload"
+        return "response value"
 
 
 def _exec_module(source: str) -> dict[str, Any]:
@@ -634,7 +634,7 @@ def test_main_fix_renames_enclosing_references_in_class_bodies_and_methods(tmp_p
 
     namespace = _exec_module(filepath.read_text())
 
-    assert namespace["outer"](_Response()) == ("payload", "payload", "payload")
+    assert namespace["outer"](_Response()) == ("response value", "response value", "response value")
 
 
 def test_main_fix_assigns_distinct_names_to_reverse_order_nested_closures(tmp_path: Path) -> None:
@@ -762,7 +762,7 @@ def test_generic_method_annotations_preserve_class_binding_at_runtime() -> None:
 
     assert method.__type_params__[0].__bound__ is int
     assert method.__annotations__ == {"value": int, "return": int}
-    assert container().method(None) == "payload"
+    assert container().method(None) == "response value"
 
 
 def test_main_fix_preserves_class_bindings_in_nested_class_headers_and_comprehension_iterables(tmp_path: Path) -> None:
@@ -805,7 +805,7 @@ def test_main_fix_preserves_class_bindings_in_nested_class_headers_and_comprehen
 
     namespace = _exec_module(filepath.read_text())
 
-    assert namespace["outer"](_Response()) == (int, "payload", "payload", ["payload"])
+    assert namespace["outer"](_Response()) == (int, "response value", "response value", ["response value"])
 
 
 def test_main_directory_argument_matches_explicit_file_argument_for_untracked_file(
