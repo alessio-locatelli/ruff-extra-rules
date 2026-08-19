@@ -2028,6 +2028,24 @@ def test_autofix_does_not_rename_generic_functions_own_annotation_referencing_a_
     assert inner.__annotations__ == {"value": peer_type_var, "return": peer_type_var}
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def inner[data, T: (lambda: (data, result))()]():\n    pass\n",
+        "def inner[data, T](value: (lambda: (data, result))()):\n    pass\n",
+    ],
+    ids=["bound", "annotation"],
+)
+def test_collect_replacements_preserves_peer_names_inside_nested_generic_scopes(source: str) -> None:
+    replacements = _collect_replacements(
+        ast.parse(source).body[0],
+        {"data": "payload", "result": "secondary_result"},
+        has_future_annotations=False,
+    )
+
+    assert [(old_name, new_name) for _, _, old_name, new_name in replacements] == [("result", "secondary_result")]
+
+
 def test_autofix_does_not_follow_generic_functions_own_annotation_under_deferred_annotations() -> None:
     # Branch coverage: a generic function's annotation must still be
     # excluded entirely under `from __future__ import annotations`, exactly
