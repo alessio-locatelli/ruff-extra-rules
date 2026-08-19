@@ -610,7 +610,7 @@ def _collect_replacements(
                         _collect_replacements(
                             expr,
                             bound_default_names,
-                            outer_replace_names=outer_replace_names,
+                            outer_replace_names=bound_default_names,
                             has_future_annotations=has_future_annotations,
                         )
                     )
@@ -621,7 +621,7 @@ def _collect_replacements(
                         _collect_replacements(
                             expr,
                             bound_default_names,
-                            outer_replace_names=outer_replace_names,
+                            outer_replace_names=bound_default_names,
                             has_future_annotations=has_future_annotations,
                         )
                     )
@@ -630,7 +630,7 @@ def _collect_replacements(
                         _collect_replacements(
                             node.returns,
                             bound_default_names,
-                            outer_replace_names=outer_replace_names,
+                            outer_replace_names=bound_default_names,
                             has_future_annotations=has_future_annotations,
                         )
                     )
