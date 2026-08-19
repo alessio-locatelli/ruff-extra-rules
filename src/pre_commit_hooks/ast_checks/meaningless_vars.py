@@ -707,12 +707,17 @@ def _collect_replacements(
     if isinstance(node, ast.ClassDef):
         class_replacements: list[tuple[int, int, VariableName, VariableName]] = []
 
-        def collect(target: ast.AST, replacements: dict[VariableName, VariableName]) -> None:
+        def collect(
+            target: ast.AST,
+            replacements: dict[VariableName, VariableName],
+            *,
+            outer_names: dict[VariableName, VariableName] = outer_replace_names,
+        ) -> None:
             class_replacements.extend(
                 _collect_replacements(
                     target,
                     replacements,
-                    outer_replace_names=outer_replace_names,
+                    outer_replace_names=outer_names,
                     has_future_annotations=has_future_annotations,
                 )
             )
@@ -725,11 +730,11 @@ def _collect_replacements(
         header_names = _peer_filtered_replace_names(node.type_params, replace_names)
         if header_names:
             for base in node.bases:
-                collect(base, header_names)
+                collect(base, header_names, outer_names=header_names)
             for keyword in node.keywords:
-                collect(keyword.value, header_names)
+                collect(keyword.value, header_names, outer_names=header_names)
             for expression in _type_param_defaults_and_bounds(node.type_params):
-                collect(expression, header_names)
+                collect(expression, header_names, outer_names=header_names)
         for child in node.body:
             collect(child, class_replace_names)
         return class_replacements
