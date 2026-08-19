@@ -632,27 +632,25 @@ def _collect_replacements(
                         )
                     )
 
-            if not has_future_annotations:
-                annotation_names = _peer_filtered_replace_names(node.type_params, replace_names)
-                if annotation_names:
-                    for expr in _signature_annotations(node.args):
-                        replacements.extend(
-                            _collect_replacements(
-                                expr,
-                                annotation_names,
-                                outer_replace_names=outer_replace_names,
-                                has_future_annotations=has_future_annotations,
-                            )
+            if not has_future_annotations and bound_default_names:
+                for expr in _signature_annotations(node.args):
+                    replacements.extend(
+                        _collect_replacements(
+                            expr,
+                            bound_default_names,
+                            outer_replace_names=outer_replace_names,
+                            has_future_annotations=has_future_annotations,
                         )
-                    if node.returns is not None:
-                        replacements.extend(
-                            _collect_replacements(
-                                node.returns,
-                                annotation_names,
-                                outer_replace_names=outer_replace_names,
-                                has_future_annotations=has_future_annotations,
-                            )
+                    )
+                if node.returns is not None:
+                    replacements.extend(
+                        _collect_replacements(
+                            node.returns,
+                            bound_default_names,
+                            outer_replace_names=outer_replace_names,
+                            has_future_annotations=has_future_annotations,
                         )
+                    )
 
         nested_names = {
             name: new for name, new in outer_replace_names.items() if not _binds_name_in_nested_scope(node, name)
