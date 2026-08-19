@@ -19,6 +19,7 @@ from pre_commit_hooks.ast_checks.meaningless_vars_suggestions.analysis import (
     _is_public_attribute,
     _is_subprocess_argument,
     _pluralize,
+    _reachable_names,
     _refine_parser_candidates,
     _singularize,
     _to_snake_case,
@@ -627,6 +628,7 @@ def test_bound_names_include_every_supported_binding_form() -> None:
     root = _Index(ast.parse(source)).root
 
     names = _bound_names(root)
+    reachable_names = _reachable_names(root)
 
     assert {
         "nonlocal_name",
@@ -640,7 +642,9 @@ def test_bound_names_include_every_supported_binding_form() -> None:
         "generic",
         "T",
     } <= names
+    assert names <= reachable_names
     assert _bound_names(root) is names
+    assert _reachable_names(root) is reachable_names
 
 
 def test_class_body_reference_produces_a_name() -> None:

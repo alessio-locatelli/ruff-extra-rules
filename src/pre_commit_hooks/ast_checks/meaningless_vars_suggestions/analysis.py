@@ -947,47 +947,52 @@ def _confirm_collection_candidates(candidates: dict[str, set[str]]) -> None:
 
 
 def _reachable_names(scope: ScopeInfo) -> set[str]:
-    scope.reachable_names = _scope_names(
-        scope,
-        cached_names=scope.reachable_names,
-        bound_only=False,
-    )
+    _scope_names(scope)
+    assert scope.reachable_names is not None
     return scope.reachable_names
 
 
 def _bound_names(scope: ScopeInfo) -> set[str]:
-    scope.bound_names = _scope_names(
-        scope,
-        cached_names=scope.bound_names,
-        bound_only=True,
-    )
+    _scope_names(scope)
+    assert scope.bound_names is not None
     return scope.bound_names
 
 
-def _scope_names(scope: ScopeInfo, *, cached_names: set[str] | None, bound_only: bool) -> set[str]:
-    if cached_names is not None:
-        return cached_names
-    names: set[str] = set()
+def _scope_names(scope: ScopeInfo) -> None:
+    if scope.reachable_names is not None and scope.bound_names is not None:
+        return
+    reachable_names: set[str] = set()
+    bound_names: set[str] = set()
     for node in ast.walk(scope.node):
         if isinstance(node, ast.Name):
-            if not bound_only or isinstance(node.ctx, ast.Store | ast.Del):
-                names.add(node.id)
+            reachable_names.add(node.id)
+            if isinstance(node.ctx, ast.Store | ast.Del):
+                bound_names.add(node.id)
         elif isinstance(node, ast.arg):
-            names.add(node.arg)
+            reachable_names.add(node.arg)
+            bound_names.add(node.arg)
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            names.add(node.name)
+            reachable_names.add(node.name)
+            bound_names.add(node.name)
         elif isinstance(node, ast.alias):
-            names.add(node.asname or node.name.split(".")[0])
+            name = node.asname or node.name.split(".")[0]
+            reachable_names.add(name)
+            bound_names.add(name)
         elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar):
             if node.name is not None:
-                names.add(node.name)
+                reachable_names.add(node.name)
+                bound_names.add(node.name)
         elif isinstance(node, ast.MatchMapping) and node.rest is not None:
-            names.add(node.rest)
+            reachable_names.add(node.rest)
+            bound_names.add(node.rest)
         elif isinstance(node, ast.Global | ast.Nonlocal):
-            names.update(node.names)
+            reachable_names.update(node.names)
+            bound_names.update(node.names)
         elif isinstance(node, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple):
-            names.add(node.name)
-    return names
+            reachable_names.add(node.name)
+            bound_names.add(node.name)
+    scope.reachable_names = reachable_names
+    scope.bound_names = bound_names
 
 
 def _iter_scopes(scope: ScopeInfo) -> Iterable[ScopeInfo]:
