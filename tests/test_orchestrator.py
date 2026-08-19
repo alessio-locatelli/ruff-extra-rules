@@ -57,6 +57,11 @@ if TYPE_CHECKING:
     from pre_commit_hooks.ast_checks.validate_function_name.analysis import Suggestion
 
 
+class _Response:
+    def json(self) -> str:
+        return "payload"
+
+
 # Every expectation below was measured against `ruff 0.16.1`'s own
 # `exclude` handling before being written down; see ADR-0046.
 @pytest.mark.parametrize(
@@ -622,11 +627,7 @@ def test_main_fix_renames_enclosing_references_in_class_bodies_and_methods(tmp_p
     namespace: dict[str, Any] = {}
     exec(compile(filepath.read_text(), filepath, "exec"), namespace)  # noqa: S102
 
-    class Response:
-        def json(self) -> str:
-            return "payload"
-
-    assert namespace["outer"](Response()) == ("payload", "payload", "payload")
+    assert namespace["outer"](_Response()) == ("payload", "payload", "payload")
 
 
 def test_main_fix_assigns_distinct_names_to_reverse_order_nested_closures(tmp_path: Path) -> None:
@@ -784,11 +785,7 @@ def test_main_fix_preserves_class_bindings_in_nested_class_headers_and_comprehen
     namespace: dict[str, Any] = {}
     exec(compile(filepath.read_text(), filepath, "exec"), namespace)  # noqa: S102
 
-    class Response:
-        def json(self) -> str:
-            return "payload"
-
-    assert namespace["outer"](Response()) == (int, "payload", "payload", ["payload"])
+    assert namespace["outer"](_Response()) == (int, "payload", "payload", ["payload"])
 
 
 def test_main_directory_argument_matches_explicit_file_argument_for_untracked_file(
