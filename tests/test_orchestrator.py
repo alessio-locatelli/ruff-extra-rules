@@ -655,31 +655,39 @@ def test_main_fix_assigns_distinct_names_to_reverse_order_nested_closures(tmp_pa
     )
 
 
+_GENERIC_METHOD_ANNOTATIONS_SOURCE = (
+    "def outer(response):\n"
+    "    data: Payload = response.json()\n"
+    "\n"
+    "    class Container:\n"
+    "        data = int\n"
+    "\n"
+    "        def method[T: data](self, value: data) -> data:\n"
+    "            return data\n"
+    "\n"
+    "    return Container\n"
+)
+
+_GENERIC_METHOD_ANNOTATIONS_EXPECTED = (
+    "def outer(response):\n"
+    "    payload: Payload = response.json()\n"
+    "\n"
+    "    class Container:\n"
+    "        data = int\n"
+    "\n"
+    "        def method[T: data](self, value: data) -> data:\n"
+    "            return payload\n"
+    "\n"
+    "    return Container\n"
+)
+
+
 @pytest.mark.parametrize(
-    ("source", "expected", "assert_runtime"),
+    ("source", "expected"),
     [
         pytest.param(
-            "def outer(response):\n"
-            "    data: Payload = response.json()\n"
-            "\n"
-            "    class Container:\n"
-            "        data = int\n"
-            "\n"
-            "        def method[T: data](self, value: data) -> data:\n"
-            "            return data\n"
-            "\n"
-            "    return Container\n",
-            "def outer(response):\n"
-            "    payload: Payload = response.json()\n"
-            "\n"
-            "    class Container:\n"
-            "        data = int\n"
-            "\n"
-            "        def method[T: data](self, value: data) -> data:\n"
-            "            return payload\n"
-            "\n"
-            "    return Container\n",
-            True,
+            _GENERIC_METHOD_ANNOTATIONS_SOURCE,
+            _GENERIC_METHOD_ANNOTATIONS_EXPECTED,
             id="generic-method-annotations",
         ),
         pytest.param(
@@ -699,7 +707,6 @@ def test_main_fix_assigns_distinct_names_to_reverse_order_nested_closures(tmp_pa
             "        captured = payload\n"
             "\n"
             "    return Container.captured\n",
-            False,
             id="lambda-local-binding",
         ),
         pytest.param(
@@ -723,7 +730,6 @@ def test_main_fix_assigns_distinct_names_to_reverse_order_nested_closures(tmp_pa
             "        captured = data\n"
             "\n"
             "    return Container.data, Container.captured\n",
-            False,
             id="method-default-binding",
         ),
     ],
@@ -732,7 +738,6 @@ def test_main_fix_preserves_class_bindings(
     tmp_path: Path,
     source: str,
     expected: str,
-    assert_runtime: bool,
 ) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text(source)
@@ -741,16 +746,19 @@ def test_main_fix_preserves_class_bindings(
 
     assert filepath.read_text() == expected
 
-    if assert_runtime:
-        namespace: dict[str, Any] = {}
-        exec(compile(filepath.read_text(), "<orchestrator-fixture>", "exec", dont_inherit=True), namespace)  # noqa: S102
 
-        container = namespace["outer"](_Response())
-        method = container.method
+def test_generic_method_annotations_preserve_class_binding_at_runtime() -> None:
+    namespace: dict[str, Any] = {}
+    exec(  # noqa: S102
+        compile(_GENERIC_METHOD_ANNOTATIONS_EXPECTED, "<orchestrator-fixture>", "exec", dont_inherit=True), namespace
+    )
 
-        assert method.__type_params__[0].__bound__ is int
-        assert method.__annotations__ == {"value": int, "return": int}
-        assert container().method(None) == "payload"
+    container = namespace["outer"](_Response())
+    method = container.method
+
+    assert method.__type_params__[0].__bound__ is int
+    assert method.__annotations__ == {"value": int, "return": int}
+    assert container().method(None) == "payload"
 
 
 def test_main_fix_preserves_class_bindings_in_nested_class_headers_and_comprehension_iterables(tmp_path: Path) -> None:
