@@ -9,7 +9,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 ### Changed
 
 - `unused-pytriage` now retains cached suppression evidence through fix-mode refreshes and audits the final source with the complete active-check context.
-- Suppression tracking now covers TR5 markers on assignment lines, keeps TR6 normal and tracking analyses separate, and avoids repeated token and suggestion analysis when it is not needed.
+- Suppression tracking now covers TR5 markers on assignment lines, so TR8 reports reflect their actual use.
 - `--fix` reports whether each fix was applied, declined for safety, rejected, aborted, errored, or failed to write, so an operational failure is visible without being confused with a safety decision.
 - `meaningless-vars --fix` now renames enclosing references in class bodies and methods, assigns distinct names to related nested renames, and declines class scopes whose `global` or `nonlocal` declarations cannot be safely rewritten.
 - `meaningless-vars --fix` preserves type-alias peer type parameters referenced inside nested scopes while still renaming unrelated enclosing variables.
