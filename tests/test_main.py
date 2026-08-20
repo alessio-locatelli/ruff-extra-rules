@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     from pre_commit_hooks.ast_checks import ASTCheck
-    from pre_commit_hooks.ast_checks._base import Violation
+    from pre_commit_hooks.ast_checks._base import SuppressionUsage, Violation
 
 
 @pytest.fixture(autouse=True)
@@ -108,10 +108,19 @@ def test_real_sigterm_mid_run_stops_gracefully_without_leftover_temp_files(
         checks: list[ASTCheck],
         *,
         record_only: Sequence[ASTCheck] = (),
+        prior_suppression_usages: tuple[SuppressionUsage, ...] = (),
+        prior_active_error_codes: frozenset[str] = frozenset(),
     ) -> list[Violation] | None:
         nonlocal calls
         calls += 1
-        violations = original_check_file(self, filepath, checks, record_only=record_only)
+        violations = original_check_file(
+            self,
+            filepath,
+            checks,
+            record_only=record_only,
+            prior_suppression_usages=prior_suppression_usages,
+            prior_active_error_codes=prior_active_error_codes,
+        )
         if calls == 3:
             os.kill(os.getpid(), signal.SIGTERM)
         return violations
