@@ -45,7 +45,7 @@ from pre_commit_hooks.ast_checks._base import (
     Violation,
     find_ignored_lines,
     find_ignored_lines_and_pytriage_comments,
-    find_suppression_usage,
+    record_suppression_usage_if_ignored,
 )
 
 from .analysis import IGNORE_PATTERN, Suggestion, collect_suggestions
@@ -118,12 +118,15 @@ class ValidateFunctionNameCheck(BaseCheck):
         suppression_usages = []
         if collect_suppression_usage:
             for suggestion in all_suggestions:
-                if suggestion.lineno in ignored_lines:
-                    usage = find_suppression_usage(
-                        comments, format_suppressed, self.check_id, self.error_code, (suggestion.lineno,)
-                    )
-                    if usage is not None:
-                        suppression_usages.append(usage)
+                record_suppression_usage_if_ignored(
+                    suppression_usages,
+                    ignored_lines,
+                    comments,
+                    format_suppressed,
+                    check_id=self.check_id,
+                    error_code=self.error_code,
+                    candidate_lines=(suggestion.lineno,),
+                )
         for suggestion in suggestions:
             auto_fixable = not suggestion.requires_property and is_autofix_safe(function_index, suggestion)
             reference_status = _repository_reference_status(filepath, suggestion.func_name) if auto_fixable else "safe"
