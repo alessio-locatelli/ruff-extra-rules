@@ -25,6 +25,7 @@ from pre_commit_hooks.ast_checks._base import (
     ignored_lines_from_tokens,
     line_terminator,
     normalize_for_tokenize,
+    record_suppression_usage_if_ignored,
     split_lines_like_ast,
     tokenize_source,
 )
@@ -234,6 +235,22 @@ def test_find_suppression_usage_excludes_format_suppressed_comments() -> None:
     comment = PytriageComment(line=2, col=0, codes=("TR1",))
 
     assert find_suppression_usage((comment,), {2}, "meaningless-vars", "TR1", (2,)) is None
+
+
+def test_record_suppression_usage_skips_a_nonmatching_comment() -> None:
+    suppression_usages = []
+    comment = PytriageComment(line=2, col=0, codes=("TR1",))
+
+    assert record_suppression_usage_if_ignored(
+        suppression_usages,
+        (comment,),
+        ignored_lines={2},
+        format_suppressed=set(),
+        check_id="meaningless-vars",
+        error_code="TR2",
+        candidate_lines=(2,),
+    )
+    assert suppression_usages == []
 
 
 @pytest.mark.parametrize(
