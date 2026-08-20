@@ -942,9 +942,9 @@ class MeaninglessVarsCheck(BaseCheck):
                         continue
                     record_suppression_usage_if_ignored(
                         suppression_usages,
-                        ignored_lines,
                         comments,
-                        format_suppressed,
+                        ignored_lines=ignored_lines,
+                        format_suppressed=format_suppressed,
                         check_id=self.check_id,
                         error_code=self.error_code,
                         candidate_lines=(candidate["line"],),

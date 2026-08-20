@@ -572,10 +572,10 @@ def find_suppression_usage(
 
 def record_suppression_usage_if_ignored(
     suppression_usages: list[SuppressionUsage],
-    ignored_lines: set[int],
     comments: Iterable[PytriageComment],
-    format_suppressed: set[int],
     *,
+    ignored_lines: set[int],
+    format_suppressed: set[int],
     check_id: str,
     error_code: str,
     candidate_lines: Collection[int],

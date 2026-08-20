@@ -96,9 +96,6 @@ class ValidateFunctionNameCheck(BaseCheck):
         return self._check(filepath, tree, source, collect_suppression_usage=True)
 
     def _check(self, filepath: Path, tree: ast.Module, source: str, *, collect_suppression_usage: bool) -> CheckResult:
-        # Reuse the orchestrator's already-parsed tree/source instead of
-        # re-reading and re-parsing the file (see analysis.process_file for
-        # the standalone equivalent used by tests).
         if collect_suppression_usage:
             ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(
                 source, IGNORE_PATTERN
@@ -121,9 +118,9 @@ class ValidateFunctionNameCheck(BaseCheck):
             for suggestion in all_suggestions:
                 record_suppression_usage_if_ignored(
                     suppression_usages,
-                    ignored_lines,
                     comments,
-                    format_suppressed,
+                    ignored_lines=ignored_lines,
+                    format_suppressed=format_suppressed,
                     check_id=self.check_id,
                     error_code=self.error_code,
                     candidate_lines=(suggestion.lineno,),
