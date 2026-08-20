@@ -40,6 +40,10 @@ _Avoid_: exclude — an excluded file is not checked by anything; a per-file ign
 A `# pytriage: TR1` comment, or a comma-separated list (`# pytriage: TR1,TR5`) to suppress more than one check's violation on the same line. Detected via `tokenize`, never text/regex matching, so a string or byte literal containing the same text can't be mistaken for one.
 _Avoid_: pragma — this repo's own suppression comment is distinct from the _third-party_ linter pragmas (`noqa`, `type: ignore`, `pylint:`, etc.) that `misplaced-comment` recognizes and refuses to ever move; don't conflate the two.
 
+**Suppression usage**:
+A record that a check found a candidate violation and an inline ignore comment suppressed it, retained separately from the violations that are reported or fixed. The `unused-pytriage` check uses these records to identify redundant known-code entries without rerunning each check's detection logic.
+_Avoid_: suppression — that is the comment's effect; suppression usage is the evidence that the effect occurred.
+
 **Format suppression**:
 `ruff format`'s own `# fmt: off`/`# fmt: on`, `# fmt: skip`, and YAPF's equivalent `# yapf: disable`/`# yapf: enable` pragmas, honored by every check with the same standing as an inline ignore comment: a line they cover is never reported and never fixed. Unlike an inline ignore comment, these are third-party pragmas this tool recognizes rather than owns, detected via the same shared `tokenize`-based helpers (`find_ignored_lines`, `ignored_lines_from_tokens`, `find_ignored_lines_and_classify_comments`), not a separate mechanism. See `docs/adr/0050-format-suppression-pragmas.md`.
 _Avoid_: fmt:off — spell it out; a bare "fmt:off" reads as the comment text itself rather than the general concept of every pragma this covers.

@@ -15,12 +15,15 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 
 from ._base import (
     BaseCheck,
+    CheckResult,
     FixOutcome,
     FixResult,
     Violation,
     atomic_write_text,
     byte_col_to_char_col,
     find_ignored_lines,
+    find_ignored_lines_and_pytriage_comments,
+    find_suppression_usage,
     ignore_pattern_for,
     split_lines_like_ast,
 )
@@ -908,14 +911,34 @@ class MeaninglessVarsCheck(BaseCheck):
     def get_prefilter_pattern(self) -> list[str] | None:
         return sorted(self.meaningless_names)
 
-    def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, tree: ast.Module, source: str) -> CheckResult:
         visitor = MeaninglessNameVisitor(self.meaningless_names, source)
         visitor.visit(tree)
 
+        suppression_usages = []
         if visitor.violations:
-            ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
+            ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(
+                source, IGNORE_PATTERN
+            )
             raw_violations = [v for v in visitor.violations if v["line"] not in ignored_lines]
             suggestions = plan_suggestions(tree, self.meaningless_names, ignored_lines)
+
+            suppressed_candidates = [v for v in visitor.violations if v["line"] in ignored_lines]
+            if suppressed_candidates:
+                all_suggestions = plan_suggestions(tree, self.meaningless_names, set())
+                for candidate in suppressed_candidates:
+                    proposal = all_suggestions.get((candidate["line"], candidate["byte_col"]))
+                    if self._level is MeaninglessVarsLevel.CONSERVATIVE and proposal is None:
+                        continue
+                    usage = find_suppression_usage(
+                        comments,
+                        format_suppressed,
+                        self.check_id,
+                        self.error_code,
+                        (candidate["line"],),
+                    )
+                    if usage is not None:
+                        suppression_usages.append(usage)
         else:
             raw_violations = []
             suggestions = {}
@@ -949,7 +972,7 @@ class MeaninglessVarsCheck(BaseCheck):
                 )
             )
 
-        return violations
+        return CheckResult(violations, suppression_usages)
 
     def fix(
         self,

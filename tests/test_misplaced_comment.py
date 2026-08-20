@@ -58,6 +58,37 @@ def test_check_returns_no_violations(source: str) -> None:
     assert MisplacedCommentCheck().check(Path("test.py"), ast.parse(source), source) == []
 
 
+def test_check_records_a_pytriage_usage() -> None:
+    source = "result = func(\n    arg\n)  # Comment  # pytriage: TR7\n"
+
+    check_result = MisplacedCommentCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert check_result == []
+    assert [(usage.check_id, usage.error_code, usage.line) for usage in check_result.suppression_usages] == [
+        ("misplaced-comment", "TR7", 3)
+    ]
+
+
+def test_check_records_each_suppressed_pytriage_usage() -> None:
+    source = "first = func(\n    arg\n)  # pytriage: TR7\nsecond = func(\n    arg\n)  # pytriage: TR7\n"
+
+    check_result = MisplacedCommentCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert check_result == []
+    assert [usage.line for usage in check_result.suppression_usages] == [3, 6]
+
+
+def test_check_ignores_a_format_suppressed_candidate_when_tracking_usage() -> None:
+    source = (
+        "first = func(\n    arg\n)  # pytriage: TR7\n# fmt: off\nsecond = func(\n    arg\n)  # comment\n# fmt: on\n"
+    )
+
+    check_result = MisplacedCommentCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert check_result == []
+    assert [usage.line for usage in check_result.suppression_usages] == [3]
+
+
 @pytest.mark.parametrize(
     ("source", "expected_source", "expected_exit_code"),
     [

@@ -677,7 +677,9 @@ def process_file(filepath: Path) -> list[Suggestion]:
     return collect_suggestions(filepath, tree, source)
 
 
-def collect_suggestions(filepath: Path, tree: ast.Module, source: str) -> list[Suggestion]:
+def collect_suggestions(
+    filepath: Path, tree: ast.Module, source: str, ignored_lines: set[int] | None = None
+) -> list[Suggestion]:
     """`filepath` is used only to tag returned Suggestions; `tree` must already be parsed from `source`."""
     attach_parents(tree)
 
@@ -693,7 +695,8 @@ def collect_suggestions(filepath: Path, tree: ast.Module, source: str) -> list[S
         # See ADR-0040.
         return []
 
-    ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
+    if ignored_lines is None:
+        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
     suggestions: list[Suggestion] = []
 
     for node in candidates:

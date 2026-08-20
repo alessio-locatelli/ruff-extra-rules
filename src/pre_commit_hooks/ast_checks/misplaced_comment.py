@@ -20,11 +20,14 @@ from typing import TYPE_CHECKING
 
 from ._base import (
     BaseCheck,
+    CheckResult,
     FixOutcome,
     FixResult,
     Violation,
     atomic_write_text,
+    find_suppression_usage,
     ignore_pattern_for,
+    ignored_lines_and_pytriage_comments_from_tokens,
     ignored_lines_from_tokens,
     line_terminator,
     tokenize_source,
@@ -163,29 +166,40 @@ class MisplacedCommentCheck(BaseCheck):
     def get_prefilter_pattern(self) -> list[str] | None:
         return ["#"]
 
-    def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, tree: ast.Module, source: str) -> CheckResult:
         tokens = tuple(tokenize_source(source))
         found = _scan_misplaced_comments(tokens, tree)
         if not found:
-            return []
+            return CheckResult()
 
-        ignored_lines = ignored_lines_from_tokens(tokens, IGNORE_PATTERN)
-        return [
-            Violation(
-                check_id=self.check_id,
-                error_code=self.error_code,
-                line=item.bracket_line,
-                col=item.comment_col,
-                message=(
-                    f"Comment on line {item.comment_line} should not be on "
-                    "closing bracket line. Or add "
-                    "'# pytriage: TR7' to suppress."
-                ),
-                fixable=True,
+        ignored_lines, format_suppressed, comments = ignored_lines_and_pytriage_comments_from_tokens(
+            tokens, IGNORE_PATTERN
+        )
+        violations = []
+        suppression_usages = []
+        for item in found:
+            if item.bracket_line in ignored_lines:
+                usage = find_suppression_usage(
+                    comments, format_suppressed, self.check_id, self.error_code, (item.bracket_line,)
+                )
+                if usage is not None:
+                    suppression_usages.append(usage)
+                continue
+            violations.append(
+                Violation(
+                    check_id=self.check_id,
+                    error_code=self.error_code,
+                    line=item.bracket_line,
+                    col=item.comment_col,
+                    message=(
+                        f"Comment on line {item.comment_line} should not be on "
+                        "closing bracket line. Or add "
+                        "'# pytriage: TR7' to suppress."
+                    ),
+                    fixable=True,
+                )
             )
-            for item in found
-            if item.bracket_line not in ignored_lines
-        ]
+        return CheckResult(violations, suppression_usages)
 
     def fix(
         self,

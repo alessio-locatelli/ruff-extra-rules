@@ -17,11 +17,14 @@ from typing import TYPE_CHECKING
 
 from ._base import (
     BaseCheck,
+    CheckResult,
     FixOutcome,
     FixResult,
     Violation,
     atomic_write_text,
     find_ignored_lines,
+    find_ignored_lines_and_pytriage_comments,
+    find_suppression_usage,
     ignore_pattern_for,
 )
 
@@ -212,15 +215,21 @@ class ExcessiveBlankLinesCheck(BaseCheck):
     def get_prefilter_pattern(self) -> list[str] | None:
         return None
 
-    def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, tree: ast.Module, source: str) -> CheckResult:
         file_violations = check_file_violations(source, tree)
         if not file_violations:
-            return []
+            return CheckResult()
 
-        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
+        ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(source, IGNORE_PATTERN)
         violations = []
+        suppression_usages = []
         for fv in file_violations:
             if fv.anchor_line in ignored_lines:
+                usage = find_suppression_usage(
+                    comments, format_suppressed, self.check_id, self.error_code, (fv.anchor_line,)
+                )
+                if usage is not None:
+                    suppression_usages.append(usage)
                 continue
             violations.append(
                 Violation(
@@ -233,7 +242,7 @@ class ExcessiveBlankLinesCheck(BaseCheck):
                 )
             )
 
-        return violations
+        return CheckResult(violations, suppression_usages)
 
     def fix(
         self,

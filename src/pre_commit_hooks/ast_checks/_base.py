@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Collection, Iterable, Iterator
 
     from ._options import CheckOption
 
@@ -56,6 +56,32 @@ class Violation:
     fixable: bool
     fix_data: dict[str, Any] | None = None
     fix_outcome: FixOutcome | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SuppressionUsage:
+    check_id: str
+    error_code: str
+    line: int
+
+
+class CheckResult(list[Violation]):
+    __slots__ = ("suppression_usages",)
+
+    def __init__(
+        self,
+        violations: Iterable[Violation] = (),
+        suppression_usages: Iterable[SuppressionUsage] = (),
+    ) -> None:
+        super().__init__(violations)
+        self.suppression_usages = tuple(suppression_usages)  # pytriage: TR6 -- retain immutable result metadata
+
+
+@dataclass(frozen=True, slots=True)
+class PytriageComment:
+    line: int
+    col: int
+    codes: tuple[str, ...]
 
 
 class ASTCheck(Protocol):
@@ -149,6 +175,10 @@ class BaseCheck:
         return True
 
     @property
+    def default_enabled(self) -> bool:
+        return True
+
+    @property
     def tracks_direct_inputs(self) -> bool:
         return False
 
@@ -157,6 +187,12 @@ class BaseCheck:
 
     def reconcile_direct_inputs(self, _direct_inputs: list[Path]) -> list[Path]:
         return []
+
+    def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        raise NotImplementedError
+
+    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+        return self.check(filepath, tree, source)
 
 
 class CheckUnavailableError(Exception):
@@ -382,6 +418,23 @@ def ignore_pattern_for(error_code: str) -> re.Pattern[str]:
     return re.compile(rf"#\s*pytriage:\s*(?:[^,\s]+\s*,\s*)*{escaped}(?!\w)", re.IGNORECASE)
 
 
+_PYTRIAGE_COMMENT_PATTERN = re.compile(r"#\s*pytriage\s*:\s*(.*)", re.IGNORECASE)
+
+
+def _parse_pytriage_comment(tok: tokenize.TokenInfo) -> PytriageComment | None:
+    match = _PYTRIAGE_COMMENT_PATTERN.search(tok.string)
+    if match is None:
+        return None
+    codes = tuple(
+        code.upper()
+        for segment in match.group(1).split(",")
+        if (code := segment.strip().split(maxsplit=1)[0] if segment.strip() else "")
+    )
+    if not codes:
+        return None
+    return PytriageComment(line=tok.start[0], col=tok.start[1], codes=codes)
+
+
 _FMT_OFF_PATTERN = re.compile(r"#\s*fmt:\s*off")
 _FMT_ON_PATTERN = re.compile(r"#\s*fmt:\s*on")
 _YAPF_DISABLE_PATTERN = re.compile(r"#\s*yapf:\s*disable")
@@ -462,6 +515,54 @@ class _FormatSuppressionScanner:
         if self._suppressed_from is None:
             return set()
         return set(range(self._suppressed_from, self._last_line + 1))
+
+
+def ignored_lines_and_pytriage_comments_from_tokens(
+    tokens: Iterable[tokenize.TokenInfo], *patterns: re.Pattern[str]
+) -> tuple[set[int], set[int], tuple[PytriageComment, ...]]:
+    ignored: set[int] = set()
+    format_suppressed: set[int] = set()
+    comments: list[PytriageComment] = []
+    scanner = _FormatSuppressionScanner()
+
+    for tok in tokens:
+        newly_ignored = scanner.observe(tok)
+        if newly_ignored:
+            ignored |= newly_ignored
+            format_suppressed |= newly_ignored
+        if tok.type == tokenize.COMMENT:
+            parsed = _parse_pytriage_comment(tok)
+            if parsed is not None:
+                comments.append(parsed)
+            if any(pattern.search(tok.string) for pattern in patterns):
+                ignored.add(tok.start[0])
+
+    finalized = scanner.finalize()
+    ignored |= finalized
+    format_suppressed |= finalized
+    return ignored, format_suppressed, tuple(comments)
+
+
+def find_ignored_lines_and_pytriage_comments(
+    source: str, *patterns: re.Pattern[str]
+) -> tuple[set[int], set[int], tuple[PytriageComment, ...]]:
+    return ignored_lines_and_pytriage_comments_from_tokens(tokenize_source(source), *patterns)
+
+
+def find_suppression_usage(
+    comments: Iterable[PytriageComment],
+    format_suppressed: set[int],
+    check_id: str,
+    error_code: str,
+    candidate_lines: Collection[int],
+) -> SuppressionUsage | None:
+    normalized_code = error_code.upper()
+    for comment in comments:
+        if comment.line in format_suppressed:
+            continue
+        if comment.line in candidate_lines and normalized_code in comment.codes:
+            return SuppressionUsage(check_id=check_id, error_code=normalized_code, line=comment.line)
+    return None
 
 
 def tokenize_source(source: str) -> Iterator[tokenize.TokenInfo]:

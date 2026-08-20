@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import ast
+from pathlib import Path
 
 import pytest
 
@@ -8,9 +9,6 @@ from pre_commit_hooks.ast_checks._orchestrator import CheckOrchestrator
 from pre_commit_hooks.ast_checks.redundant_assignment import RedundantAssignmentCheck
 from pre_commit_hooks.ast_checks.redundant_assignment.semantic import AggressivenessLevel
 from tests.redundant_assignment._helpers import _check
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def test_check_id_and_error_code() -> None:
@@ -74,6 +72,39 @@ def load_config():
 )
 def test_check_does_not_report_assignments_protected_by_try_handlers(source: str) -> None:
     assert _check(source, level=AggressivenessLevel.PERMISSIVE) == []
+
+
+def test_check_records_a_pytriage_usage() -> None:
+    source = 'def example():\n    x = "foo"\n    func(x=x)  # pytriage: TR5\n'
+
+    check_result = RedundantAssignmentCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert check_result == []
+    assert [(usage.check_id, usage.error_code, usage.line) for usage in check_result.suppression_usages] == [
+        ("redundant-assignment", "TR5", 3)
+    ]
+
+
+def test_check_records_each_suppressed_pytriage_usage() -> None:
+    source = (
+        'def example():\n    x = "foo"\n    func(x=x)  # pytriage: TR5\n    y = "bar"\n    func(y=y)  # pytriage: TR5\n'
+    )
+
+    check_result = RedundantAssignmentCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert check_result == []
+    assert [usage.line for usage in check_result.suppression_usages] == [3, 5]
+
+
+def test_check_ignores_a_format_suppressed_candidate_when_tracking_usage() -> None:
+    source = (
+        'def example():\n    x = "foo"\n    func(x=x)  # pytriage: TR5\n    y = "bar"\n    func(y=y)  # fmt: skip\n'
+    )
+
+    check_result = RedundantAssignmentCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert check_result == []
+    assert [usage.line for usage in check_result.suppression_usages] == [3]
 
 
 @pytest.mark.parametrize(

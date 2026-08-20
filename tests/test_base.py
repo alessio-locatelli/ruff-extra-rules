@@ -12,12 +12,15 @@ from pre_commit_hooks.ast_checks._base import (
     FixOutcome,
     FixResult,
     FixValidationError,
+    PytriageComment,
     atomic_write_text,
     byte_col_to_char_col,
     classify_comment_lines,
     fast_get_source_segment,
     find_ignored_lines,
     find_ignored_lines_and_classify_comments,
+    find_ignored_lines_and_pytriage_comments,
+    find_suppression_usage,
     ignore_pattern_for,
     ignored_lines_from_tokens,
     line_terminator,
@@ -217,6 +220,20 @@ def test_find_ignored_lines_on_cr_only_source() -> None:
 )
 def test_ignore_pattern_for_comma_separated_codes(comment: str, code: str, expected: bool) -> None:
     assert bool(find_ignored_lines(f"x = 1  {comment}\n", ignore_pattern_for(code))) is expected
+
+
+def test_pytriage_comment_parser_ignores_an_empty_comment() -> None:
+    ignored, format_suppressed, comments = find_ignored_lines_and_pytriage_comments("x = 1  # pytriage:\n")
+
+    assert ignored == set()
+    assert format_suppressed == set()
+    assert comments == ()
+
+
+def test_find_suppression_usage_excludes_format_suppressed_comments() -> None:
+    comment = PytriageComment(line=2, col=0, codes=("TR1",))
+
+    assert find_suppression_usage((comment,), {2}, "meaningless-vars", "TR1", (2,)) is None
 
 
 @pytest.mark.parametrize(
