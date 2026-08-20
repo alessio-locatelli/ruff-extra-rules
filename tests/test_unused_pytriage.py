@@ -381,3 +381,21 @@ def test_validate_function_name_records_pytriage_usage(source: str, expected_lin
     assert [(usage.check_id, usage.error_code, usage.line) for usage in check_result.suppression_usages] == [
         ("validate-function-name", "TR4", line) for line in expected_lines
     ]
+
+
+def test_validate_function_name_tracks_a_suppression_alongside_an_unsuppressed_suggestion() -> None:
+    source = (
+        "def get_total(numbers):  # pytriage: TR4\n"
+        "    return sum(numbers)\n"
+        "def get_max(numbers):\n"
+        "    return max(numbers)\n"
+    )
+
+    check_result = ValidateFunctionNameCheck().check_with_suppression_tracking(
+        Path("test.py"), ast.parse(source), source
+    )
+
+    assert [(usage.check_id, usage.error_code, usage.line) for usage in check_result.suppression_usages] == [
+        ("validate-function-name", "TR4", 1)
+    ]
+    assert [violation.error_code for violation in check_result] == ["TR4"]
