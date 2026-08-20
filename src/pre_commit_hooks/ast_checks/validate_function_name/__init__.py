@@ -42,6 +42,7 @@ from pre_commit_hooks.ast_checks._base import (
     FixOutcome,
     FixResult,
     FixValidationError,
+    SuppressionUsage,
     Violation,
     find_ignored_lines,
     find_ignored_lines_and_pytriage_comments,
@@ -115,7 +116,7 @@ class ValidateFunctionNameCheck(BaseCheck):
         function_index = index_function_nodes(tree)
 
         violations = []
-        suppression_usages = []
+        suppression_usages: list[SuppressionUsage] = []
         if collect_suppression_usage:
             for suggestion in all_suggestions:
                 record_suppression_usage_if_ignored(
