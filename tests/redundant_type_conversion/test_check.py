@@ -213,10 +213,9 @@ def test_tracking_check_does_not_reuse_normal_analysis_cache(
         _candidates: object,
         _source: str,
         *,
-        level: object,
+        level: object,  # noqa: ARG001
         ignored_lines: set[int],
     ) -> list[SimpleNamespace]:
-        assert level is not None
         ignored_lines_seen.append(ignored_lines)
         return [
             SimpleNamespace(candidate=SimpleNamespace(constructor="str"), line=1, col=4, argument_type="str"),
@@ -263,8 +262,18 @@ def test_tracking_check_handles_cached_format_suppressed_redundancies(monkeypatc
         ("bool", 5, 8, "bool"),
     ]
     filepath = Path("test.py")
-    session.cache_redundancies(filepath, source, "CONSERVATIVE:normal", redundancies)
-    session.cache_redundancies(filepath, source, "CONSERVATIVE:tracking", redundancies)
+    session.cache_redundancies(
+        filepath,
+        source,
+        tri006_module._cache_key(ConfidenceLevel.CONSERVATIVE, collect_suppression_usage=False),
+        redundancies,
+    )
+    session.cache_redundancies(
+        filepath,
+        source,
+        tri006_module._cache_key(ConfidenceLevel.CONSERVATIVE, collect_suppression_usage=True),
+        redundancies,
+    )
     _patch_session(monkeypatch, session)
     check = RedundantTypeConversionCheck()
 
