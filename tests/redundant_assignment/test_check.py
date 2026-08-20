@@ -125,6 +125,21 @@ def test_check_records_suppression_usage_for_each_reportable_candidate(
     assert [usage.line for usage in check_result.suppression_usages] == expected_lines
 
 
+def test_check_does_not_record_assignment_suppression_for_a_format_suppressed_use() -> None:
+    source = """
+def example():
+    value = "foo"  # pytriage: TR5
+    # fmt: off
+    func(value=value)
+    # fmt: on
+"""
+
+    check_result = RedundantAssignmentCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert check_result == []
+    assert check_result.suppression_usages == ()
+
+
 @pytest.mark.parametrize(
     "source",
     [

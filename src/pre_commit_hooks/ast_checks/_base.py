@@ -582,7 +582,10 @@ def record_suppression_usage_if_ignored(
 ) -> bool:
     if not any(line in ignored_lines for line in candidate_lines):
         return False
-    usage = find_suppression_usage(comments, format_suppressed, check_id, error_code, candidate_lines)
+    non_format_candidate_lines = tuple(line for line in candidate_lines if line not in format_suppressed)
+    if len(non_format_candidate_lines) != len(candidate_lines):
+        return True
+    usage = find_suppression_usage(comments, format_suppressed, check_id, error_code, non_format_candidate_lines)
     if usage is not None:
         suppression_usages.append(usage)
     return True
