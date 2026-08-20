@@ -523,11 +523,13 @@ class _FormatSuppressionScanner:
         return set(range(self._suppressed_from, self._last_line + 1))
 
 
-def ignored_lines_and_pytriage_comments_from_tokens(
+def _scan_token_stream(
     tokens: Iterable[tokenize.TokenInfo], *patterns: re.Pattern[str]
-) -> tuple[set[int], set[int], tuple[PytriageComment, ...]]:
+) -> tuple[set[int], set[int], set[int], set[int], tuple[PytriageComment, ...]]:
     ignored: set[int] = set()
     format_suppressed: set[int] = set()
+    comment_lines: set[int] = set()
+    code_lines: set[int] = set()
     comments: list[PytriageComment] = []
     scanner = _FormatSuppressionScanner()
 
@@ -537,22 +539,38 @@ def ignored_lines_and_pytriage_comments_from_tokens(
             ignored |= newly_ignored
             format_suppressed |= newly_ignored
         if tok.type == tokenize.COMMENT:
+            comment_lines.add(tok.start[0])
             parsed = _parse_pytriage_comment(tok)
             if parsed is not None:
                 comments.append(parsed)
             if any(pattern.search(tok.string) for pattern in patterns):
                 ignored.add(tok.start[0])
+        elif tok.type not in _NON_CODE_TOKEN_TYPES:
+            code_lines.update(range(tok.start[0], tok.end[0] + 1))
 
     finalized = scanner.finalize()
     ignored |= finalized
     format_suppressed |= finalized
-    return ignored, format_suppressed, tuple(comments)
+    return ignored, comment_lines - code_lines, comment_lines & code_lines, format_suppressed, tuple(comments)
+
+
+def ignored_lines_and_pytriage_comments_from_tokens(
+    tokens: Iterable[tokenize.TokenInfo], *patterns: re.Pattern[str]
+) -> tuple[set[int], set[int], tuple[PytriageComment, ...]]:
+    ignored, _comment_only, _trailing, format_suppressed, comments = _scan_token_stream(tokens, *patterns)
+    return ignored, format_suppressed, comments
 
 
 def find_ignored_lines_and_pytriage_comments(
     source: str, *patterns: re.Pattern[str]
 ) -> tuple[set[int], set[int], tuple[PytriageComment, ...]]:
     return ignored_lines_and_pytriage_comments_from_tokens(tokenize_source(source), *patterns)
+
+
+def find_ignored_lines_and_classify_comments_and_pytriage(
+    source: str, *patterns: re.Pattern[str]
+) -> tuple[set[int], set[int], set[int], set[int], tuple[PytriageComment, ...]]:
+    return _scan_token_stream(tokenize_source(source), *patterns)
 
 
 def find_suppression_usage(
@@ -681,35 +699,7 @@ def classify_comment_lines(source: str) -> tuple[set[int], set[int]]:
 def find_ignored_lines_and_classify_comments(
     source: str, *patterns: re.Pattern[str]
 ) -> tuple[set[int], set[int], set[int]]:
-    """Tokenize `source` exactly once, returning (ignored_lines,
-    comment_only_lines, trailing_comment_lines) — the same results
-    `find_ignored_lines`/`classify_comment_lines` would each compute from
-    their own separate tokenize pass, fused into one. `ignored_lines` also
-    includes every line suppressed by a ruff/Black-style format-suppression
-    pragma, same as `ignored_lines_from_tokens` — see that function's own
-    docstring and `docs/adr/0050-format-suppression-pragmas.md`.
-
-    `RedundantAssignmentCheck.check()` needs both, and streams this single
-    combined pass over `tokenize_source`'s lazy `Iterator` (rather than
-    materializing the whole token stream once and feeding it to each
-    helper) so a large file's token count never inflates peak memory — only
-    the resulting line-number sets are retained, one token at a time.
-    """
-    ignored_lines: set[int] = set()
-    comment_lines: set[int] = set()
-    code_lines: set[int] = set()
-    scanner = _FormatSuppressionScanner()
-
-    for tok in tokenize_source(source):
-        newly_ignored = scanner.observe(tok)
-        if newly_ignored:
-            ignored_lines |= newly_ignored
-        if tok.type == tokenize.COMMENT:
-            comment_lines.add(tok.start[0])
-            if any(p.search(tok.string) for p in patterns):
-                ignored_lines.add(tok.start[0])
-        elif tok.type not in _NON_CODE_TOKEN_TYPES:
-            code_lines.update(range(tok.start[0], tok.end[0] + 1))
-
-    ignored_lines |= scanner.finalize()
-    return ignored_lines, comment_lines - code_lines, comment_lines & code_lines
+    ignored, comment_only, trailing, _format_suppressed, _comments = _scan_token_stream(
+        tokenize_source(source), *patterns
+    )
+    return ignored, comment_only, trailing

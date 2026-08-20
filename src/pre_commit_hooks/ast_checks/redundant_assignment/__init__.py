@@ -10,8 +10,7 @@ from pre_commit_hooks.ast_checks._base import (
     SuppressionUsage,
     Violation,
     byte_col_to_char_col,
-    find_ignored_lines_and_classify_comments,
-    find_ignored_lines_and_pytriage_comments,
+    find_ignored_lines_and_classify_comments_and_pytriage,
     find_suppression_usage,
     ignore_pattern_for,
     record_suppression_usage_if_ignored,
@@ -91,10 +90,13 @@ class RedundantAssignmentCheck(BaseCheck):
         return [" = "]
 
     def check(self, _filepath: Path, tree: ast.Module, source: str) -> CheckResult:
-        ignored_lines, comment_only_lines, trailing_comment_lines = find_ignored_lines_and_classify_comments(
-            source, IGNORE_PATTERN
-        )
-        _ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(source, IGNORE_PATTERN)
+        (
+            ignored_lines,
+            comment_only_lines,
+            trailing_comment_lines,
+            format_suppressed,
+            comments,
+        ) = find_ignored_lines_and_classify_comments_and_pytriage(source, IGNORE_PATTERN)
 
         tracker = VariableTracker(source, comment_only_lines, trailing_comment_lines)
         tracker.visit(tree)
