@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import pytest
 
@@ -22,6 +22,9 @@ from pre_commit_hooks.ast_checks.excessive_blank_lines import ExcessiveBlankLine
 from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsCheck, MeaninglessVarsLevel
 from pre_commit_hooks.ast_checks.unused_pytriage import UnusedPytriageCheck
 from pre_commit_hooks.ast_checks.validate_function_name import ValidateFunctionNameCheck
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def test_unused_pytriage_reports_redundant_known_suppression(
@@ -376,10 +379,22 @@ def test_unused_pytriage_rerun_discards_stale_cached_usage_after_always_fix(
     assert "# pytriage: TR97" in filepath.read_text()
 
 
-def test_unused_pytriage_refresh_handles_a_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def patch_parsed_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[[tuple[str, ast.Module] | None], None]:
+    def patch(parsed: tuple[str, ast.Module] | None) -> None:
+        monkeypatch.setattr(CheckOrchestrator, "_parsed_source", lambda _self, _filepath: parsed)
+
+    return patch
+
+
+def test_unused_pytriage_refresh_handles_a_missing_file(
+    tmp_path: Path, patch_parsed_source: Callable[[tuple[str, ast.Module] | None], None]
+) -> None:
     filepath = tmp_path / "module.py"
     orchestrator = CheckOrchestrator(checks=[])
-    monkeypatch.setattr(CheckOrchestrator, "_parsed_source", lambda _self, _filepath: None)
+    patch_parsed_source(None)
     violations_result = CheckResult([Violation("test", "TR99", 1, 0, "message", fixable=False)])
 
     orchestrator._refresh_unused_pytriage(filepath, [], [UnusedPytriageCheck()], violations_result)
@@ -388,7 +403,9 @@ def test_unused_pytriage_refresh_handles_a_missing_file(tmp_path: Path, monkeypa
     assert orchestrator.rule_failures == []
 
 
-def test_unused_pytriage_refresh_skips_an_unavailable_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unused_pytriage_refresh_skips_an_unavailable_check(
+    tmp_path: Path, patch_parsed_source: Callable[[tuple[str, ast.Module] | None], None]
+) -> None:
     filepath = tmp_path / "module.py"
     orchestrator = CheckOrchestrator(checks=[])
     orchestrator._unavailable_check_ids.add("unavailable")
@@ -397,7 +414,7 @@ def test_unused_pytriage_refresh_skips_an_unavailable_check(tmp_path: Path, monk
         check_id = "unavailable"
         error_code = "TR99"
 
-    monkeypatch.setattr(CheckOrchestrator, "_parsed_source", lambda _self, _filepath: ("x = 1\n", ast.parse("x = 1\n")))
+    patch_parsed_source(("x = 1\n", ast.parse("x = 1\n")))
     violations_result = CheckResult([Violation("test", "TR99", 1, 0, "message", fixable=False)])
     orchestrator._refresh_unused_pytriage(
         filepath, [cast("ASTCheck", UnavailableCheck())], [UnusedPytriageCheck()], violations_result
@@ -407,45 +424,46 @@ def test_unused_pytriage_refresh_skips_an_unavailable_check(tmp_path: Path, monk
     assert orchestrator.rule_failures == []
 
 
-def test_unused_pytriage_refresh_records_a_check_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    "case",
+    [
+        (RuntimeError("refresh failed"), "failing-check", True, []),
+        (
+            CheckUnavailableError("refresh unavailable"),
+            "unavailable-check",
+            False,
+            [("unavailable-check", "refresh unavailable")],
+        ),
+    ],
+    ids=["failure", "unavailable"],
+)
+def test_unused_pytriage_refresh_records_check_outcomes(
+    tmp_path: Path,
+    patch_parsed_source: Callable[[tuple[str, ast.Module] | None], None],
+    case: tuple[Exception, str, bool, list[tuple[str, str]]],
+) -> None:
+    raised, check_id, expect_rule_failure, expected_unavailable = case
     filepath = tmp_path / "module.py"
     orchestrator = CheckOrchestrator(checks=[])
 
-    class FailingCheck:
-        check_id = "failing-check"
+    class RaisedCheck:
         error_code = "TR99"
+
+        @property
+        def check_id(self) -> str:
+            return check_id
 
         @staticmethod
         def check_with_suppression_tracking(_filepath: Path, _tree: object, _source: str) -> CheckResult:
-            raise RuntimeError("refresh failed")
+            raise raised
 
-    monkeypatch.setattr(CheckOrchestrator, "_parsed_source", lambda _self, _filepath: ("x = 1\n", ast.parse("x = 1\n")))
+    patch_parsed_source(("x = 1\n", ast.parse("x = 1\n")))
     orchestrator._refresh_unused_pytriage(
-        filepath, [cast("ASTCheck", FailingCheck())], [UnusedPytriageCheck()], CheckResult()
+        filepath, [cast("ASTCheck", RaisedCheck())], [UnusedPytriageCheck()], CheckResult()
     )
 
-    assert orchestrator.rule_failures == [(str(filepath), "failing-check")]
-
-
-def test_unused_pytriage_refresh_records_an_unavailable_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    filepath = tmp_path / "module.py"
-    orchestrator = CheckOrchestrator(checks=[])
-
-    class UnavailableCheck:
-        check_id = "unavailable-check"
-        error_code = "TR99"
-
-        @staticmethod
-        def check_with_suppression_tracking(_filepath: Path, _tree: object, _source: str) -> CheckResult:
-            raise CheckUnavailableError("refresh unavailable")
-
-    monkeypatch.setattr(CheckOrchestrator, "_parsed_source", lambda _self, _filepath: ("x = 1\n", ast.parse("x = 1\n")))
-    orchestrator._refresh_unused_pytriage(
-        filepath, [cast("ASTCheck", UnavailableCheck())], [UnusedPytriageCheck()], CheckResult()
-    )
-
-    assert orchestrator.rule_failures == []
-    assert orchestrator.unavailable_checks == [("unavailable-check", "refresh unavailable")]
+    assert orchestrator.rule_failures == ([(filepath.as_posix(), check_id)] if expect_rule_failure else [])
+    assert orchestrator.unavailable_checks == expected_unavailable
 
 
 def test_unused_pytriage_fix_declines() -> None:

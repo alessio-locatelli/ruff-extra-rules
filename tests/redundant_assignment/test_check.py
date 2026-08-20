@@ -106,26 +106,23 @@ async def example():
     assert check_result.suppression_usages == ()
 
 
-def test_check_records_each_suppressed_pytriage_usage() -> None:
+@pytest.mark.parametrize(
+    ("second_comment", "expected_lines"),
+    [("# pytriage: TR5", [3, 5]), ("# fmt: skip", [3])],
+    ids=["pytriage", "format-suppressed"],
+)
+def test_check_records_suppression_usage_for_each_reportable_candidate(
+    second_comment: str, expected_lines: list[int]
+) -> None:
     source = (
-        'def example():\n    x = "foo"\n    func(x=x)  # pytriage: TR5\n    y = "bar"\n    func(y=y)  # pytriage: TR5\n'
+        'def example():\n    x = "foo"\n    func(x=x)  # pytriage: TR5\n'
+        f'    y = "bar"\n    func(y=y)  {second_comment}\n'
     )
 
     check_result = RedundantAssignmentCheck().check(Path("test.py"), ast.parse(source), source)
 
     assert check_result == []
-    assert [usage.line for usage in check_result.suppression_usages] == [3, 5]
-
-
-def test_check_ignores_a_format_suppressed_candidate_when_tracking_usage() -> None:
-    source = (
-        'def example():\n    x = "foo"\n    func(x=x)  # pytriage: TR5\n    y = "bar"\n    func(y=y)  # fmt: skip\n'
-    )
-
-    check_result = RedundantAssignmentCheck().check(Path("test.py"), ast.parse(source), source)
-
-    assert check_result == []
-    assert [usage.line for usage in check_result.suppression_usages] == [3]
+    assert [usage.line for usage in check_result.suppression_usages] == expected_lines
 
 
 @pytest.mark.parametrize(

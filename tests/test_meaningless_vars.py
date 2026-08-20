@@ -421,12 +421,21 @@ def test_check_reports_violation_count(source: str, count: int) -> None:
     assert len(violations) == count
 
 
-def test_check_records_each_suppressed_pytriage_usage() -> None:
-    source = """
+@pytest.mark.parametrize(
+    ("second_fragment", "expected_lines"),
+    [
+        ("    result = None  # pytriage: TR1\n", [3, 4]),
+        ("    # fmt: off\n    result = None\n    # fmt: on\n", [3]),
+    ],
+    ids=["pytriage", "format-suppressed"],
+)
+def test_check_records_suppression_usage_for_each_reportable_candidate(
+    second_fragment: str, expected_lines: list[int]
+) -> None:
+    source = f"""
 def process():
-    data = {}  # pytriage: TR1
-    result = None  # pytriage: TR1
-    return data, result
+    data = {{}}  # pytriage: TR1
+{second_fragment}    return data, result
 """
 
     check_result = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check_with_suppression_tracking(
@@ -434,25 +443,7 @@ def process():
     )
 
     assert check_result == []
-    assert [usage.line for usage in check_result.suppression_usages] == [3, 4]
-
-
-def test_check_ignores_a_format_suppressed_candidate_when_tracking_usage() -> None:
-    source = """
-def process():
-    data = {}  # pytriage: TR1
-    # fmt: off
-    result = None
-    # fmt: on
-    return data, result
-"""
-
-    check_result = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check_with_suppression_tracking(
-        Path("test.py"), ast.parse(source), source
-    )
-
-    assert check_result == []
-    assert [usage.line for usage in check_result.suppression_usages] == [3]
+    assert [usage.line for usage in check_result.suppression_usages] == expected_lines
 
 
 def test_multiple_meaningless_names() -> None:
