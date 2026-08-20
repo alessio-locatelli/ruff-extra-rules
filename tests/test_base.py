@@ -13,6 +13,7 @@ from pre_commit_hooks.ast_checks._base import (
     FixResult,
     FixValidationError,
     PytriageComment,
+    SuppressionUsage,
     atomic_write_text,
     byte_col_to_char_col,
     classify_comment_lines,
@@ -238,7 +239,7 @@ def test_find_suppression_usage_excludes_format_suppressed_comments() -> None:
 
 
 def test_record_suppression_usage_skips_a_nonmatching_comment() -> None:
-    suppression_usages = []
+    suppression_usages: list[SuppressionUsage] = []
     comment = PytriageComment(line=2, col=0, codes=("TR1",))
 
     assert record_suppression_usage_if_ignored(
