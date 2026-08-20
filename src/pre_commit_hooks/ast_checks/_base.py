@@ -147,7 +147,7 @@ class ASTCheck(Protocol):
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]: ...
 
-    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]: ...
+    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str) -> CheckResult: ...
 
     def fix(
         self,
@@ -196,8 +196,9 @@ class BaseCheck:
     def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
         raise NotImplementedError
 
-    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
-        return self.check(filepath, tree, source)
+    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str) -> CheckResult:
+        check_result = self.check(filepath, tree, source)
+        return check_result if isinstance(check_result, CheckResult) else CheckResult(check_result)
 
 
 class CheckUnavailableError(Exception):
