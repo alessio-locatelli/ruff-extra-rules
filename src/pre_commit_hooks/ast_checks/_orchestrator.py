@@ -1,7 +1,3 @@
-"""The linting application itself: running the enabled checks over a set of
-files, caching their results, and applying fixes.
-"""
-
 from __future__ import annotations
 
 import ast
@@ -40,14 +36,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("ast_checks")
 
-# src/pre_commit_hooks/ — the tree CacheManager.compute_tree_hash() hashes to
-# invalidate every cached result whenever any check's own code, or shared
-# code it depends on, changes.
+
 _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 
-# Matches a pre-fix Violation against a fresh check() re-run's own new
-# Violation objects, which can never share object identity with it.
-type ViolationKey = tuple[int, int, str]  # (line, col, message)
+
+type ViolationKey = tuple[int, int, str]
 
 
 def _as_check_result(result: list[Violation]) -> CheckResult:
@@ -88,12 +81,7 @@ def _has_terminal_fix_state(violation: Violation) -> bool:
 def _replace_check_violations(
     all_violations: dict[str, list[Violation]], key: str, check_id: str, new_violations: list[Violation]
 ) -> None:
-    """Replaces whatever `check_id` previously reported for `key` in `all_violations` with
-    `new_violations`, preserving any other check's own violations for that same file (ADR-0041: a
-    drained candidate is re-checked with only the one check that flagged it, never every check, so a
-    stale result must be replaced rather than appended to -- otherwise an unchanged violation would be
-    reported twice, and one that's now clean would still show its own, no-longer-true earlier report).
-    """
+
     kept = [violation for violation in all_violations.get(key, []) if violation.check_id != check_id]
     combined = kept + new_violations
     if combined:
@@ -121,7 +109,7 @@ def _unmatched_by_message(dropped: list[Violation], replacements: list[Violation
 
 
 def _record_indirect_resolutions(violations: list[Violation], initial_violations: dict[str, list[Violation]]) -> None:
-    """See `docs/adr/0053-indirect-resolution-outcome.md`."""
+
     final_by_check = _group_by_check_id(violations)
     surviving = {id(violation) for violation in violations}
     for check_id, initial in initial_violations.items():
@@ -144,34 +132,14 @@ def _set_fix_outcomes(violations: list[Violation], fix_result: FixResult) -> Non
 
 
 def _fingerprint_default(value: object) -> object:
-    """`json.dumps(..., default=...)` handler for the value shapes a check's
-    own instance state (see `_instance_state`) can contain but that `json`
-    can't natively serialize: a `set`'s iteration order depends on
-    PYTHONHASHSEED (randomized per process by default), so it's sorted
-    first rather than dumped as-is — otherwise the same config would
-    fingerprint differently across process runs, making the cache key (and
-    so the cache itself) useless. Anything else falls back to repr() rather
-    than raising, since instance state can pick up values this generic and
-    unopinionated (e.g. a test's monkeypatched instance attribute) that
-    were never meant to be "config" in the first place — the fingerprint
-    just needs to not crash construction, not be meaningful for every
-    possible value a check instance could ever hold.
-    """
+
     if isinstance(value, (set, frozenset)):
         return sorted(value)
     return repr(value)
 
 
 def _instance_state(check: ASTCheck) -> dict[str, object]:
-    """Every attribute making up `check`'s own instance state — effectively
-    its constructor arguments, so two instances of the same check with
-    different configuration wouldn't share a cache entry. Checks with no
-    `__init__` override (most of them) have no instance state at all, so
-    this deliberately walks both `__slots__` (across the whole MRO, since a
-    subclass's own `__slots__` doesn't include an ancestor's) and any
-    `__dict__` a check might still have, rather than something every check
-    must opt into.
-    """
+
     state: dict[str, object] = {}
     for cls in type(check).__mro__:
         for slot in cls.__dict__.get("__slots__", ()):
@@ -183,37 +151,18 @@ def _instance_state(check: ASTCheck) -> dict[str, object]:
 
 
 def _fingerprint_check(check: ASTCheck) -> str:
-    """Stable fingerprint of a check instance's own state (see
-    `_instance_state`).
-    """
+
     return json.dumps(_instance_state(check), default=_fingerprint_default, sort_keys=True)
 
 
 @dataclass(frozen=True, slots=True)
 class _FileChecks:
-    """One file's share of a run: the checks to run against it, the checks
-    `per-file-ignores` switched off for it that must still be handed its
-    content (see `ASTCheck.tracks_direct_inputs`), and the cache identity of
-    what running that set produces. See
-    `docs/adr/0049-per-file-ignores.md`.
-    """
-
     run: tuple[ASTCheck, ...]
     record_only: tuple[ASTCheck, ...]
     hook_name: str
 
 
 class CheckOrchestrator:
-    """Orchestrates running multiple AST checks on Python files.
-
-    This class manages the workflow of:
-    1. Pre-filtering files per-check, against each check's own pattern
-    2. Caching check results
-    3. Parsing files once and running each file's applicable checks
-    4. Applying fixes when requested
-    5. Reporting violations
-    """
-
     __slots__ = (
         "_cacheable_check_ids",
         "_cacheable_fingerprints",
@@ -252,50 +201,19 @@ class CheckOrchestrator:
             hook_name=self._hook_name_for(self._cacheable_check_ids),
             cache_version=self._generate_cache_version(),
         )
-        # Populated by process_files() with every candidate file _check_file()
-        # returned None for (couldn't be read/decoded or failed to parse) —
-        # reset at the start of each call, so main() can report them instead
-        # of letting them vanish silently from all_violations with no trace.
+
         self.unprocessable_files: list[str] = []
-        # (filepath, check_id) pairs where a check's own check() or fix()
-        # raised unexpectedly (in _check_file or _apply_fixes respectively)
-        # — reset at the start of each process_files() call, same as
-        # unprocessable_files. Without this, a check that crashes on every
-        # file it sees would make the whole run look clean (zero
-        # violations, exit code 0) whenever no other check reports
-        # anything for the same files; and a fix() that raises after
-        # already resolving every violation it was given would otherwise
-        # leave no trace at all once every one of them gets marked fixed.
+
         self.rule_failures: list[tuple[str, str]] = []
-        # (check_id, message) pairs, one per check_id, where a check raised
-        # CheckUnavailableError -- see that exception's own docstring for
-        # why this is recorded once here instead of aborting the whole run.
-        # Reset at the start of each process_files() call, same as the two
-        # above.
+
         self.unavailable_checks: list[tuple[str, str]] = []
-        # check_ids already recorded in unavailable_checks this run -- once
-        # a check_id lands here, _check_file skips calling that check
-        # entirely, rather than paying its own failure cost again (and
-        # recording a duplicate entry) on every remaining file.
+
         self._unavailable_check_ids: set[str] = set()
-        # Set by _apply_fixes() for the file it was just called on -- read
-        # back by _process_single_file() right after its own full-checks
-        # _check_file() call returns, to decide whether that file's result
-        # is safe to cache (see _apply_fixes' own docstring for why a
-        # changed file's cacheable results aren't).
+
         self._fix_changed_file = False
 
     def process_files(self, filepaths: list[str]) -> dict[str, list[Violation]]:
-        """A file that couldn't be read or parsed has no entry in the
-        returned dict (indistinguishable from "processed, zero
-        violations") — check `self.unprocessable_files` for those. A file
-        where one check crashed while others ran fine can still have an
-        entry here (the other checks' violations), but its results are
-        incomplete — check `self.rule_failures` for those. A check that
-        raised `CheckUnavailableError` contributes no violations for the
-        rest of this run, for any file — check `self.unavailable_checks`
-        for those; every other check's results are unaffected.
-        """
+
         self.unprocessable_files = []
         self.rule_failures = []
         self.unavailable_checks = []
@@ -309,12 +227,8 @@ class CheckOrchestrator:
         if not checks_by_file:
             return {}
 
-        # self.cache's own cache_version and hook_name (set at construction
-        # from _generate_cache_version()/_generate_hook_name()) already gate
-        # staleness and config identity — no separate per-file cache_key
-        # needed here.
         all_violations: dict[str, list[Violation]] = {}
-        # Lets a reconciled file that is also a direct input retain the caller's original key.
+
         resolved_to_key: dict[Path, str] = {}
         for filepath_str in checks_by_file:
             try:
@@ -327,8 +241,6 @@ class CheckOrchestrator:
             violations = self._process_single_file(filepath, file_checks)
 
             if violations is None:
-                # Unreadable, undecodable, or unparseable — _check_file
-                # already logged the specific cause.
                 self.unprocessable_files.append(filepath_str)
             elif violations:
                 all_violations[filepath_str] = violations
@@ -378,28 +290,10 @@ class CheckOrchestrator:
                     _replace_check_violations(all_violations, extra_file_str, check.check_id, violations)
 
     def _process_single_file(self, filepath: Path, file_checks: _FileChecks) -> list[Violation] | None:
-        """Runs `file_checks.run` against a single file, honoring each
-        check's own `cacheable` flag: a cacheable check's violations may
-        come from (and be written to) the shared per-file cache; a
-        non-cacheable check (see `ASTCheck.cacheable`) is always re-run
-        fresh, on every call, regardless of what the cache holds for this
-        file.
 
-        `file_checks.record_only` rides along with whichever pass below
-        already reads the file, since a check switched off for it by
-        `per-file-ignores` still has to be handed its content (ADR-0049).
-        Only a clean cache hit with nothing to re-run pays for its own read,
-        being the one path that would otherwise never open the file.
-
-        Returns `None` if the file couldn't be read/parsed (mirrors
-        `_check_file`'s own contract).
-        """
         record_only = file_checks.record_only
         checks = file_checks.run
         if not checks:
-            # Nothing left to run, but reading and parsing the file is what
-            # turns an unreadable or unparseable input into a report rather
-            # than a silent skip (ch. 13).
             return self._check_file(filepath, (), record_only=record_only)
 
         hook_name = file_checks.hook_name
@@ -410,26 +304,12 @@ class CheckOrchestrator:
         if cacheable_checks:
             cached_violations = self._get_cached_violations(filepath, hook_name)
 
-        # A cache hit is only trustworthy in fix mode when it reports zero
-        # violations: fix_data is never cached (see _cache_violations), so
-        # a hit that shows a violation can't be used to actually fix it --
-        # that case falls through to the full recompute-and-fix path below,
-        # same as a genuine cache miss. See ADR-0044.
         if cached_violations is not None and (not self.fix_mode or not cached_violations):
             if not always_rerun_checks:
-                # The one path that returns without opening the file, so a
-                # check owed its content gets a pass of its own here.
                 if record_only and not self._record_direct_inputs(filepath, record_only):
                     return None
                 return cached_violations
-            # The cacheable group's cache entry is still valid, but a
-            # non-cacheable check must run fresh against this file's
-            # current, real content every single call — its own result is
-            # never read from or written to the cache. In fix mode, this
-            # already fixes any violation it finds: _check_file_locked
-            # calls _apply_fixes with exactly the violations this call
-            # produced, so it never touches the (already-clean) cacheable
-            # group.
+
             self._fix_changed_file = False
             rule_failures_before = len(self.rule_failures)
             fresh = self._check_file(
@@ -445,17 +325,7 @@ class CheckOrchestrator:
                 return None
             if not self._fix_changed_file:
                 return _merge_check_results(cached_violations, fresh)
-            # The always-rerun group's own fix changed the file, so the
-            # cached "clean" cacheable-group result is no longer known to
-            # be accurate for the file's new content. Re-verify (and fix,
-            # if needed) just the cacheable group fresh against that new
-            # content, merging in `fresh` as-is rather than re-running the
-            # already-fixed always-rerun group a second time: a second
-            # check() there would find it clean and silently lose its own
-            # [FIXED] outcome, since the violation is already gone.
-            # cacheable_checks is guaranteed non-empty here: cached_violations
-            # is only ever not None when it was, since that's the only branch
-            # that sets it.
+
             rerun_checks = [*cacheable_checks, *(check for check in checks if isinstance(check, UnusedPytriageCheck))]
             audit_check_ids = {check.check_id for check in rerun_checks if isinstance(check, UnusedPytriageCheck)}
             fresh_regular_result = CheckResult(
@@ -495,17 +365,7 @@ class CheckOrchestrator:
         prior_suppression_usages: tuple[SuppressionUsage, ...] = (),
         prior_active_error_codes: frozenset[str] = frozenset(),
     ) -> list[Violation] | None:
-        """Runs `checks` fresh against `filepath` (fixing, in fix mode),
-        then caches whatever cacheable subset of `checks` is complete and
-        accurate this run. `extra_violations`, if given, is merged into the
-        return value without being cached itself — e.g. an always-rerun
-        group's own already-resolved result from an earlier pass this same
-        `_process_single_file()` call, which must still be reported even
-        though it's never eligible for caching either way (ADR-0034).
 
-        Returns `None` if the file couldn't be read/parsed (mirrors
-        `_check_file`'s own contract).
-        """
         rule_failures_before = len(self.rule_failures)
         self._fix_changed_file = False
         if prior_suppression_usages or prior_active_error_codes:
@@ -524,27 +384,11 @@ class CheckOrchestrator:
             return None
 
         cacheable_ids = {check.check_id for check in checks if check.cacheable}
-        # incomplete_ids covers a cacheable check that crashed this file
-        # (new_failure_ids), one that's globally unavailable this run
-        # (_unavailable_check_ids, e.g. a missing prerequisite), and — in
-        # fix mode — one that hit a rejected/errored/aborted fix outcome
-        # this run (terminal_negative_ids). All three mean this check's own
-        # results for this file are missing or unverified: caching the rest
-        # of the group as if it were complete would let a future cache hit
-        # keep serving that gap, or serve stale positions _refresh_stale_
-        # positions() deliberately left unrefreshed for the same check_id
-        # (see its own docstring), until the file or cache version changes.
+
         terminal_negative_ids = {v.check_id for v in violations if _has_terminal_fix_state(v)}
         incomplete_ids = new_failure_ids | self._unavailable_check_ids | terminal_negative_ids
-        # self._fix_changed_file (set by _apply_fixes, see its own
-        # docstring): a check with zero violations here is never
-        # re-verified against the file's final content once some other
-        # check's fix actually changed it, so nothing in this group can be
-        # cached as complete and accurate this run — it converges to a
-        # cache hit on its own next (unchanged) run instead.
+
         if cacheable_ids and not (incomplete_ids & cacheable_ids) and not self._fix_changed_file:
-            # A violation marked fixed no longer exists in the file's
-            # current content, so it must never be cached as still present.
             cacheable_violations = [
                 v for v in violations if v.check_id in cacheable_ids and v.fix_outcome is not FixOutcome.APPLIED
             ]
@@ -556,33 +400,7 @@ class CheckOrchestrator:
         return _merge_check_results(violations, extra_result) if extra_result else violations
 
     def _checks_by_file(self, filepaths: list[str]) -> dict[str, _FileChecks]:
-        """Applies each check's own prefilter pattern independently, rather
-        than combining every enabled check's pattern into one OR'd filter --
-        the combined filter dropped a file for every check whenever it
-        matched none of them, even a check whose own get_prefilter_pattern()
-        returns None specifically to see every file. Preserves `self.checks`
-        order per file, since `_apply_fixes` depends on it.
 
-        A check's prefilter is never asked about a file `per-file-ignores`
-        switched it off for -- the answer could not change what runs, and
-        the scan is the expensive half of deciding it. A check tracking
-        direct inputs is the exception, since it still has to be handed
-        those files (ADR-0049).
-
-        The cache identity is decided from the `per-file-ignores` outcome
-        alone, never from the prefilter: a prefiltered-out check genuinely
-        has nothing to report for that file, so its absence is already part
-        of what a cache entry means (ADR-0049).
-
-        A file matched by no enabled check's prefilter and not named by
-        `per-file-ignores` either gets no entry at all, so it is never read
-        or parsed and a syntax error in it is never reported -- an accepted
-        scope boundary, not an oversight (ADR-0052).
-        """
-        # Intersected with this run's own checks: one table serves both
-        # published hooks (ADR-0045), so an entry naming only the other one's
-        # check has switched nothing off here and must not change what this
-        # run reads or reports.
         ignored_by_file = {
             filepath_str: self._per_file_ignores.ignored_check_ids(filepath_str) & self._check_ids
             for filepath_str in filepaths
@@ -611,11 +429,7 @@ class CheckOrchestrator:
             record_only = tuple(
                 check for check in applicable if check.check_id in ignored and check.tracks_direct_inputs
             )
-            # A file `per-file-ignores` emptied out is still an input the
-            # user named, and dropping it here is what would make an
-            # unreadable one vanish without a word (ch. 13). A file with
-            # neither -- no enabled check's prefilter matched it, nothing
-            # ignored it -- is dropped on purpose (ADR-0052).
+
             if applicable or ignored:
                 checks_by_file[filepath_str] = _FileChecks(
                     run=run,
@@ -626,13 +440,7 @@ class CheckOrchestrator:
         return checks_by_file
 
     def _hook_name_for(self, check_ids: frozenset[str]) -> str:
-        """Identity of *what produced* a cached result: a short hash of
-        `check_ids` (a subset of the enabled cacheable checks, since
-        `per-file-ignores` can switch some of them off for one file) and
-        their own config. See ADR-0044 and ADR-0005 for why this is split
-        from `_generate_cache_version()`, and ADR-0049 for why it is decided
-        per file.
-        """
+
         hook_name = self._hook_names.get(check_ids)
         if hook_name is None:
             fingerprints = sorted(self._cacheable_fingerprints[check_id] for check_id in check_ids)
@@ -641,20 +449,13 @@ class CheckOrchestrator:
         return hook_name
 
     def _generate_cache_version(self) -> str:
-        """Whether a cached result can be trusted *at all*: this package's
-        own source-tree hash, and the running interpreter's major.minor
-        (`ast.parse()`'s output isn't guaranteed identical across Python
-        minor versions). See ADR-0044 and ADR-0005.
-        """
+
         tree_hash = CacheManager.compute_tree_hash(_PACKAGE_ROOT)
         python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
         return f"{tree_hash}|{python_version}"
 
     def _get_cached_violations(self, filepath: Path, hook_name: str) -> CheckResult | None:
         try:
-            # self.cache's own cache_version already rejects a stale entry,
-            # and `hook_name` a mismatched-config one, before this ever sees
-            # it.
             cached = self.cache.get_cached_result(filepath, hook_name)
             if cached is None:
                 return None
@@ -697,7 +498,6 @@ class CheckOrchestrator:
                     "col": v.col,
                     "message": v.message,
                     "fixable": v.fixable,
-                    # Note: fix_data is NOT cached as it may contain AST nodes
                 }
                 for v in check_result
             ]
@@ -720,19 +520,7 @@ class CheckOrchestrator:
             logger.warning("Cache serialization failed: %s", repr(error))
 
     def _read_source(self, filepath: Path) -> tuple[str, str] | None:
-        """Thin error-handling wrapper around read_source_with_encoding: logs
-        and returns None on any failure instead of raising, since every
-        caller here treats "file couldn't be processed" the same way.
 
-        Debug-only logging: every caller already turns a None return into
-        its own clean, user-facing diagnostic (_check_file's own caller
-        reports it via unprocessable_files; _apply_fixes's own caller
-        reports it via rule_failures) — an ERROR-level .exception() call
-        here would just leak a redundant raw traceback onto the user's
-        stderr by default (nothing in this codebase configures logging, so
-        Python's own lastResort handler prints WARNING+ straight to
-        stderr).
-        """
         try:
             return read_source_with_encoding(filepath)
         except OSError:
@@ -815,12 +603,7 @@ class CheckOrchestrator:
             return None
 
     def _parsed_source(self, filepath: Path) -> tuple[str, ast.Module] | None:
-        """`None` if the file couldn't be read, decoded, or parsed — every
-        caller here turns that into the same "unprocessable file" outcome.
 
-        Debug-only logging: see `_read_source`'s own docstring for why an
-        ERROR-level `.exception()` call here would just be redundant noise.
-        """
         read_result = self._read_source(filepath)
         if read_result is None:
             return None
@@ -852,10 +635,6 @@ class CheckOrchestrator:
         audit_checks = [check for check in checks if isinstance(check, UnusedPytriageCheck)]
         for check in regular_checks:
             if check.check_id in self._unavailable_check_ids:
-                # Already recorded in unavailable_checks for an earlier
-                # file this run -- a missing/misbehaving prerequisite
-                # doesn't get better on the next file, so this check is
-                # never worth retrying (or re-recording) again this run.
                 continue
             try:
                 if audit_checks:
@@ -863,16 +642,9 @@ class CheckOrchestrator:
                 else:
                     violations = check.check(filepath, tree, source)
             except CheckUnavailableError as error:
-                # Recorded once here rather than per file: see
-                # CheckUnavailableError's own docstring for why this must
-                # not abort every other check's results for the rest of
-                # this run.
                 logger.debug("Check %s is unavailable: %s", check.check_id, error, exc_info=True)
                 self._record_unavailable_check(check, error)
             except Exception:
-                # Debug-only: reported cleanly via rule_failures below — see
-                # _read_source's own docstring for why ERROR-level
-                # .exception() logging here would just be redundant noise.
                 logger.debug("Check %s failed on %s", check.check_id, filepath, exc_info=True)
                 self.rule_failures.append((str(filepath), check.check_id))
             else:
@@ -963,10 +735,7 @@ class CheckOrchestrator:
         violations_result.suppression_usages = tuple(usages)
 
     def _record_direct_inputs(self, filepath: Path, checks: Sequence[ASTCheck]) -> bool:
-        """Reads and parses `filepath` for its own sake, for the one caller
-        with nothing else to read it. `False` if it couldn't be, which is that
-        caller's cue to report the file unprocessable.
-        """
+
         parsed = self._parsed_source(filepath)
         if parsed is None:
             return False
@@ -992,58 +761,20 @@ class CheckOrchestrator:
         filepath: Path,
         violations: list[Violation],
     ) -> None:
-        """`violations` holds all violations found in the file so far this
-        run, and is mutated in place: each fixable check's own stale entries
-        (collected once, before any fix ran) are replaced with a freshly
-        recomputed list, each marked fixed/rejected/errored/left alone
-        against the file's actual post-fix state. The pre-fix entries are
-        kept aside for `_record_indirect_resolutions`. Matching a stale entry
-        back to "is this the same violation, now fixed" by identity isn't
-        reliable — an earlier check's own fix can shift line/col numbers,
-        and two distinct violations can share an identical message (e.g. a
-        same-named free function and method both suggesting the same
-        rename) — so the stale entries for this check_id are discarded
-        outright rather than matched.
 
-        Sets `self._fix_changed_file` for `_process_single_file` to read
-        back: a check with zero violations this run is never re-verified
-        here or by `_refresh_stale_positions()` below (neither one has any
-        reason to look at a check_id with no entries in `violations`), so
-        if some *other* check's fix changed the file, that zero-violation
-        check's result is no longer known to be accurate against the file's
-        final content — a fresh check() next run might disagree. See
-        ADR-0044.
-        """
         initial_violations = _group_by_check_id(violations)
         fixable_check_ids = {v.check_id for v in violations if v.fixable}
 
-        # Whether any check's fix() actually resolved at least one violation
-        # this call — the only case where a later check's own recompute (or
-        # a non-participating check's stale entries) can possibly be
-        # pointing at shifted line numbers, so the final pass below is worth
-        # its own extra read+parse+recheck.
         file_changed = False
-        # Once somebody else has written to the file, a violation that
-        # disappeared can no longer be attributed to a fix of this run's
-        # own. See ADR-0053.
+
         externally_modified = False
 
         for check in self.checks:
             if check.check_id not in fixable_check_ids:
                 continue
             try:
-                # Re-read source in case a previous check's fix in this same
-                # loop already modified the file
                 read_result = self._read_source(filepath)
                 if read_result is None:
-                    # The file was readable moments ago (this run's own
-                    # initial check pass succeeded on it) — a failure here
-                    # means something changed concurrently, or an earlier
-                    # check's own fix in this same loop left it in a bad
-                    # state. Without a rule_failure + marking, this check's
-                    # violations would silently keep their stale pre-fix
-                    # snapshot and be reported as ordinary [FIXABLE], as if
-                    # --fix had never even been attempted for them.
                     self.rule_failures.append((str(filepath), check.check_id))
                     for v in violations:
                         if v.check_id == check.check_id and v.fixable:
@@ -1052,11 +783,6 @@ class CheckOrchestrator:
                 current_source, encoding = read_result
                 current_tree = ast.parse(current_source, filename=filepath)
 
-                # Recompute violations against the current file state rather
-                # than reusing the stale ones collected before any fixes ran:
-                # an earlier check's fix can shift line/col numbers (removing
-                # or inserting lines), which would otherwise make this
-                # check's fix() edit the wrong location.
                 fresh_violations = [v for v in check.check(filepath, current_tree, current_source) if v.fixable]
                 if not fresh_violations:
                     continue
@@ -1122,41 +848,7 @@ class CheckOrchestrator:
         filepath: Path,
         violations: list[Violation],
     ) -> None:
-        """Re-check `filepath`'s final on-disk state and refresh the
-        position of every still-*open* violation (no fixed/rejected/
-        errored/failed/aborted outcome yet this call) — covers both a check that
-        never got as far as calling its own `fix()` this run (e.g. a check
-        that's never fixable at all, like redundant-super-init) *and* a
-        check that did run but left some of its own violations open (e.g.
-        `validate-function-name`'s `should_autofix` guard skipping a method
-        while renaming a different, unrelated function in the same `fix()`
-        call — the per-check loop above only recomputes that check's own
-        positions once, immediately before its own `fix()` call, not again
-        afterward). Either way, if some *other* check's fix in the same run
-        removed or inserted lines after that point, the still-open
-        violation's position silently points at the wrong place — ch. 7:
-        "MUST report line and column information accurately when
-        available". Only called when `_apply_fixes` already confirmed the
-        file's content actually changed this call.
 
-        A violation already marked fixed this call is left completely
-        untouched rather than recomputed: it's genuinely gone from the file,
-        so a fresh `check()` call would never find it again (silently
-        losing its `[FIXED]` confirmation). A check_id with any
-        rejected/errored/failed/aborted entry is skipped *entirely* this
-        pass, including its own still-open entries (if any): a fresh
-        `check()` call would rediscover the still-present rejected/errored/
-        failed/aborted violation too, and there's no reliable way to tell
-        that rediscovery
-        apart from a different, unrelated violation that merely happens to
-        share the same message text (e.g. two identically-named functions
-        in different scopes) without a stable per-violation identity this
-        codebase doesn't have — silently dropping a real, unrelated
-        violation would be worse than leaving its position stale (ch. 34:
-        "MUST prefer a visible failure over a silent incorrect result").
-
-        `violations` is the same list `_apply_fixes` mutates in place.
-        """
         final_read = self._read_source(filepath)
         if final_read is None:
             return
@@ -1168,9 +860,6 @@ class CheckOrchestrator:
 
         for check in self.checks:
             if check.check_id in self._unavailable_check_ids:
-                # Already recorded in unavailable_checks -- see _check_file's
-                # own matching guard for why this check is never worth
-                # retrying again this run.
                 continue
             check_entries = [v for v in violations if v.check_id == check.check_id]
             if not check_entries or any(_has_terminal_fix_state(v) for v in check_entries):
@@ -1183,9 +872,6 @@ class CheckOrchestrator:
             try:
                 fresh = check.check(filepath, final_tree, final_source)
             except Exception:
-                # Debug-only: reported cleanly via rule_failures below — see
-                # _read_source's own docstring for why ERROR-level
-                # .exception() logging here would just be redundant noise.
                 logger.debug("Check %s failed on %s", check.check_id, filepath, exc_info=True)
                 self.rule_failures.append((str(filepath), check.check_id))
                 continue
@@ -1232,10 +918,7 @@ def load_checks(
     check_args: dict[str, Any] | None = None,
     check_classes: Sequence[type[ASTCheck]] | None = None,
 ) -> list[ASTCheck]:
-    """Mirrors `ruff check --select`/`--ignore`: `select` narrows the
-    candidate set (None = all checks), and `ignore` always subtracts from
-    whatever that candidate set is, whether or not `select` was given.
-    """
+
     if check_args is None:
         check_args = {}
 
@@ -1257,7 +940,6 @@ def load_checks(
         if select is None and not check.default_enabled:
             continue
 
-        # Re-instantiate with check-specific arguments, if any were given.
         args = check_args.get(check_id, {})
         if args:
             try:
