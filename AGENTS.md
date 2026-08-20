@@ -55,6 +55,8 @@ See [docs/adding-a-check.md](docs/adding-a-check.md) for the full walkthrough of
 - If a file is already bloated with prose that violates these rules, that is not an excuse to bypass them. Instead, signal that the code needs decluttering — retain any indispensable rationale as an ADR reference instead.
 - Immediately delete any pre-existing stale comments or prose that violates these rules.
 
+_Note that ignore comments that suppress false-positives (e.g., `# noqa`, `# type: ignore`, `# pragma`) are obviously out of scope of these guidelines._
+
 ## User-facing prose (README, program output)
 
 - **No internal implementation details.** Don't expose internal scoring/threshold numbers (e.g. "semantic value score ≤ 10", "score < 50") or other implementation-level mechanics in a README. A README is a short, high-level description for a regular user, not a spec for the internals — use a concrete illustrative example instead of a formula.
