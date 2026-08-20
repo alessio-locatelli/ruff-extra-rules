@@ -87,6 +87,52 @@ class Child(Base):
     assert "Base.__init__()" in violation.message
 
 
+def test_check_records_each_suppressed_pytriage_usage() -> None:
+    source = """class Base:
+    def __init__(self):
+        pass
+
+
+class First(Base):
+    def __init__(self, **kwargs):  # pytriage: TR3
+        super().__init__(**kwargs)
+
+
+class Second(Base):
+    def __init__(self, **kwargs):  # pytriage: TR3
+        super().__init__(**kwargs)
+"""
+
+    check_result = RedundantSuperInitCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert check_result == []
+    assert [usage.line for usage in check_result.suppression_usages] == [7, 12]
+
+
+def test_check_ignores_a_format_suppressed_candidate_when_tracking_usage() -> None:
+    source = """class Base:
+    def __init__(self):
+        pass
+
+
+class First(Base):
+    def __init__(self, **kwargs):  # pytriage: TR3
+        super().__init__(**kwargs)
+
+
+# fmt: off
+class Second(Base):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+# fmt: on
+"""
+
+    check_result = RedundantSuperInitCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert check_result == []
+    assert [usage.line for usage in check_result.suppression_usages] == [7]
+
+
 @pytest.mark.parametrize(
     ("source", "flagged"),
     [

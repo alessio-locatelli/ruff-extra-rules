@@ -22,15 +22,18 @@ from pre_commit_hooks._prefilter import batch_filter_files
 from . import ALL_CHECKS
 from ._base import (
     ASTCheck,
+    CheckResult,
     CheckUnavailableError,
     ConcurrentModificationError,
     FixOutcome,
     FixResult,
     FixValidationError,
+    SuppressionUsage,
     Violation,
     read_source_with_encoding,
 )
 from ._per_file_ignores import PerFileIgnoreList
+from .unused_pytriage import UnusedPytriageCheck
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -45,6 +48,26 @@ _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 # Matches a pre-fix Violation against a fresh check() re-run's own new
 # Violation objects, which can never share object identity with it.
 type ViolationKey = tuple[int, int, str]  # (line, col, message)
+
+
+def _as_check_result(result: list[Violation]) -> CheckResult:
+    return result if isinstance(result, CheckResult) else CheckResult(result)
+
+
+def _merge_check_results(*results: CheckResult) -> CheckResult:
+    merged = CheckResult()
+    for result in results:
+        merged.extend(result)
+        merged.suppression_usages += result.suppression_usages
+    return merged
+
+
+def _check_with_suppression_tracking(check: ASTCheck, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    tracking_check = getattr(check, "check_with_suppression_tracking", None)
+    if tracking_check is None:
+        return check.check(filepath, tree, source)
+    return tracking_check(filepath, tree, source)
+
 
 _FIX_LOCK_TIMEOUT_SECONDS = 30.0
 _FIX_LOCK_POLL_INTERVAL_SECONDS = 0.05
@@ -386,7 +409,7 @@ class CheckOrchestrator:
         cacheable_checks = [check for check in checks if check.cacheable]
         always_rerun_checks = [check for check in checks if not check.cacheable]
 
-        cached_violations: list[Violation] | None = None
+        cached_violations: CheckResult | None = None
         if cacheable_checks:
             cached_violations = self._get_cached_violations(filepath, hook_name)
 
@@ -411,11 +434,19 @@ class CheckOrchestrator:
             # produced, so it never touches the (already-clean) cacheable
             # group.
             self._fix_changed_file = False
-            fresh = self._check_file(filepath, always_rerun_checks, record_only=record_only)
+            fresh = self._check_file(
+                filepath,
+                [*always_rerun_checks],
+                record_only=record_only,
+                prior_suppression_usages=cached_violations.suppression_usages,
+                prior_active_error_codes=frozenset(
+                    check.error_code for check in cacheable_checks if not isinstance(check, UnusedPytriageCheck)
+                ),
+            )
             if fresh is None:
                 return None
             if not self._fix_changed_file:
-                return cached_violations + fresh
+                return _merge_check_results(cached_violations, fresh)
             # The always-rerun group's own fix changed the file, so the
             # cached "clean" cacheable-group result is no longer known to
             # be accurate for the file's new content. Re-verify (and fix,
@@ -427,7 +458,8 @@ class CheckOrchestrator:
             # cacheable_checks is guaranteed non-empty here: cached_violations
             # is only ever not None when it was, since that's the only branch
             # that sets it.
-            return self._check_and_cache(filepath, cacheable_checks, hook_name, extra_violations=fresh)
+            rerun_checks = [*cacheable_checks, *(check for check in checks if isinstance(check, UnusedPytriageCheck))]
+            return self._check_and_cache(filepath, rerun_checks, hook_name, extra_result=fresh)
 
         return self._check_and_cache(filepath, checks, hook_name, record_only=record_only)
 
@@ -437,7 +469,7 @@ class CheckOrchestrator:
         checks: Sequence[ASTCheck],
         hook_name: str,
         *,
-        extra_violations: list[Violation] | None = None,
+        extra_result: CheckResult | None = None,
         record_only: Sequence[ASTCheck] = (),
     ) -> list[Violation] | None:
         """Runs `checks` fresh against `filepath` (fixing, in fix mode),
@@ -484,9 +516,12 @@ class CheckOrchestrator:
             cacheable_violations = [
                 v for v in violations if v.check_id in cacheable_ids and v.fix_outcome is not FixOutcome.APPLIED
             ]
-            self._cache_violations(filepath, hook_name, cacheable_violations)
+            cacheable_usages = tuple(
+                usage for usage in violations.suppression_usages if usage.check_id in cacheable_ids
+            )
+            self._cache_violations(filepath, hook_name, CheckResult(cacheable_violations, cacheable_usages))
 
-        return violations + extra_violations if extra_violations else violations
+        return _merge_check_results(violations, extra_result) if extra_result else violations
 
     def _checks_by_file(self, filepaths: list[str]) -> dict[str, _FileChecks]:
         """Applies each check's own prefilter pattern independently, rather
@@ -583,13 +618,15 @@ class CheckOrchestrator:
         python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
         return f"{tree_hash}|{python_version}"
 
-    def _get_cached_violations(self, filepath: Path, hook_name: str) -> list[Violation] | None:
+    def _get_cached_violations(self, filepath: Path, hook_name: str) -> CheckResult | None:
         try:
             # self.cache's own cache_version already rejects a stale entry,
             # and `hook_name` a mismatched-config one, before this ever sees
             # it.
             cached = self.cache.get_cached_result(filepath, hook_name)
             if cached is None:
+                return None
+            if "suppression_usages" not in cached:
                 return None
 
             violations = [
@@ -604,13 +641,21 @@ class CheckOrchestrator:
                 )
                 for v_dict in cached.get("violations", [])
             ]
+            suppression_usages = tuple(
+                SuppressionUsage(
+                    check_id=usage_dict["check_id"],
+                    error_code=usage_dict["error_code"],
+                    line=usage_dict["line"],
+                )
+                for usage_dict in cached.get("suppression_usages", [])
+            )
         except (KeyError, TypeError, ValueError) as error:
             logger.debug("Cache deserialization failed: %s", repr(error))
             return None
         else:
-            return violations
+            return CheckResult(violations, suppression_usages)
 
-    def _cache_violations(self, filepath: Path, hook_name: str, violations: list[Violation]) -> None:
+    def _cache_violations(self, filepath: Path, hook_name: str, check_result: CheckResult) -> None:
         try:
             serialized = [
                 {
@@ -622,10 +667,23 @@ class CheckOrchestrator:
                     "fixable": v.fixable,
                     # Note: fix_data is NOT cached as it may contain AST nodes
                 }
-                for v in violations
+                for v in check_result
             ]
-
-            self.cache.set_cached_result(filepath, hook_name, {"violations": serialized})
+            self.cache.set_cached_result(
+                filepath,
+                hook_name,
+                {
+                    "violations": serialized,
+                    "suppression_usages": [
+                        {
+                            "check_id": usage.check_id,
+                            "error_code": usage.error_code,
+                            "line": usage.line,
+                        }
+                        for usage in check_result.suppression_usages
+                    ],
+                },
+            )
         except (TypeError, ValueError) as error:
             logger.warning("Cache serialization failed: %s", repr(error))
 
@@ -656,18 +714,45 @@ class CheckOrchestrator:
             return None
 
     def _check_file(
-        self, filepath: Path, checks: Sequence[ASTCheck], *, record_only: Sequence[ASTCheck] = ()
-    ) -> list[Violation] | None:
-        return self._check_file_with_lifecycle(filepath, checks, direct=True, record_only=record_only)
+        self,
+        filepath: Path,
+        checks: Sequence[ASTCheck],
+        *,
+        record_only: Sequence[ASTCheck] = (),
+        prior_suppression_usages: tuple[SuppressionUsage, ...] = (),
+        prior_active_error_codes: frozenset[str] = frozenset(),
+    ) -> CheckResult | None:
+        return self._check_file_with_lifecycle(
+            filepath,
+            checks,
+            direct=True,
+            record_only=record_only,
+            prior_suppression_usages=prior_suppression_usages,
+            prior_active_error_codes=prior_active_error_codes,
+        )
 
-    def _check_derived_file(self, filepath: Path, checks: Sequence[ASTCheck]) -> list[Violation] | None:
+    def _check_derived_file(self, filepath: Path, checks: Sequence[ASTCheck]) -> CheckResult | None:
         return self._check_file_with_lifecycle(filepath, checks, direct=False)
 
     def _check_file_with_lifecycle(
-        self, filepath: Path, checks: Sequence[ASTCheck], *, direct: bool, record_only: Sequence[ASTCheck] = ()
-    ) -> list[Violation] | None:
+        self,
+        filepath: Path,
+        checks: Sequence[ASTCheck],
+        *,
+        direct: bool,
+        record_only: Sequence[ASTCheck] = (),
+        prior_suppression_usages: tuple[SuppressionUsage, ...] = (),
+        prior_active_error_codes: frozenset[str] = frozenset(),
+    ) -> CheckResult | None:
         if not self.fix_mode or not locking_is_available():
-            return self._check_file_locked(filepath, checks, direct=direct, record_only=record_only)
+            return self._check_file_locked(
+                filepath,
+                checks,
+                direct=direct,
+                record_only=record_only,
+                prior_suppression_usages=prior_suppression_usages,
+                prior_active_error_codes=prior_active_error_codes,
+            )
 
         try:
             lock_path = _fix_lock_path(filepath)
@@ -677,7 +762,14 @@ class CheckOrchestrator:
                 timeout_seconds=_FIX_LOCK_TIMEOUT_SECONDS,
                 poll_interval_seconds=_FIX_LOCK_POLL_INTERVAL_SECONDS,
             ):
-                return self._check_file_locked(filepath, checks, direct=direct, record_only=record_only)
+                return self._check_file_locked(
+                    filepath,
+                    checks,
+                    direct=direct,
+                    record_only=record_only,
+                    prior_suppression_usages=prior_suppression_usages,
+                    prior_active_error_codes=prior_active_error_codes,
+                )
         except TimeoutError:
             logger.debug(
                 "Could not acquire the fix lock for %s within %ss -- another process may be fixing it",
@@ -708,15 +800,25 @@ class CheckOrchestrator:
             return None
 
     def _check_file_locked(
-        self, filepath: Path, checks: Sequence[ASTCheck], *, direct: bool, record_only: Sequence[ASTCheck] = ()
-    ) -> list[Violation] | None:
+        self,
+        filepath: Path,
+        checks: Sequence[ASTCheck],
+        *,
+        direct: bool,
+        record_only: Sequence[ASTCheck] = (),
+        prior_suppression_usages: tuple[SuppressionUsage, ...] = (),
+        prior_active_error_codes: frozenset[str] = frozenset(),
+    ) -> CheckResult | None:
         parsed = self._parsed_source(filepath)
         if parsed is None:
             return None
         source, tree = parsed
 
-        all_violations: list[Violation] = []
-        for check in checks:
+        all_violations = CheckResult(suppression_usages=prior_suppression_usages)
+        active_error_codes = set(prior_active_error_codes)
+        regular_checks = [check for check in checks if not isinstance(check, UnusedPytriageCheck)]
+        audit_checks = [check for check in checks if isinstance(check, UnusedPytriageCheck)]
+        for check in regular_checks:
             if check.check_id in self._unavailable_check_ids:
                 # Already recorded in unavailable_checks for an earlier
                 # file this run -- a missing/misbehaving prerequisite
@@ -724,7 +826,10 @@ class CheckOrchestrator:
                 # never worth retrying (or re-recording) again this run.
                 continue
             try:
-                violations = check.check(filepath, tree, source)
+                if audit_checks:
+                    violations = _check_with_suppression_tracking(check, filepath, tree, source)
+                else:
+                    violations = check.check(filepath, tree, source)
             except CheckUnavailableError as error:
                 # Recorded once here rather than per file: see
                 # CheckUnavailableError's own docstring for why this must
@@ -739,9 +844,23 @@ class CheckOrchestrator:
                 logger.debug("Check %s failed on %s", check.check_id, filepath, exc_info=True)
                 self.rule_failures.append((str(filepath), check.check_id))
             else:
-                all_violations.extend(violations)
+                check_result = _as_check_result(violations)
+                all_violations.extend(check_result)
+                all_violations.suppression_usages += check_result.suppression_usages
+                active_error_codes.add(check.error_code)
                 if direct:
                     self._record_direct_input(check, filepath, source)
+
+        for check in audit_checks:
+            try:
+                audit_result = check.check_with_suppression_usage(
+                    source, all_violations.suppression_usages, frozenset(active_error_codes)
+                )
+            except Exception:
+                logger.debug("Check %s failed on %s", check.check_id, filepath, exc_info=True)
+                self.rule_failures.append((str(filepath), check.check_id))
+            else:
+                all_violations.extend(audit_result)
 
         if direct:
             for check in record_only:
@@ -749,8 +868,50 @@ class CheckOrchestrator:
 
         if self.fix_mode and all_violations:
             self._apply_fixes(filepath, all_violations)
+            if self._fix_changed_file and audit_checks:
+                self._refresh_unused_pytriage(filepath, regular_checks, audit_checks, all_violations)
 
         return all_violations
+
+    def _refresh_unused_pytriage(
+        self,
+        filepath: Path,
+        regular_checks: Sequence[ASTCheck],
+        audit_checks: Sequence[UnusedPytriageCheck],
+        violations_result: CheckResult,
+    ) -> None:
+        parsed = self._parsed_source(filepath)
+        if parsed is None:
+            return
+        source, tree = parsed
+        usages: list[SuppressionUsage] = []
+        active_error_codes: set[str] = set()
+        for check in regular_checks:
+            if check.check_id in self._unavailable_check_ids:
+                continue
+            try:
+                fresh = _check_with_suppression_tracking(check, filepath, tree, source)
+            except Exception:
+                logger.debug("Check %s failed while refreshing unused suppressions", check.check_id, exc_info=True)
+                self.rule_failures.append((str(filepath), check.check_id))
+            else:
+                fresh_result = _as_check_result(fresh)
+                usages.extend(fresh_result.suppression_usages)
+                active_error_codes.add(check.error_code)
+
+        fresh_audits = CheckResult()
+        for check in audit_checks:
+            fresh_audits.extend(
+                check.check_with_suppression_usage(source, tuple(usages), frozenset(active_error_codes))
+            )
+
+        violations_result[:] = [
+            violation
+            for violation in violations_result
+            if violation.check_id not in {check.check_id for check in audit_checks}
+        ]
+        violations_result.extend(fresh_audits)
+        violations_result.suppression_usages = tuple(usages)
 
     def _record_direct_inputs(self, filepath: Path, checks: Sequence[ASTCheck]) -> bool:
         """Reads and parses `filepath` for its own sake, for the one caller
@@ -1043,6 +1204,8 @@ def load_checks(
         if select is not None and check_id not in select:
             continue
         if ignore is not None and check_id in ignore:
+            continue
+        if select is None and not getattr(check, "default_enabled", True):
             continue
 
         # Re-instantiate with check-specific arguments, if any were given.

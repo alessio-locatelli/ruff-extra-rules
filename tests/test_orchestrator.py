@@ -3725,7 +3725,7 @@ def test_load_checks_ignore_set_skips_matching_check() -> None:
     checks = load_checks(ignore={"meaningless-vars"})
     check_ids = {c.check_id for c in checks}
     assert "meaningless-vars" not in check_ids
-    assert len(check_ids) == len(ALL_CHECKS) - 1
+    assert len(check_ids) == len(ALL_CHECKS) - 2
 
 
 def test_load_checks_ignore_composes_with_select() -> None:
@@ -3785,7 +3785,7 @@ def test_load_checks_skips_check_whose_init_raises(
 
     monkeypatch.setattr(_orchestrator, "ALL_CHECKS", [*ALL_CHECKS, BrokenCheck])
 
-    assert len(load_checks()) == len(ALL_CHECKS)
+    assert len(load_checks()) == len(ALL_CHECKS) - 1
 
 
 def test_load_checks_skips_check_when_custom_args_raise() -> None:

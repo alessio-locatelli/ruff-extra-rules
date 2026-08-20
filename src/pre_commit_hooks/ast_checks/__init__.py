@@ -35,6 +35,7 @@ from .misplaced_comment import MisplacedCommentCheck
 from .redundant_assignment import RedundantAssignmentCheck
 from .redundant_super_init import RedundantSuperInitCheck
 from .redundant_type_conversion import RedundantTypeConversionCheck
+from .unused_pytriage import UnusedPytriageCheck
 from .validate_function_name import ValidateFunctionNameCheck
 
 if TYPE_CHECKING:
@@ -52,4 +53,5 @@ ALL_CHECKS: list[type[ASTCheck]] = [
     RedundantAssignmentCheck,
     MisplacedCommentCheck,
     RedundantTypeConversionCheck,
+    UnusedPytriageCheck,
 ]

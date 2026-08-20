@@ -5,10 +5,13 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pre_commit_hooks.ast_checks._base import (
     BaseCheck,
+    CheckResult,
     FixResult,
     Violation,
     byte_col_to_char_col,
     find_ignored_lines_and_classify_comments,
+    find_ignored_lines_and_pytriage_comments,
+    find_suppression_usage,
     ignore_pattern_for,
 )
 from pre_commit_hooks.ast_checks._options import EnumOption
@@ -85,10 +88,11 @@ class RedundantAssignmentCheck(BaseCheck):
     def get_prefilter_pattern(self) -> list[str] | None:
         return [" = "]
 
-    def check(self, _filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, tree: ast.Module, source: str) -> CheckResult:
         ignored_lines, comment_only_lines, trailing_comment_lines = find_ignored_lines_and_classify_comments(
             source, IGNORE_PATTERN
         )
+        _ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(source, IGNORE_PATTERN)
 
         tracker = VariableTracker(source, comment_only_lines, trailing_comment_lines)
         tracker.visit(tree)
@@ -113,6 +117,7 @@ class RedundantAssignmentCheck(BaseCheck):
         }
 
         violations: list[Violation] = []
+        suppression_usages = []
 
         for lifecycle in lifecycles:
             key = (lifecycle.assignment.scope_id, lifecycle.assignment.var_name)
@@ -129,10 +134,16 @@ class RedundantAssignmentCheck(BaseCheck):
             if pattern is None:
                 continue
 
-            if lifecycle.assignment.line in ignored_lines or any(use.line in ignored_lines for use in lifecycle.uses):
+            if not should_report_violation(lifecycle, pattern, level=self._level):
                 continue
 
-            if not should_report_violation(lifecycle, pattern, level=self._level):
+            candidate_lines = (lifecycle.assignment.line, *(use.line for use in lifecycle.uses))
+            if any(line in ignored_lines for line in candidate_lines):
+                usage = find_suppression_usage(
+                    comments, format_suppressed, self.check_id, self.error_code, candidate_lines
+                )
+                if usage is not None:
+                    suppression_usages.append(usage)
                 continue
 
             fixable = should_autofix(lifecycle, source_lines=tracker.source_lines)
@@ -165,7 +176,7 @@ class RedundantAssignmentCheck(BaseCheck):
             )
             violations.append(violation)
 
-        return violations
+        return CheckResult(violations, suppression_usages)
 
     def fix(
         self,

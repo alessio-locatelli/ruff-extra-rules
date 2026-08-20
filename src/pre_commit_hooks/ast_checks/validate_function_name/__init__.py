@@ -37,14 +37,17 @@ from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from pre_commit_hooks.ast_checks._base import (
     BaseCheck,
+    CheckResult,
     ConcurrentModificationError,
     FixOutcome,
     FixResult,
     FixValidationError,
     Violation,
+    find_ignored_lines_and_pytriage_comments,
+    find_suppression_usage,
 )
 
-from .analysis import Suggestion, collect_suggestions
+from .analysis import IGNORE_PATTERN, Suggestion, collect_suggestions
 from .autofix import (
     _repository_reference_status,
     apply_fix,
@@ -84,14 +87,24 @@ class ValidateFunctionNameCheck(BaseCheck):
     def get_prefilter_pattern(self) -> list[str] | None:
         return ["def get_"]
 
-    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, filepath: Path, tree: ast.Module, source: str) -> CheckResult:
         # Reuse the orchestrator's already-parsed tree/source instead of
         # re-reading and re-parsing the file (see analysis.process_file for
         # the standalone equivalent used by tests).
-        suggestions = collect_suggestions(filepath, tree, source)
+        ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(source, IGNORE_PATTERN)
+        suggestions = collect_suggestions(filepath, tree, source, ignored_lines)
+        all_suggestions = collect_suggestions(filepath, tree, source, set())
         function_index = index_function_nodes(tree)
 
         violations = []
+        suppression_usages = []
+        for suggestion in all_suggestions:
+            if suggestion.lineno in ignored_lines:
+                usage = find_suppression_usage(
+                    comments, format_suppressed, self.check_id, self.error_code, (suggestion.lineno,)
+                )
+                if usage is not None:
+                    suppression_usages.append(usage)
         for suggestion in suggestions:
             auto_fixable = not suggestion.requires_property and is_autofix_safe(function_index, suggestion)
             reference_status = _repository_reference_status(filepath, suggestion.func_name) if auto_fixable else "safe"
@@ -126,7 +139,7 @@ class ValidateFunctionNameCheck(BaseCheck):
                 )
             )
 
-        return violations
+        return CheckResult(violations, suppression_usages)
 
     def fix(
         self,

@@ -13,6 +13,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 - `meaningless-vars --fix` preserves type-alias peer type parameters referenced inside nested scopes while still renaming unrelated enclosing variables.
 - `meaningless-vars --fix` preserves peer type-parameter references inside nested generic bounds and signature annotations while still renaming unrelated enclosing variables.
 
+### Added
+
+- `unused-pytriage` (TR8) reports redundant known `# pytriage` suppression codes when explicitly selected; it is report-only and does not auto-fix comments.
+
 ## [0.1.0] - 2026-08-16
 
 ### Changed

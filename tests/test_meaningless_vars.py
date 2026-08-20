@@ -421,6 +421,40 @@ def test_check_reports_violation_count(source: str, count: int) -> None:
     assert len(violations) == count
 
 
+def test_check_records_each_suppressed_pytriage_usage() -> None:
+    source = """
+def process():
+    data = {}  # pytriage: TR1
+    result = None  # pytriage: TR1
+    return data, result
+"""
+
+    check_result = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
+
+    assert check_result == []
+    assert [usage.line for usage in check_result.suppression_usages] == [3, 4]
+
+
+def test_check_ignores_a_format_suppressed_candidate_when_tracking_usage() -> None:
+    source = """
+def process():
+    data = {}  # pytriage: TR1
+    # fmt: off
+    result = None
+    # fmt: on
+    return data, result
+"""
+
+    check_result = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
+
+    assert check_result == []
+    assert [usage.line for usage in check_result.suppression_usages] == [3]
+
+
 def test_multiple_meaningless_names() -> None:
     source = """
 def process():

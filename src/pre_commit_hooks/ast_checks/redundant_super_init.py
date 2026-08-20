@@ -13,7 +13,16 @@ import ast
 import logging
 from typing import TYPE_CHECKING
 
-from ._base import BaseCheck, FixOutcome, FixResult, Violation, find_ignored_lines, ignore_pattern_for
+from ._base import (
+    BaseCheck,
+    CheckResult,
+    FixOutcome,
+    FixResult,
+    Violation,
+    find_ignored_lines_and_pytriage_comments,
+    find_suppression_usage,
+    ignore_pattern_for,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -137,17 +146,21 @@ class RedundantSuperInitCheck(BaseCheck):
     def get_prefilter_pattern(self) -> list[str] | None:
         return ["super().__init__"]
 
-    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, filepath: Path, tree: ast.Module, source: str) -> CheckResult:
         checker = SuperInitChecker(str(filepath))
         checker.visit(tree)
 
         if not checker.violations:
-            return []
+            return CheckResult()
 
-        ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
+        ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(source, IGNORE_PATTERN)
         violations = []
+        suppression_usages = []
         for line_num, message in checker.violations:
             if line_num in ignored_lines:
+                usage = find_suppression_usage(comments, format_suppressed, self.check_id, self.error_code, (line_num,))
+                if usage is not None:
+                    suppression_usages.append(usage)
                 continue
             violations.append(
                 Violation(
@@ -160,7 +173,7 @@ class RedundantSuperInitCheck(BaseCheck):
                 )
             )
 
-        return violations
+        return CheckResult(violations, suppression_usages)
 
     def fix(
         self,

@@ -180,6 +180,62 @@ def test_check_honors_pytriage_inline_ignore(monkeypatch: pytest.MonkeyPatch) ->
     assert session.opened_content == []
 
 
+def test_tracking_check_records_a_pytriage_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = "y = str(x)  # pytriage: TR6\n"
+    session = FakeSession(
+        diagnostics_by_content={source: frozenset(), "y = x  # pytriage: TR6\n": frozenset()},
+        hover_by_position={(0, 8): "str"},
+    )
+    _patch_session(monkeypatch, session)
+
+    check_result = RedundantTypeConversionCheck().check_with_suppression_tracking(
+        Path("test.py"), ast.parse(source), source
+    )
+
+    assert check_result == []
+    assert [(usage.check_id, usage.error_code, usage.line) for usage in check_result.suppression_usages] == [
+        ("redundant-type-conversion", "TR6", 1)
+    ]
+
+
+def test_tracking_check_records_each_pytriage_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = "y = str(x)  # pytriage: TR6\nz = int(a)  # pytriage: TR6\n"
+    session = FakeSession(
+        diagnostics_by_content={
+            source: frozenset(),
+            "y = x  # pytriage: TR6\nz = int(a)  # pytriage: TR6\n": frozenset(),
+            "y = str(x)  # pytriage: TR6\nz = a  # pytriage: TR6\n": frozenset(),
+        },
+        hover_by_position={(0, 8): "str", (1, 8): "int"},
+    )
+    _patch_session(monkeypatch, session)
+
+    check_result = RedundantTypeConversionCheck().check_with_suppression_tracking(
+        Path("test.py"), ast.parse(source), source
+    )
+
+    assert check_result == []
+    assert [usage.line for usage in check_result.suppression_usages] == [1, 2]
+
+
+def test_tracking_check_handles_cached_format_suppressed_redundancies(monkeypatch: pytest.MonkeyPatch) -> None:
+    source = "y = str(x)  # pytriage: TR6\n# fmt: off\nz = int(a)\n# fmt: on\nw = bool(value)\n"
+    session = FakeSession(diagnostics_by_content={}, hover_by_position={})
+    session._redundancies_by_content[(source, "CONSERVATIVE")] = [
+        ("str", 1, 8, "str"),
+        ("int", 3, 8, "int"),
+        ("bool", 5, 8, "bool"),
+    ]
+    _patch_session(monkeypatch, session)
+    check = RedundantTypeConversionCheck()
+
+    tracked = check.check_with_suppression_tracking(Path("test.py"), ast.parse(source), source)
+    direct = check.check(Path("test.py"), ast.parse(source), source)
+
+    assert [usage.line for usage in tracked.suppression_usages] == [1]
+    assert [violation.line for violation in direct] == [5]
+
+
 @pytest.mark.parametrize(
     "comment",
     ["# type: ignore", "# pyright: ignore", "# pyright: ignore[reportArgumentType]", "# ty: ignore", "# TY: IGNORE"],
