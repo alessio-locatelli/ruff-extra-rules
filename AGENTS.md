@@ -121,6 +121,10 @@ This repo runs its own checks against itself, which creates three gotchas that d
 - **The `local-*-aggressive` hooks run live working-tree code, at `permissive` level, against `src/` and `tests/` on every commit.** They no longer pass `--fix` explicitly; it comes from `[tool.ruff-extra-rules] fix = true`. Widening any check's default detection can therefore fail your very next commit. It can also rewrite code you just wrote, mid-commit, but only through `local-ruff-extra-rules-aggressive` — `local-ruff-extra-rules-ty-aggressive` runs `redundant-type-conversion` alone, which reports violations and never fixes. Before widening a default, search `src/` and `tests/` for what it would newly catch and reconcile anything that has no auto-fix path.
 - **`ruff check`/`ruff format` above use the standalone binary, not the pinned `ruff-pre-commit` rev.** When the two drift, the standalone one can make edits the pinned one rejects — including stripping `# noqa` comments the pinned version still wants. Compare `ruff --version` against the `rev:` under `astral-sh/ruff-pre-commit` in `.pre-commit-config.yaml`; if they differ, use `prek run ruff-check --files <paths>` instead and tell the user about the drift.
 
+### Writing Commit Messages
+
+The commit body should communicate the "why," not just the "what." Include the rationale behind the changes, non-trivial decisions, and any other information that may be useful for future developers.
+
 ## Agent skills
 
 ### Issue tracker
