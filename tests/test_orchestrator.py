@@ -331,7 +331,7 @@ def test_expand_directories_caps_gitignore_warning_at_a_bounded_number_of_paths(
 def _patch_status_popen(monkeypatch: pytest.MonkeyPatch, status_command: list[str] | None) -> None:
     real_popen = subprocess.Popen
 
-    def fake_popen(cmd: list[str], *args: object, **kwargs: Any) -> subprocess.Popen[bytes]:
+    def fake_popen(cmd: list[str], *args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
         if "status" in cmd:
             if status_command is None:
                 raise FileNotFoundError("git not found")
@@ -4095,7 +4095,7 @@ def test_main_handles_path_containing_spaces_and_unicode(
     grep_commands: list[list[str]] = []
     grep_results: list[subprocess.CompletedProcess[str]] = []
 
-    def _spy_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _spy_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
         completed_process = real_run(*args, **kwargs)
         grep_commands.append(args[0])
         grep_results.append(completed_process)
