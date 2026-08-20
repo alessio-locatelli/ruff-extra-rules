@@ -431,6 +431,7 @@ class CheckOrchestrator:
             # produced, so it never touches the (already-clean) cacheable
             # group.
             self._fix_changed_file = False
+            rule_failures_before = len(self.rule_failures)
             fresh = self._check_file(
                 filepath,
                 [*always_rerun_checks],
@@ -456,7 +457,25 @@ class CheckOrchestrator:
             # is only ever not None when it was, since that's the only branch
             # that sets it.
             rerun_checks = [*cacheable_checks, *(check for check in checks if isinstance(check, UnusedPytriageCheck))]
-            return self._check_and_cache(filepath, rerun_checks, hook_name, extra_result=fresh)
+            fresh_failure_ids = {
+                check_id
+                for _filepath, check_id in self.rule_failures[rule_failures_before:]
+                if _filepath == str(filepath)  # pytriage: TR6
+            }
+            return self._check_and_cache(
+                filepath,
+                rerun_checks,
+                hook_name,
+                extra_result=fresh,
+                prior_suppression_usages=fresh.suppression_usages,
+                prior_active_error_codes=frozenset(
+                    check.error_code
+                    for check in [*cacheable_checks, *always_rerun_checks]
+                    if not isinstance(check, UnusedPytriageCheck)
+                    and check.check_id not in self._unavailable_check_ids
+                    and check.check_id not in fresh_failure_ids
+                ),
+            )
 
         return self._check_and_cache(filepath, checks, hook_name, record_only=record_only)
 
@@ -468,6 +487,8 @@ class CheckOrchestrator:
         *,
         extra_result: CheckResult | None = None,
         record_only: Sequence[ASTCheck] = (),
+        prior_suppression_usages: tuple[SuppressionUsage, ...] = (),
+        prior_active_error_codes: frozenset[str] = frozenset(),
     ) -> list[Violation] | None:
         """Runs `checks` fresh against `filepath` (fixing, in fix mode),
         then caches whatever cacheable subset of `checks` is complete and
@@ -482,7 +503,16 @@ class CheckOrchestrator:
         """
         rule_failures_before = len(self.rule_failures)
         self._fix_changed_file = False
-        violations = self._check_file(filepath, checks, record_only=record_only)
+        if prior_suppression_usages or prior_active_error_codes:
+            violations = self._check_file(
+                filepath,
+                checks,
+                record_only=record_only,
+                prior_suppression_usages=prior_suppression_usages,
+                prior_active_error_codes=prior_active_error_codes,
+            )
+        else:
+            violations = self._check_file(filepath, checks, record_only=record_only)
         new_failure_ids = {check_id for _fp, check_id in self.rule_failures[rule_failures_before:]}
 
         if violations is None:
@@ -908,9 +938,13 @@ class CheckOrchestrator:
 
         fresh_audits = CheckResult()
         for check in audit_checks:
-            fresh_audits.extend(
-                check.check_with_suppression_usage(source, tuple(usages), frozenset(active_error_codes))
-            )
+            try:
+                fresh_audits.extend(
+                    check.check_with_suppression_usage(source, tuple(usages), frozenset(active_error_codes))
+                )
+            except Exception:
+                logger.debug("Check %s failed while refreshing unused suppressions", check.check_id, exc_info=True)
+                self.rule_failures.append((str(filepath), check.check_id))
 
         violations_result[:] = [
             violation
