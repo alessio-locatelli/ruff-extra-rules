@@ -11,7 +11,7 @@ import time
 import types
 from enum import Enum, auto
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, NoReturn
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, NoReturn, cast
 from unittest import mock
 
 import pytest
@@ -329,9 +329,9 @@ def test_expand_directories_caps_gitignore_warning_at_a_bounded_number_of_paths(
 
 
 def _patch_status_popen(monkeypatch: pytest.MonkeyPatch, status_command: list[str] | None) -> None:
-    real_popen = subprocess.Popen
+    real_popen = cast("Callable[..., subprocess.Popen[bytes]]", subprocess.Popen)
 
-    def fake_popen(cmd: list[str], *args: Any, **kwargs: Any) -> subprocess.Popen[bytes]:
+    def fake_popen(cmd: list[str], *args: object, **kwargs: object) -> subprocess.Popen[bytes]:
         if "status" in cmd:
             if status_command is None:
                 raise FileNotFoundError("git not found")
@@ -1821,7 +1821,7 @@ def test_process_files_records_an_unavailable_direct_input_check(tmp_path: Path)
 def test_drain_cross_file_candidates_skips_an_unresolvable_extra_path(tmp_path: Path) -> None:
 
     class _UnresolvablePath(Path):
-        def resolve(self, _strict: bool = False) -> NoReturn:
+        def resolve(self, _strict: bool = False) -> NoReturn:  # noqa: FBT002 -- matches Path.resolve()'s own signature
             msg = "simulated resolve failure"
             raise OSError(msg)
 
@@ -1847,7 +1847,7 @@ def test_drain_cross_file_candidates_skips_an_unresolvable_direct_path(
     monkeypatch.setattr(CheckOrchestrator, "_process_single_file", lambda *_args: [])
     real_resolve = Path.resolve
 
-    def resolve(filepath: Path, strict: bool = False) -> Path:
+    def resolve(filepath: Path, strict: bool = False) -> Path:  # noqa: FBT002
         if filepath == main_file:
             msg = "simulated resolve failure"
             raise OSError(msg)
@@ -4090,14 +4090,14 @@ def test_main_handles_path_containing_spaces_and_unicode(
         encoding="utf-8",
     )
 
-    real_run = subprocess.run
+    real_run = cast("Callable[..., subprocess.CompletedProcess[str]]", subprocess.run)
 
     grep_commands: list[list[str]] = []
     grep_results: list[subprocess.CompletedProcess[str]] = []
 
-    def _spy_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    def _spy_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         completed_process = real_run(*args, **kwargs)
-        grep_commands.append(args[0])
+        grep_commands.append(cast("list[str]", args[0]))
         grep_results.append(completed_process)
         return completed_process
 
