@@ -10,6 +10,7 @@ from pre_commit_hooks.ast_checks._base import (
     ASTCheck,
     BaseCheck,
     CheckResult,
+    CheckUnavailableError,
     FixOutcome,
     FixResult,
     SuppressionUsage,
@@ -130,7 +131,7 @@ def test_unused_pytriage_uses_cached_suppression_usage(tmp_path: Path, monkeypat
     def fail_if_called(*_args: object, **_kwargs: object) -> list[object]:
         raise AssertionError("meaningless-vars should be served from its cache")
 
-    monkeypatch.setattr(MeaninglessVarsCheck, "check", fail_if_called)
+    monkeypatch.setattr(MeaninglessVarsCheck, "_check", fail_if_called)
     second = CheckOrchestrator(
         checks=load_checks(select={"meaningless-vars", "unused-pytriage"}, check_args=check_args), cache_dir=cache_dir
     )
@@ -270,7 +271,7 @@ def test_unused_pytriage_rerun_retains_always_rerun_suppression_context(tmp_path
             self, _source: str, usages: tuple[SuppressionUsage, ...], active_error_codes: frozenset[str]
         ) -> CheckResult:
             self.calls.append((usages, active_error_codes))
-            return CheckResult()
+            return CheckResult([Violation("unused-pytriage", "TR8", 1, 0, "stale audit", fixable=False)])
 
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1  # pytriage: TR99\n")
@@ -279,11 +280,14 @@ def test_unused_pytriage_rerun_retains_always_rerun_suppression_context(tmp_path
     CheckOrchestrator(checks=[cacheable_check], cache_dir=cache_dir).process_files([str(filepath)])
     audit = RecordingAudit()
 
-    CheckOrchestrator(
+    violations = CheckOrchestrator(
         checks=[cacheable_check, AlwaysFixingCheck(), audit], cache_dir=cache_dir, fix_mode=True
     ).process_files([str(filepath)])
 
     assert audit.calls[-1] == ((SuppressionUsage("always-fixing-check", "TR98", 1),), frozenset({"TR97", "TR98"}))
+    violations_for_file = violations[str(filepath)]
+    assert [violation.check_id for violation in violations_for_file].count("unused-pytriage") == 1
+    assert [violation.check_id for violation in violations_for_file].count("always-fixing-check") == 1
 
 
 def test_unused_pytriage_refresh_handles_a_missing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -335,6 +339,27 @@ def test_unused_pytriage_refresh_records_a_check_failure(tmp_path: Path, monkeyp
     )
 
     assert orchestrator.rule_failures == [(str(filepath), "failing-check")]
+
+
+def test_unused_pytriage_refresh_records_an_unavailable_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    filepath = tmp_path / "module.py"
+    orchestrator = CheckOrchestrator(checks=[])
+
+    class UnavailableCheck:
+        check_id = "unavailable-check"
+        error_code = "TR99"
+
+        @staticmethod
+        def check_with_suppression_tracking(_filepath: Path, _tree: object, _source: str) -> CheckResult:
+            raise CheckUnavailableError("refresh unavailable")
+
+    monkeypatch.setattr(CheckOrchestrator, "_parsed_source", lambda _self, _filepath: ("x = 1\n", ast.parse("x = 1\n")))
+    orchestrator._refresh_unused_pytriage(
+        filepath, [cast("ASTCheck", UnavailableCheck())], [UnusedPytriageCheck()], CheckResult()
+    )
+
+    assert orchestrator.rule_failures == []
+    assert orchestrator.unavailable_checks == [("unavailable-check", "refresh unavailable")]
 
 
 def test_unused_pytriage_fix_declines() -> None:
