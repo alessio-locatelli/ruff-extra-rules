@@ -2,7 +2,7 @@
 
 Reports `# pytriage` codes that no longer suppress a matching violation from an active check.
 
-Enable it explicitly with `--select=unused-pytriage` or alongside the checks you want to audit:
+Select it alongside the checks you want to audit:
 
 ```python
 result = 42  # pytriage: TR1
