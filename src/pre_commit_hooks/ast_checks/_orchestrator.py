@@ -457,16 +457,21 @@ class CheckOrchestrator:
             # is only ever not None when it was, since that's the only branch
             # that sets it.
             rerun_checks = [*cacheable_checks, *(check for check in checks if isinstance(check, UnusedPytriageCheck))]
+            audit_check_ids = {check.check_id for check in rerun_checks if isinstance(check, UnusedPytriageCheck)}
+            fresh_regular_result = CheckResult(
+                (violation for violation in fresh if violation.check_id not in audit_check_ids),
+                fresh.suppression_usages,
+            )
             fresh_failure_ids = {
                 check_id
                 for _filepath, check_id in self.rule_failures[rule_failures_before:]
-                if _filepath == str(filepath)  # pytriage: TR6
+                if Path(_filepath) == filepath
             }
             return self._check_and_cache(
                 filepath,
                 rerun_checks,
                 hook_name,
-                extra_result=fresh,
+                extra_result=fresh_regular_result,
                 prior_suppression_usages=fresh.suppression_usages,
                 prior_active_error_codes=frozenset(
                     check.error_code
@@ -928,6 +933,9 @@ class CheckOrchestrator:
                 continue
             try:
                 fresh = _check_with_suppression_tracking(check, filepath, tree, source)
+            except CheckUnavailableError as error:
+                logger.debug("Check %s is unavailable while refreshing unused suppressions: %s", check.check_id, error)
+                self._record_unavailable_check(check, error)
             except Exception:
                 logger.debug("Check %s failed while refreshing unused suppressions", check.check_id, exc_info=True)
                 self.rule_failures.append((str(filepath), check.check_id))
