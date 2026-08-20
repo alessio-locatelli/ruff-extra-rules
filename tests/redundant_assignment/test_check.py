@@ -91,6 +91,21 @@ def test_check_records_a_pytriage_usage(source: str, expected_line: int) -> None
     ]
 
 
+def test_check_does_not_record_a_non_reportable_assignment_suppression() -> None:
+    source = """
+async def example():
+    value = await get_value()  # pytriage: TR5
+    return value
+"""
+
+    check_result = RedundantAssignmentCheck(level=AggressivenessLevel.PERMISSIVE).check(
+        Path("test.py"), ast.parse(source), source
+    )
+
+    assert check_result == []
+    assert check_result.suppression_usages == ()
+
+
 def test_check_records_each_suppressed_pytriage_usage() -> None:
     source = (
         'def example():\n    x = "foo"\n    func(x=x)  # pytriage: TR5\n    y = "bar"\n    func(y=y)  # pytriage: TR5\n'
