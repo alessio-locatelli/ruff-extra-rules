@@ -262,13 +262,14 @@ def test_tracking_check_handles_cached_format_suppressed_redundancies(monkeypatc
         ("int", 3, 8, "int"),
         ("bool", 5, 8, "bool"),
     ]
-    session._redundancies_by_content[(source, "CONSERVATIVE:normal")] = redundancies
-    session._redundancies_by_content[(source, "CONSERVATIVE:tracking")] = redundancies
+    filepath = Path("test.py")
+    session.cache_redundancies(filepath, source, "CONSERVATIVE:normal", redundancies)
+    session.cache_redundancies(filepath, source, "CONSERVATIVE:tracking", redundancies)
     _patch_session(monkeypatch, session)
     check = RedundantTypeConversionCheck()
 
-    tracked = check.check_with_suppression_tracking(Path("test.py"), ast.parse(source), source)
-    direct = check.check(Path("test.py"), ast.parse(source), source)
+    tracked = check.check_with_suppression_tracking(filepath, ast.parse(source), source)
+    direct = check.check(filepath, ast.parse(source), source)
 
     assert [usage.line for usage in tracked.suppression_usages] == [1]
     assert [violation.line for violation in direct] == [5]
