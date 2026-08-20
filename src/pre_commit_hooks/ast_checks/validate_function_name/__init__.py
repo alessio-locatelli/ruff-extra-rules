@@ -93,7 +93,7 @@ class ValidateFunctionNameCheck(BaseCheck):
         # the standalone equivalent used by tests).
         ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(source, IGNORE_PATTERN)
         suggestions = collect_suggestions(filepath, tree, source, ignored_lines)
-        all_suggestions = collect_suggestions(filepath, tree, source, set())
+        all_suggestions = collect_suggestions(filepath, tree, source, set()) if ignored_lines else suggestions
         function_index = index_function_nodes(tree)
 
         violations = []

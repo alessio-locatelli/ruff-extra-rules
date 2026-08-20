@@ -18,13 +18,14 @@ from ._base import (
     CheckResult,
     FixOutcome,
     FixResult,
+    SuppressionUsage,
     Violation,
     atomic_write_text,
     byte_col_to_char_col,
     find_ignored_lines,
     find_ignored_lines_and_pytriage_comments,
-    find_suppression_usage,
     ignore_pattern_for,
+    record_suppression_usage_if_ignored,
     split_lines_like_ast,
 )
 from ._options import EnumOption
@@ -912,33 +913,42 @@ class MeaninglessVarsCheck(BaseCheck):
         return sorted(self.meaningless_names)
 
     def check(self, _filepath: Path, tree: ast.Module, source: str) -> CheckResult:
+        return self._check(tree, source, collect_suppression_usage=False)
+
+    def check_with_suppression_tracking(self, _filepath: Path, tree: ast.Module, source: str) -> CheckResult:
+        return self._check(tree, source, collect_suppression_usage=True)
+
+    def _check(self, tree: ast.Module, source: str, *, collect_suppression_usage: bool) -> CheckResult:
         visitor = MeaninglessNameVisitor(self.meaningless_names, source)
         visitor.visit(tree)
 
-        suppression_usages = []
+        suppression_usages: list[SuppressionUsage] = []
         if visitor.violations:
-            ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(
-                source, IGNORE_PATTERN
-            )
+            if collect_suppression_usage:
+                ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(
+                    source, IGNORE_PATTERN
+                )
+            else:
+                ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
             raw_violations = [v for v in visitor.violations if v["line"] not in ignored_lines]
             suggestions = plan_suggestions(tree, self.meaningless_names, ignored_lines)
 
             suppressed_candidates = [v for v in visitor.violations if v["line"] in ignored_lines]
-            if suppressed_candidates:
+            if collect_suppression_usage and suppressed_candidates:
                 all_suggestions = plan_suggestions(tree, self.meaningless_names, set())
                 for candidate in suppressed_candidates:
                     proposal = all_suggestions.get((candidate["line"], candidate["byte_col"]))
                     if self._level is MeaninglessVarsLevel.CONSERVATIVE and proposal is None:
                         continue
-                    usage = find_suppression_usage(
+                    record_suppression_usage_if_ignored(
+                        suppression_usages,
+                        ignored_lines,
                         comments,
                         format_suppressed,
-                        self.check_id,
-                        self.error_code,
-                        (candidate["line"],),
+                        check_id=self.check_id,
+                        error_code=self.error_code,
+                        candidate_lines=(candidate["line"],),
                     )
-                    if usage is not None:
-                        suppression_usages.append(usage)
         else:
             raw_violations = []
             suggestions = {}

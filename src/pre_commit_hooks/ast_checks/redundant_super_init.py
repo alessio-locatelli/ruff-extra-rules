@@ -18,10 +18,11 @@ from ._base import (
     CheckResult,
     FixOutcome,
     FixResult,
+    SuppressionUsage,
     Violation,
     find_ignored_lines_and_pytriage_comments,
-    find_suppression_usage,
     ignore_pattern_for,
+    record_suppression_usage_if_ignored,
 )
 
 if TYPE_CHECKING:
@@ -155,12 +156,17 @@ class RedundantSuperInitCheck(BaseCheck):
 
         ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(source, IGNORE_PATTERN)
         violations = []
-        suppression_usages = []
+        suppression_usages: list[SuppressionUsage] = []
         for line_num, message in checker.violations:
-            if line_num in ignored_lines:
-                usage = find_suppression_usage(comments, format_suppressed, self.check_id, self.error_code, (line_num,))
-                if usage is not None:
-                    suppression_usages.append(usage)
+            if record_suppression_usage_if_ignored(
+                suppression_usages,
+                ignored_lines,
+                comments,
+                format_suppressed,
+                check_id=self.check_id,
+                error_code=self.error_code,
+                candidate_lines=(line_num,),
+            ):
                 continue
             violations.append(
                 Violation(

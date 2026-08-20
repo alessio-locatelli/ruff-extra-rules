@@ -24,6 +24,7 @@ from pre_commit_hooks._filelock import locked
 from pre_commit_hooks._lsp import LSPError
 from pre_commit_hooks.ast_checks import ALL_CHECKS, _cli, _discovery, _orchestrator
 from pre_commit_hooks.ast_checks._base import (
+    BaseCheck,
     CheckUnavailableError,
     FixOutcome,
     FixResult,
@@ -1633,7 +1634,7 @@ def test_process_files_a_sibling_hook_names_own_write_does_not_serve_a_stale_ent
     assert rechecked_a.process_files([str(filepath)]) == {}
 
 
-class _AlwaysRerunProbeCheck:
+class _AlwaysRerunProbeCheck(BaseCheck):
     """Minimal `ASTCheck` double with `cacheable = False`, for exercising
     `CheckOrchestrator`'s always-rerun split independent of any real
     check's own implementation (e.g. `redundant-type-conversion`, which

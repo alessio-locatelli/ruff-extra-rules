@@ -429,7 +429,7 @@ def process():
     return data, result
 """
 
-    check_result = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+    check_result = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check_with_suppression_tracking(
         Path("test.py"), ast.parse(source), source
     )
 
@@ -447,7 +447,7 @@ def process():
     return data, result
 """
 
-    check_result = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+    check_result = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check_with_suppression_tracking(
         Path("test.py"), ast.parse(source), source
     )
 

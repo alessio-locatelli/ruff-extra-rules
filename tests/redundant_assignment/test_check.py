@@ -85,6 +85,15 @@ def test_check_records_a_pytriage_usage() -> None:
     ]
 
 
+def test_check_records_a_pytriage_usage_on_the_assignment_line() -> None:
+    source = 'def example():\n    x = "foo"  # pytriage: TR5\n    func(x=x)\n'
+
+    check_result = RedundantAssignmentCheck().check(Path("test.py"), ast.parse(source), source)
+
+    assert check_result == []
+    assert [usage.line for usage in check_result.suppression_usages] == [2]
+
+
 def test_check_records_each_suppressed_pytriage_usage() -> None:
     source = (
         'def example():\n    x = "foo"\n    func(x=x)  # pytriage: TR5\n    y = "bar"\n    func(y=y)  # pytriage: TR5\n'

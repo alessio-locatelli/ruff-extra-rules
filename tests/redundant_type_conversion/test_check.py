@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 from typing import NoReturn
 
 import pytest
@@ -198,6 +199,41 @@ def test_tracking_check_records_a_pytriage_usage(monkeypatch: pytest.MonkeyPatch
     ]
 
 
+def test_tracking_check_does_not_reuse_normal_analysis_cache(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = "y = str(x)  # pytriage: TR6\nz = int(value)\n"
+    session = FakeSession(diagnostics_by_content={}, hover_by_position={})
+    _patch_session(monkeypatch, session)
+    ignored_lines_seen: list[set[int]] = []
+
+    def decide(
+        _session: object,
+        _filepath: Path,
+        _candidates: object,
+        _source: str,
+        *,
+        level: object,
+        ignored_lines: set[int],
+    ) -> list[SimpleNamespace]:
+        assert level is not None
+        ignored_lines_seen.append(ignored_lines)
+        return [
+            SimpleNamespace(candidate=SimpleNamespace(constructor="str"), line=1, col=4, argument_type="str"),
+            SimpleNamespace(candidate=SimpleNamespace(constructor="int"), line=2, col=4, argument_type="int"),
+        ]
+
+    monkeypatch.setattr(tri006_module, "decide_candidates", decide)
+    check = RedundantTypeConversionCheck()
+
+    assert check.check(Path("test.py"), ast.parse(source), source)[0].line == 2
+    tracked = check.check_with_suppression_tracking(Path("test.py"), ast.parse(source), source)
+
+    assert ignored_lines_seen == [{1}, set()]
+    assert [usage.line for usage in tracked.suppression_usages] == [1]
+    assert [violation.line for violation in tracked] == [2]
+
+
 def test_tracking_check_records_each_pytriage_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     source = "y = str(x)  # pytriage: TR6\nz = int(a)  # pytriage: TR6\n"
     session = FakeSession(
@@ -221,11 +257,13 @@ def test_tracking_check_records_each_pytriage_usage(monkeypatch: pytest.MonkeyPa
 def test_tracking_check_handles_cached_format_suppressed_redundancies(monkeypatch: pytest.MonkeyPatch) -> None:
     source = "y = str(x)  # pytriage: TR6\n# fmt: off\nz = int(a)\n# fmt: on\nw = bool(value)\n"
     session = FakeSession(diagnostics_by_content={}, hover_by_position={})
-    session._redundancies_by_content[(source, "CONSERVATIVE")] = [
+    redundancies = [
         ("str", 1, 8, "str"),
         ("int", 3, 8, "int"),
         ("bool", 5, 8, "bool"),
     ]
+    session._redundancies_by_content[(source, "CONSERVATIVE:normal")] = redundancies
+    session._redundancies_by_content[(source, "CONSERVATIVE:tracking")] = redundancies
     _patch_session(monkeypatch, session)
     check = RedundantTypeConversionCheck()
 

@@ -7,12 +7,13 @@ from pre_commit_hooks.ast_checks._base import (
     BaseCheck,
     CheckResult,
     FixResult,
+    SuppressionUsage,
     Violation,
     byte_col_to_char_col,
     find_ignored_lines_and_classify_comments,
     find_ignored_lines_and_pytriage_comments,
-    find_suppression_usage,
     ignore_pattern_for,
+    record_suppression_usage_if_ignored,
 )
 from pre_commit_hooks.ast_checks._options import EnumOption
 
@@ -117,7 +118,7 @@ class RedundantAssignmentCheck(BaseCheck):
         }
 
         violations: list[Violation] = []
-        suppression_usages = []
+        suppression_usages: list[SuppressionUsage] = []
 
         for lifecycle in lifecycles:
             key = (lifecycle.assignment.scope_id, lifecycle.assignment.var_name)
@@ -134,16 +135,31 @@ class RedundantAssignmentCheck(BaseCheck):
             if pattern is None:
                 continue
 
+            candidate_lines = (lifecycle.assignment.line, *(use.line for use in lifecycle.uses))
+            if lifecycle.assignment.line in ignored_lines:
+                record_suppression_usage_if_ignored(
+                    suppression_usages,
+                    ignored_lines,
+                    comments,
+                    format_suppressed,
+                    check_id=self.check_id,
+                    error_code=self.error_code,
+                    candidate_lines=candidate_lines,
+                )
+                continue
+
             if not should_report_violation(lifecycle, pattern, level=self._level):
                 continue
 
-            candidate_lines = (lifecycle.assignment.line, *(use.line for use in lifecycle.uses))
-            if any(line in ignored_lines for line in candidate_lines):
-                usage = find_suppression_usage(
-                    comments, format_suppressed, self.check_id, self.error_code, candidate_lines
-                )
-                if usage is not None:
-                    suppression_usages.append(usage)
+            if record_suppression_usage_if_ignored(
+                suppression_usages,
+                ignored_lines,
+                comments,
+                format_suppressed,
+                check_id=self.check_id,
+                error_code=self.error_code,
+                candidate_lines=candidate_lines,
+            ):
                 continue
 
             fixable = should_autofix(lifecycle, source_lines=tracker.source_lines)
