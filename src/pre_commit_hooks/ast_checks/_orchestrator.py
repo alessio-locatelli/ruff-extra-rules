@@ -328,21 +328,29 @@ class CheckOrchestrator:
 
             rerun_checks = [*cacheable_checks, *(check for check in checks if isinstance(check, UnusedPytriageCheck))]
             audit_check_ids = {check.check_id for check in rerun_checks if isinstance(check, UnusedPytriageCheck)}
-            fresh_regular_result = CheckResult(
-                (violation for violation in fresh if violation.check_id not in audit_check_ids),
-                fresh.suppression_usages,
-            )
             fresh_failure_ids = {
                 check_id
                 for _filepath, check_id in self.rule_failures[rule_failures_before:]
                 if Path(_filepath) == filepath
             }
+            successful_always_rerun_ids = {
+                check.check_id
+                for check in always_rerun_checks
+                if check.check_id not in self._unavailable_check_ids and check.check_id not in fresh_failure_ids
+            }
+            fresh_suppression_usages = tuple(
+                usage for usage in fresh.suppression_usages if usage.check_id in successful_always_rerun_ids
+            )
+            fresh_regular_result = CheckResult(
+                (violation for violation in fresh if violation.check_id not in audit_check_ids),
+                fresh_suppression_usages,
+            )
             return self._check_and_cache(
                 filepath,
                 rerun_checks,
                 hook_name,
                 extra_result=fresh_regular_result,
-                prior_suppression_usages=fresh.suppression_usages,
+                prior_suppression_usages=fresh_suppression_usages,
                 prior_active_error_codes=frozenset(
                     check.error_code
                     for check in [*cacheable_checks, *always_rerun_checks]
