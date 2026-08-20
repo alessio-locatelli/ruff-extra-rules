@@ -43,6 +43,7 @@ from pre_commit_hooks.ast_checks._base import (
     FixResult,
     FixValidationError,
     Violation,
+    find_ignored_lines,
     find_ignored_lines_and_pytriage_comments,
     find_suppression_usage,
 )
@@ -88,23 +89,41 @@ class ValidateFunctionNameCheck(BaseCheck):
         return ["def get_"]
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> CheckResult:
+        return self._check(filepath, tree, source, collect_suppression_usage=False)
+
+    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str) -> CheckResult:
+        return self._check(filepath, tree, source, collect_suppression_usage=True)
+
+    def _check(self, filepath: Path, tree: ast.Module, source: str, *, collect_suppression_usage: bool) -> CheckResult:
         # Reuse the orchestrator's already-parsed tree/source instead of
         # re-reading and re-parsing the file (see analysis.process_file for
         # the standalone equivalent used by tests).
-        ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(source, IGNORE_PATTERN)
+        if collect_suppression_usage:
+            ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(
+                source, IGNORE_PATTERN
+            )
+        else:
+            ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
+            format_suppressed = set()
+            comments = ()
         suggestions = collect_suggestions(filepath, tree, source, ignored_lines)
-        all_suggestions = collect_suggestions(filepath, tree, source, set()) if ignored_lines else suggestions
+        all_suggestions = (
+            collect_suggestions(filepath, tree, source, set())
+            if collect_suppression_usage and ignored_lines
+            else suggestions
+        )
         function_index = index_function_nodes(tree)
 
         violations = []
         suppression_usages = []
-        for suggestion in all_suggestions:
-            if suggestion.lineno in ignored_lines:
-                usage = find_suppression_usage(
-                    comments, format_suppressed, self.check_id, self.error_code, (suggestion.lineno,)
-                )
-                if usage is not None:
-                    suppression_usages.append(usage)
+        if collect_suppression_usage:
+            for suggestion in all_suggestions:
+                if suggestion.lineno in ignored_lines:
+                    usage = find_suppression_usage(
+                        comments, format_suppressed, self.check_id, self.error_code, (suggestion.lineno,)
+                    )
+                    if usage is not None:
+                        suppression_usages.append(usage)
         for suggestion in suggestions:
             auto_fixable = not suggestion.requires_property and is_autofix_safe(function_index, suggestion)
             reference_status = _repository_reference_status(filepath, suggestion.func_name) if auto_fixable else "safe"

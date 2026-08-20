@@ -231,42 +231,39 @@ def test_unused_pytriage_fix_declines() -> None:
     assert fix_result.outcomes == (FixOutcome.DECLINED,)
 
 
-def test_validate_function_name_records_a_pytriage_usage() -> None:
-    source = "def get_total(numbers):  # pytriage: TR4\n    return sum(numbers)\n"
-
-    check_result = ValidateFunctionNameCheck().check(Path("test.py"), ast.parse(source), source)
+@pytest.mark.parametrize(
+    ("source", "expected_lines"),
+    [
+        ("def get_total(numbers):  # pytriage: TR4\n    return sum(numbers)\n", [1]),
+        (
+            (
+                "def get_total(numbers):  # pytriage: TR4\n"
+                "    return sum(numbers)\n"
+                "def get_max(numbers):  # pytriage: TR4\n"
+                "    return max(numbers)\n"
+            ),
+            [1, 3],
+        ),
+        (
+            (
+                "def get_total(numbers):  # pytriage: TR4\n"
+                "    return sum(numbers)\n"
+                "# fmt: off\n"
+                "def get_max(numbers):\n"
+                "    return max(numbers)\n"
+                "# fmt: on\n"
+            ),
+            [1],
+        ),
+    ],
+    ids=["single", "multiple", "format-suppressed"],
+)
+def test_validate_function_name_records_pytriage_usage(source: str, expected_lines: list[int]) -> None:
+    check_result = ValidateFunctionNameCheck().check_with_suppression_tracking(
+        Path("test.py"), ast.parse(source), source
+    )
 
     assert check_result == []
     assert [(usage.check_id, usage.error_code, usage.line) for usage in check_result.suppression_usages] == [
-        ("validate-function-name", "TR4", 1)
+        ("validate-function-name", "TR4", line) for line in expected_lines
     ]
-
-
-def test_validate_function_name_records_each_suppressed_pytriage_usage() -> None:
-    source = (
-        "def get_total(numbers):  # pytriage: TR4\n"
-        "    return sum(numbers)\n"
-        "def get_max(numbers):  # pytriage: TR4\n"
-        "    return max(numbers)\n"
-    )
-
-    check_result = ValidateFunctionNameCheck().check(Path("test.py"), ast.parse(source), source)
-
-    assert check_result == []
-    assert [usage.line for usage in check_result.suppression_usages] == [1, 3]
-
-
-def test_validate_function_name_ignores_a_format_suppressed_candidate_when_tracking_usage() -> None:
-    source = (
-        "def get_total(numbers):  # pytriage: TR4\n"
-        "    return sum(numbers)\n"
-        "# fmt: off\n"
-        "def get_max(numbers):\n"
-        "    return max(numbers)\n"
-        "# fmt: on\n"
-    )
-
-    check_result = ValidateFunctionNameCheck().check(Path("test.py"), ast.parse(source), source)
-
-    assert check_result == []
-    assert [usage.line for usage in check_result.suppression_usages] == [1]
