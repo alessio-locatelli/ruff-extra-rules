@@ -27,6 +27,127 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+class _CacheableRerunCheck(BaseCheck):
+    __slots__ = ("_suppression_usage_line", "_violation_line")
+
+    def __init__(self, *, violation_line: int | None, suppression_usage_line: int | None) -> None:
+        self._violation_line = violation_line
+        self._suppression_usage_line = suppression_usage_line
+
+    @property
+    def check_id(self) -> str:
+        return "cacheable-check"
+
+    @property
+    def error_code(self) -> str:
+        return "TR97"
+
+    def get_prefilter_pattern(self) -> list[str] | None:
+        return None
+
+    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> CheckResult:
+        if "# fixed" in source or self._violation_line is None:
+            return CheckResult()
+        suppression_usages = (
+            ()
+            if self._suppression_usage_line is None
+            else (SuppressionUsage(self.check_id, self.error_code, self._suppression_usage_line),)
+        )
+        return CheckResult(
+            [Violation(self.check_id, self.error_code, self._violation_line, 0, "needs fixing", fixable=False)],
+            suppression_usages,
+        )
+
+
+class _AlwaysFixingRerunCheck(BaseCheck):
+    __slots__ = ("_replacement", "_suppression_usage_line", "_violation_line")
+
+    def __init__(
+        self,
+        *,
+        violation_line: int,
+        suppression_usage_line: int | None,
+        replacement: tuple[str, str] | None = None,
+    ) -> None:
+        self._violation_line = violation_line
+        self._suppression_usage_line = suppression_usage_line
+        self._replacement = replacement
+
+    @property
+    def check_id(self) -> str:
+        return "always-fixing-check"
+
+    @property
+    def error_code(self) -> str:
+        return "TR98"
+
+    @property
+    def cacheable(self) -> bool:
+        return False
+
+    def get_prefilter_pattern(self) -> list[str] | None:
+        return None
+
+    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> CheckResult:
+        if "# fixed" in source:
+            return CheckResult()
+        return CheckResult(
+            [Violation(self.check_id, self.error_code, self._violation_line, 0, "needs fixing", fixable=True)]
+        )
+
+    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str) -> CheckResult:
+        suppression_usages = (
+            ()
+            if self._suppression_usage_line is None
+            else (SuppressionUsage(self.check_id, self.error_code, self._suppression_usage_line),)
+        )
+        return CheckResult(self.check(filepath, tree, source), suppression_usages)
+
+    def fix(
+        self, filepath: Path, violations: list[Violation], source: str, _tree: ast.Module, _encoding: str = "utf-8"
+    ) -> FixResult:
+        if self._replacement is None:
+            fixed_source = source + "# fixed\n"
+        else:
+            fixed_source = source.replace(*self._replacement) + "# fixed\n"
+        filepath.write_text(fixed_source)
+        return FixResult.for_violations(violations, FixOutcome.APPLIED)
+
+
+class _RecordingRerunAudit(UnusedPytriageCheck):
+    __slots__ = ("_report_with_usages", "calls")
+
+    def __init__(self, *, report_with_usages: bool) -> None:
+        self._report_with_usages = report_with_usages
+        self.calls: list[tuple[tuple[SuppressionUsage, ...], frozenset[str]]] = []
+
+    def check_with_suppression_usage(
+        self, _source: str, usages: tuple[SuppressionUsage, ...], active_error_codes: frozenset[str]
+    ) -> CheckResult:
+        self.calls.append((usages, active_error_codes))
+        if self._report_with_usages or not usages:
+            return CheckResult([Violation(self.check_id, self.error_code, 1, 0, "unused", fixable=False)])
+        return CheckResult()
+
+
+def _make_cacheable_rerun_check(
+    *, violation_line: int | None, suppression_usage_line: int | None
+) -> _CacheableRerunCheck:
+    return _CacheableRerunCheck(violation_line=violation_line, suppression_usage_line=suppression_usage_line)
+
+
+def _make_always_fixing_rerun_check(
+    *, violation_line: int, suppression_usage_line: int | None, replacement: tuple[str, str] | None = None
+) -> _AlwaysFixingRerunCheck:
+    return _AlwaysFixingRerunCheck(
+        violation_line=violation_line, suppression_usage_line=suppression_usage_line, replacement=replacement
+    )
+
+
+def _make_recording_rerun_audit(*, report_with_usages: bool) -> _RecordingRerunAudit:
+    return _RecordingRerunAudit(report_with_usages=report_with_usages)
+
+
 def test_unused_pytriage_reports_redundant_known_suppression(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -214,77 +335,21 @@ def test_unused_pytriage_refresh_records_an_audit_failure_after_fix(tmp_path: Pa
 
 
 def test_unused_pytriage_rerun_retains_always_rerun_suppression_context(tmp_path: Path) -> None:
-    class CacheableCheck(BaseCheck):
-        @property
-        def check_id(self) -> str:
-            return "cacheable-check"
-
-        @property
-        def error_code(self) -> str:
-            return "TR97"
-
-        def get_prefilter_pattern(self) -> list[str] | None:
-            return None
-
-        def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> CheckResult:
-            return CheckResult()
-
-    class AlwaysFixingCheck(BaseCheck):
-        __slots__ = ()
-
-        @property
-        def check_id(self) -> str:
-            return "always-fixing-check"
-
-        @property
-        def error_code(self) -> str:
-            return "TR98"
-
-        @property
-        def cacheable(self) -> bool:
-            return False
-
-        def get_prefilter_pattern(self) -> list[str] | None:
-            return None
-
-        def check(self, _filepath: Path, _tree: ast.Module, source: str) -> CheckResult:
-            if "# fixed\n" in source:
-                return CheckResult()
-            return CheckResult([Violation(self.check_id, self.error_code, 1, 0, "needs fixing", fixable=True)])
-
-        def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str) -> CheckResult:
-            return CheckResult(
-                self.check(filepath, tree, source),
-                [SuppressionUsage(self.check_id, self.error_code, 1)],
-            )
-
-        def fix(
-            self, filepath: Path, violations: list[Violation], source: str, _tree: ast.Module, _encoding: str = "utf-8"
-        ) -> FixResult:
-            filepath.write_text(source + "# fixed\n")
-            return FixResult.for_violations(violations, FixOutcome.APPLIED)
-
-    class RecordingAudit(UnusedPytriageCheck):
-        __slots__ = ("calls",)
-
-        def __init__(self) -> None:
-            self.calls: list[tuple[tuple[SuppressionUsage, ...], frozenset[str]]] = []
-
-        def check_with_suppression_usage(
-            self, _source: str, usages: tuple[SuppressionUsage, ...], active_error_codes: frozenset[str]
-        ) -> CheckResult:
-            self.calls.append((usages, active_error_codes))
-            return CheckResult([Violation("unused-pytriage", "TR8", 1, 0, "stale audit", fixable=False)])
-
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1  # pytriage: TR99\n")
     cache_dir = tmp_path / "cache"
-    cacheable_check = cast("ASTCheck", CacheableCheck())
+    cacheable_check = cast("ASTCheck", _make_cacheable_rerun_check(violation_line=None, suppression_usage_line=None))
     CheckOrchestrator(checks=[cacheable_check], cache_dir=cache_dir).process_files([str(filepath)])
-    audit = RecordingAudit()
+    audit = _make_recording_rerun_audit(report_with_usages=True)
 
     violations = CheckOrchestrator(
-        checks=[cacheable_check, AlwaysFixingCheck(), audit], cache_dir=cache_dir, fix_mode=True
+        checks=[
+            cacheable_check,
+            _make_always_fixing_rerun_check(violation_line=1, suppression_usage_line=1),
+            audit,
+        ],
+        cache_dir=cache_dir,
+        fix_mode=True,
     ).process_files([str(filepath)])
 
     assert audit.calls[-1] == ((SuppressionUsage("always-fixing-check", "TR98", 1),), frozenset({"TR97", "TR98"}))
@@ -296,78 +361,23 @@ def test_unused_pytriage_rerun_retains_always_rerun_suppression_context(tmp_path
 def test_unused_pytriage_rerun_discards_stale_cached_usage_after_always_fix(
     tmp_path: Path,
 ) -> None:
-    class CacheableCheck(BaseCheck):
-        @property
-        def check_id(self) -> str:
-            return "cacheable-check"
-
-        @property
-        def error_code(self) -> str:
-            return "TR97"
-
-        def get_prefilter_pattern(self) -> list[str] | None:
-            return None
-
-        def check(self, _filepath: Path, _tree: ast.Module, source: str) -> CheckResult:
-            if "# fixed" in source:
-                return CheckResult()
-            return CheckResult(
-                [Violation(self.check_id, self.error_code, 2, 0, "needs fixing", fixable=False)],
-                [SuppressionUsage(self.check_id, self.error_code, 1)],
-            )
-
-    class AlwaysFixingCheck(BaseCheck):
-        __slots__ = ()
-
-        @property
-        def check_id(self) -> str:
-            return "always-fixing-check"
-
-        @property
-        def error_code(self) -> str:
-            return "TR98"
-
-        @property
-        def cacheable(self) -> bool:
-            return False
-
-        def get_prefilter_pattern(self) -> list[str] | None:
-            return None
-
-        def check(self, _filepath: Path, _tree: ast.Module, source: str) -> CheckResult:
-            if "# fixed" in source:
-                return CheckResult()
-            return CheckResult([Violation(self.check_id, self.error_code, 2, 0, "needs fixing", fixable=True)])
-
-        def fix(
-            self, filepath: Path, violations: list[Violation], source: str, _tree: ast.Module, _encoding: str = "utf-8"
-        ) -> FixResult:
-            filepath.write_text(source.replace("bad = 1", "good = 1") + "# fixed\n")
-            return FixResult.for_violations(violations, FixOutcome.APPLIED)
-
-    class RecordingAudit(UnusedPytriageCheck):
-        __slots__ = ("calls",)
-
-        def __init__(self) -> None:
-            self.calls: list[tuple[tuple[SuppressionUsage, ...], frozenset[str]]] = []
-
-        def check_with_suppression_usage(
-            self, _source: str, usages: tuple[SuppressionUsage, ...], active_error_codes: frozenset[str]
-        ) -> CheckResult:
-            self.calls.append((usages, active_error_codes))
-            return CheckResult(
-                [] if usages else [Violation(self.check_id, self.error_code, 1, 0, "unused", fixable=False)]
-            )
-
     filepath = tmp_path / "module.py"
     filepath.write_text("x = 1  # pytriage: TR97\nbad = 1\n")
     cache_dir = tmp_path / "cache"
-    cacheable_check = cast("ASTCheck", CacheableCheck())
+    cacheable_check = cast("ASTCheck", _make_cacheable_rerun_check(violation_line=2, suppression_usage_line=1))
     CheckOrchestrator(checks=[cacheable_check], cache_dir=cache_dir).process_files([str(filepath)])
-    audit = RecordingAudit()
+    audit = _make_recording_rerun_audit(report_with_usages=False)
 
     violations = CheckOrchestrator(
-        checks=[cacheable_check, AlwaysFixingCheck(), audit], cache_dir=cache_dir, fix_mode=True
+        checks=[
+            cacheable_check,
+            _make_always_fixing_rerun_check(
+                violation_line=2, suppression_usage_line=None, replacement=("bad = 1", "good = 1")
+            ),
+            audit,
+        ],
+        cache_dir=cache_dir,
+        fix_mode=True,
     ).process_files([str(filepath)])
 
     assert audit.calls[-1] == ((), frozenset({"TR97", "TR98"}))
@@ -442,7 +452,7 @@ def test_unused_pytriage_refresh_records_check_outcomes(
     patch_parsed_source: Callable[[tuple[str, ast.Module] | None], None],
     case: tuple[Exception, str, bool, list[tuple[str, str]]],
 ) -> None:
-    raised, check_id, expect_rule_failure, expected_unavailable = case
+    raised, expected_check_id, expect_rule_failure, expected_unavailable = case
     filepath = tmp_path / "module.py"
     orchestrator = CheckOrchestrator(checks=[])
 
@@ -451,7 +461,7 @@ def test_unused_pytriage_refresh_records_check_outcomes(
 
         @property
         def check_id(self) -> str:
-            return check_id
+            return expected_check_id
 
         @staticmethod
         def check_with_suppression_tracking(_filepath: Path, _tree: object, _source: str) -> CheckResult:
@@ -462,7 +472,7 @@ def test_unused_pytriage_refresh_records_check_outcomes(
         filepath, [cast("ASTCheck", RaisedCheck())], [UnusedPytriageCheck()], CheckResult()
     )
 
-    assert orchestrator.rule_failures == ([(filepath.as_posix(), check_id)] if expect_rule_failure else [])
+    assert orchestrator.rule_failures == ([(filepath.as_posix(), expected_check_id)] if expect_rule_failure else [])
     assert orchestrator.unavailable_checks == expected_unavailable
 
 
