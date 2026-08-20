@@ -28,7 +28,7 @@ Individual checks are toggled with `--select`/`--ignore` (or the matching `pypro
 | [redundant-assignment](docs/rules/redundant-assignment.md)           | TR5  | Flags (and optionally inlines) variable assignments that add no clarity.                                                                                                          |
 | [redundant-type-conversion](docs/rules/redundant-type-conversion.md) | TR6  | Flags a builtin type conversion that `ty` considers redundant given the argument's real type, including across files. Requires [`ty`](https://github.com/astral-sh/ty) on `PATH`. |
 | [misplaced-comment](docs/rules/misplaced-comment.md)                 | TR7  | Moves a trailing comment off a closing bracket onto the expression line.                                                                                                          |
-| [unused-pytriage](docs/rules/unused-pytriage.md)                     | TR8  | Reports known `# pytriage` codes that no longer suppress an active violation; opt in with `--select=unused-pytriage`.                                                             |
+| [unused-pytriage](docs/rules/unused-pytriage.md)                     | TR8  | Reports known `# pytriage` codes that no longer suppress an active violation; select it alongside the checks being audited, e.g. `--select=meaningless-vars,unused-pytriage`.     |
 
 ## Installation
 
