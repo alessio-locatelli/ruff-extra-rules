@@ -23,13 +23,14 @@ from ._base import (
     CheckResult,
     FixOutcome,
     FixResult,
+    SuppressionUsage,
     Violation,
     atomic_write_text,
-    find_suppression_usage,
     ignore_pattern_for,
     ignored_lines_and_pytriage_comments_from_tokens,
     ignored_lines_from_tokens,
     line_terminator,
+    record_suppression_usage_if_ignored,
     tokenize_source,
 )
 
@@ -176,14 +177,17 @@ class MisplacedCommentCheck(BaseCheck):
             tokens, IGNORE_PATTERN
         )
         violations = []
-        suppression_usages = []
+        suppression_usages: list[SuppressionUsage] = []
         for item in found:
-            if item.bracket_line in ignored_lines:
-                usage = find_suppression_usage(
-                    comments, format_suppressed, self.check_id, self.error_code, (item.bracket_line,)
-                )
-                if usage is not None:
-                    suppression_usages.append(usage)
+            if record_suppression_usage_if_ignored(
+                suppression_usages,
+                ignored_lines,
+                comments,
+                format_suppressed,
+                check_id=self.check_id,
+                error_code=self.error_code,
+                candidate_lines=(item.bracket_line,),
+            ):
                 continue
             violations.append(
                 Violation(

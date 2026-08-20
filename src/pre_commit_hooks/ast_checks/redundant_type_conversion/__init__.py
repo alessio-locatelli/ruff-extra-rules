@@ -146,7 +146,7 @@ class RedundantTypeConversionCheck(BaseCheck):
             return CheckResult()
 
         session = get_session()
-        cache_key = self._level.name
+        cache_key = f"{self._level.name}:{'tracking' if collect_suppression_usage else 'normal'}"
         redundancies = session.cached_redundancies(filepath, source, cache_key)
         if redundancies is None:
             redundant = decide_candidates(

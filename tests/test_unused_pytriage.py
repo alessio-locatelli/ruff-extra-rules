@@ -128,7 +128,7 @@ def test_unused_pytriage_uses_cached_suppression_usage(tmp_path: Path, monkeypat
     assert second.process_files([str(filepath)]) == {}
 
 
-def test_unused_pytriage_supports_checks_without_tracking_hook(tmp_path: Path) -> None:
+def test_unused_pytriage_supports_checks_with_a_default_tracking_hook(tmp_path: Path) -> None:
     class PlainCheck:
         check_id = "plain-check"
         error_code = "TR99"
@@ -142,6 +142,10 @@ def test_unused_pytriage_supports_checks_without_tracking_hook(tmp_path: Path) -
         @staticmethod
         def check(_filepath: Path, _tree: object, _source: str) -> CheckResult:
             return CheckResult([], [SuppressionUsage("plain-check", "TR99", 2)])
+
+        @staticmethod
+        def check_with_suppression_tracking(_filepath: Path, _tree: object, _source: str) -> CheckResult:
+            return PlainCheck.check(_filepath, _tree, _source)
 
         @staticmethod
         def fix(_filepath: Path, violations: list[Violation], _source: str, _tree: object) -> FixResult:

@@ -101,6 +101,9 @@ class ASTCheck(Protocol):
         ...
 
     @property
+    def default_enabled(self) -> bool: ...
+
+    @property
     def cacheable(self) -> bool:
         """Whether `CheckOrchestrator` may store/reuse this check's own
         violations in the shared per-file cache. `True` for almost every
@@ -143,6 +146,8 @@ class ASTCheck(Protocol):
         ...
 
     def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]: ...
+
+    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]: ...
 
     def fix(
         self,
@@ -565,6 +570,24 @@ def find_suppression_usage(
     return None
 
 
+def record_suppression_usage_if_ignored(
+    suppression_usages: list[SuppressionUsage],
+    ignored_lines: set[int],
+    comments: Iterable[PytriageComment],
+    format_suppressed: set[int],
+    *,
+    check_id: str,
+    error_code: str,
+    candidate_lines: Collection[int],
+) -> bool:
+    if not any(line in ignored_lines for line in candidate_lines):
+        return False
+    usage = find_suppression_usage(comments, format_suppressed, check_id, error_code, candidate_lines)
+    if usage is not None:
+        suppression_usages.append(usage)
+    return True
+
+
 def tokenize_source(source: str) -> Iterator[tokenize.TokenInfo]:
     """Tokenize `source`, normalizing line endings first (see
     `normalize_for_tokenize`) — the one `tokenize`-invocation boilerplate
@@ -588,15 +611,7 @@ def ignored_lines_from_tokens(tokens: Iterable[tokenize.TokenInfo], *patterns: r
     `misplaced_comment`, which would otherwise tokenize the same source a
     second time just to check for suppression comments).
     """
-    ignored: set[int] = set()
-    scanner = _FormatSuppressionScanner()
-    for tok in tokens:
-        newly_ignored = scanner.observe(tok)
-        if newly_ignored:
-            ignored |= newly_ignored
-        if tok.type == tokenize.COMMENT and any(p.search(tok.string) for p in patterns):
-            ignored.add(tok.start[0])
-    ignored |= scanner.finalize()
+    ignored, _format_suppressed, _comments = ignored_lines_and_pytriage_comments_from_tokens(tokens, *patterns)
     return ignored
 
 

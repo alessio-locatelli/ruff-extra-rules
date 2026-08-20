@@ -63,10 +63,7 @@ def _merge_check_results(*results: CheckResult) -> CheckResult:
 
 
 def _check_with_suppression_tracking(check: ASTCheck, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
-    tracking_check = getattr(check, "check_with_suppression_tracking", None)
-    if tracking_check is None:
-        return check.check(filepath, tree, source)
-    return tracking_check(filepath, tree, source)
+    return check.check_with_suppression_tracking(filepath, tree, source)
 
 
 _FIX_LOCK_TIMEOUT_SECONDS = 30.0
@@ -869,7 +866,14 @@ class CheckOrchestrator:
         if self.fix_mode and all_violations:
             self._apply_fixes(filepath, all_violations)
             if self._fix_changed_file and audit_checks:
-                self._refresh_unused_pytriage(filepath, regular_checks, audit_checks, all_violations)
+                self._refresh_unused_pytriage(
+                    filepath,
+                    regular_checks,
+                    audit_checks,
+                    all_violations,
+                    prior_suppression_usages=prior_suppression_usages,
+                    prior_active_error_codes=prior_active_error_codes,
+                )
 
         return all_violations
 
@@ -879,13 +883,16 @@ class CheckOrchestrator:
         regular_checks: Sequence[ASTCheck],
         audit_checks: Sequence[UnusedPytriageCheck],
         violations_result: CheckResult,
+        *,
+        prior_suppression_usages: tuple[SuppressionUsage, ...] = (),
+        prior_active_error_codes: frozenset[str] = frozenset(),
     ) -> None:
         parsed = self._parsed_source(filepath)
         if parsed is None:
             return
         source, tree = parsed
-        usages: list[SuppressionUsage] = []
-        active_error_codes: set[str] = set()
+        usages = list(prior_suppression_usages)
+        active_error_codes = set(prior_active_error_codes)
         for check in regular_checks:
             if check.check_id in self._unavailable_check_ids:
                 continue
@@ -1205,7 +1212,7 @@ def load_checks(
             continue
         if ignore is not None and check_id in ignore:
             continue
-        if select is None and not getattr(check, "default_enabled", True):
+        if select is None and not check.default_enabled:
             continue
 
         # Re-instantiate with check-specific arguments, if any were given.
