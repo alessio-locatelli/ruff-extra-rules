@@ -41,6 +41,10 @@ ERROR_CODE = "TR6"
 CHECK_ID = "redundant-type-conversion"
 
 
+def _cache_key(level: ConfidenceLevel, *, collect_suppression_usage: bool) -> str:
+    return f"{level.name}:{'tracking' if collect_suppression_usage else 'normal'}"
+
+
 def _format_message(constructor: str, argument_type: str) -> str:
     if is_exact_match(argument_type, constructor):
         return (
@@ -146,7 +150,7 @@ class RedundantTypeConversionCheck(BaseCheck):
             return CheckResult()
 
         session = get_session()
-        cache_key = f"{self._level.name}:{'tracking' if collect_suppression_usage else 'normal'}"
+        cache_key = _cache_key(self._level, collect_suppression_usage=collect_suppression_usage)
         redundancies = session.cached_redundancies(filepath, source, cache_key)
         if redundancies is None:
             redundant = decide_candidates(
