@@ -12,6 +12,7 @@ from pre_commit_hooks.ast_checks._base import (
     byte_col_to_char_col,
     find_ignored_lines_and_classify_comments,
     find_ignored_lines_and_pytriage_comments,
+    find_suppression_usage,
     ignore_pattern_for,
     record_suppression_usage_if_ignored,
 )
@@ -136,19 +137,19 @@ class RedundantAssignmentCheck(BaseCheck):
                 continue
 
             candidate_lines = (lifecycle.assignment.line, *(use.line for use in lifecycle.uses))
-            if lifecycle.assignment.line in ignored_lines:
-                record_suppression_usage_if_ignored(
-                    suppression_usages,
-                    ignored_lines,
-                    comments,
-                    format_suppressed,
-                    check_id=self.check_id,
-                    error_code=self.error_code,
-                    candidate_lines=candidate_lines,
-                )
-                continue
-
-            if not should_report_violation(lifecycle, pattern, level=self._level):
+            assignment_suppression = find_suppression_usage(
+                comments,
+                format_suppressed,
+                self.check_id,
+                self.error_code,
+                (lifecycle.assignment.line,),
+            )
+            if not should_report_violation(
+                lifecycle,
+                pattern,
+                level=self._level,
+                allow_inline_suppression=assignment_suppression is not None,
+            ):
                 continue
 
             if record_suppression_usage_if_ignored(

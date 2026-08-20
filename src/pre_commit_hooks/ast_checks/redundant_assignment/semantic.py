@@ -482,6 +482,8 @@ def should_report_violation(
     lifecycle: VariableLifecycle,
     pattern: PatternType,
     level: AggressivenessLevel = AggressivenessLevel.CONSERVATIVE,
+    *,
+    allow_inline_suppression: bool = False,
 ) -> bool:
     assignment = lifecycle.assignment
     is_keyword_argument_echo = _is_keyword_argument_echo(lifecycle)
@@ -501,7 +503,7 @@ def should_report_violation(
 
     # Skip if there's an inline comment on the assignment line
     # Inline comments (e.g., type: ignore) indicate intentional code
-    if assignment.has_inline_comment:
+    if assignment.has_inline_comment and not allow_inline_suppression:
         return False
 
     # Rule 1: Don't report global scope variables unless prefixed with `_`
