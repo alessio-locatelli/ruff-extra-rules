@@ -55,10 +55,6 @@ def _merge_check_results(*results: CheckResult) -> CheckResult:
     return merged
 
 
-def _check_with_suppression_tracking(check: ASTCheck, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
-    return check.check_with_suppression_tracking(filepath, tree, source)
-
-
 _FIX_LOCK_TIMEOUT_SECONDS = 30.0
 _FIX_LOCK_POLL_INTERVAL_SECONDS = 0.05
 
@@ -376,16 +372,13 @@ class CheckOrchestrator:
 
         rule_failures_before = len(self.rule_failures)
         self._fix_changed_file = False
-        if prior_suppression_usages or prior_active_error_codes:
-            violations = self._check_file(
-                filepath,
-                checks,
-                record_only=record_only,
-                prior_suppression_usages=prior_suppression_usages,
-                prior_active_error_codes=prior_active_error_codes,
-            )
-        else:
-            violations = self._check_file(filepath, checks, record_only=record_only)
+        violations = self._check_file(
+            filepath,
+            checks,
+            record_only=record_only,
+            prior_suppression_usages=prior_suppression_usages,
+            prior_active_error_codes=prior_active_error_codes,
+        )
         new_failure_ids = {check_id for _fp, check_id in self.rule_failures[rule_failures_before:]}
 
         if violations is None:
@@ -646,9 +639,9 @@ class CheckOrchestrator:
                 continue
             try:
                 if audit_checks:
-                    violations = _check_with_suppression_tracking(check, filepath, tree, source)
+                    check_result = check.check_with_suppression_tracking(filepath, tree, source)
                 else:
-                    violations = check.check(filepath, tree, source)
+                    check_result = _as_check_result(check.check(filepath, tree, source))
             except CheckUnavailableError as error:
                 logger.debug("Check %s is unavailable: %s", check.check_id, error, exc_info=True)
                 self._record_unavailable_check(check, error)
@@ -656,7 +649,6 @@ class CheckOrchestrator:
                 logger.debug("Check %s failed on %s", check.check_id, filepath, exc_info=True)
                 self.rule_failures.append((str(filepath), check.check_id))
             else:
-                check_result = _as_check_result(violations)
                 all_violations.extend(check_result)
                 all_violations.suppression_usages += check_result.suppression_usages
                 active_error_codes.add(check.error_code)
@@ -712,7 +704,7 @@ class CheckOrchestrator:
             if check.check_id in self._unavailable_check_ids:
                 continue
             try:
-                fresh = _check_with_suppression_tracking(check, filepath, tree, source)
+                fresh_result = check.check_with_suppression_tracking(filepath, tree, source)
             except CheckUnavailableError as error:
                 logger.debug("Check %s is unavailable while refreshing unused suppressions: %s", check.check_id, error)
                 self._record_unavailable_check(check, error)
@@ -720,7 +712,6 @@ class CheckOrchestrator:
                 logger.debug("Check %s failed while refreshing unused suppressions", check.check_id, exc_info=True)
                 self.rule_failures.append((str(filepath), check.check_id))
             else:
-                fresh_result = _as_check_result(fresh)
                 usages.extend(fresh_result.suppression_usages)
                 active_error_codes.add(check.error_code)
 
