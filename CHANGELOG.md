@@ -6,6 +6,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Changed
+
+- `misplaced-comment` preserves `#:` documentation comments wherever they appear.
+
 ## [0.2.0] - 2026-08-21
 
 ### Changed

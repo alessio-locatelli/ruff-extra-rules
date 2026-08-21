@@ -10,6 +10,38 @@ from pre_commit_hooks.ast_checks._cli import main
 from pre_commit_hooks.ast_checks.misplaced_comment import MisplacedCommentCheck
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "misplaced_comments"
+MODULE_TRY_ASSIGN_SOURCE = (
+    "try:\n"
+    "    value = make_value(\n"
+    "        argument\n"
+    "    )  #: Description\n"
+    "except ImportError:\n"
+    "    value = make_placeholder()\n"
+)
+MODULE_TRY_ANN_ASSIGN_SOURCE = (
+    "try:\n"
+    "    value: object = make_value(\n"
+    "        argument\n"
+    "    )  #: Description\n"
+    "except ImportError:\n"
+    "    value = make_placeholder()\n"
+)
+ASYNC_FUNCTION_LOCAL_SOURCE = "async def make_value():\n    process(\n        argument\n    )  #: Description\n"
+CLASS_ATTRIBUTE_SOURCE = (
+    "class Serializer:\n"
+    "    pipeline = SerializerPipeline(\n"
+    '        name="optional",\n'
+    "        is_binary=True,\n"
+    "    )  #: Complete optional serializer\n"
+)
+INSTANCE_ATTRIBUTE_SOURCE = (
+    "class Serializer:\n"
+    "    def __init__(self) -> None:\n"
+    "        self.pipeline = SerializerPipeline(\n"
+    '            name="optional",\n'
+    "            is_binary=True,\n"
+    "        )  #: Complete optional serializer\n"
+)
 
 
 def test_check_id_and_error_code() -> None:
@@ -102,12 +134,46 @@ def test_check_records_suppression_usage_for_each_reportable_candidate(
             0,
         ),
         (
+            MODULE_TRY_ASSIGN_SOURCE,
+            MODULE_TRY_ASSIGN_SOURCE,
+            0,
+        ),
+        (
+            MODULE_TRY_ANN_ASSIGN_SOURCE,
+            MODULE_TRY_ANN_ASSIGN_SOURCE,
+            0,
+        ),
+        (
             "def make_value():\n    process(\n        argument\n    )  #: Description\n",
-            "def make_value():\n    process(\n        argument  #: Description\n    )\n",
-            1,
+            "def make_value():\n    process(\n        argument\n    )  #: Description\n",
+            0,
+        ),
+        (
+            ASYNC_FUNCTION_LOCAL_SOURCE,
+            ASYNC_FUNCTION_LOCAL_SOURCE,
+            0,
+        ),
+        (
+            CLASS_ATTRIBUTE_SOURCE,
+            CLASS_ATTRIBUTE_SOURCE,
+            0,
+        ),
+        (
+            INSTANCE_ATTRIBUTE_SOURCE,
+            INSTANCE_ATTRIBUTE_SOURCE,
+            0,
         ),
     ],
-    ids=["module-level-assignment", "module-level-annotated-assignment", "nested-expression"],
+    ids=[
+        "module-level-assignment",
+        "module-level-annotated-assignment",
+        "module-level-try-assignment",
+        "module-level-try-annotated-assignment",
+        "function-local-marker",
+        "async-function-local-marker",
+        "class-attribute",
+        "instance-attribute",
+    ],
 )
 def test_cli_fix_handles_sphinx_attribute_comments(
     source: str,
@@ -116,10 +182,10 @@ def test_cli_fix_handles_sphinx_attribute_comments(
     tmp_path: Path,
 ) -> None:
     filepath = tmp_path / "module.py"
-    filepath.write_text(source)
+    filepath.write_bytes(source.encode())
 
     assert main(["--select", "misplaced-comment", "--fix", str(filepath)]) == expected_exit_code
-    assert filepath.read_text() == expected_source
+    assert filepath.read_bytes() == expected_source.encode()
 
 
 @pytest.mark.parametrize(
