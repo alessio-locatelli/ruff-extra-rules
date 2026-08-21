@@ -6,6 +6,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-21
+
 ### Changed
 
 - `unused-pytriage` now retains cached suppression evidence through fix-mode refreshes and audits the final source with the complete active-check context.
