@@ -10,7 +10,6 @@ Inline ignore: # pytriage: TR7
 
 from __future__ import annotations
 
-import ast
 import functools
 import logging
 import re
@@ -35,6 +34,7 @@ from ._base import (
 )
 
 if TYPE_CHECKING:
+    import ast
     from pathlib import Path
 
 logger = logging.getLogger("misplaced_comment")
@@ -94,7 +94,6 @@ class _MisplacedComment:
 
 def _scan_misplaced_comments(
     tokens: tuple[tokenize.TokenInfo, ...],
-    tree: ast.Module,
 ) -> list[_MisplacedComment]:
     """Find comments trailing bracket-only closing lines.
 
@@ -112,11 +111,6 @@ def _scan_misplaced_comments(
     for token in tokens:
         tokens_by_line.setdefault(token.start[0], []).append(token)
 
-    sphinx_attribute_comment_lines = {
-        node.end_lineno
-        for node in tree.body
-        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.end_lineno is not None
-    }
     found: list[_MisplacedComment] = []
     seen_bracket_lines: set[int] = set()
 
@@ -130,15 +124,10 @@ def _scan_misplaced_comments(
 
         line_tokens = tokens_by_line[bracket_line]
         comment_token = next((t for t in line_tokens if t.type == tokenize.COMMENT), None)
-        is_sphinx_attribute_comment = (
-            comment_token is not None
-            and comment_token.string.startswith("#:")
-            and bracket_line in sphinx_attribute_comment_lines
-        )
         if (
             comment_token is not None
             and not is_linter_pragma(comment_token.string)
-            and not is_sphinx_attribute_comment
+            and not comment_token.string.startswith("#:")
             and is_bracket_only_line(line_tokens)
         ):
             found.append(
@@ -167,9 +156,9 @@ class MisplacedCommentCheck(BaseCheck):
     def get_prefilter_pattern(self) -> list[str] | None:
         return ["#"]
 
-    def check(self, _filepath: Path, tree: ast.Module, source: str) -> CheckResult:
+    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> CheckResult:
         tokens = tuple(tokenize_source(source))
-        found = _scan_misplaced_comments(tokens, tree)
+        found = _scan_misplaced_comments(tokens)
         if not found:
             return CheckResult()
 
@@ -210,11 +199,11 @@ class MisplacedCommentCheck(BaseCheck):
         filepath: Path,
         violations: list[Violation],
         source: str,
-        tree: ast.Module,
+        _tree: ast.Module,
         encoding: str = "utf-8",
     ) -> FixResult:
         tokens = tuple(tokenize_source(source))
-        found = _scan_misplaced_comments(tokens, tree)
+        found = _scan_misplaced_comments(tokens)
         if not found:
             return FixResult.for_violations(violations, FixOutcome.DECLINED)
 
