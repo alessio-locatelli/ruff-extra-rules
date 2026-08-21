@@ -44,6 +44,12 @@ INSTANCE_ATTRIBUTE_SOURCE = (
 )
 
 
+def _write_module_source(tmp_path: Path, source: str) -> Path:
+    filepath = tmp_path / "module.py"
+    filepath.write_bytes(source.encode())
+    return filepath
+
+
 def test_check_id_and_error_code() -> None:
     check = MisplacedCommentCheck()
     assert check.check_id == "misplaced-comment"
@@ -181,8 +187,7 @@ def test_cli_fix_handles_sphinx_attribute_comments(
     expected_exit_code: int,
     tmp_path: Path,
 ) -> None:
-    filepath = tmp_path / "module.py"
-    filepath.write_bytes(source.encode())
+    filepath = _write_module_source(tmp_path, source)
 
     assert main(["--select", "misplaced-comment", "--fix", str(filepath)]) == expected_exit_code
     assert filepath.read_bytes() == expected_source.encode()
