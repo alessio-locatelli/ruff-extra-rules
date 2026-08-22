@@ -963,7 +963,7 @@ def test_connect_reuses_a_daemon_spawned_by_a_peer_while_waiting_for_the_lock(
     # Simulates another process spawning a daemon in the window between this
     # process's own first _try_connect attempt and acquiring the spawn lock.
     peer_sock = socketpair_peer
-    attempts: list[socket.socket | None] = [None, peer_sock]  # pytriage: TR5 -- mutated by pop() on every call below
+    attempts: list[socket.socket | None] = [None, peer_sock]
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
     monkeypatch.setattr(daemon_module, "_try_connect", lambda *_a: attempts.pop(0))

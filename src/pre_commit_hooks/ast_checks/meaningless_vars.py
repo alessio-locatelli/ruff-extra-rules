@@ -40,7 +40,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("meaningless_vars")
 
-# Format: # pytriage: TR1
 IGNORE_PATTERN = ignore_pattern_for("TR1")
 
 type VariableName = str

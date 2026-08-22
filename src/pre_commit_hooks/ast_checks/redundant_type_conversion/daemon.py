@@ -780,7 +780,7 @@ def _serve(root: Path) -> None:
         socket_path.unlink()  # a stale socket left behind by a crashed prior daemon
 
     try:
-        daemon_identity = _daemon_identity(root)  # pytriage: TR5
+        daemon_identity = _daemon_identity(root)
     except OSError as error:
         print(f"FAILED: {error}", flush=True)
         return

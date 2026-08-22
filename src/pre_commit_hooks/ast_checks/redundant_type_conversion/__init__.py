@@ -31,7 +31,6 @@ if TYPE_CHECKING:
 
     from pre_commit_hooks.ast_checks._options import CheckOption
 
-# Format: # pytriage: TR6
 IGNORE_PATTERN = ignore_pattern_for("TR6")
 
 # See docs/rules/redundant-type-conversion.md's Suppression section.

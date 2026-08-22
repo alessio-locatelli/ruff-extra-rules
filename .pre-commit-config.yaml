@@ -84,6 +84,7 @@ repos:
         files: ^(src|tests)/
         exclude: ^tests/fixtures/
         require_serial: true
+        args: [--ignore=unused-pytriage]
       - id: local-ruff-extra-rules-ty-aggressive
         name: Extra Python rule checks (redundant-type-conversion, serial, strictest config)
         description: >-
@@ -107,6 +108,7 @@ repos:
         args:
           [
             --fix,
+            --isolated,
             --meaningless-vars-level=permissive,
             --redundant-assignment-level=permissive,
           ]
