@@ -260,36 +260,37 @@ def test_config_file_option_applies_when_no_flag_is_given(project: Path) -> None
     assert main([str(filepath), "--select", "meaningless-vars"]) == 1
 
 
-def test_extend_select_from_config_adds_to_default_checks(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    _write_config(project, '[tool.ruff-extra-rules]\nextend-select = ["unused-pytriage"]\n')
-    filepath = project / "module.py"
-    filepath.write_text("while True:  # pytriage: TR1\n    break\n")
-
-    assert ruff_extra_rules.main([str(filepath), "--no-fix"]) == 1
-    assert "TR8" in capsys.readouterr().err
-
-
-def test_extend_select_from_config_adds_to_an_explicit_selection(
-    project: Path, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    ("config_body", "extra_args", "suppression_code"),
+    [
+        pytest.param(
+            '[tool.ruff-extra-rules]\nextend-select = ["unused-pytriage"]\n',
+            [],
+            "TR1",
+            id="config-default-selection",
+        ),
+        pytest.param(
+            '[tool.ruff-extra-rules]\nselect = ["redundant-assignment"]\nextend-select = ["unused-pytriage"]\n',
+            [],
+            "TR5",
+            id="config-explicit-selection",
+        ),
+        pytest.param(None, ["--extend-select", "unused-pytriage"], "TR1", id="command-line-default-selection"),
+    ],
+)
+def test_extend_select_enables_unused_pytriage(
+    project: Path,
+    capsys: pytest.CaptureFixture[str],
+    config_body: str | None,
+    extra_args: list[str],
+    suppression_code: str,
 ) -> None:
-    _write_config(
-        project,
-        '[tool.ruff-extra-rules]\nselect = ["redundant-assignment"]\nextend-select = ["unused-pytriage"]\n',
-    )
+    if config_body is not None:
+        _write_config(project, config_body)
     filepath = project / "module.py"
-    filepath.write_text("while True:  # pytriage: TR5\n    break\n")
+    filepath.write_text(f"while True:  # pytriage: {suppression_code}\n    break\n")
 
-    assert ruff_extra_rules.main([str(filepath), "--no-fix"]) == 1
-    assert "TR8" in capsys.readouterr().err
-
-
-def test_extend_select_from_command_line_adds_to_default_checks(
-    project: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    filepath = project / "module.py"
-    filepath.write_text("while True:  # pytriage: TR1\n    break\n")
-
-    assert ruff_extra_rules.main([str(filepath), "--extend-select", "unused-pytriage", "--no-fix"]) == 1
+    assert ruff_extra_rules.main([str(filepath), *extra_args, "--no-fix"]) == 1
     assert "TR8" in capsys.readouterr().err
 
 
