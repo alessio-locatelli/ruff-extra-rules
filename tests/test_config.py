@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
 
@@ -37,6 +37,14 @@ def _write_config(directory: Path, body: str) -> Path:
     path = directory / "pyproject.toml"
     path.write_text(body)
     return path
+
+
+class _ExtendSelectCase(NamedTuple):
+    config_body: str | None
+    extra_args: list[str]
+    suppression_code: str
+    expected_exit_code: int
+    expected_diagnostic_code: str | None
 
 
 def test_discovery_finds_the_table_in_the_starting_directory(project: Path) -> None:
@@ -261,37 +269,54 @@ def test_config_file_option_applies_when_no_flag_is_given(project: Path) -> None
 
 
 @pytest.mark.parametrize(
-    ("config_body", "extra_args", "suppression_code"),
+    "case",
     [
-        pytest.param(
-            '[tool.ruff-extra-rules]\nextend-select = ["unused-pytriage"]\n',
-            [],
-            "TR1",
-            id="config-default-selection",
-        ),
-        pytest.param(
+        _ExtendSelectCase('[tool.ruff-extra-rules]\nextend-select = ["unused-pytriage"]\n', [], "TR1", 1, "TR8"),
+        _ExtendSelectCase(
             '[tool.ruff-extra-rules]\nselect = ["redundant-assignment"]\nextend-select = ["unused-pytriage"]\n',
             [],
             "TR5",
-            id="config-explicit-selection",
+            1,
+            "TR8",
         ),
-        pytest.param(None, ["--extend-select", "unused-pytriage"], "TR1", id="command-line-default-selection"),
+        _ExtendSelectCase(None, ["--extend-select", "unused-pytriage"], "TR1", 1, "TR8"),
+        _ExtendSelectCase(
+            '[tool.ruff-extra-rules]\nextend-select = ["unused-pytriage"]\n',
+            ["--extend-select", "redundant-assignment"],
+            "TR1",
+            0,
+            None,
+        ),
+        _ExtendSelectCase(
+            '[tool.ruff-extra-rules]\nextend-select = ["unused-pytriage"]\nignore = ["unused-pytriage"]\n',
+            [],
+            "TR1",
+            0,
+            None,
+        ),
+    ],
+    ids=[
+        "config-default-selection",
+        "config-explicit-selection",
+        "command-line-default-selection",
+        "command-line-replaces-configured-extension",
+        "ignore-disables-extended-check",
     ],
 )
 def test_extend_select_enables_unused_pytriage(
-    project: Path,
-    capsys: pytest.CaptureFixture[str],
-    config_body: str | None,
-    extra_args: list[str],
-    suppression_code: str,
+    project: Path, capsys: pytest.CaptureFixture[str], case: _ExtendSelectCase
 ) -> None:
-    if config_body is not None:
-        _write_config(project, config_body)
+    if case.config_body is not None:
+        _write_config(project, case.config_body)
     filepath = project / "module.py"
-    filepath.write_text(f"while True:  # pytriage: {suppression_code}\n    break\n")
+    filepath.write_text(f"while True:  # pytriage: {case.suppression_code}\n    break\n")
 
-    assert ruff_extra_rules.main([str(filepath), *extra_args, "--no-fix"]) == 1
-    assert "TR8" in capsys.readouterr().err
+    assert ruff_extra_rules.main([str(filepath), *case.extra_args, "--no-fix"]) == case.expected_exit_code
+    err = capsys.readouterr().err
+    if case.expected_diagnostic_code is None:
+        assert err == ""
+    else:
+        assert case.expected_diagnostic_code in err
 
 
 def test_fix_from_the_config_file_rewrites_the_file(project: Path) -> None:
