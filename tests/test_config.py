@@ -23,16 +23,11 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.uses_project_config
 
-# A name meaningless-vars reports only at the permissive level, so a run's
-# configured level is observable from the exit code alone.
 _UNSUGGESTABLE = "data = 1\n"
 
 
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """A git-rooted project directory, with the working directory moved
-    into it so discovery starts there.
-    """
     (tmp_path / ".git").mkdir()
     monkeypatch.chdir(tmp_path)
     return tmp_path
@@ -67,8 +62,6 @@ def test_discovery_walks_past_a_pyproject_without_our_table(project: Path) -> No
 
 
 def test_discovery_never_climbs_above_the_git_root(tmp_path: Path) -> None:
-    # The config lives outside the repository, so it must not apply — this
-    # is the "unrelated parent directory" case chapter 28 forbids.
     _write_config(tmp_path, "[tool.ruff-extra-rules]\nfix = true\n")
     repository = tmp_path / "repository"
     inner = repository / "src"
@@ -85,8 +78,6 @@ def test_discovery_returns_nothing_when_no_table_exists_anywhere(project: Path) 
 
 
 def test_discovery_outside_a_git_repository_walks_to_the_filesystem_root(tmp_path: Path) -> None:
-    # No `.git` anywhere above `tmp_path`, so there is no boundary to stop
-    # at and the search simply runs out of parents.
     nested = tmp_path / "a" / "b"
     nested.mkdir(parents=True)
 
@@ -165,11 +156,6 @@ def test_invalid_configuration_exits_two_and_names_its_source(
 def test_an_invalid_setting_is_rejected_even_when_the_command_line_overrides_it(
     project: Path, capsys: pytest.CaptureFixture[str], body: str, argv: list[str], needle: str
 ) -> None:
-    # An override must not turn an invalid file into an accepted one. For
-    # `fix` that is the difference between reporting the error and letting an
-    # unvalidated file authorize rewriting sources (behavioral contract
-    # chapter 17, "MUST validate configuration before performing potentially
-    # destructive operations").
     path = _write_config(project, body)
     filepath = project / "module.py"
     filepath.write_text("x = 1\n")
@@ -184,8 +170,6 @@ def test_an_invalid_setting_is_rejected_even_when_the_command_line_overrides_it(
 def test_an_invalid_option_value_for_a_sibling_hooks_check_is_rejected(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # One shared file must be accepted or rejected identically by both hooks,
-    # so a value is validated even when this entry point will not apply it.
     path = _write_config(project, '[tool.ruff-extra-rules.redundant-type-conversion]\nlevel = "bad"\n')
     filepath = project / "module.py"
     filepath.write_text("x = 1\n")
@@ -269,7 +253,6 @@ def test_command_line_option_overrides_the_config_file(project: Path, capsys: py
 
 
 def test_config_file_option_applies_when_no_flag_is_given(project: Path) -> None:
-    # The flag's own argparse default must not outrank the file.
     _write_config(project, '[tool.ruff-extra-rules.meaningless-vars]\nlevel = "permissive"\n')
     filepath = project / "module.py"
     filepath.write_text(_UNSUGGESTABLE)
@@ -357,10 +340,6 @@ def test_config_flag_uses_the_named_file_without_searching(project: Path) -> Non
 
 
 def test_a_relative_config_path_still_anchors_exclude_at_that_files_directory(project: Path) -> None:
-    # `--config pyproject.toml` must behave like the absolute form: a
-    # relative anchor can never match the absolute paths patterns are
-    # compared against, which would silently check — and with fix = true,
-    # rewrite — a file the configuration excludes.
     _write_config(project, '[tool.ruff-extra-rules]\nfix = true\nexclude = ["vendor/**"]\n')
     vendored = project / "vendor"
     vendored.mkdir()
@@ -389,7 +368,6 @@ def test_config_flag_rejects_an_unusable_path(
 
 
 def test_selecting_nothing_from_the_config_file_exits_zero(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    # `ruff check` with `select = []` likewise reports nothing and exits 0.
     _write_config(project, "[tool.ruff-extra-rules]\nselect = []\n")
     filepath = project / "module.py"
     filepath.write_text(_UNSUGGESTABLE)
@@ -426,9 +404,6 @@ def test_exclude_from_the_config_file_is_anchored_at_the_project_root(project: P
 def test_a_sibling_hooks_option_is_accepted_on_the_command_line(
     entrypoint: Callable[[list[str] | None], int], flag: str
 ) -> None:
-    # The command line must match the configuration file: an option owned by
-    # a check this entry point cannot run is accepted and ignored, so one set
-    # of options works with either hook.
     assert entrypoint(["--isolated", flag, "permissive"]) == 0
 
 
@@ -436,16 +411,12 @@ def test_a_sibling_hooks_option_does_not_change_this_hooks_own_behaviour(project
     filepath = project / "module.py"
     filepath.write_text(_UNSUGGESTABLE)
 
-    # meaningless-vars stays conservative: the level belongs to TR6, which
-    # this entry point never runs.
     exit_code = ruff_extra_rules.main(["--isolated", "--redundant-type-conversion-level", "permissive", str(filepath)])
 
     assert exit_code == 0
 
 
 def test_a_sibling_hooks_check_section_is_accepted_but_not_applied(project: Path) -> None:
-    # One project-wide config serves both entry points, so the section for
-    # a check this one cannot run is validated and then ignored.
     _write_config(project, '[tool.ruff-extra-rules.redundant-type-conversion]\nlevel = "permissive"\n')
     filepath = project / "module.py"
     filepath.write_text("x = 1\n")

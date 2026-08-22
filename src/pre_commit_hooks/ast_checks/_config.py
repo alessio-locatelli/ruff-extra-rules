@@ -1,8 +1,3 @@
-"""`pyproject.toml` discovery, validation, and precedence over the command line.
-
-See `docs/adr/0045-pyproject-toml-configuration.md`.
-"""
-
 from __future__ import annotations
 
 import os
@@ -35,8 +30,6 @@ _GLOBAL_KEYS = frozenset({"exclude", "extend-select", "fix", "ignore", PER_FILE_
 
 @dataclass(frozen=True, slots=True)
 class ResolvedConfig:
-    """See `docs/adr/0045-pyproject-toml-configuration.md`."""
-
     root: Path
     select: set[str] | None
     extend_select: set[str] | None
@@ -48,9 +41,6 @@ class ResolvedConfig:
 
 
 def _git_boundary(start: Path) -> Path | None:
-    """`.git` is a directory in an ordinary clone and a file in a worktree
-    or submodule, so existence rather than type is the test.
-    """
     for directory in (start, *start.parents):
         if (directory / ".git").exists():
             return directory
@@ -58,7 +48,6 @@ def _git_boundary(start: Path) -> Path | None:
 
 
 def discover(start: Path) -> tuple[Path, Mapping[str, Any]] | None:
-    """See `docs/adr/0045-pyproject-toml-configuration.md`."""
     boundary = _git_boundary(start)
     for directory in (start, *start.parents):
         candidate = directory / CONFIG_FILENAME
@@ -120,7 +109,6 @@ def _table_string_list(table: Mapping[str, Any], key: str, source: str) -> list[
 
 
 def _split_check_ids(values: list[str]) -> set[str]:
-    """See `docs/adr/0019-behavioral-contract-audit-configuration-and-discovery.md`."""
     return {check_id.strip() for value in values for check_id in value.split(",") if check_id.strip()}
 
 
@@ -149,9 +137,6 @@ def _cli_check_ids(cli_values: list[str], key: str, known: Iterable[str]) -> set
 
 
 def _validated_glob(pattern: str, key: str, source: str) -> str:
-    """A pattern that can't be compiled is reported rather than left to
-    quietly match nothing; see `docs/adr/0046-exclude-glob-semantics.md`.
-    """
     try:
         compile_glob(pattern)
     except InvalidGlobError as error:
@@ -173,7 +158,6 @@ def _per_file_ignore(pattern: str, check_ids: Iterable[str], anchor: Path, key: 
 def _table_per_file_ignores(
     table: Mapping[str, Any], source: str, known: Iterable[str], anchor: Path
 ) -> PerFileIgnoreList:
-    """See `docs/adr/0049-per-file-ignores.md`."""
     if PER_FILE_IGNORES_KEY not in table:
         return PerFileIgnoreList()
 
@@ -231,9 +215,7 @@ def _load(args: argparse.Namespace, cwd: Path) -> tuple[Mapping[str, Any], Path,
         return {}, cwd, CLI_SOURCE
 
     if args.config is not None:
-        # `path.parent` anchors every config-file `exclude` pattern, and a
-        # relative anchor can never match the absolute paths those patterns
-        # are compared against. See ADR-0046.
+        # See ADR-0046.
         path = Path(os.path.abspath(args.config))  # noqa: PTH100
         if not path.is_file():
             message = f"Could not read `{path}`: no such file"
@@ -257,7 +239,6 @@ def resolve(
     enabled_check_classes: Sequence[type[ASTCheck]],
     all_check_classes: Sequence[type[ASTCheck]],
 ) -> ResolvedConfig:
-    """See `docs/adr/0045-pyproject-toml-configuration.md`."""
     cwd = Path.cwd()
     table, root, source = _load(args, cwd)
 
@@ -271,7 +252,7 @@ def resolve(
         )
         raise ConfigError(message)
 
-    # Validated in full before precedence is applied; see ADR-0045.
+    # See ADR-0045.
     configured_fix = _table_bool(table, "fix", source, default=False)
     configured_exclude = _exclude_patterns(_table_string_list(table, "exclude", source) or (), root, "exclude", source)
     configured_select = _table_check_ids(table, "select", source, known_check_ids)
