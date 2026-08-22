@@ -67,8 +67,6 @@ def _scripted_try_connect(
 
 
 class _FakeSession:
-    """A `PersistentSession`-conforming stub for `_dispatch`/`_handle_connection` unit tests."""
-
     __slots__ = ("cached", "close_calls", "direct_inputs", "drained", "hover_delay_seconds", "hover_result", "raises")
 
     def __init__(
@@ -146,8 +144,6 @@ def test_ty_version_normalizes_any_failure_to_os_error(monkeypatch: pytest.Monke
     [
         (
             {"op": "open_or_update", "filepath": "f.py", "content": "x"},
-            # A tuple, not a list -- json.dumps() serializes both identically as a JSON array, so
-            # _dispatch() no longer converts one to the other before this ever reaches the wire.
             {"result": [("code", "msg", 1, 1)]},
         ),
         ({"op": "hover", "filepath": "f.py", "line0": 0, "char_utf16": 0}, {"result": "str"}),
@@ -185,11 +181,7 @@ def test_dispatch_converts_lsp_error_to_an_error_response() -> None:
 
 
 def test_dispatch_converts_a_malformed_request_to_an_error_response() -> None:
-    # Client and daemon are always the same, handshake-matched code, so a missing field should never
-    # happen in practice -- but it must not escape as a raw KeyError/TypeError and end this whole
-    # daemon's process (ADR-0041) the way an uncaught exception escaping _accept_loop already would.
-    session = _FakeSession()
-    response = _dispatch({"op": "open_or_update", "content": "x"}, session)  # missing "filepath"
+    response = _dispatch({"op": "open_or_update", "content": "x"}, _FakeSession())
     assert "error" in response
     assert "open_or_update" in response["error"]
 
@@ -211,7 +203,7 @@ def test_call_raises_lsp_error_when_the_daemon_closes_without_responding() -> No
 
     def _server() -> None:
         with server_sock:
-            daemon_module.read_framed_message(server_sock.makefile("rb"))  # consume the request, then just close
+            daemon_module.read_framed_message(server_sock.makefile("rb"))
 
     thread = threading.Thread(target=_server)
     thread.start()
@@ -340,11 +332,10 @@ def test_handle_connection_releases_an_abandoned_analysis_transaction() -> None:
 
 def test_handle_connection_returns_when_the_client_disconnects_before_handshake() -> None:
     server_sock, client_sock = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
-    client_sock.close()  # disconnect immediately, before ever sending a handshake
+    client_sock.close()
 
     with server_sock:
         _handle_connection(
-            # must return, not raise
             server_sock,
             _FakeSession(),
             daemon_identity="v1",
@@ -360,7 +351,6 @@ def test_handle_connection_returns_when_the_client_disconnects_mid_session() -> 
     def _server() -> None:
         with server_sock:
             _handle_connection(
-                # must return, not raise
                 server_sock,
                 _FakeSession(),
                 daemon_identity="v1",
@@ -371,7 +361,7 @@ def test_handle_connection_returns_when_the_client_disconnects_mid_session() -> 
     thread.start()
     handshake_response = daemon_module.read_framed_message(client._rfile)
     assert handshake_response == {"result": "ok"}
-    client.close()  # disconnect without ever sending "shutdown"
+    client.close()
     thread.join(timeout=5)
     assert not thread.is_alive()
 
@@ -394,7 +384,7 @@ def test_accept_loop_ends_when_a_served_connection_requests_shutdown(tmp_path: P
 
         thread = threading.Thread(target=_client)
         thread.start()
-        _accept_loop(sock, _FakeSession(), daemon_identity="v1")  # must return once the client asks to shut down
+        _accept_loop(sock, _FakeSession(), daemon_identity="v1")
         thread.join(timeout=5)
         assert not thread.is_alive()
 
@@ -413,21 +403,16 @@ def test_accept_loop_ends_on_a_version_mismatch(tmp_path: Path) -> None:
                 daemon_module.write_framed_message(
                     client_sock.makefile("wb"), {"op": "handshake", "ty_version": "mismatched"}
                 )
-                # Waits for the daemon's own error response before disconnecting -- closing
-                # immediately after the write races the daemon's own reply with a BrokenPipeError.
                 daemon_module.read_framed_message(client_sock.makefile("rb"))
 
         thread = threading.Thread(target=_client)
         thread.start()
-        _accept_loop(sock, _FakeSession(), daemon_identity="v1")  # must return once the mismatch is detected
+        _accept_loop(sock, _FakeSession(), daemon_identity="v1")
         thread.join(timeout=5)
         assert not thread.is_alive()
 
 
 def test_accept_loop_returns_on_idle_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # _accept_loop now owns sock's own timeout itself (min(_ACCEPT_POLL_INTERVAL_SECONDS,
-    # _IDLE_TIMEOUT_SECONDS)), so shortening _IDLE_TIMEOUT_SECONDS -- not sock.settimeout() directly -- is
-    # what makes this test return promptly.
     monkeypatch.setattr(daemon_module, "_IDLE_TIMEOUT_SECONDS", 0.2)
     socket_path = tmp_path / "d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -436,9 +421,8 @@ def test_accept_loop_returns_on_idle_timeout(tmp_path: Path, monkeypatch: pytest
         sock.bind(str(socket_path))
         sock.listen(1)
 
-        _accept_loop(sock, session, daemon_identity="v1")  # must return promptly, not hang
+        _accept_loop(sock, session, daemon_identity="v1")
 
-    # Mirrors what _serve()'s own finally block does once _accept_loop returns.
     session.close()
     assert session.close_calls == 1
 
@@ -446,9 +430,6 @@ def test_accept_loop_returns_on_idle_timeout(tmp_path: Path, monkeypatch: pytest
 def test_accept_loop_drops_a_stalled_connection_and_still_serves_the_next_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Without its own per-connection timeout, a connection that's accepted and then never completes a
-    # request would block _handle_connection forever, wedging this whole daemon -- it would never return
-    # to accept() for any later, well-behaved client (see ADR-0041).
     monkeypatch.setattr(daemon_module, "_CLIENT_REQUEST_TIMEOUT_SECONDS", 0.2)
     socket_path = tmp_path / "d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -457,7 +438,7 @@ def test_accept_loop_drops_a_stalled_connection_and_still_serves_the_next_one(
         sock.listen(2)
 
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stalled_sock:
-            stalled_sock.connect(str(socket_path))  # connects, then never sends a single byte
+            stalled_sock.connect(str(socket_path))
 
             def _well_behaved_client() -> None:
                 with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client_sock:
@@ -471,7 +452,6 @@ def test_accept_loop_drops_a_stalled_connection_and_still_serves_the_next_one(
             thread = threading.Thread(target=_well_behaved_client)
             thread.start()
 
-            # Must drop the stalled connection once it times out and still serve the next, real client.
             _accept_loop(sock, _FakeSession(), daemon_identity="v1")
 
             thread.join(timeout=5)
@@ -481,10 +461,6 @@ def test_accept_loop_drops_a_stalled_connection_and_still_serves_the_next_one(
 def test_accept_loop_drops_a_connection_with_a_truncated_frame_and_still_serves_the_next_one(
     tmp_path: Path,
 ) -> None:
-    # An interrupted client (or one that disconnects mid-request) leaves read_framed_message() raising
-    # LSPError rather than returning a clean None -- an ordinary client-side failure, not this daemon's
-    # own, so it must not escape _accept_loop and end this whole daemon's process (ADR-0041), discarding
-    # every other file it had been tracking over the one connection that actually failed.
     socket_path = tmp_path / "d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     with sock:
@@ -493,8 +469,6 @@ def test_accept_loop_drops_a_connection_with_a_truncated_frame_and_still_serves_
 
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as truncated_sock:
             truncated_sock.connect(str(socket_path))
-            # Claims a 10-byte body but sends only 5 -- read_framed_message() raises LSPError once the
-            # connection closes (via this `with` block's own exit) before the rest ever arrives.
             truncated_sock.sendall(b'Content-Length: 10\r\n\r\n{"a":')
 
         def _well_behaved_client() -> None:
@@ -518,9 +492,6 @@ def test_accept_loop_drops_a_connection_with_a_truncated_frame_and_still_serves_
 def test_accept_loop_drops_a_connection_whose_reply_write_fails_and_still_serves_the_next_one(
     tmp_path: Path,
 ) -> None:
-    # A client that disconnects right after sending its own request, before this daemon ever gets a
-    # chance to reply, makes that reply's own write raise a plain OSError (BrokenPipeError or similar) --
-    # an ordinary client-side failure, not this daemon's own, so it must not escape _accept_loop either.
     socket_path = tmp_path / "d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     with sock:
@@ -531,12 +502,11 @@ def test_accept_loop_drops_a_connection_whose_reply_write_fails_and_still_serves
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as rude_sock:
                 rude_sock.connect(str(socket_path))
                 daemon_module.write_framed_message(rude_sock.makefile("wb"), {"op": "handshake", "ty_version": "v1"})
-                # Disconnects immediately, before ever reading this daemon's own handshake reply.
 
         rude_thread = threading.Thread(target=_rude_client)
         rude_thread.start()
         rude_thread.join(timeout=5)
-        time.sleep(0.2)  # gives the kernel time to fully process the disconnect before accept() below
+        time.sleep(0.2)
 
         def _well_behaved_client() -> None:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client_sock:
@@ -557,9 +527,6 @@ def test_accept_loop_drops_a_connection_whose_reply_write_fails_and_still_serves
 
 
 def test_accept_loop_serves_a_new_connections_handshake_while_another_is_mid_request(tmp_path: Path) -> None:
-    # Proves connections are handled concurrently (ADR-0041), not one at a time: a second client's own
-    # handshake must not wait behind a first client's own slow, in-flight request -- only the actual calls
-    # into `session` are serialized (`session_lock`), never the accept loop or framing.
     socket_path = tmp_path / "d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     session = _FakeSession(hover_result="int", hover_delay_seconds=1.0)
@@ -581,7 +548,7 @@ def test_accept_loop_serves_a_new_connections_handshake_while_another_is_mid_req
 
         slow_thread = threading.Thread(target=_slow_client)
         slow_thread.start()
-        time.sleep(0.2)  # lets the slow client's own hover() request actually start (and hold the lock)
+        time.sleep(0.2)
 
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as fast_client_sock:
             start = time.monotonic()
@@ -591,7 +558,7 @@ def test_accept_loop_serves_a_new_connections_handshake_while_another_is_mid_req
             handshake_elapsed = time.monotonic() - start
 
         assert response == {"result": "ok"}
-        assert handshake_elapsed < 0.5  # well under the slow client's own 1s hold -- proves concurrency
+        assert handshake_elapsed < 0.5
 
         slow_thread.join(timeout=5)
         assert not slow_thread.is_alive()
@@ -600,9 +567,6 @@ def test_accept_loop_serves_a_new_connections_handshake_while_another_is_mid_req
 
 
 def test_accept_loop_serializes_concurrent_calls_into_the_shared_session(tmp_path: Path) -> None:
-    # Proves the other half of ADR-0041's own design: even though connections are handled concurrently,
-    # `_lsp.LSPClient` is documented as not thread-safe for concurrent request()/notify() calls, so no two
-    # calls into the shared `session` may ever actually overlap.
     socket_path = tmp_path / "d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     concurrent_calls = 0
@@ -640,7 +604,7 @@ def test_accept_loop_serializes_concurrent_calls_into_the_shared_session(tmp_pat
         threads = [threading.Thread(target=_client) for _ in range(3)]
         for thread in threads:
             thread.start()
-            time.sleep(0.05)  # stagger connects so all three overlap mid-request, not just mid-accept
+            time.sleep(0.05)
 
         _accept_loop(sock, session, daemon_identity="v1")
 
@@ -678,8 +642,6 @@ def test_repository_root_reuses_a_daemon_path_from_subdirectories_and_path_alias
 def test_try_connect_existing_returns_none_when_ty_version_is_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A socket file must actually exist here, or the cheap socket_exists_for() check short-circuits
-    # before ever reaching _ty_version() at all.
     socket_path = daemon_module._socket_path(tmp_path)
     socket_path.parent.mkdir(parents=True)
     socket_path.touch()
@@ -695,14 +657,11 @@ def test_try_connect_existing_returns_none_when_ty_version_is_unavailable(
 def test_try_connect_existing_cleans_up_a_crashed_daemons_stale_socket(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A socket left behind by a daemon that crashed (no live process behind its own pidfile) would
-    # otherwise widen get_prefilter_pattern()'s own "every file" fallback indefinitely in a repository
-    # where no later, candidate-containing commit happens to run connect() to notice and replace it.
     socket_path = daemon_module._socket_path(tmp_path)
     pid_path = daemon_module._pid_path(tmp_path)
     socket_path.parent.mkdir(parents=True)
     socket_path.touch()
-    pid_path.write_text("999999999", encoding="utf-8")  # not a real, live process
+    pid_path.write_text("999999999", encoding="utf-8")
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
     monkeypatch.setattr(daemon_module, "_try_connect", lambda *_a: None)
 
@@ -715,8 +674,6 @@ def test_try_connect_existing_cleans_up_a_crashed_daemons_stale_socket(
 def test_try_connect_existing_leaves_a_departing_but_still_alive_daemons_socket_alone(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A daemon that's still alive but shutting itself down for a version mismatch owns its own cleanup
-    # (ADR-0041) -- this candidate-less, non-spawning path must not race it by touching the same files.
     socket_path = daemon_module._socket_path(tmp_path)
     socket_path.parent.mkdir(parents=True)
     socket_path.touch()
@@ -729,16 +686,12 @@ def test_try_connect_existing_leaves_a_departing_but_still_alive_daemons_socket_
 
     assert try_connect_existing(tmp_path) is None
 
-    assert socket_path.exists()  # left alone -- the still-alive, departing daemon owns cleaning this up
+    assert socket_path.exists()
 
 
 def test_try_connect_existing_waits_for_a_busy_daemon_and_succeeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
-    # A daemon confirmed alive but too busy to answer must be waited for here too, not treated as
-    # unreachable: this call's own result is cached and reused for the rest of the run (see ADR-0041),
-    # so giving up on the first overlapping hook invocation would drop a disk-change notification for
-    # every later candidate-less file in that same run.
     socket_path = daemon_module._socket_path(tmp_path)
     socket_path.parent.mkdir(parents=True)
     socket_path.touch()
@@ -772,9 +725,6 @@ def test_try_connect_existing_gives_up_when_a_busy_daemon_never_frees_up(
 
 
 def test_try_connect_returns_none_when_the_socket_path_is_stale(tmp_path: Path) -> None:
-    # A regular file left at the socket path (e.g. by a daemon that crashed before ever reaching its own
-    # bind()) makes connect() itself fail with an OSError distinct from "nothing there at all" -- also
-    # ambiguous with "busy," left for the caller's own liveness/busy-wait logic to resolve.
     socket_path = tmp_path / "d.sock"
     socket_path.touch()
 
@@ -862,8 +812,6 @@ def test_try_connect_returns_none_when_the_daemon_disconnects_without_answering(
             conn, _peer = sock.accept()
             with conn:
                 daemon_module.read_framed_message(conn.makefile("rb"))
-                # Disconnects without ever answering the handshake -- e.g. a daemon that crashed mid-handshake.
-                # Ambiguous with "busy," unlike an explicit version-mismatch rejection above.
 
         thread = threading.Thread(target=_server)
         thread.start()
@@ -874,10 +822,6 @@ def test_try_connect_returns_none_when_the_daemon_disconnects_without_answering(
 
 
 def test_try_connect_returns_none_when_the_handshake_response_is_malformed(tmp_path: Path) -> None:
-    # A truncated/malformed handshake response (a daemon that died mid-write, or a stale socket
-    # answering with garbage) makes read_framed_message() raise LSPError -- as unusable a connection as
-    # an OSError, so it must be treated the same way rather than escaping uncaught and being recorded as
-    # a rule failure instead of falling back to a local session.
     socket_path = tmp_path / "d.sock"
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     with sock:
@@ -889,9 +833,6 @@ def test_try_connect_returns_none_when_the_handshake_response_is_malformed(tmp_p
             conn, _peer = sock.accept()
             with conn:
                 daemon_module.read_framed_message(conn.makefile("rb"))
-                # Claims a 10-byte body but sends only 5, then disconnects -- read_framed_message() on
-                # the client side raises LSPError once it sees the connection close before the rest
-                # of the promised body ever arrives.
                 conn.sendall(b'Content-Length: 10\r\n\r\n{"a":')
 
         thread = threading.Thread(target=_server)
@@ -960,8 +901,6 @@ def test_context_change_rejects_an_existing_daemon(tmp_path: Path, monkeypatch: 
 def test_connect_reuses_a_daemon_spawned_by_a_peer_while_waiting_for_the_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
-    # Simulates another process spawning a daemon in the window between this
-    # process's own first _try_connect attempt and acquiring the spawn lock.
     peer_sock = socketpair_peer
     attempts: list[socket.socket | None] = [None, peer_sock]
 
@@ -972,7 +911,7 @@ def test_connect_reuses_a_daemon_spawned_by_a_peer_while_waiting_for_the_lock(
 
     session = connect(tmp_path)
 
-    assert spawn_calls == []  # never actually spawned -- the retry inside the lock found the peer's daemon
+    assert spawn_calls == []
     assert session._sock is peer_sock
     session.close()
 
@@ -980,11 +919,6 @@ def test_connect_reuses_a_daemon_spawned_by_a_peer_while_waiting_for_the_lock(
 def test_connect_remembers_a_pre_lock_version_mismatch_even_once_the_daemon_has_vanished(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
-    # The pre-lock attempt can observe an explicit version-mismatch rejection, but by the time this
-    # process acquires the spawn lock the old daemon may have already removed its own socket entirely --
-    # at that point the in-lock attempt alone sees a plain "nothing answered," indistinguishable from
-    # busy, unless the earlier mismatch is carried forward: it must still count as departing rather than
-    # triggering the busy-daemon wait for a daemon that already confirmed it's not coming back.
     peer_sock = socketpair_peer
 
     daemon_alive_check = Mock()
@@ -1004,10 +938,10 @@ def test_connect_remembers_a_pre_lock_version_mismatch_even_once_the_daemon_has_
     session = connect(tmp_path)
     elapsed = time.monotonic() - start
 
-    daemon_alive_check.assert_not_called()  # already known to be departing -- must not check liveness at all
+    daemon_alive_check.assert_not_called()
     assert spawn_calls == [tmp_path]
     assert session._sock is peer_sock
-    assert elapsed < 5.0  # must not wait out the busy-daemon retry budget
+    assert elapsed < 5.0
     session.close()
 
 
@@ -1029,7 +963,6 @@ def test_daemon_process_is_alive_is_false_with_no_pidfile(tmp_path: Path) -> Non
 def test_daemon_process_is_alive_is_false_for_a_dead_pid(tmp_path: Path) -> None:
     pid_path = daemon_module._pid_path(tmp_path)
     pid_path.parent.mkdir(parents=True)
-    # Waited on below, so its own PID is already reaped and no longer alive by the time it's recorded.
     dead_process = subprocess.Popen([sys.executable, "-c", "pass"])
     dead_process.wait(timeout=5)
     pid_path.write_text(str(dead_process.pid), encoding="utf-8")
@@ -1057,7 +990,6 @@ def test_daemon_process_is_alive_is_true_when_owned_by_another_user(
 
     monkeypatch.setattr(daemon_module.os, "kill", _raise_permission_error)
 
-    # Exists, just not killable by this user -- conservatively assumed alive.
     assert daemon_module._daemon_process_is_alive(tmp_path) is True
 
 
@@ -1083,9 +1015,6 @@ def test_cleanup_if_still_owned_removes_its_own_socket_and_pidfile(tmp_path: Pat
 
 
 def test_cleanup_if_still_owned_removes_files_when_no_pidfile_exists_yet(tmp_path: Path) -> None:
-    # A daemon that fails before ever reaching its own pid_path.write_text() (e.g. a bind failure) must
-    # still be able to clean up whatever it already created (the stale-socket unlink at _serve()'s own
-    # startup already handles the socket; this covers the finally block reaching the same state).
     socket_path = daemon_module._socket_path(tmp_path)
     socket_path.parent.mkdir(parents=True)
     socket_path.touch()
@@ -1096,9 +1025,6 @@ def test_cleanup_if_still_owned_removes_files_when_no_pidfile_exists_yet(tmp_pat
 
 
 def test_cleanup_if_still_owned_leaves_a_replacement_daemons_files_alone(tmp_path: Path) -> None:
-    # A replacement daemon spawned right after this one shuts down for a version mismatch (ADR-0041) can
-    # already be bound and serving, with its own PID recorded, by the time this daemon's own belated
-    # finally-block cleanup runs -- it must not delete files it no longer owns.
     socket_path = daemon_module._socket_path(tmp_path)
     pid_path = daemon_module._pid_path(tmp_path)
     socket_path.parent.mkdir(parents=True)
@@ -1127,7 +1053,7 @@ def test_connect_waits_for_a_busy_daemon_instead_of_spawning_a_competing_one(
 
     session = connect(tmp_path)
 
-    spawn_daemon.assert_not_called()  # existing daemon confirmed alive -- must not spawn a competing one
+    spawn_daemon.assert_not_called()
     assert session._sock is peer_sock
     session.close()
 
@@ -1146,15 +1072,12 @@ def test_connect_raises_os_error_when_a_busy_daemon_never_frees_up(
     with pytest.raises(OSError, match="stayed busy"):
         connect(tmp_path)
 
-    spawn_daemon.assert_not_called()  # existing daemon confirmed alive -- must not spawn a competing one
+    spawn_daemon.assert_not_called()
 
 
 def test_connect_spawns_a_replacement_when_a_busy_daemon_turns_out_to_be_departing_mid_wait(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
-    # A daemon confirmed alive and busy at first can still turn out to be departing (a version mismatch
-    # discovered partway through the busy-wait, see _wait_for_busy_daemon()) -- this must spawn its
-    # replacement immediately rather than reporting a misleading "stayed busy" failure and falling back.
     peer_sock = socketpair_peer
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
@@ -1174,9 +1097,6 @@ def test_connect_spawns_a_replacement_when_a_busy_daemon_turns_out_to_be_departi
 def test_connect_spawns_a_fresh_daemon_immediately_after_a_version_mismatch_instead_of_waiting(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
-    # A version-mismatched daemon is already shutting itself down, not merely busy -- waiting for it the
-    # way connect() waits for a busy one would burn the full busy-daemon retry budget on an answer that
-    # was never coming, instead of spawning its replacement right away (see ADR-0041).
     peer_sock = socketpair_peer
 
     daemon_alive_check = Mock()
@@ -1198,19 +1118,16 @@ def test_connect_spawns_a_fresh_daemon_immediately_after_a_version_mismatch_inst
     session = connect(tmp_path)
     elapsed = time.monotonic() - start
 
-    daemon_alive_check.assert_not_called()  # already known to be departing -- must not check liveness at all
+    daemon_alive_check.assert_not_called()
     assert spawn_calls == [tmp_path]
     assert session._sock is peer_sock
-    assert elapsed < 5.0  # must not wait out the busy-daemon retry budget
+    assert elapsed < 5.0
     session.close()
 
 
 def test_wait_for_busy_daemon_bails_out_early_once_the_daemon_starts_departing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # A daemon confirmed alive can still turn out to be departing (e.g. a peer's own version-mismatched
-    # handshake) partway through the busy-wait retry loop -- this must return None immediately rather than
-    # burning the rest of the retry budget on an answer that's never coming.
     monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_INTERVAL_SECONDS", 0.01)
     monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_TIMEOUT_SECONDS", 5.0)
     attempts: list[socket.socket | None] = [None]
@@ -1228,19 +1145,16 @@ def test_wait_for_busy_daemon_bails_out_early_once_the_daemon_starts_departing(
 
     assert sock is None
     assert departing is True
-    assert elapsed < 5.0  # must not wait out the full retry budget
+    assert elapsed < 5.0
 
 
 def test_shutdown_if_running_is_a_silent_no_op_when_nothing_is_listening(tmp_path: Path) -> None:
-    shutdown_if_running(tmp_path)  # must not raise
+    shutdown_if_running(tmp_path)
 
 
 def test_connect_raises_os_error_when_ty_is_entirely_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A totally-missing ty fails this client's own _ty_version() call before connect() ever tries to reach
-    # or spawn a daemon -- an operational failure (OSError), not a self-test failure (CheckUnavailableError):
-    # get_session()'s own caller is the one that falls back to a local session from here.
     monkeypatch.setattr(
         daemon_module, "_ty_version", lambda: (_ for _ in ()).throw(OSError("simulated: ty not on PATH"))
     )
@@ -1251,10 +1165,6 @@ def test_connect_raises_os_error_when_ty_is_entirely_unavailable(
 def test_connect_raises_os_error_instead_of_asserting_when_locking_is_unavailable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # locked() itself asserts fcntl is not None -- connect() must check locking_is_available() and raise
-    # a plain, fallback-worthy OSError before ever reaching that, or a platform without fcntl would crash
-    # with an uncaught AssertionError instead of falling back to a local session the way every other
-    # operational failure here does.
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
     monkeypatch.setattr(daemon_module, "locking_is_available", lambda: False)
     with pytest.raises(OSError, match="locking is unavailable"):
@@ -1278,8 +1188,6 @@ def test_spawn_daemon_raises_check_unavailable_error_on_a_reported_self_test_fai
 def test_spawn_daemon_raises_os_error_on_a_reported_bind_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A bind failure is an operational problem unrelated to ty itself, so it must surface as OSError
-    # (fallback-worthy) rather than CheckUnavailableError, unlike a self-test failure above.
     def _fake_popen(_args: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401
         return _REAL_POPEN([sys.executable, "-c", "print('BIND_FAILED: simulated bind failure', flush=True)"], **kwargs)
 
@@ -1303,9 +1211,6 @@ def test_spawn_daemon_raises_os_error_when_nothing_is_printed_within_the_wait_ti
     with pytest.raises(OSError, match="did not start within"):
         _spawn_daemon(tmp_path)
 
-    # A daemon that never reached READY must not be left running -- it could still finish starting and
-    # bind the socket later, after this caller already fell back locally. _spawn_daemon() already waits
-    # for it to exit before raising, so no timeout is needed here.
     (process,) = spawned
     assert process.poll() is not None
 
@@ -1328,7 +1233,7 @@ def test_kill_spawn_attempt_escalates_to_sigkill_when_sigterm_is_ignored(monkeyp
         start_new_session=True,
     )
     assert process.stdout is not None
-    process.stdout.readline()  # wait until SIGTERM is actually ignored before trying to kill it
+    process.stdout.readline()
 
     daemon_module._kill_spawn_attempt(process)
 
@@ -1357,8 +1262,6 @@ def test_self_test_passes_with_the_real_installed_ty(tmp_path: Path) -> None:
 def test_serve_binds_prints_ready_and_exits_on_idle_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # _detach_stdio() would otherwise sever this test process's own stdio;
-    # _IDLE_TIMEOUT_SECONDS is shortened so _serve() returns quickly with no client ever connecting.
     monkeypatch.setattr(daemon_module, "_detach_stdio", lambda: None)
     monkeypatch.setattr(daemon_module, "_IDLE_TIMEOUT_SECONDS", 0.2)
 
@@ -1406,13 +1309,6 @@ def test_serve_prints_failed_when_the_self_test_raises(
 def test_serve_prints_failed_when_bind_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # A read-only parent directory makes bind() itself raise PermissionError while creating the socket's
-    # special file -- real self-test/session construction still runs for real here, since only this later
-    # bind step is meant to fail. _serve() now writes its own pidfile before ever attempting to bind (see
-    # ADR-0041), so that file is pre-created here first: overwriting an *existing* file's own content
-    # doesn't need directory write permission the way creating the new socket special file does. The
-    # directory being read-only also means this same pidfile can't actually be removed afterward --
-    # covered separately (without restricting directory permissions) below.
     monkeypatch.setattr(daemon_module, "_IDLE_TIMEOUT_SECONDS", 0.2)
     socket_path = daemon_module._socket_path(tmp_path)
     pid_path = daemon_module._pid_path(tmp_path)
@@ -1429,10 +1325,6 @@ def test_serve_prints_failed_when_bind_fails(
 def test_serve_removes_its_own_pidfile_when_bind_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # A directory already occupying the socket's own path makes bind() fail without needing to restrict
-    # the parent directory's own permissions -- unlike the read-only-directory case above, this leaves the
-    # pidfile this daemon just wrote for itself actually removable, so its own bind-failure cleanup can be
-    # verified directly: the failed bind must not leave this daemon's own pid claiming a dead socket.
     monkeypatch.setattr(daemon_module, "_IDLE_TIMEOUT_SECONDS", 0.2)
     socket_path = daemon_module._socket_path(tmp_path)
     pid_path = daemon_module._pid_path(tmp_path)
@@ -1445,12 +1337,6 @@ def test_serve_removes_its_own_pidfile_when_bind_fails(
 
 
 class TestRealDaemonEndToEnd:
-    """Spawns a real daemon subprocess against the real, installed `ty` binary -- see ADR-0041.
-
-    Isolated to `tmp_path` (never the real repo's own `.cache/`), and explicitly torn down via
-    `shutdown_if_running()` rather than left running until its own idle timeout.
-    """
-
     __slots__ = ()
 
     @pytest.fixture(autouse=True)
@@ -1461,20 +1347,10 @@ class TestRealDaemonEndToEnd:
         session_module._session = None
         session_module._daemon_probe_failed = False
         yield
-        # A test that established its own session (session_module._session) never closes it, since that's
-        # this feature's whole point -- closing it here first matters because _accept_loop's own graceful
-        # shutdown (ADR-0041) joins every still-in-flight connection's own worker thread before the daemon's
-        # process actually ends: a leftover, still-open-but-idle connection's own thread wouldn't return on
-        # its own until its full per-connection timeout, so shutdown_if_running() below would otherwise wait
-        # out that same budget instead of the daemon actually exiting promptly.
         leftover_session = session_module.peek_session()
         if leftover_session is not None:
             leftover_session.close()
             session_module._session = None
-        # shutdown_if_running() is best-effort by design (never raises) --
-        # a couple of unconditional retries absorb a rare, transient
-        # connection hiccup rather than leaving this test's own daemon to
-        # idle out on its own.
         for _ in range(3):
             shutdown_if_running(tmp_path)
             time.sleep(0.2)
@@ -1492,18 +1368,12 @@ class TestRealDaemonEndToEnd:
             original_spawn(root)
 
         monkeypatch.setattr(daemon_module, "_spawn_daemon", _counting_spawn)
-        # Each connection closes before the next "hook invocation" connects, matching real usage -- one
-        # connection per hook invocation, never held open across separate commits.
-        first = connect(tmp_path)
-        first.close()
+        connect(tmp_path).close()
         connect(tmp_path).close()
 
         assert len(spawn_calls) == 1
 
     def test_daemon_flags_a_caller_after_a_later_run_only_touches_the_callee(self, tmp_path: Path) -> None:
-        # The exact gap issue #109 exists to close: a redundant conversion at a call site whose
-        # parameter's own type lives in a different file, where the commit that widens that
-        # parameter's type never passes the call site itself to this hook.
         callee = tmp_path / "callee.py"
         caller = tmp_path / "caller.py"
         callee.write_text("def takes(x: int) -> None:\n    print(x)\n")
@@ -1511,11 +1381,8 @@ class TestRealDaemonEndToEnd:
 
         first_check = RedundantTypeConversionCheck(level=ConfidenceLevel.PERMISSIVE)
         caller_source = caller.read_text()
-        # "Commit 1": caller.py is examined while callee.py still requires int -- int(y) is necessary.
         assert first_check.check(caller, ast.parse(caller_source), caller_source) == []
 
-        # "Commit 2": only callee.py changes (widened to also accept str) and only *it* is examined --
-        # caller.py is never passed to this run at all.
         callee.write_text("def takes(x: int | str) -> None:\n    print(x)\n")
         second_check = RedundantTypeConversionCheck(level=ConfidenceLevel.PERMISSIVE)
         callee_source = callee.read_text()

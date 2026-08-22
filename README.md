@@ -59,7 +59,7 @@ Settings go in your `pyproject.toml`, under `[tool.ruff-extra-rules]`:
 fix = true                          # apply safe fixes without passing --fix
 exclude = ["vendor/**"]             # glob patterns, relative to this file
 ignore = ["misplaced-comment"]      # or select = [...] to run only certain checks
-extend-select = ["unused-pytriage"] # add an opt-in check to the normal defaults
+extend-select = ["unused-pytriage"]
 
 [tool.ruff-extra-rules.meaningless-vars]
 level = "permissive"                # each check's own settings live in its own table
