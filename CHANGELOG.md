@@ -6,6 +6,12 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-22
+
+### Added
+
+- `extend-select` enables opt-in checks such as `unused-pytriage` alongside the normal default checks from `pyproject.toml` or the command line, including TR6 suppressions when the dedicated ty hook is installed.
+
 ### Changed
 
 - `misplaced-comment` preserves `#:` documentation comments wherever they appear.
