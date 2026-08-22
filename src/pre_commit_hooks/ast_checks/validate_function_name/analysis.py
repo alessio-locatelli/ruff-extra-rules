@@ -782,6 +782,9 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
     if is_decorator_override_or_abstract(func_node):
         return old, "skip: decorated with @override or @abstractmethod"
 
+    if _is_context_manager(func_node):
+        return old, "context manager name is left to the author"
+
     if analysis["delegates_get"]:
         return old, "delegates to another get_ function; skipping suggestion"
 
@@ -824,11 +827,6 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
         suggested = entity or old
         reason = "@property: prefer noun name rather than verb"
         return suggested, reason
-
-    if _is_context_manager(func_node):
-        if isinstance(getattr(func_node, "parent", None), ast.ClassDef):
-            return old, "context manager method; get prefix is acceptable"
-        return entity or old, "context manager; prefer noun phrase"
 
     # A generator's calling contract (must be iterated, can't be used as a
     # plain return value) is a stronger, unambiguous signal than any verb

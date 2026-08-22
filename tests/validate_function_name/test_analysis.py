@@ -1334,8 +1334,8 @@ def test_extract_first_verb(docstring_line: str, verb: str | None) -> None:
         (
             ("from contextlib import contextmanager\n\n@contextmanager\ndef get_transaction():\n    yield object()\n"),
             "get_transaction",
-            "transaction",
-            "context manager; prefer noun phrase",
+            "get_transaction",
+            "context manager name is left to the author",
         ),
         (
             (
@@ -1346,20 +1346,20 @@ def test_extract_first_verb(docstring_line: str, verb: str | None) -> None:
                 "    yield object()\n"
             ),
             "get_tempfile_session",
-            "tempfile_session",
-            "context manager; prefer noun phrase",
+            "get_tempfile_session",
+            "context manager name is left to the author",
         ),
         (
             ("import contextlib\n\n@contextlib.contextmanager\ndef get_connection():\n    yield object()\n"),
             "get_connection",
-            "connection",
-            "context manager; prefer noun phrase",
+            "get_connection",
+            "context manager name is left to the author",
         ),
         (
             ("import contextlib\n\n@contextlib.asynccontextmanager\nasync def get_lock():\n    yield object()\n"),
             "get_lock",
-            "lock",
-            "context manager; prefer noun phrase",
+            "get_lock",
+            "context manager name is left to the author",
         ),
     ],
     ids=[
@@ -1370,10 +1370,10 @@ def test_extract_first_verb(docstring_line: str, verb: str | None) -> None:
         "validates-only-suggests-validate",
         "transforms-only-suggests-transform",
         "generator-outranks-disk-read",
-        "context-manager-uses-noun-phrase",
-        "async-context-manager-uses-noun-phrase",
-        "qualified-context-manager-uses-noun-phrase",
-        "qualified-async-context-manager-uses-noun-phrase",
+        "context-manager-name-is-accepted",
+        "async-context-manager-name-is-accepted",
+        "qualified-context-manager-name-is-accepted",
+        "qualified-async-context-manager-name-is-accepted",
     ],
 )
 def test_suggest_name_for(source: str, func_name: str, suggested_name: str, reason: str) -> None:
