@@ -1,12 +1,14 @@
 # Switch a check off for some files, matching `ruff`'s own rule
 
+**Update, ADR-0058:** global check selection now has an additive `extend-select` setting; per-file ignores remain replacement-valued and have no `extend-` variant.
+
 Check selection was all-or-nothing for a run: `select` and `ignore` (ADR-0045) apply to every file the hook is given. Real codebases need one check off in `tests/`, in generated or vendored trees, or in `__init__.py`, without losing it everywhere else — and the alternative, an inline suppression comment per occurrence, does not scale to a whole subtree.
 
 `ruff` answers this with `lint.per-file-ignores`, so entries will be copied between the two configurations. That makes matching behavior, not just the key name, part of the decision.
 
 ## Decision
 
-`[tool.ruff-extra-rules.per-file-ignores]` maps a file pattern to a list of check ids. `--per-file-ignores <file pattern>:<check>` is the same setting on the command line, comma-separated and repeatable; like every other setting it replaces the configured value rather than extending it, and `ruff`'s separate `extend-` tier is not reproduced — this tool has no `extend-` surface anywhere.
+`[tool.ruff-extra-rules.per-file-ignores]` maps a file pattern to a list of check ids. `--per-file-ignores <file pattern>:<check>` is the same setting on the command line, comma-separated and repeatable; like every other setting it replaces the configured value rather than extending it. This per-file setting has no `extend-` variant; global check selection's additive `extend-select` is defined by ADR-0058.
 
 An entry applies to a file when its pattern matches the file's own name, or matches the file's path anchored at the pattern's source — the project root for the configuration file, the working directory for the flag, exactly as ADR-0046 anchors `exclude`. A leading `!` inverts that: the entry then applies to every file the pattern does not match. Every applying entry contributes its checks, so entries accumulate rather than the last one winning. This is `ruff`'s rule, verified against `ruff 0.16.1` rather than inferred from its documentation, including the consequence that a bare directory name matches nothing: only a file's own name is matched unanchored.
 

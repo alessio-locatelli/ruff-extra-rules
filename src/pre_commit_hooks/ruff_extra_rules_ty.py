@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import sys
 
-from .ast_checks import RedundantTypeConversionCheck
+from .ast_checks import RedundantTypeConversionCheck, UnusedPytriageCheck
 from .ast_checks.__main__ import run
 from .ast_checks._cli import main as run_checks
 
-_CHECKS = [RedundantTypeConversionCheck]
+_CHECKS = [RedundantTypeConversionCheck, UnusedPytriageCheck]
 
 
 def main(argv: list[str] | None = None) -> int:

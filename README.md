@@ -17,6 +17,7 @@ Extra Python rule checks and fixups that run as a pre-commit/prek hook alongside
 Individual checks are toggled with `--select`/`--ignore` (or the matching `pyproject.toml` keys), and `--fix` applies whatever each check's own fix logic considers safe — mirroring `ruff check`'s own `--select`/`--ignore`/`--fix` flags:
 
 - `--select=<id>,<id>` restricts the hook to **only** the listed check(s).
+- `--extend-select=<id>,<id>` adds checks to the normal selection without disabling the defaults.
 - `--ignore=<id>,<id>` excludes the listed check(s) — it composes with `--select` rather than replacing it, just like `ruff check --select`/`--ignore`.
 
 | Rule                                                                 | Code | Description                                                                                                                                                                       |
@@ -28,7 +29,7 @@ Individual checks are toggled with `--select`/`--ignore` (or the matching `pypro
 | [redundant-assignment](docs/rules/redundant-assignment.md)           | TR5  | Flags (and optionally inlines) variable assignments that add no clarity.                                                                                                          |
 | [redundant-type-conversion](docs/rules/redundant-type-conversion.md) | TR6  | Flags a builtin type conversion that `ty` considers redundant given the argument's real type, including across files. Requires [`ty`](https://github.com/astral-sh/ty) on `PATH`. |
 | [misplaced-comment](docs/rules/misplaced-comment.md)                 | TR7  | Moves a trailing comment off a closing bracket onto the expression line.                                                                                                          |
-| [unused-pytriage](docs/rules/unused-pytriage.md)                     | TR8  | Reports known `# pytriage` codes that no longer suppress an active violation; select it alongside the checks being audited, e.g. `--select=meaningless-vars,unused-pytriage`.     |
+| [unused-pytriage](docs/rules/unused-pytriage.md)                     | TR8  | Reports known `# pytriage` codes that no longer suppress an active violation; add it with `--extend-select=unused-pytriage`.                                                      |
 
 ## Installation
 
@@ -43,9 +44,9 @@ repos:
       - id: ruff-extra-rules-ty # optional: adds redundant-type-conversion (TR6), see below
 ```
 
-`ruff-extra-rules-ty` runs [redundant-type-conversion](docs/rules/redundant-type-conversion.md) by itself. It's optional and requires [`ty`](https://github.com/astral-sh/ty) on `PATH`.
+`ruff-extra-rules-ty` normally runs [redundant-type-conversion](docs/rules/redundant-type-conversion.md) by itself. When `unused-pytriage` is enabled through `extend-select`, it also audits TR6 suppressions. The hook is optional and requires [`ty`](https://github.com/astral-sh/ty) on `PATH`.
 
-`ruff-extra-rules` always excludes `redundant-type-conversion`, and `ruff-extra-rules-ty` always runs only that check. Both read the same configuration and accept the same options; a check one hook can't run is simply left out rather than rejected, so a single configuration works for both.
+`ruff-extra-rules` always excludes `redundant-type-conversion`; `ruff-extra-rules-ty` owns that check and the shared `unused-pytriage` audit. Both read the same configuration and accept the same options; a check one hook can't run is simply left out rather than rejected, so a single configuration works for both.
 
 Run `check-ast` and `ruff-check` in the same `.pre-commit-config.yaml` — syntax errors are their job, not this tool's; see the [FAQ](docs/faq.md#does-this-catch-syntax-errors).
 
@@ -58,6 +59,7 @@ Settings go in your `pyproject.toml`, under `[tool.ruff-extra-rules]`:
 fix = true                          # apply safe fixes without passing --fix
 exclude = ["vendor/**"]             # glob patterns, relative to this file
 ignore = ["misplaced-comment"]      # or select = [...] to run only certain checks
+extend-select = ["unused-pytriage"] # add an opt-in check to the normal defaults
 
 [tool.ruff-extra-rules.meaningless-vars]
 level = "permissive"                # each check's own settings live in its own table
@@ -69,7 +71,7 @@ level = "permissive"                # each check's own settings live in its own 
 
 Patterns use the same glob syntax as `ruff`'s, so an entry copied from your `[tool.ruff.lint.per-file-ignores]` covers the same files. `--per-file-ignores 'tests/**:meaningless-vars'` is the command-line form.
 
-The nearest `pyproject.toml` with a `[tool.ruff-extra-rules]` table, searching upward from where the command runs, is the one used — so a monorepo can configure everything from its root. The search stops at your git repository. Command-line arguments win over the file, `--config` points at a specific file, and `--isolated` ignores configuration files entirely.
+The nearest `pyproject.toml` with a `[tool.ruff-extra-rules]` table, searching upward from where the command runs, is the one used — so a monorepo can configure everything from its root. The search stops at your git repository. Command-line arguments win over the file, `--config` points at a specific file, and `--isolated` ignores configuration files entirely. `extend-select` adds to either the default selection or an explicit `select` list; `ignore` is applied afterward.
 
 ### Inline Suppression
 

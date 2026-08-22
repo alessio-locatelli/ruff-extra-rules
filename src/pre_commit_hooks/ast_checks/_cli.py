@@ -78,6 +78,11 @@ def main(
         help="Comma-separated list of checks to restrict to (default: all); may be repeated",
     )
     parser.add_argument(
+        "--extend-select",
+        action="append",
+        help="Comma-separated list of checks to add to the selected checks; may be repeated",
+    )
+    parser.add_argument(
         "--ignore",
         action="append",
         help="Comma-separated list of checks to exclude; may be repeated",
@@ -179,6 +184,7 @@ def main(
 
     checks = load_checks(
         select=config.select,
+        extend_select=config.extend_select,
         ignore=config.ignore,
         check_args=config.check_kwargs,
         check_classes=enabled_check_classes,
