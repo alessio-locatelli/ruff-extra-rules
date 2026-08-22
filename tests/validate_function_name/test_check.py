@@ -110,18 +110,20 @@ def test_fix_applies_safe_suggestion(tmp_path: Path) -> None:
     assert "def is_data() -> bool:" in filepath.read_text()
 
 
-def test_fix_applies_context_manager_rename(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("decorator", "definition"),
+    [
+        ("contextmanager", "def get_transaction():"),
+        ("asynccontextmanager", "async def get_connection():"),
+        ("contextlib.contextmanager", "def get_lock():"),
+        ("contextlib.asynccontextmanager", "async def get_session():"),
+    ],
+    ids=["sync", "async", "qualified-sync", "qualified-async"],
+)
+def test_context_manager_names_are_not_reported(tmp_path: Path, decorator: str, definition: str) -> None:
     filepath = tmp_path / "mod.py"
     source = (
-        "from contextlib import asynccontextmanager\n"
-        "\n"
-        "@asynccontextmanager\n"
-        "async def get_tempfile_session():\n"
-        "    yield object()\n"
-        "\n"
-        "async def use_session():\n"
-        "    async with get_tempfile_session() as session:\n"
-        "        return session\n"
+        f'import contextlib\n\n@{decorator}\n{definition}\n    """Load the managed resource."""\n    yield object()\n'
     )
     filepath.write_text(source)
     tree = ast.parse(source)
@@ -129,11 +131,9 @@ def test_fix_applies_context_manager_rename(tmp_path: Path) -> None:
     check = ValidateFunctionNameCheck()
     violations = check.check(filepath, tree, source)
 
-    assert len(violations) == 1
-    assert violations[0].fixable is True
-    assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
-    assert "async def tempfile_session()" in filepath.read_text()
-    assert "async with tempfile_session() as session:" in filepath.read_text()
+    assert violations == []
+    assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
+    assert filepath.read_text() == source
 
 
 def test_sync_lazy_accessor_property_suggestion_is_not_fixable(tmp_path: Path) -> None:
