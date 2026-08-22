@@ -114,7 +114,9 @@ def test_an_unreadable_config_file_is_reported_rather_than_skipped(
         ('[tool.ruff-extra-rules]\nexclude = "a"\n', "expected a list of strings"),
         ('[tool.ruff-extra-rules]\nexclude = ["[bad"]\n', "Invalid file pattern"),
         ("[tool.ruff-extra-rules]\nselect = [1]\n", "expected a list of strings"),
+        ("[tool.ruff-extra-rules]\nextend-select = [1]\n", "expected a list of strings"),
         ('[tool.ruff-extra-rules]\nselect = ["nope"]\n', "Unknown check `nope`"),
+        ('[tool.ruff-extra-rules]\nextend-select = ["nope"]\n', "Unknown check `nope`"),
         ("[tool.ruff-extra-rules]\nmeaningless-vars = 1\n", "must be a table"),
         ('[tool.ruff-extra-rules.meaningless-vars]\nlvl = "permissive"\n', "Unknown field `lvl`"),
         ('[tool.ruff-extra-rules.meaningless-vars]\nlevel = "loud"\n', "expected one of: `conservative`"),
@@ -127,7 +129,9 @@ def test_an_unreadable_config_file_is_reported_rather_than_skipped(
         "non-list-exclude",
         "uncompilable-exclude-pattern",
         "non-string-select-entry",
+        "non-string-extend-select-entry",
         "unknown-check-in-select",
+        "unknown-check-in-extend-select",
         "non-table-check-section",
         "unknown-option-field",
         "invalid-option-value",
@@ -201,7 +205,15 @@ def test_unknown_field_error_lists_the_valid_ones(project: Path, capsys: pytest.
     assert main([str(filepath)]) == 2
 
     err = capsys.readouterr().err
-    for valid in ("`fix`", "`select`", "`ignore`", "`exclude`", "`per-file-ignores`", "`meaningless-vars`"):
+    for valid in (
+        "`fix`",
+        "`select`",
+        "`extend-select`",
+        "`ignore`",
+        "`exclude`",
+        "`per-file-ignores`",
+        "`meaningless-vars`",
+    ):
         assert valid in err
 
 
@@ -233,6 +245,7 @@ def test_a_checks_option_reaches_its_constructor_from_the_config_file(
 def _parsed(argv: list[str], *, enabled: Sequence[type[ASTCheck]]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--select", action="append")
+    parser.add_argument("--extend-select", action="append")
     parser.add_argument("--ignore", action="append")
     parser.add_argument("--exclude")
     parser.add_argument("--per-file-ignores", action="append")
@@ -262,6 +275,39 @@ def test_config_file_option_applies_when_no_flag_is_given(project: Path) -> None
     filepath.write_text(_UNSUGGESTABLE)
 
     assert main([str(filepath), "--select", "meaningless-vars"]) == 1
+
+
+def test_extend_select_from_config_adds_to_default_checks(project: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write_config(project, '[tool.ruff-extra-rules]\nextend-select = ["unused-pytriage"]\n')
+    filepath = project / "module.py"
+    filepath.write_text("while True:  # pytriage: TR1\n    break\n")
+
+    assert ruff_extra_rules.main([str(filepath), "--no-fix"]) == 1
+    assert "TR8" in capsys.readouterr().err
+
+
+def test_extend_select_from_config_adds_to_an_explicit_selection(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _write_config(
+        project,
+        '[tool.ruff-extra-rules]\nselect = ["redundant-assignment"]\nextend-select = ["unused-pytriage"]\n',
+    )
+    filepath = project / "module.py"
+    filepath.write_text("while True:  # pytriage: TR5\n    break\n")
+
+    assert ruff_extra_rules.main([str(filepath), "--no-fix"]) == 1
+    assert "TR8" in capsys.readouterr().err
+
+
+def test_extend_select_from_command_line_adds_to_default_checks(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filepath = project / "module.py"
+    filepath.write_text("while True:  # pytriage: TR1\n    break\n")
+
+    assert ruff_extra_rules.main([str(filepath), "--extend-select", "unused-pytriage", "--no-fix"]) == 1
+    assert "TR8" in capsys.readouterr().err
 
 
 def test_fix_from_the_config_file_rewrites_the_file(project: Path) -> None:

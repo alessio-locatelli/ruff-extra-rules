@@ -13,6 +13,7 @@ Error Codes
   - TR5: Redundant variable assignments (redundant-assignment)
   - TR6: Redundant builtin type conversions (redundant-type-conversion)
   - TR7: Comment misplaced on closing bracket line (misplaced-comment)
+  - TR8: Unused pytriage suppression codes (unused-pytriage)
 
 Inline Ignore Comments
 ----------------------

@@ -3249,6 +3249,18 @@ def test_load_checks_ignore_composes_with_select() -> None:
     assert {c.check_id for c in checks} == {"redundant-super-init"}
 
 
+def test_load_checks_extend_select_adds_to_defaults() -> None:
+    checks = load_checks(extend_select={"unused-pytriage"})
+
+    assert {check.check_id for check in checks} == {check().check_id for check in ALL_CHECKS}
+
+
+def test_load_checks_extend_select_adds_to_explicit_selection() -> None:
+    checks = load_checks(select={"meaningless-vars"}, extend_select={"unused-pytriage"})
+
+    assert {check.check_id for check in checks} == {"meaningless-vars", "unused-pytriage"}
+
+
 def test_all_checks_have_unique_check_ids_and_error_codes() -> None:
 
     instances = [cls() for cls in ALL_CHECKS]
@@ -3327,6 +3339,12 @@ def test_fixed_hook_entrypoints_list_only_their_own_checks(
     out = capsys.readouterr().out
     assert expected_check in out
     assert unexpected_check not in out
+
+
+def test_ty_hook_lists_the_shared_unused_pytriage_audit(capsys: pytest.CaptureFixture[str]) -> None:
+    assert ruff_extra_rules_ty.main(["--list-checks"]) == 0
+
+    assert "unused-pytriage: TR8" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(

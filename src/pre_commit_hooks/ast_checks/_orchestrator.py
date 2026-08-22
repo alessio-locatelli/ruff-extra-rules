@@ -419,12 +419,25 @@ class CheckOrchestrator:
                 matches_by_check_id[check.check_id] = set(batch_filter_files(candidates, pattern))
 
         checks_by_file: dict[str, _FileChecks] = {}
+        audit_check_id = next(
+            (check.check_id for check in self.checks if isinstance(check, UnusedPytriageCheck)),
+            None,
+        )
         for filepath_str in filepaths:
             ignored = ignored_by_file[filepath_str]
+            audit_requested = (
+                audit_check_id is not None
+                and audit_check_id not in ignored
+                and filepath_str in matches_by_check_id.get(audit_check_id, set())
+            )
             applicable = [
                 check
                 for check in self.checks
-                if check.check_id not in matches_by_check_id or filepath_str in matches_by_check_id[check.check_id]
+                if (
+                    check.check_id not in matches_by_check_id
+                    or filepath_str in matches_by_check_id[check.check_id]
+                    or (audit_requested and check.check_id not in ignored)
+                )
             ]
             run = tuple(check for check in applicable if check.check_id not in ignored)
             record_only = tuple(
@@ -913,6 +926,7 @@ class CheckOrchestrator:
 
 def load_checks(
     select: set[str] | None = None,
+    extend_select: set[str] | None = None,
     ignore: set[str] | None = None,
     check_args: dict[str, Any] | None = None,
     check_classes: Sequence[type[ASTCheck]] | None = None,
@@ -921,6 +935,7 @@ def load_checks(
     if check_args is None:
         check_args = {}
 
+    extended_ids: set[str] = extend_select or set()
     checks: list[ASTCheck] = []
 
     for check_class in ALL_CHECKS if check_classes is None else check_classes:
@@ -932,11 +947,11 @@ def load_checks(
 
         check_id = check.check_id
 
-        if select is not None and check_id not in select:
+        if select is not None and check_id not in select and check_id not in extended_ids:
             continue
         if ignore is not None and check_id in ignore:
             continue
-        if select is None and not check.default_enabled:
+        if select is None and check_id not in extended_ids and not check.default_enabled:
             continue
 
         args = check_args.get(check_id, {})

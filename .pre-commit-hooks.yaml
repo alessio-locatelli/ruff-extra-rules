@@ -6,7 +6,7 @@
   types: [python]
 - id: ruff-extra-rules-ty
   name: Extra Python rule checks (redundant-type-conversion)
-  description: Run redundant-type-conversion (TR6), the only check that shares a persistent ty daemon across files (ADR-0041). Runs as a single, serial process so pre-commit/prek's own parallel file-batching never contends with itself over that one shared daemon.
+  description: Run redundant-type-conversion (TR6), plus unused-pytriage (TR8) when selected. TR6 is the only check that shares a persistent ty daemon across files (ADR-0041), so this hook runs as a single, serial process.
   entry: python -m pre_commit_hooks.ruff_extra_rules_ty
   language: python
   types: [python]

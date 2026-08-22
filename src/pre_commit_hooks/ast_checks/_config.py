@@ -30,7 +30,7 @@ CLI_SOURCE = "the CLI"
 
 PER_FILE_IGNORES_KEY = "per-file-ignores"
 
-_GLOBAL_KEYS = frozenset({"exclude", "fix", "ignore", PER_FILE_IGNORES_KEY, "select"})
+_GLOBAL_KEYS = frozenset({"exclude", "extend-select", "fix", "ignore", PER_FILE_IGNORES_KEY, "select"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +39,7 @@ class ResolvedConfig:
 
     root: Path
     select: set[str] | None
+    extend_select: set[str] | None
     ignore: set[str] | None
     exclude: list[ExcludePattern]
     per_file_ignores: PerFileIgnoreList
@@ -274,6 +275,7 @@ def resolve(
     configured_fix = _table_bool(table, "fix", source, default=False)
     configured_exclude = _exclude_patterns(_table_string_list(table, "exclude", source) or (), root, "exclude", source)
     configured_select = _table_check_ids(table, "select", source, known_check_ids)
+    configured_extend_select = _table_check_ids(table, "extend-select", source, known_check_ids)
     configured_ignore = _table_check_ids(table, "ignore", source, known_check_ids)
     configured_per_file_ignores = _table_per_file_ignores(table, source, known_check_ids, root)
 
@@ -306,6 +308,11 @@ def resolve(
     return ResolvedConfig(
         root=root,
         select=_cli_check_ids(args.select, "select", known_check_ids) if args.select is not None else configured_select,
+        extend_select=(
+            _cli_check_ids(args.extend_select, "extend-select", known_check_ids)
+            if args.extend_select is not None
+            else configured_extend_select
+        ),
         ignore=_cli_check_ids(args.ignore, "ignore", known_check_ids) if args.ignore is not None else configured_ignore,
         exclude=(
             _exclude_patterns(

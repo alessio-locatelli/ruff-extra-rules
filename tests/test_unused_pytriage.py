@@ -168,6 +168,16 @@ def test_unused_pytriage_reports_redundant_known_suppression(
     assert "TR8" in capsys.readouterr().err
 
 
+def test_unused_pytriage_reports_a_code_on_a_non_candidate_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("while True:  # pytriage: TR1\n    break\n")
+
+    assert main([str(filepath), "--select", "meaningless-vars,unused-pytriage", "--no-fix"]) == 1
+    assert "TR8" in capsys.readouterr().err
+
+
 def test_unused_pytriage_alone_does_not_audit_inactive_checks(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
