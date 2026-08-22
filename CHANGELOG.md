@@ -6,6 +6,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-08-22
+
 ### Changed
 
 - `validate-function-name` no longer reports `get_`-prefixed context-manager functions, since their names can describe project-specific resource acquisition.
