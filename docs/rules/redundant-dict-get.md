@@ -1,6 +1,8 @@
 # redundant-dict-get (TR9)
 
-Reports `dict.get()` where the current local code already proves the requested key exists.
+Reports `dict.get()` where the current local code already proves the requested key exists. TR9 supports one
+positional key argument on a direct local-name receiver only. It does not report calls with a default value,
+such as `config.get("port", 0)`, or calls on non-local receivers.
 
 ## Example
 
