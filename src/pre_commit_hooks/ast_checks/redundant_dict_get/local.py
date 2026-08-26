@@ -165,14 +165,9 @@ def _invalidate_escaped_facts(
     candidate_by_call: dict[int, Candidate],
 ) -> None:
     for call in ast.walk(statement):
-        if not isinstance(call, ast.Call) or id(call) in candidate_by_call:
-            continue
-        if isinstance(call.func, ast.Attribute) and isinstance(call.func.value, ast.Name):
-            _drop_name(facts, call.func.value.id)
-        for argument in [*call.args, *(keyword.value for keyword in call.keywords)]:
-            for name in ast.walk(argument):
-                if isinstance(name, ast.Name):
-                    _drop_name(facts, name.id)
+        if isinstance(call, ast.Call) and id(call) not in candidate_by_call:
+            facts.clear()
+            return
     for node in ast.walk(statement):
         if isinstance(node, ast.NamedExpr | ast.Yield | ast.YieldFrom):
             _invalidate_assigned_value_facts(node.value, facts)
@@ -283,13 +278,31 @@ def _binds_dict(tree: ast.Module) -> bool:
         for name in (
             iter_binding_names(node)
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-            else (
-                node.name,
-                *(
-                    type_parameter.name
-                    for type_parameter in node.type_params
-                    if isinstance(type_parameter, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple)
-                ),
-            )
+            else _definition_binding_names(node)
         )
+    )
+
+
+def _definition_binding_names(
+    definition: ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef,
+) -> tuple[str, ...]:
+    arguments = (
+        [
+            *definition.args.posonlyargs,
+            *definition.args.args,
+            *definition.args.kwonlyargs,
+            *([definition.args.vararg] if definition.args.vararg is not None else []),
+            *([definition.args.kwarg] if definition.args.kwarg is not None else []),
+        ]
+        if isinstance(definition, ast.FunctionDef | ast.AsyncFunctionDef)
+        else []
+    )
+    return (
+        definition.name,
+        *(argument.arg for argument in arguments),
+        *(
+            type_parameter.name
+            for type_parameter in definition.type_params
+            if isinstance(type_parameter, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple)
+        ),
     )
