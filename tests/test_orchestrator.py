@@ -3884,7 +3884,8 @@ class _LevelFlagCase(NamedTuple):
     check_id: str
     level_flag: str
     source: str
-    permissive_needle: str
+    broader_level: str
+    broader_needle: str
 
 
 @pytest.mark.parametrize(
@@ -3894,18 +3895,32 @@ class _LevelFlagCase(NamedTuple):
             "redundant-assignment",
             "--redundant-assignment-level",
             'def example():\n    x: str = "foo"\n    func(x)\n',
+            "permissive",
             "'x'",
         ),
         _LevelFlagCase(
             "meaningless-vars",
             "--meaningless-vars-level",
             "def other():\n    result = 42\n    return result\n",
+            "permissive",
             "'result'",
         ),
+        _LevelFlagCase(
+            "redundant-dict-get",
+            "--redundant-dict-get-level",
+            (
+                "def read(config: dict[str, int], key: str) -> int | None:\n"
+                "    if key in config:\n"
+                "        return config.get(key)\n"
+                "    return None\n"
+            ),
+            "aggressive",
+            "Redundant `dict.get()`",
+        ),
     ],
-    ids=["redundant-assignment", "meaningless-vars"],
+    ids=["redundant-assignment", "meaningless-vars", "redundant-dict-get"],
 )
-def test_main_level_flag_switches_between_conservative_and_permissive_reporting(
+def test_main_level_flag_switches_between_conservative_and_broader_reporting(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], case: _LevelFlagCase
 ) -> None:
 
@@ -3918,9 +3933,9 @@ def test_main_level_flag_switches_between_conservative_and_permissive_reporting(
     conservative_exit_code = main([str(filepath), "--select", case.check_id, case.level_flag, "conservative"])
     assert conservative_exit_code == 0
 
-    permissive_exit_code = main([str(filepath), "--select", case.check_id, case.level_flag, "permissive"])
-    assert permissive_exit_code == 1
-    assert case.permissive_needle in capsys.readouterr().err
+    broader_exit_code = main([str(filepath), "--select", case.check_id, case.level_flag, case.broader_level])
+    assert broader_exit_code == 1
+    assert case.broader_needle in capsys.readouterr().err
 
 
 @pytest.mark.parametrize(

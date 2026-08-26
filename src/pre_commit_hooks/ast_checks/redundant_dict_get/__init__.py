@@ -14,8 +14,10 @@ from pre_commit_hooks.ast_checks._base import (
     find_suppression_usage,
     ignore_pattern_for,
 )
+from pre_commit_hooks.ast_checks._options import EnumOption
 
 from .candidates import find_candidates
+from .local import ProofLevel
 from .local import find_proofs as find_local_proofs
 
 if TYPE_CHECKING:
@@ -30,9 +32,23 @@ IGNORE_PATTERN = ignore_pattern_for(ERROR_CODE)
 
 
 class RedundantDictGetCheck(BaseCheck):
-    __slots__ = ()
+    __slots__ = ("_level",)
 
-    OPTIONS: ClassVar[tuple[CheckOption, ...]] = ()
+    OPTIONS: ClassVar[tuple[CheckOption, ...]] = (
+        EnumOption(
+            name="level",
+            values=ProofLevel,
+            default=ProofLevel.CONSERVATIVE,
+            help=(
+                "How broadly redundant-dict-get (TR9) recognizes key-presence proofs. "
+                "'conservative' (default) reports only built-in and TypedDict-backed proofs; "
+                "'aggressive' also trusts direct dict annotations."
+            ),
+        ),
+    )
+
+    def __init__(self, level: ProofLevel = ProofLevel.CONSERVATIVE) -> None:
+        self._level = level
 
     @property
     def check_id(self) -> str:
@@ -77,7 +93,7 @@ class RedundantDictGetCheck(BaseCheck):
         active = [candidate for candidate in candidates if candidate.call.lineno not in analysis_ignored_lines]
         if not active:
             return CheckResult()
-        local_proofs = {proof.candidate: proof.reason for proof in find_local_proofs(tree, active)}
+        local_proofs = {proof.candidate: proof.reason for proof in find_local_proofs(tree, active, level=self._level)}
         proofs = local_proofs
         violations = []
         usages = []

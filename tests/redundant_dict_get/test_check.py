@@ -7,6 +7,7 @@ import pytest
 
 from pre_commit_hooks.ast_checks._base import FixOutcome, Violation
 from pre_commit_hooks.ast_checks.redundant_dict_get import RedundantDictGetCheck
+from pre_commit_hooks.ast_checks.redundant_dict_get.local import ProofLevel
 
 
 def _check(source: str) -> list[Violation]:
@@ -24,6 +25,20 @@ def test_identity_and_opt_in_properties() -> None:
     assert check.get_prefilter_pattern() == [".get("]
 
 
+def test_aggressive_level_retains_the_direct_dict_annotation_heuristic() -> None:
+    source = (
+        "def read(config: dict[str, int], key: str) -> int | None:\n"
+        "    if key in config:\n"
+        "        return config.get(key)\n"
+        "    return None\n"
+    )
+
+    aggressive = RedundantDictGetCheck(level=ProofLevel.AGGRESSIVE).check(Path("test.py"), ast.parse(source), source)
+
+    assert _check(source) == []
+    assert [violation.line for violation in aggressive] == [3]
+
+
 def test_check_reports_a_literal_dict_proof() -> None:
     source = "config = {'port': 5432}\nvalue = config.get('port')\n"
 
@@ -33,7 +48,7 @@ def test_check_reports_a_literal_dict_proof() -> None:
     assert violations[0].line == 2
     assert violations[0].col == 8
     assert violations[0].fixable is False
-    assert "dict literal" in violations[0].message
+    assert "known dict" in violations[0].message
     assert "config['port']" in violations[0].message
     assert "pytriage: TR9" in violations[0].message
 

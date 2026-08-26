@@ -30,7 +30,7 @@ Individual checks are toggled with `--select`/`--ignore` (or the matching `pypro
 | [redundant-type-conversion](docs/rules/redundant-type-conversion.md) | TR6  | Flags a builtin type conversion that `ty` considers redundant given the argument's real type, including across files. Requires [`ty`](https://github.com/astral-sh/ty) on `PATH`. |
 | [misplaced-comment](docs/rules/misplaced-comment.md)                 | TR7  | Moves a trailing comment off a closing bracket onto the expression line.                                                                                                          |
 | [unused-pytriage](docs/rules/unused-pytriage.md)                     | TR8  | Reports known `# pytriage` codes that no longer suppress an active violation; add it with `--extend-select=unused-pytriage`.                                                      |
-| [redundant-dict-get](docs/rules/redundant-dict-get.md)               | TR9  | Reports `dict.get()` calls where local code already proves the key exists.                                                                                                        |
+| [redundant-dict-get](docs/rules/redundant-dict-get.md)               | TR9  | Reports `dict.get()` calls where local control flow, containers, or required TypedDict fields prove the key exists.                                                               |
 
 ## Installation
 

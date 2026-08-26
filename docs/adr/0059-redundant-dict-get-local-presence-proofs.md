@@ -6,26 +6,28 @@
 
 `docs/audits/type-checker-coverage-for-redundant-dict-get.md` records that ty, Mypy, and Pyright do not report the supported proven-presence examples as redundant access.
 
-Required `TypedDict` keys were investigated as a type-backed proof source. `ty`'s hover response exposes an overload for both required and optional keys. Its return type separates a required `int` key from an optional `int` key, but cannot separate a required `int | None` key from an optional `int` key. Replacing `.get()` with subscription adds no `ty` diagnostic for an optional key, so diagnostic comparison cannot fill that gap. A local parser for TypedDict declarations, imports, inheritance, and requiredness would duplicate a partial type checker.
+Required `TypedDict` keys cannot be inferred from `ty` hover or diagnostic comparison: nullable required values and optional values remain indistinguishable. TR9 therefore reads only complete local declarations, where `Required`, `NotRequired`, and `total=False` are syntactic facts. Imported, inherited, or otherwise unresolved declarations remain unknown.
 
 ## Decision
 
 `redundant-dict-get` (TR9) is a report-only AST check. It reports only `.get(key)` calls with one positional argument where the receiver is a direct local name and the key is a string literal or the same local-name key used in a supported membership proof.
 
-The initial proof providers are deliberately independent:
+The proof providers are deliberately independent:
 
 - a direct local dict display with explicit string keys;
-- the true branch of `if key in mapping:` for a local dict display or a direct builtin `dict[...]` parameter annotation;
-- the path after `if key not in mapping:` for the same receiver forms, when its body terminates with `raise` or `return`.
+- required fields on a complete local `TypedDict` declaration;
+- direct aliases of known dictionaries and collections;
+- short-circuit Boolean membership guards, branch intersections, and paths after structural termination;
+- validated local key collections through `required <= mapping.keys()` and `all(key in mapping for key in required)`.
 
-Facts are confined to one lexical scope and discarded when a tracked name is rebound, mutated through a subscription, passed to an unknown call, stored through an unsupported construct, or crosses a loop, try, with, class, function, lambda, or comprehension boundary. Dictionary unpacking, comprehensions, aliases, non-string literal keys, boolean-combined predicates, branch merges, and alternative terminating forms are out of scope.
+Facts are confined to one lexical scope and discarded when a tracked name is rebound, mutated through a subscription, passed to an unknown call, stored through an unsupported construct, or crosses a suspension or comprehension boundary. Branch joins retain only facts shared by every normal path.
 
 TR9 is default-enabled in the dedicated `ruff-extra-rules-ty` hook and remains excluded from the normal hook. `# pytriage: TR9` is its only inline suppression. It never applies an autofix. The normal/ty-hook split is represented by an explicit check-id collection rather than a one-off class-identity exclusion, so future checks can join the dedicated hook without changing entrypoint architecture.
 
-Required TypedDict detection is deferred until a type checker exposes a stable requiredness query that handles nullable required values. The local proof protocol is the extension point for that provider and for future relational container proofs; neither is approximated meanwhile.
+The default `conservative` level accepts only built-in local dictionaries and collections plus complete local `TypedDict` declarations. `aggressive` additionally accepts direct builtin `dict[...]` parameter annotations; this is a deliberate heuristic because subclasses can customize mapping operations.
 
 ## Consequences
 
-TR9 catches local invariants without starting an external process or duplicating type-checker behavior. It intentionally leaves valid but more complex cases unreported to preserve false-positive safety.
+TR9 catches local invariants without starting an external process. It intentionally leaves unresolved type declarations and unbounded flow cases unreported at the default level to preserve false-positive safety.
 
-A future type-backed provider needs its own positive and negative compatibility controls, non-cacheable direct-input reconciliation, real-type-checker integration coverage, and a documented performance measurement before it can be enabled.
+An imported or inherited type-backed provider needs its own positive and negative compatibility controls, non-cacheable direct-input reconciliation, real-type-checker integration coverage, and a documented performance measurement before it can be enabled.
