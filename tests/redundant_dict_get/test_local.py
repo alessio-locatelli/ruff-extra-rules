@@ -201,6 +201,10 @@ def test_find_proofs_rejects_mutation_escape_alias_and_non_dominating_cases(sour
             [5],
         ),
         (
+            "config = {'port': 5432}\nif True:\n    pass\nvalue = config.get('port')\n",
+            [4],
+        ),
+        (
             (
                 "required = {'port'}\n"
                 "config = {'port': 5432}\n"
@@ -210,6 +214,16 @@ def test_find_proofs_rejects_mutation_escape_alias_and_non_dominating_cases(sour
                 "            value = config.get(key)\n"
             ),
             [6],
+        ),
+        (
+            (
+                "required = {'port'}\n"
+                "config = {'port': 5432}\n"
+                "if required <= config.keys():\n"
+                "    for key in required:\n"
+                "        value = config.get(key)\n"
+            ),
+            [5],
         ),
         (
             (
@@ -274,6 +288,68 @@ def test_alias_mutation_invalidates_every_alias() -> None:
             "    value = config.get(key)\n"
         ),
         "config = {'port': 5432}\nif 'port' in config and flag:\n    value = config.get('port')\n",
+        ("config = {'port': 5432}\nfor _ in items:\n    del config['port']\nvalue = config.get('port')\n"),
+        ("config = {'port': 5432}\nfor _ in items:\n    del config['port']\n    break\nvalue = config.get('port')\n"),
+        ("config = {}\nmatch subject:\n    case 1:\n        config = {'port': 5432}\nvalue = config.get('port')\n"),
+        ("config = {}\nwith manager:\n    config = {'port': 5432}\nvalue = config.get('port')\n"),
+        "config = {'port': 5432}\nfrom settings import config\nvalue = config.get('port')\n",
+        "config = {'port': 5432}\nfrom settings import *\nvalue = config.get('port')\n",
+        "config = {'port': 5432}\ndel config\nvalue = config.get('port')\n",
+        "config = {'port': 5432}\nholder.value += config\nvalue = config.get('port')\n",
+        "config = {'port': 5432}\nvalue = (config := {}, config.get('port'))[1]\n",
+        "config = {'port': 5432}\n(config := {})\nvalue = config.get('port')\n",
+        "config = {'port': 5432}\nif consume():\n    pass\nvalue = config.get('port')\n",
+        ("config = {'port': 5432}\nmatch consume():\n    case _:\n        pass\nvalue = config.get('port')\n"),
+        ("config = {'port': 5432}\nmatch subject:\n    case 1 as config:\n        pass\nvalue = config.get('port')\n"),
+        (
+            "config = {'port': 5432}\n"
+            "match subject:\n"
+            "    case _ as config if enabled:\n"
+            "        pass\n"
+            "value = config.get('port')\n"
+        ),
+        (
+            "config = {'port': 5432}\n"
+            "try:\n"
+            "    pass\n"
+            "except OSError:\n"
+            "    pass\n"
+            "else:\n"
+            "    pass\n"
+            "value = config.get('port')\n"
+        ),
+        "for _ in values:\n    break\nelse:\n    pass\n",
+        "def read():\n    for _ in values:\n        return\n",
+        "import os\n",
+        ("config = {'port': 5432}\nfor _ in values:\n    consume()\n    value = config.get('port')\n"),
+        ("config = {'port': 5432}\nfor _ in values:\n    other += 1\nvalue = config.get('port')\n"),
+        (
+            "def read():\n"
+            "    config = {'port': 5432}\n"
+            "    for _ in values:\n"
+            "        yield None\n"
+            "    return config.get('port')\n"
+        ),
+        ("config = {'port': 5432}\nfor _ in values:\n    config = {}\nvalue = config.get('port')\n"),
+        ("config = {'port': 5432}\nfor _ in values:\n    from settings import config\nvalue = config.get('port')\n"),
+        ("config = {'port': 5432}\nfor _ in values:\n    def config():\n        pass\nvalue = config.get('port')\n"),
+        (
+            "from typing import TypedDict\n"
+            "class Settings(TypedDict):\n"
+            "    port: int\n"
+            "def read(settings: other.Settings) -> int | None:\n"
+            "    return settings.get('port')\n"
+        ),
+        (
+            "required = {'port'}\n"
+            "alias = required\n"
+            "config = {'port': 5432}\n"
+            "if not required <= config.keys():\n"
+            "    raise ValueError\n"
+            "alias |= {'missing'}\n"
+            "if key in required:\n"
+            "    value = config.get(key)\n"
+        ),
     ],
 )
 def test_find_proofs_rejects_reviewed_false_positive_paths(source: str) -> None:
