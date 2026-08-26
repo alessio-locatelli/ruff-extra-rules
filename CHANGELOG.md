@@ -9,6 +9,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 ### Added
 
 - `redundant-dict-get` (TR9) reports local `.get()` calls whose key presence is already proven. It is report-only.
+- `redundant-dict-get` now recognizes bounded control-flow, alias, relational-container, and required-`TypedDict` proofs. Its new `level` setting defaults to `conservative`; `aggressive` retains direct `dict[...]` annotation heuristics.
 
 ## [0.2.2] - 2026-08-22
 

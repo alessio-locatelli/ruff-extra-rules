@@ -5,7 +5,7 @@ import ast
 import pytest
 
 from pre_commit_hooks.ast_checks.redundant_dict_get.candidates import find_candidates
-from pre_commit_hooks.ast_checks.redundant_dict_get.local import find_proofs
+from pre_commit_hooks.ast_checks.redundant_dict_get.local import ProofLevel, find_proofs
 
 
 @pytest.mark.parametrize(
@@ -61,7 +61,7 @@ from pre_commit_hooks.ast_checks.redundant_dict_get.local import find_proofs
 def test_find_proofs_reports_the_supported_local_invariants(source: str, expected_lines: list[int]) -> None:
     tree = ast.parse(source)
 
-    proofs = find_proofs(tree, find_candidates(tree))
+    proofs = find_proofs(tree, find_candidates(tree), level=ProofLevel.AGGRESSIVE)
 
     assert [proof.candidate.call.lineno for proof in proofs] == expected_lines
 
@@ -73,7 +73,6 @@ def test_find_proofs_reports_the_supported_local_invariants(source: str, expecte
         "config = {'port': 5432}\nconfig['port'] += 1\nvalue = config.get('port')\n",
         "config = {'port': 5432}\ndel config['port']\nvalue = config.get('port')\n",
         "config = {'port': 5432}\nconsume(config)\nvalue = config.get('port')\n",
-        "config = {'port': 5432}\nalias = config\nvalue = alias.get('port')\n",
         "config = {'port': 5432}\nalias = config\nalias.pop('port')\nvalue = config.get('port')\n",
         "config = {'port': 5432}\nholder.config = config\nvalue = config.get('port')\n",
         "config = {'port': 5432}\nconfig, other = build()\nvalue = config.get('port')\n",
@@ -169,19 +168,169 @@ def test_find_proofs_reports_the_supported_local_invariants(source: str, expecte
             "    config = {'port': 5432}\n"
             "    return [config.get('port') for _ in range(1)]\n"
         ),
-        (
-            "def f() -> int | None:\n"
-            "    config = {'port': 5432}\n"
-            "    for _ in range(1):\n"
-            "        return config.get('port')\n"
-            "    return None\n"
-        ),
         ("def f(*config: dict[str, int]) -> int | None:\n    return config.get('port')\n"),
         ("def f(**config: dict[str, int]) -> int | None:\n    return config.get('port')\n"),
         "config = {'port': 5432}\nconfig, *other = build()\nvalue = config.get('port')\n",
     ],
 )
 def test_find_proofs_rejects_mutation_escape_alias_and_non_dominating_cases(source: str) -> None:
+    tree = ast.parse(source)
+
+    assert find_proofs(tree, find_candidates(tree)) == []
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_lines"),
+    [
+        (
+            "config = {'port': 5432}\nalias = config\nvalue = alias.get('port')\n",
+            [3],
+        ),
+        (
+            "config = {'port': 5432}\nif key in config and other in config:\n    value = config.get(key)\n",
+            [3],
+        ),
+        (
+            (
+                "if enabled:\n"
+                "    config = {'port': 5432}\n"
+                "else:\n"
+                "    config = {'port': 5433}\n"
+                "value = config.get('port')\n"
+            ),
+            [5],
+        ),
+        (
+            (
+                "required = {'port'}\n"
+                "config = {'port': 5432}\n"
+                "if required <= config.keys():\n"
+                "    for key in required:\n"
+                "        if key in config:\n"
+                "            value = config.get(key)\n"
+            ),
+            [6],
+        ),
+        (
+            (
+                "required = {'port'}\n"
+                "config = {'port': 5432}\n"
+                "if not all(key in config for key in required):\n"
+                "    raise ValueError\n"
+                "for key in required:\n"
+                "    if key in config:\n"
+                "        value = config.get(key)\n"
+            ),
+            [7],
+        ),
+        (
+            (
+                "from typing import NotRequired, TypedDict\n"
+                "class Settings(TypedDict):\n"
+                "    present: int | None\n"
+                "    absent: NotRequired[int]\n"
+                "def read(settings: Settings) -> int | None:\n"
+                "    first = settings.get('present')\n"
+                "    second = settings.get('absent')\n"
+            ),
+            [6],
+        ),
+    ],
+)
+def test_find_proofs_reports_extended_conservative_proofs(source: str, expected_lines: list[int]) -> None:
+    tree = ast.parse(source)
+
+    proofs = find_proofs(tree, find_candidates(tree))
+
+    assert [proof.candidate.call.lineno for proof in proofs] == expected_lines
+
+
+def test_alias_mutation_invalidates_every_alias() -> None:
+    source = "config = {'port': 5432}\nalias = config\ndel alias['port']\nvalue = config.get('port')\n"
+    tree = ast.parse(source)
+
+    assert find_proofs(tree, find_candidates(tree)) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "config = {'a': 1}\nalias = config\nconfig = {'b': 2}\nvalue = alias.get('b')\n",
+        (
+            "from typing import TypedDict\n"
+            "total = False\n"
+            "class Settings(TypedDict, total=total):\n"
+            "    port: int\n"
+            "def read(settings: Settings) -> int | None:\n"
+            "    return settings.get('port')\n"
+        ),
+        (
+            "required = {'port'}\n"
+            "config = {'port': 5432}\n"
+            "if not required <= config.keys():\n"
+            "    raise ValueError\n"
+            "required |= {'missing'}\n"
+            "for key in required:\n"
+            "    value = config.get(key)\n"
+        ),
+        "config = {'port': 5432}\nif 'port' in config and flag:\n    value = config.get('port')\n",
+    ],
+)
+def test_find_proofs_rejects_reviewed_false_positive_paths(source: str) -> None:
+    tree = ast.parse(source)
+
+    assert find_proofs(tree, find_candidates(tree)) == []
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "config = {'port': 5432}\nwhile enabled:\n    value = config.get('port')\n",
+        "config = {'port': 5432}\nfor key in unknown:\n    value = config.get('port')\nelse:\n    pass\n",
+        "config = {'port': 5432}\nfor key in range(1):\n    value = config.get('port')\n",
+        "config = {'port': 5432}\nconfig['port'] += 1\nvalue = config.get('port')\n",
+        "required = {'port'}\nconfig = {'port': 5432}\nif required <= config.values():\n    pass\n",
+        (
+            "required = {'port'}\n"
+            "config = {'port': 5432}\n"
+            "if all(key in config for key in required if enabled):\n"
+            "    pass\n"
+        ),
+        "import typing\nclass Settings(typing.TypedDict):\n    port: typing.Required[int]\n",
+        "def read(config: module.Settings) -> None:\n    pass\n",
+        "from typing import List\n",
+        "def read() -> None:\n    if enabled:\n        return\n    raise ValueError\n",
+        "def read() -> None:\n    if enabled:\n        return\n    else:\n        raise ValueError\n",
+        (
+            "def read() -> None:\n"
+            "    try:\n"
+            "        return\n"
+            "    except ValueError:\n"
+            "        return\n"
+            "    finally:\n"
+            "        pass\n"
+        ),
+        "counter = 0\ncounter += 1\n",
+        "config = {'port': 5432}\ndel config[consume()]\n",
+        "required = unknown\nconfig = {'port': 5432}\nif required <= config.keys():\n    pass\n",
+        "config = {'port': 5432}\nif key in config or enabled:\n    pass\n",
+        (
+            "first = {'first'}\n"
+            "second = {'second'}\n"
+            "config = {'first': 1, 'second': 2}\n"
+            "if not first <= config.keys():\n"
+            "    raise ValueError\n"
+            "if not second <= config.keys():\n"
+            "    raise ValueError\n"
+            "for key in first:\n"
+            "    pass\n"
+        ),
+        "config = {'port': 5432}\nif all((key in config for key, other in required)):\n    pass\n",
+        "config = {'port': 5432}\nif all(0 for key in required):\n    pass\n",
+        "pass\n" * 1_001,
+    ],
+)
+def test_find_proofs_handles_boundaries_without_reporting(source: str) -> None:
     tree = ast.parse(source)
 
     assert find_proofs(tree, find_candidates(tree)) == []
