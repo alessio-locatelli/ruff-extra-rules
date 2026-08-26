@@ -38,6 +38,7 @@ def _visit_scope(
             _visit_if(statement, facts, candidate_by_call, proofs, builtin_dict_available=builtin_dict_available)
             continue
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+            facts.clear()
             _visit_scope(
                 statement.body,
                 _dict_parameter_facts(statement, builtin_dict_available=builtin_dict_available),
@@ -47,9 +48,12 @@ def _visit_scope(
             )
             continue
         if isinstance(statement, ast.ClassDef):
+            facts.clear()
             _visit_scope(statement.body, {}, candidate_by_call, proofs, builtin_dict_available=builtin_dict_available)
             continue
-        if isinstance(statement, ast.For | ast.AsyncFor | ast.While | ast.Try | ast.TryStar | ast.With | ast.AsyncWith):
+        if isinstance(
+            statement, ast.For | ast.AsyncFor | ast.While | ast.Try | ast.TryStar | ast.With | ast.AsyncWith | ast.Match
+        ):
             _visit_compound_statement(
                 statement, candidate_by_call, proofs, builtin_dict_available=builtin_dict_available
             )
@@ -67,15 +71,19 @@ def _visit_if(
     builtin_dict_available: bool,
 ) -> None:
     membership = _membership(statement.test)
+    if membership is None:
+        facts.clear()
+        _visit_scope(statement.body, {}, candidate_by_call, proofs, builtin_dict_available=builtin_dict_available)
+        _visit_scope(statement.orelse, {}, candidate_by_call, proofs, builtin_dict_available=builtin_dict_available)
+        return
     body_facts = _copy_facts(facts)
     else_facts = _copy_facts(facts)
     post_guard_facts: set[str] | None = None
-    if membership is not None:
-        receiver, key, positive = membership
-        if positive and _receiver_marker() in facts.get(receiver, set()):
-            body_facts.setdefault(receiver, set()).add(_flow_key(key))
-        elif not statement.orelse and _receiver_marker() in facts.get(receiver, set()) and _terminates(statement.body):
-            post_guard_facts = {*facts[receiver], _flow_key(key)}
+    receiver, key, positive = membership
+    if positive and _receiver_marker() in facts.get(receiver, set()):
+        body_facts.setdefault(receiver, set()).add(_flow_key(key))
+    elif not statement.orelse and _receiver_marker() in facts.get(receiver, set()) and _terminates(statement.body):
+        post_guard_facts = {*facts[receiver], _flow_key(key)}
     _visit_scope(statement.body, body_facts, candidate_by_call, proofs, builtin_dict_available=builtin_dict_available)
     _visit_scope(statement.orelse, else_facts, candidate_by_call, proofs, builtin_dict_available=builtin_dict_available)
     facts.clear()
@@ -165,6 +173,9 @@ def _invalidate_escaped_facts(
             for name in ast.walk(argument):
                 if isinstance(name, ast.Name):
                     _drop_name(facts, name.id)
+    for node in ast.walk(statement):
+        if isinstance(node, ast.NamedExpr | ast.Yield | ast.YieldFrom):
+            _invalidate_assigned_value_facts(node.value, facts)
 
 
 def _invalidate_assigned_value_facts(value: ast.expr | None, facts: dict[str, set[str]]) -> None:
@@ -186,13 +197,13 @@ def _copy_facts(facts: dict[str, set[str]]) -> dict[str, set[str]]:
 
 
 def _visit_compound_statement(
-    statement: ast.For | ast.AsyncFor | ast.While | ast.Try | ast.TryStar | ast.With | ast.AsyncWith,
+    statement: ast.For | ast.AsyncFor | ast.While | ast.Try | ast.TryStar | ast.With | ast.AsyncWith | ast.Match,
     candidate_by_call: dict[int, Candidate],
     proofs: list[LocalProof],
     *,
     builtin_dict_available: bool,
 ) -> None:
-    bodies = [statement.body]
+    bodies = [case.body for case in statement.cases] if isinstance(statement, ast.Match) else [statement.body]
     if isinstance(statement, ast.For | ast.AsyncFor | ast.While | ast.Try | ast.TryStar):
         bodies.append(statement.orelse)
     if isinstance(statement, ast.Try | ast.TryStar):
@@ -272,6 +283,13 @@ def _binds_dict(tree: ast.Module) -> bool:
         for name in (
             iter_binding_names(node)
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
-            else (node.name,)
+            else (
+                node.name,
+                *(
+                    type_parameter.name
+                    for type_parameter in node.type_params
+                    if isinstance(type_parameter, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple)
+                ),
+            )
         )
     )
