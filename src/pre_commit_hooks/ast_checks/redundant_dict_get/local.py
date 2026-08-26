@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
-from pre_commit_hooks.ast_checks._scope import iter_within_scope
+from pre_commit_hooks.ast_checks._scope import iter_binding_names, iter_within_scope
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -53,6 +53,8 @@ class _State:
 
     def drop(self, name: str) -> None:
         root = self.aliases.pop(name, None)
+        for keys in self.present.values():
+            keys.discard(name)
         if root is None or root in self.aliases.values():
             return
         self.dictionaries.pop(root, None)
@@ -160,7 +162,11 @@ class _Analyzer:
             | ast.AsyncFunctionDef
             | ast.ClassDef
         )
-        if not isinstance(statement, compound) and not _has_unknown_call(statement, self._candidates):
+        if (
+            not isinstance(statement, compound)
+            and not _has_unknown_call(statement, self._candidates)
+            and not _contains_named_expression(statement)
+        ):
             self.report_candidates(statement, state)
         if isinstance(statement, ast.If):
             return self.visit_if(statement, state)
@@ -176,9 +182,10 @@ class _Analyzer:
         if isinstance(statement, ast.With | ast.AsyncWith):
             state.clear()
             self.visit_scope(statement.body, state)
+            state.clear()
             return state
         if isinstance(statement, ast.Match):
-            return _join([self.visit_scope(case.body, state.copy()) for case in statement.cases])
+            return self.visit_match(statement, state)
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
             self.visit_scope(statement.body, self.function_state(statement))
             state.clear()
@@ -195,6 +202,16 @@ class _Analyzer:
         if isinstance(statement, ast.AugAssign | ast.Delete):
             self.invalidate_mutation(statement, state)
             return state
+        if isinstance(statement, ast.Import | ast.ImportFrom):
+            if any(alias.name == "*" for alias in statement.names):
+                state.clear()
+            else:
+                for name in iter_binding_names(statement):
+                    state.drop(name)
+            return state
+        if _contains_named_expression(statement):
+            state.clear()
+            return state
         if _contains_suspension(statement) or _has_unknown_call(statement, self._candidates):
             state.clear()
         return state
@@ -209,21 +226,56 @@ class _Analyzer:
         )
 
     def visit_for(self, statement: ast.For | ast.AsyncFor, state: _State) -> _State:
+        entry_state = state.copy()
+        if _has_unknown_call(statement.iter, self._candidates) or _contains_suspension(statement.iter):
+            entry_state.clear()
         body_state = _State(
-            state.aliases.copy(),
-            {root: set() for root in state.dictionaries},
-            state.collections.copy(),
+            entry_state.aliases.copy(),
+            {root: set() for root in entry_state.dictionaries},
+            entry_state.collections.copy(),
+            entry_state.relations.copy(),
         )
+        for target in _target_names(statement.target):
+            body_state.drop(target)
+        if _loop_body_invalidates_state(statement.body, entry_state, self._candidates):
+            body_state.clear()
         if isinstance(statement.iter, ast.Name) and body_state.root(statement.iter.id) in body_state.collections:
             for target in _target_names(statement.target):
                 body_state.add_collection_membership(statement.iter.id, target)
         else:
             body_state.clear()
-        self.visit_scope(statement.body, body_state)
-        self.visit_scope(statement.orelse, state.copy())
-        if _has_unknown_call(statement.iter, self._candidates) or _contains_suspension(statement):
-            state.clear()
-        return state
+        normal_exit = self.visit_scope(statement.body, body_state)
+        if _contains_loop_control(statement.body):
+            if statement.orelse:
+                self.visit_scope(statement.orelse, _State())
+            return _State()
+        merged = _join([entry_state, normal_exit]) or _State()
+        if statement.orelse:
+            return self.visit_scope(statement.orelse, merged) or _State()
+        return merged
+
+    def visit_match(self, statement: ast.Match, state: _State) -> _State | None:
+        fallthrough = state.copy()
+        if _has_unknown_call(statement.subject, self._candidates) or _contains_suspension(statement.subject):
+            fallthrough.clear()
+        paths: list[_State | None] = []
+        for case in statement.cases:
+            bound_names = _pattern_names(case.pattern)
+            matched = fallthrough.copy()
+            for name in bound_names:
+                matched.drop(name)
+            if case.guard is not None:
+                matched, guard_fallthrough = self.condition_states(case.guard, matched)
+                fallthrough = guard_fallthrough
+            elif _is_irrefutable(case.pattern):
+                paths.append(self.visit_scope(case.body, matched))
+                return _join(paths)
+            else:
+                for name in bound_names:
+                    fallthrough.drop(name)
+            paths.append(self.visit_scope(case.body, matched))
+        paths.append(fallthrough)
+        return _join(paths)
 
     def visit_try(self, statement: ast.Try | ast.TryStar, state: _State) -> _State | None:
         paths = [self.visit_scope(statement.body, state.copy())]
@@ -302,10 +354,12 @@ class _Analyzer:
             state.clear()
 
     def invalidate_mutation(self, statement: ast.AugAssign | ast.Delete, state: _State) -> None:
-        if _mutation_targets(statement):
+        if _mutation_targets(statement) or isinstance(statement, ast.AugAssign):
             state.clear()
-        elif isinstance(statement, ast.AugAssign) and isinstance(statement.target, ast.Name):
-            state.drop(statement.target.id)
+        else:
+            for target in statement.targets:
+                for name in _target_names(target):
+                    state.drop(name)
         if _has_unknown_call(statement, self._candidates) or _contains_suspension(statement):
             state.clear()
 
@@ -503,8 +557,6 @@ def _is_typing_name(annotation: ast.expr | None, expected: str, names: dict[str,
 def _annotation_name(annotation: ast.expr | None) -> str | None:
     if isinstance(annotation, ast.Name):
         return annotation.id
-    if isinstance(annotation, ast.Attribute):
-        return annotation.attr
     return None
 
 
@@ -556,8 +608,60 @@ def _has_unknown_call(node: ast.AST, candidates: dict[int, Candidate]) -> bool:
     return any(isinstance(child, ast.Call) and id(child) not in candidates for child in ast.walk(node))
 
 
+def _contains_named_expression(node: ast.AST) -> bool:
+    return any(isinstance(child, ast.NamedExpr) for child in iter_within_scope(node))
+
+
 def _contains_suspension(node: ast.AST) -> bool:
     return any(isinstance(child, ast.Await | ast.Yield | ast.YieldFrom) for child in ast.walk(node))
+
+
+def _loop_body_invalidates_state(statements: list[ast.stmt], state: _State, candidates: dict[int, Candidate]) -> bool:
+    tracked_names = state.aliases.keys()
+    if not tracked_names:
+        return False
+    for statement in statements:
+        for node in [statement, *iter_within_scope(statement)]:
+            if isinstance(node, ast.Call) and id(node) not in candidates:
+                return True
+            if isinstance(node, ast.Await | ast.Yield | ast.YieldFrom):
+                return True
+            if isinstance(node, ast.AugAssign):
+                return True
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del) and node.id in tracked_names:
+                return True
+            if isinstance(node, ast.Import | ast.ImportFrom) and any(
+                name in tracked_names for name in iter_binding_names(node)
+            ):
+                return True
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and node.name in tracked_names:
+                return True
+            if (
+                isinstance(node, ast.Subscript)
+                and isinstance(node.ctx, ast.Store | ast.Del)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in tracked_names
+            ):
+                return True
+    return False
+
+
+def _contains_loop_control(statements: list[ast.stmt]) -> bool:
+    return any(
+        isinstance(node, ast.Break | ast.Continue)
+        for statement in statements
+        for node in [statement, *iter_within_scope(statement)]
+    )
+
+
+def _pattern_names(pattern: ast.pattern) -> set[str]:
+    return {name for node in ast.walk(pattern) for name in iter_binding_names(node)}
+
+
+def _is_irrefutable(pattern: ast.pattern) -> bool:
+    if isinstance(pattern, ast.MatchAs):
+        return pattern.pattern is None or _is_irrefutable(pattern.pattern)
+    return isinstance(pattern, ast.MatchOr) and any(_is_irrefutable(item) for item in pattern.patterns)
 
 
 def _binds_name(tree: ast.Module, name: str) -> bool:
