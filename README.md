@@ -30,6 +30,7 @@ Individual checks are toggled with `--select`/`--ignore` (or the matching `pypro
 | [redundant-type-conversion](docs/rules/redundant-type-conversion.md) | TR6  | Flags a builtin type conversion that `ty` considers redundant given the argument's real type, including across files. Requires [`ty`](https://github.com/astral-sh/ty) on `PATH`. |
 | [misplaced-comment](docs/rules/misplaced-comment.md)                 | TR7  | Moves a trailing comment off a closing bracket onto the expression line.                                                                                                          |
 | [unused-pytriage](docs/rules/unused-pytriage.md)                     | TR8  | Reports known `# pytriage` codes that no longer suppress an active violation; add it with `--extend-select=unused-pytriage`.                                                      |
+| [redundant-dict-get](docs/rules/redundant-dict-get.md)               | TR9  | Reports `dict.get()` calls where local code already proves the key exists.                                                                                                        |
 
 ## Installation
 
@@ -41,12 +42,12 @@ repos:
     rev: <tag> # pin a release tag; see the CHANGELOG for what each one changes
     hooks:
       - id: ruff-extra-rules
-      - id: ruff-extra-rules-ty # optional: adds redundant-type-conversion (TR6), see below
+      - id: ruff-extra-rules-ty # optional: adds redundant-type-conversion (TR6) and redundant-dict-get (TR9), see below
 ```
 
-`ruff-extra-rules-ty` normally runs [redundant-type-conversion](docs/rules/redundant-type-conversion.md) by itself. When `unused-pytriage` is enabled through `extend-select`, it also audits TR6 suppressions. The hook is optional and requires [`ty`](https://github.com/astral-sh/ty) on `PATH`.
+`ruff-extra-rules-ty` runs [redundant-type-conversion](docs/rules/redundant-type-conversion.md) and [redundant-dict-get](docs/rules/redundant-dict-get.md). When `unused-pytriage` is enabled through `extend-select`, it also audits TR6 and TR9 suppressions. The hook is optional and requires [`ty`](https://github.com/astral-sh/ty) on `PATH`.
 
-`ruff-extra-rules` always excludes `redundant-type-conversion`; `ruff-extra-rules-ty` owns that check and the shared `unused-pytriage` audit. Both read the same configuration and accept the same options; a check one hook can't run is simply left out rather than rejected, so a single configuration works for both.
+`ruff-extra-rules` always excludes `redundant-type-conversion` and `redundant-dict-get`; `ruff-extra-rules-ty` owns those checks and the shared `unused-pytriage` audit. Both read the same configuration and accept the same options; a check one hook can't run is simply left out rather than rejected, so a single configuration works for both.
 
 Run `check-ast` and `ruff-check` in the same `.pre-commit-config.yaml` — syntax errors are their job, not this tool's; see the [FAQ](docs/faq.md#does-this-catch-syntax-errors).
 
