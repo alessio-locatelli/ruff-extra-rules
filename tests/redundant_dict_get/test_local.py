@@ -106,12 +106,20 @@ def test_find_proofs_reports_the_supported_local_invariants(source: str, expecte
             "later_value = config.get('port')\n"
         ),
         "config = {'port': 5432}\nalias = (alias := config)\ndel alias['port']\nvalue = config.get('port')\n",
+        "config = {'port': 5432}\nremove()\nvalue = config.get('port')\n",
         ("def values() -> int | None:\n    config = {'port': 5432}\n    yield config\n    return config.get('port')\n"),
         (
             "def generic[dict](config: dict[str, int], key: str) -> int | None:\n"
             "    if key in config:\n"
             "        return config.get(key)\n"
             "    return None\n"
+        ),
+        (
+            "def outer(dict: object) -> None:\n"
+            "    def inner(config: dict[str, int], key: str) -> int | None:\n"
+            "        if key in config:\n"
+            "            return config.get(key)\n"
+            "        return None\n"
         ),
         (
             "def f(config: dict[str, int], key: str) -> int | None:\n"
