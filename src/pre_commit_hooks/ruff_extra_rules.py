@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import sys
 
-from .ast_checks import ALL_CHECKS, RedundantTypeConversionCheck
+from .ast_checks import ALL_CHECKS
 from .ast_checks.__main__ import run
 from .ast_checks._cli import main as run_checks
+from .ast_checks._ty_hook import belongs_to_ty_hook
 
-_CHECKS = [check_class for check_class in ALL_CHECKS if check_class is not RedundantTypeConversionCheck]
+_CHECKS = [check_class for check_class in ALL_CHECKS if not belongs_to_ty_hook(check_class)]
 
 
 def main(argv: list[str] | None = None) -> int:

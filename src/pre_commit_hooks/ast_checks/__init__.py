@@ -6,6 +6,7 @@ from .excessive_blank_lines import ExcessiveBlankLinesCheck
 from .meaningless_vars import MeaninglessVarsCheck
 from .misplaced_comment import MisplacedCommentCheck
 from .redundant_assignment import RedundantAssignmentCheck
+from .redundant_dict_get import RedundantDictGetCheck
 from .redundant_super_init import RedundantSuperInitCheck
 from .redundant_type_conversion import RedundantTypeConversionCheck
 from .unused_pytriage import UnusedPytriageCheck
@@ -23,4 +24,5 @@ ALL_CHECKS: list[type[ASTCheck]] = [
     MisplacedCommentCheck,
     RedundantTypeConversionCheck,
     UnusedPytriageCheck,
+    RedundantDictGetCheck,
 ]

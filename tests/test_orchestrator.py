@@ -3301,7 +3301,7 @@ def test_load_checks_skips_check_whose_init_raises(
 
     monkeypatch.setattr(_orchestrator, "ALL_CHECKS", [*ALL_CHECKS, BrokenCheck])
 
-    assert len(load_checks()) == len(ALL_CHECKS) - 1
+    assert len(load_checks()) == sum(check().default_enabled for check in ALL_CHECKS)
 
 
 def test_load_checks_skips_check_when_custom_args_raise() -> None:
@@ -3321,24 +3321,32 @@ def test_main_list_checks(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 @pytest.mark.parametrize(
-    ("entrypoint", "expected_check", "unexpected_check"),
+    ("entrypoint", "expected_checks", "unexpected_checks"),
     [
-        (ruff_extra_rules.main, "meaningless-vars: TR1", "redundant-type-conversion: TR6"),
-        (ruff_extra_rules_ty.main, "redundant-type-conversion: TR6", "meaningless-vars: TR1"),
+        (
+            ruff_extra_rules.main,
+            ("meaningless-vars: TR1",),
+            ("redundant-type-conversion: TR6", "redundant-dict-get: TR9"),
+        ),
+        (
+            ruff_extra_rules_ty.main,
+            ("redundant-type-conversion: TR6", "redundant-dict-get: TR9"),
+            ("meaningless-vars: TR1",),
+        ),
     ],
     ids=["default", "ty"],
 )
 def test_fixed_hook_entrypoints_list_only_their_own_checks(
     capsys: pytest.CaptureFixture[str],
     entrypoint: Callable[[list[str] | None], int],
-    expected_check: str,
-    unexpected_check: str,
+    expected_checks: tuple[str, ...],
+    unexpected_checks: tuple[str, ...],
 ) -> None:
     assert entrypoint(["--list-checks"]) == 0
 
     out = capsys.readouterr().out
-    assert expected_check in out
-    assert unexpected_check not in out
+    assert all(check in out for check in expected_checks)
+    assert all(check not in out for check in unexpected_checks)
 
 
 def test_ty_hook_lists_the_shared_unused_pytriage_audit(capsys: pytest.CaptureFixture[str]) -> None:
@@ -3374,6 +3382,14 @@ def test_fixed_hook_entrypoint_runs_a_selected_check_it_does_own(tmp_path: Path)
     )
 
     assert exit_code == 1
+
+
+def test_ty_hook_runs_redundant_dict_get_by_default(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text("config = {'port': 5432}\nvalue = config.get('port')\n")
+
+    assert ruff_extra_rules.main(["--isolated", "--select", "redundant-dict-get", str(filepath)]) == 0
+    assert ruff_extra_rules_ty.main(["--isolated", str(filepath)]) == 1
 
 
 def test_main_no_filenames_returns_zero() -> None:
