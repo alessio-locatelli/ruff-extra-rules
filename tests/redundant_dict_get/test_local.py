@@ -292,6 +292,8 @@ def test_find_proofs_reports_extended_conservative_proofs(source: str, expected_
         "config = {'port': 5432}\nholder.value += config\nvalue = config.get('port')\n",
         "config = {'port': 5432}\nvalue = (config := {}, config.get('port'))[1]\n",
         "config = {'port': 5432}\n(config := {})\nvalue = config.get('port')\n",
+        "config = {}\nif port in config:\n    value = config.get('port')\n",
+        "config = {'port': 5432}\nvalue = config.get(port)\n",
         "config = {'port': 5432}\nif consume():\n    pass\nvalue = config.get('port')\n",
         ("config = {'port': 5432}\nmatch consume():\n    case _:\n        pass\nvalue = config.get('port')\n"),
         ("config = {'port': 5432}\nmatch subject:\n    case 1 as config:\n        pass\nvalue = config.get('port')\n"),
@@ -312,9 +314,9 @@ def test_find_proofs_reports_extended_conservative_proofs(source: str, expected_
             "    pass\n"
             "value = config.get('port')\n"
         ),
-        "for _ in values:\n    break\nelse:\n    pass\n",
-        "def read():\n    for _ in values:\n        return\n",
-        "import os\n",
+        "config = {'port': 5432}\nfor _ in values:\n    break\nelse:\n    pass\nvalue = config.get('port')\n",
+        "def read():\n    config = {'port': 5432}\n    for _ in values:\n        return config.get('port')\n",
+        "import os\nconfig = {}\nvalue = config.get('port')\n",
         ("config = {'port': 5432}\nfor _ in values:\n    consume()\n    value = config.get('port')\n"),
         ("config = {'port': 5432}\nfor _ in values:\n    other += 1\nvalue = config.get('port')\n"),
         (

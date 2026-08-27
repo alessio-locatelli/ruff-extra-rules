@@ -88,9 +88,9 @@ class _State:
         self.aliases[name] = root
         return True
 
-    def add_present(self, dictionary: str, key: str) -> None:
+    def add_present(self, dictionary: str, variable_name: str) -> None:
         if (root := self.root(dictionary)) in self.dictionaries:
-            self.present.setdefault(root, set()).add(key)
+            self.present.setdefault(root, set()).add(variable_name)
 
     def add_relation(self, collection: str, dictionary: str) -> None:
         collection_root = self.root(collection)
@@ -98,9 +98,11 @@ class _State:
         if collection_root in self.collections and dictionary_root in self.dictionaries:
             self.relations.add((collection_root, dictionary_root))
 
-    def contains(self, dictionary: str, key: str) -> bool:
+    def contains(self, dictionary: str, key: str, *, literal: bool) -> bool:
         root = self.root(dictionary)
-        return root in self.dictionaries and (key in self.dictionaries[root] or key in self.present.get(root, set()))
+        if root not in self.dictionaries:
+            return False
+        return key in (self.dictionaries[root] if literal else self.present.get(root, set()))
 
     def add_collection_membership(self, collection: str, key: str) -> None:
         collection_root = self.root(collection)
@@ -386,7 +388,7 @@ class _Analyzer:
                 continue
             key = candidate.literal_key if candidate.literal_key is not None else candidate.name_key
             assert key is not None
-            if state.contains(candidate.receiver, key):
+            if state.contains(candidate.receiver, key, literal=candidate.literal_key is not None):
                 self._proof_ids.add(id(call))
                 reason = (
                     "key is present in a known dict"
