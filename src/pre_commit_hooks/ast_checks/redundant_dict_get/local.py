@@ -283,10 +283,11 @@ class _Analyzer:
         return _join(paths)
 
     def visit_try(self, statement: ast.Try | ast.TryStar, state: _State) -> _State | None:
-        paths = [self.visit_scope(statement.body, state.copy())]
+        body_state = self.visit_scope(statement.body, state.copy())
+        paths = [body_state]
         paths.extend(self.visit_scope(handler.body, _State()) for handler in statement.handlers)
         if statement.orelse:
-            paths.append(self.visit_scope(statement.orelse, state.copy()))
+            paths.append(self.visit_scope(statement.orelse, body_state.copy()) if body_state is not None else None)
         merged = _join(paths)
         if merged is None:
             return self.visit_scope(statement.finalbody, _State()) if statement.finalbody else None
