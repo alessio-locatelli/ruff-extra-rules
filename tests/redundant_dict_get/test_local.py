@@ -259,16 +259,10 @@ def test_find_proofs_reports_extended_conservative_proofs(source: str, expected_
     assert [proof.candidate.call.lineno for proof in proofs] == expected_lines
 
 
-def test_alias_mutation_invalidates_every_alias() -> None:
-    source = "config = {'port': 5432}\nalias = config\ndel alias['port']\nvalue = config.get('port')\n"
-    tree = ast.parse(source)
-
-    assert find_proofs(tree, find_candidates(tree)) == []
-
-
 @pytest.mark.parametrize(
     "source",
     [
+        "config = {'port': 5432}\nalias = config\ndel alias['port']\nvalue = config.get('port')\n",
         "config = {'a': 1}\nalias = config\nconfig = {'b': 2}\nvalue = alias.get('b')\n",
         (
             "from typing import TypedDict\n"
@@ -350,17 +344,6 @@ def test_alias_mutation_invalidates_every_alias() -> None:
             "if key in required:\n"
             "    value = config.get(key)\n"
         ),
-    ],
-)
-def test_find_proofs_rejects_reviewed_false_positive_paths(source: str) -> None:
-    tree = ast.parse(source)
-
-    assert find_proofs(tree, find_candidates(tree)) == []
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
         "config = {'port': 5432}\nwhile enabled:\n    value = config.get('port')\n",
         "config = {'port': 5432}\nfor key in unknown:\n    value = config.get('port')\nelse:\n    pass\n",
         "config = {'port': 5432}\nfor key in range(1):\n    value = config.get('port')\n",
@@ -406,7 +389,7 @@ def test_find_proofs_rejects_reviewed_false_positive_paths(source: str) -> None:
         "pass\n" * 1_001,
     ],
 )
-def test_find_proofs_handles_boundaries_without_reporting(source: str) -> None:
+def test_find_proofs_rejects_reviewed_false_positive_paths(source: str) -> None:
     tree = ast.parse(source)
 
     assert find_proofs(tree, find_candidates(tree)) == []

@@ -24,7 +24,7 @@ Facts are confined to one lexical scope and discarded when a tracked name is reb
 
 TR9 is default-enabled in the dedicated `ruff-extra-rules-ty` hook and remains excluded from the normal hook. `# pytriage: TR9` is its only inline suppression. It never applies an autofix. The normal/ty-hook split is represented by an explicit check-id collection rather than a one-off class-identity exclusion, so future checks can join the dedicated hook without changing entrypoint architecture.
 
-The default `conservative` level accepts only built-in local dictionaries and collections plus complete local `TypedDict` declarations. `aggressive` additionally accepts direct builtin `dict[...]` parameter annotations; this is a deliberate heuristic because subclasses can customize mapping operations.
+The default `conservative` level accepts only built-in local dictionaries and collections plus complete local `TypedDict` declarations. `aggressive` additionally accepts direct built-in `dict[...]` parameter annotations; this is a deliberate heuristic because subclasses can customize mapping operations.
 
 ## Consequences
 
