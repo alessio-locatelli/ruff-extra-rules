@@ -241,9 +241,12 @@ class _Analyzer:
             body_state.drop(target)
         if _loop_body_invalidates_state(statement.body, entry_state, self._candidates):
             body_state.clear()
-        if isinstance(statement.iter, ast.Name) and body_state.root(statement.iter.id) in body_state.collections:
-            for target in _target_names(statement.target):
-                body_state.add_collection_membership(statement.iter.id, target)
+        if (
+            isinstance(statement.iter, ast.Name)
+            and isinstance(statement.target, ast.Name)
+            and body_state.root(statement.iter.id) in body_state.collections
+        ):
+            body_state.add_collection_membership(statement.iter.id, statement.target.id)
         else:
             body_state.clear()
         normal_exit = self.visit_scope(statement.body, body_state)
@@ -659,6 +662,4 @@ def _is_irrefutable(pattern: ast.pattern) -> bool:
 
 
 def _binds_name(tree: ast.Module, name: str) -> bool:
-    return any(
-        isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == name for node in ast.walk(tree)
-    )
+    return any(name in iter_binding_names(node) for node in ast.walk(tree))

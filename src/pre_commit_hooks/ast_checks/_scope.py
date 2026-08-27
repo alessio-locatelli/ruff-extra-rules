@@ -98,6 +98,8 @@ def collect_scope_names(scope: ast.AST) -> set[str]:
 def iter_binding_names(node: ast.AST) -> Iterator[str]:
     if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
         yield node.id
+    elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        yield node.name
     elif isinstance(node, ast.Import):
         yield from (alias.asname or alias.name.split(".")[0] for alias in node.names)
     elif isinstance(node, ast.ImportFrom):
