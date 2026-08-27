@@ -337,6 +337,13 @@ class _Analyzer:
         if mutations:
             state.clear()
             return
+        if value is not None and (
+            any(isinstance(node, ast.NamedExpr) for node in ast.walk(value))
+            or _has_unknown_call(value, self._candidates)
+            or _contains_suspension(value)
+        ):
+            state.clear()
+            return
         if len(targets) != 1 or value is None:
             for target in targets:
                 state.drop(target)
@@ -344,9 +351,6 @@ class _Analyzer:
                 state.clear()
             return
         target = targets[0]
-        if any(isinstance(node, ast.NamedExpr) for node in ast.walk(value)):
-            state.clear()
-            return
         if isinstance(value, ast.Name) and state.bind_alias(target, value.id):
             return
         if (keys := _literal_dict_keys(value)) is not None:
@@ -356,8 +360,6 @@ class _Analyzer:
             state.bind_collection(target, collection_keys)
             return
         state.drop(target)
-        if _has_unknown_call(value, self._candidates) or _contains_suspension(value):
-            state.clear()
 
     def invalidate_mutation(self, statement: ast.AugAssign | ast.Delete, state: _State) -> None:
         if _mutation_targets(
