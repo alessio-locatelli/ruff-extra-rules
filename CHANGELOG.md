@@ -15,6 +15,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 - `redundant-dict-get` no longer retains key-presence proofs across rebinding, context-manager exits, match fall-through, or mutating loop paths, and recognizes validated local key collections inside read-only loops.
 - `redundant-dict-get` distinguishes literal dictionary keys from variable-name presence proofs, avoiding unrelated reports when their spellings match.
+- `redundant-dict-get` no longer treats unpacked loop targets as known mapping keys or relies on shadowed `all` and `dict` builtins.
 
 ## [0.2.2] - 2026-08-22
 

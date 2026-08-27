@@ -5,7 +5,7 @@ import ast
 import pytest
 
 from pre_commit_hooks.ast_checks.redundant_dict_get.candidates import find_candidates
-from pre_commit_hooks.ast_checks.redundant_dict_get.local import ProofLevel, find_proofs
+from pre_commit_hooks.ast_checks.redundant_dict_get.local import ProofLevel, _binds_name, find_proofs
 
 
 @pytest.mark.parametrize(
@@ -376,6 +376,22 @@ def test_find_proofs_reports_extended_conservative_proofs(source: str, expected_
         "required = unknown\nconfig = {'port': 5432}\nif required <= config.keys():\n    pass\n",
         "config = {'port': 5432}\nif key in config or enabled:\n    pass\n",
         (
+            "required = {'ab'}\n"
+            "config = {'ab': 1}\n"
+            "if required <= config.keys():\n"
+            "    for key, other in required:\n"
+            "        value = config.get(key)\n"
+        ),
+        (
+            "from alternate import all\n"
+            "required = {'port'}\n"
+            "config = {'port': 5432}\n"
+            "if not all(key in config for key in required):\n"
+            "    raise ValueError\n"
+            "for key in required:\n"
+            "    value = config.get(key)\n"
+        ),
+        (
             "first = {'first'}\n"
             "second = {'second'}\n"
             "config = {'first': 1, 'second': 2}\n"
@@ -395,3 +411,32 @@ def test_find_proofs_rejects_reviewed_false_positive_paths(source: str) -> None:
     tree = ast.parse(source)
 
     assert find_proofs(tree, find_candidates(tree)) == []
+
+
+def test_find_proofs_rejects_aggressive_dict_proof_after_function_binding() -> None:
+    tree = ast.parse(
+        "def dict():\n"
+        "    pass\n"
+        "def read(config: dict[str, int], key: str) -> int | None:\n"
+        "    if key in config:\n"
+        "        return config.get(key)\n"
+        "    return None\n"
+    )
+
+    assert find_proofs(tree, find_candidates(tree), level=ProofLevel.AGGRESSIVE) == []
+
+
+@pytest.mark.parametrize(
+    ("source", "name"),
+    [
+        ("all = replacement\n", "all"),
+        ("del dict\n", "dict"),
+        ("import replacement as all\n", "all"),
+        ("from replacement import dict\n", "dict"),
+        ("def all():\n    pass\n", "all"),
+        ("async def dict():\n    pass\n", "dict"),
+        ("class all:\n    pass\n", "all"),
+    ],
+)
+def test_binds_name_recognizes_all_binding_forms(source: str, name: str) -> None:
+    assert _binds_name(ast.parse(source), name)
