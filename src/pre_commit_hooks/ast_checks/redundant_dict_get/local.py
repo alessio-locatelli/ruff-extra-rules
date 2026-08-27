@@ -327,7 +327,7 @@ class _Analyzer:
     def bind_assignment(self, statement: ast.Assign | ast.AnnAssign, state: _State) -> None:
         targets = _assignment_targets(statement)
         value = statement.value
-        mutations = _assignment_mutation_targets(statement)
+        mutations = _mutation_targets(statement.targets if isinstance(statement, ast.Assign) else [statement.target])
         if mutations:
             state.clear()
             return
@@ -354,7 +354,9 @@ class _Analyzer:
             state.clear()
 
     def invalidate_mutation(self, statement: ast.AugAssign | ast.Delete, state: _State) -> None:
-        if _mutation_targets(statement) or isinstance(statement, ast.AugAssign):
+        if _mutation_targets(
+            statement.targets if isinstance(statement, ast.Delete) else [statement.target]
+        ) or isinstance(statement, ast.AugAssign):
             state.clear()
         else:
             for target in statement.targets:
@@ -586,17 +588,7 @@ def _target_names(target: ast.expr) -> list[str]:
     return []
 
 
-def _mutation_targets(statement: ast.AugAssign | ast.Delete) -> set[str]:
-    targets = statement.targets if isinstance(statement, ast.Delete) else [statement.target]
-    return {
-        target.value.id
-        for target in targets
-        if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name)
-    }
-
-
-def _assignment_mutation_targets(statement: ast.Assign | ast.AnnAssign) -> set[str]:
-    targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+def _mutation_targets(targets: Iterable[ast.expr]) -> set[str]:
     return {
         target.value.id
         for target in targets
