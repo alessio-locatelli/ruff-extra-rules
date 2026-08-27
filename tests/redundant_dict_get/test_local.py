@@ -392,6 +392,24 @@ def test_find_proofs_reports_extended_conservative_proofs(source: str, expected_
             "    value = config.get(key)\n"
         ),
         (
+            "config = {'port': 5432}\n"
+            "try:\n"
+            "    del config['port']\n"
+            "except KeyError:\n"
+            "    pass\n"
+            "else:\n"
+            "    value = config.get('port')\n"
+        ),
+        (
+            "config = {'port': 5432}\n"
+            "try:\n"
+            "    config = {'host': 'localhost'}\n"
+            "except OSError:\n"
+            "    pass\n"
+            "else:\n"
+            "    value = config.get('port')\n"
+        ),
+        (
             "first = {'first'}\n"
             "second = {'second'}\n"
             "config = {'first': 1, 'second': 2}\n"
