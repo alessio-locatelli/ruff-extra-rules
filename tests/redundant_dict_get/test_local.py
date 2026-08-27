@@ -409,6 +409,10 @@ def test_find_proofs_reports_extended_conservative_proofs(source: str, expected_
             "else:\n"
             "    value = config.get('port')\n"
         ),
+        "config = {'port': 5432}\na, b = mutate(config)\nvalue = config.get('port')\n",
+        "config = {'port': 5432}\na = b = mutate(config)\nvalue = config.get('port')\n",
+        ("def read():\n    config = {'port': 5432}\n    a, b = yield config\n    return config.get('port')\n"),
+        "config = {'port': 5432}\na, b = (config := {})\nvalue = config.get('port')\n",
         (
             "first = {'first'}\n"
             "second = {'second'}\n"
