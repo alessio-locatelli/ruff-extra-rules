@@ -158,11 +158,6 @@ class CacheManager:
 
     @staticmethod
     def compute_tree_hash(root: Path) -> str:
-        """SHA-1 over every `.py` file's content under `root`, sorted for
-        determinism. Recomputed fresh on every call rather than cached to
-        disk itself — measured ~0.2ms for this repo's own src/ tree,
-        negligible next to per-invocation interpreter startup.
-        """
         sha1 = hashlib.sha1(usedforsecurity=False)
         for py_file in sorted(root.rglob("*.py")):
             sha1.update(py_file.read_bytes())
