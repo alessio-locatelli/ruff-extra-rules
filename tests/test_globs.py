@@ -8,8 +8,6 @@ import pytest
 from pre_commit_hooks.ast_checks._globs import InvalidGlobError, anchored_pattern, compile_glob, glob_matches
 
 
-# Every expectation below was measured against `ruff 0.16.1` before being
-# written down; see ADR-0049.
 @pytest.mark.parametrize(
     ("pattern", "candidate", "expected"),
     [
