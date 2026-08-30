@@ -1099,21 +1099,19 @@ def test_lifecycle_is_immediate_use_with_closure() -> None:
         stmt_index=0,
         rhs_node=ast.parse("1", mode="eval").body,
         rhs_source="1",
-        scope_id=1,  # Outer scope
+        scope_id=1,
         has_type_annotation=False,
     )
     usage = UsageInfo(
         var_name="x",
         line=3,
         col=0,
-        stmt_index=1,  # Would normally be considered immediate
+        stmt_index=1,
         context="unknown",
-        scope_id=2,  # Nested scope (closure)
+        scope_id=2,
     )
     lifecycle = VariableLifecycle(assignment=assignment, uses=[usage])
 
-    # Even though stmt_index suggests immediate use, it should return
-    # False because the use is in a different scope (closure).
     assert lifecycle.is_immediate_use is False
     assert lifecycle.is_single_use is True
 
