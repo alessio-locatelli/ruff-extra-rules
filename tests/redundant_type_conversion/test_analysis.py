@@ -86,13 +86,11 @@ def test_decide_candidates_skips_the_recheck_entirely_when_hover_gate_fails() ->
     source = "y = str(x)\n"
     redundant, session = _decide(
         source,
-        diagnostics_by_content={source: frozenset()},  # "y = x\n" deliberately not recorded
+        diagnostics_by_content={source: frozenset()},
         hover_by_position={(0, 8): "Any"},
     )
 
     assert redundant == []
-    # Only the baseline open -- the expensive synthetic-rewrite-and-recheck
-    # must never run for a candidate the cheap hover gate already rejected.
     assert session.opened_content == [source]
 
 
