@@ -19,14 +19,6 @@ def _raise_keyboard_interrupt(_signum: int, _frame: FrameType | None) -> None:
 
 
 def _install_sigterm_handler() -> None:
-    """Best-effort: `signal.signal()` raises `ValueError` when called
-    outside the main thread, and can raise `OSError` in some restricted or
-    sandboxed environments. Either way, Ctrl-C still works via SIGINT's own
-    handler (installed by Python itself, independent of this call) — this
-    only extends the same graceful shutdown path to SIGTERM, so a failure
-    to install it just means one fewer signal is handled gracefully, not a
-    reason to abort the run.
-    """
     try:
         signal.signal(signal.SIGTERM, _raise_keyboard_interrupt)
     except ValueError, OSError:
