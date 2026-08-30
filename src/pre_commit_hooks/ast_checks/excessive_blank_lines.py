@@ -1,13 +1,3 @@
-"""Check and fix excessive blank lines after module headers.
-
-TR2: Collapse 2+ consecutive blank lines after module headers (copyright,
-docstring, or comments) to a single blank line.
-
-Inline ignore: # pytriage: TR2, placed on the first code line after
-the blank run (the violation's own line is blank, so it can't carry a
-trailing comment itself).
-"""
-
 from __future__ import annotations
 
 import ast
