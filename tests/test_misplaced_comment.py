@@ -278,12 +278,6 @@ def test_fix_preserves_crlf_on_touched_lines(source: str, fixed_source: str, tmp
 
 
 def test_check_and_fix_detect_comment_on_cr_only_source(tmp_path: Path) -> None:
-    # tokenize can't see a COMMENT token at all on an old-Mac-style
-    # CR-only file (io.StringIO.readline() doesn't split on a lone \r), so
-    # the violation must still be detected here rather than going
-    # completely undetected — not just misplaced, invisible. Also confirms
-    # the fix preserves the CR-only convention on the lines it touches,
-    # same as the CRLF case above.
     source = "foo(\r    bar,\r)  # comment\r"
     test_file = tmp_path / "test.py"
     test_file.write_bytes(source.encode())
