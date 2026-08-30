@@ -232,20 +232,15 @@ def test_on_notification_callback_raising_does_not_kill_the_reader_thread(tmp_pa
 
     with _spawn_fake_server(tmp_path, on_notification=_boom) as client:
         client.request("send_notification", {"uri": "file:///a.py", "items": []})
-        # The reader loop must survive the callback raising and keep serving requests.
         assert client.request("echo", {"ok": True}) == {"ok": True}
 
 
 def test_late_response_after_a_timeout_is_silently_dropped(tmp_path: Path) -> None:
-    # A response that arrives for a request the caller already gave up on
-    # (removed from _pending after its own timeout) must not raise or
-    # corrupt a later, unrelated request -- it has nowhere to go, so the
-    # reader loop just drops it.
     with _spawn_fake_server(tmp_path) as client:
         with pytest.raises(LSPTimeoutError):
             client.request("delayed_echo", {"value": 1}, timeout=0.05)
 
-        time.sleep(0.5)  # let the server's delayed response actually arrive
+        time.sleep(0.5)
 
         assert client.request("echo", {"ok": True}) == {"ok": True}
 
