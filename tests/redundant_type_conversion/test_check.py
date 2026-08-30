@@ -137,7 +137,6 @@ def test_check_reuses_a_cached_result_for_identical_source(monkeypatch: pytest.M
 
 
 def test_check_hedges_the_message_for_a_non_exact_permissive_match(monkeypatch: pytest.MonkeyPatch) -> None:
-    # See ADR-0035's permissive-gate limitation.
     source = "y = str({'a': [1]}) == 1\n"
     session = FakeSession(
         diagnostics_by_content={source: frozenset(), "y = {'a': [1]} == 1\n": frozenset()},
