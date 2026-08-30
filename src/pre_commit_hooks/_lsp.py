@@ -197,7 +197,7 @@ class LSPClient:
 
     def _write(self, payload: dict[str, Any]) -> None:
         stdin = self._process.stdin
-        assert stdin is not None  # constructed with stdin=PIPE above
+        assert stdin is not None
         try:
             write_framed_message(stdin, payload)
         except (BrokenPipeError, OSError) as error:
