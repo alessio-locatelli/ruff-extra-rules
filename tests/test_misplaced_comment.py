@@ -64,7 +64,6 @@ def test_prefilter_pattern_is_hash() -> None:
     ("source", "line", "fixable"),
     [
         ("result = func(\n    arg\n)  # Comment here\n", 3, True),
-        # `))  # c` visits the scanner once per bracket token but is one violation.
         ("foo(\n    bar(x\n))  # dedup comment\n", 3, True),
     ],
     ids=["closing-paren", "dedups-multiple-closing-brackets"],
