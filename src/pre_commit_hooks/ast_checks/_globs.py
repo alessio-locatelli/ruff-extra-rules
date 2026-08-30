@@ -126,13 +126,6 @@ def _translate(pattern: str) -> str:
 
 
 def _join(pieces: list[_Piece]) -> str:
-    """Spells each interior `<star><fixed-width run>` as an atomic group, the
-    way `fnmatch.translate` does: nested greedy `.*` groups otherwise
-    backtrack exponentially, so one pattern like `*a*a*a...b` takes seconds
-    to reject a name it doesn't match. A run that isn't fixed-width can't
-    take the atomic form -- committing to the first alternative of
-    `*{ab,a}*b` would reject `ab`, which the pattern does match.
-    """
     parts: list[str] = []
     index = 0
     while index < len(pieces) and not pieces[index].is_star:
@@ -151,9 +144,6 @@ def _join(pieces: list[_Piece]) -> str:
         if fixed_width and index < len(pieces):
             parts.append(f"(?>.*?{joined})")
         else:
-            # A trailing run is anchored by the end of the candidate itself,
-            # and a variable-width one can't be committed to; either way,
-            # leave the star free to give back what it consumed.
             parts.append(f".*{joined}")
 
     return "".join(parts)
