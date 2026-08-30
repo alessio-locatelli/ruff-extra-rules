@@ -1857,11 +1857,6 @@ def fetch_users():
 
 
 def test_autofix_avoids_walrus_target_collision_in_comprehension() -> None:
-    # A suggested name must not collide with a `:=` target bound inside a
-    # comprehension in the same scope (PEP 572: the walrus target belongs
-    # to the enclosing scope, not the comprehension's own scope), even
-    # though the comprehension's own loop variable is correctly invisible
-    # to it.
     source = (
         "def foo():\n"
         "    data = requests.get(url)\n"
