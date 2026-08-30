@@ -860,8 +860,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
     ("source", "shadowed_snippet"),
     [
         (
-            # A nested function's own same-named parameter is a distinct
-            # binding, not a reference to the outer variable.
             """def outer(response):
     data: Payload = response.json()
 
@@ -873,8 +871,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "def inner(data):\n        return data",
         ),
         (
-            # A nested function's own local reassignment (not a parameter)
-            # is likewise a distinct, shadowing binding.
             """def outer(response):
     data: Payload = response.json()
 
@@ -887,8 +883,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             'data = "local"\n        return data',
         ),
         (
-            # A doubly-nested def/class sharing the outer variable's name
-            # shadows it for the rest of the enclosing nested scope too.
             """def outer(response):
     data: Payload = response.json()
 
@@ -903,8 +897,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "def data():\n            return 1",
         ),
         (
-            # An import binding the same name inside a nested scope shadows
-            # the outer variable the same way an assignment would.
             """def outer(response):
     data: Payload = response.json()
 
@@ -918,8 +910,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "import data\n\n        return data",
         ),
         (
-            # A comprehension's own `for` target shadows the outer variable
-            # for reads inside that comprehension.
             """def outer(response):
     data: Payload = response.json()
     return [data for data in range(3)], data
@@ -927,13 +917,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "[data for data in range(3)]",
         ),
         (
-            # `except E as data:` binds `data` as a plain string
-            # (ast.ExceptHandler.name), not an ast.Name node, so it was
-            # invisible to the shadow check — `return data` inside the
-            # handler was wrongly renamed to `return payload`, silently
-            # returning the outer JSON payload instead of the caught
-            # exception (syntactically valid, so atomic_write_text()'s
-            # compile() check couldn't catch it).
             """def outer(response):
     data: Payload = response.json()
 
@@ -948,8 +931,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "except RuntimeError as data:\n            return data",
         ),
         (
-            # a match `case data:` capture binds via
-            # ast.MatchAs.name, also a plain string, not an ast.Name.
             """def outer(response):
     data: Payload = response.json()
 
@@ -963,8 +944,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "case data:\n                return data",
         ),
         (
-            # a match `case {**rest}:` mapping-rest capture
-            # binds via ast.MatchMapping.rest, also a plain string.
             """def outer(response):
     data: Payload = response.json()
 
@@ -978,10 +957,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "case {**data}:\n                return data",
         ),
         (
-            # a PEP 695 type parameter (`def f[data]():`) binds
-            # via ast.TypeVar.name, also a plain string — and, unlike a
-            # regular parameter, type params are accessible at runtime
-            # inside the function body too.
             """def outer(response):
     data: Payload = response.json()
 
@@ -993,12 +968,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "def inner[data]() -> data:\n        return data",
         ),
         (
-            # `del data` makes `data` local to the *whole*
-            # enclosing function (Python's rule for any binding operation,
-            # not just assignment) — `del`'s target has ctx=ast.Del, not
-            # ast.Store, so the original Store-only check missed it and
-            # renamed both the del and the function's own later local
-            # reassignment into the outer variable's new name.
             """def outer(response):
     data: Payload = response.json()
 
@@ -1012,12 +981,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             'del data\n        data = "local value"\n        return data',
         ),
         (
-            # a dotted `import data.models` (no `as`) binds
-            # only the first component, "data", in the local namespace —
-            # ast.alias.name is the full dotted path "data.models", which
-            # never equals a bare "data", so the original check missed the
-            # shadow and renamed `data.models` (a valid attribute access on
-            # the imported module) into `payload.models` (nonsensical).
             """def outer(response):
     data: Payload = response.json()
 
@@ -1031,9 +994,6 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
             "import data.models\n\n        return data.models",
         ),
         (
-            # Branch coverage: a non-dotted `from x import data` also
-            # shadows via the ast.ImportFrom branch, distinct from the
-            # dotted ast.Import case above.
             """def outer(response):
     data: Payload = response.json()
 
@@ -1075,9 +1035,6 @@ def test_autofix_does_not_rename_shadowed_reference_in_nested_scope(source: str,
         fixed_content = filepath.read_text()
 
     assert shadowed_snippet in fixed_content
-    # The outer occurrence (the trailing `, data` in every case above) must
-    # still have been renamed to the .json()-derived suggestion — only the
-    # shadowed nested reference is left as "data".
     assert "payload" in fixed_content
 
 
