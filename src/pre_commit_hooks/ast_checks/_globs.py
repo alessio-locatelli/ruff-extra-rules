@@ -150,11 +150,6 @@ def _join(pieces: list[_Piece]) -> str:
 
 
 def _translate_stars(pattern: str, index: int) -> tuple[_Piece, int]:
-    """`*` spans path separators, so `**` differs from it only where it is a
-    path component of its own: there it also matches zero components, making
-    `a/**/b.py` match `a/b.py`. A longer run of stars is just that many `*`,
-    so `a/***/b.py` still requires a component between the two.
-    """
     end = index
     while end < len(pattern) and pattern[end] == "*":
         end += 1
