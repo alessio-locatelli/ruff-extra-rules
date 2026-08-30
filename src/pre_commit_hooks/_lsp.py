@@ -138,7 +138,7 @@ class LSPClient:
 
     def _read_loop(self) -> None:
         stdout = self._process.stdout
-        assert stdout is not None  # constructed with stdout=PIPE above
+        assert stdout is not None
         error: BaseException | None = None
         try:
             while True:
@@ -157,18 +157,11 @@ class LSPClient:
                         self._on_notification(method, message.get("params") or {})
                     except Exception:
                         logger.debug("on_notification callback raised", exc_info=True)
-                # else: a server-to-client request (carries both id and
-                # method), or a notification with no on_notification
-                # registered -- see this class's own docstring for why
-                # either is dropped.
         except Exception as caught:
             error = caught
             logger.debug("LSP reader loop failed", exc_info=True)
         finally:
             self._connection_lost = True
-            # Unblock every request still waiting on a response, rather than
-            # leaving each to discover the connection is gone only once its
-            # own timeout separately elapses.
             failure = {"error": {"message": f"{error}" if error else "LSP connection closed"}}
             with self._pending_lock:
                 boxes = list(self._pending.values())
