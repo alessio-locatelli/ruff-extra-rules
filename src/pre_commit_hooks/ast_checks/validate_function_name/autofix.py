@@ -25,7 +25,7 @@ logger = logging.getLogger("validate-function-name")
 
 _FuncNode = ast.FunctionDef | ast.AsyncFunctionDef
 
-type SourcePosition = tuple[int, int]  # (1-indexed line, 0-indexed character column)
+type SourcePosition = tuple[int, int]
 type RepositoryReferenceStatus = Literal["safe", "external", "unavailable"]
 
 
