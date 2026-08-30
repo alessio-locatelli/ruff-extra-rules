@@ -1451,19 +1451,6 @@ def test_autofix_still_follows_annotation_closure_without_deferred_annotations()
 
 
 def test_autofix_never_offered_for_module_scope_name_referenced_in_annotation() -> None:
-    # under PEP 563, every annotation resolves only against the
-    # annotated function's own *module* globals, ignoring any local
-    # shadowing along the way — so unlike a nested-local rename (previous
-    # two tests), a module-scope rename genuinely *should* propagate into
-    # every annotation referencing it, at any nesting depth. Correctly doing
-    # that would require an annotation-specific traversal that ignores
-    # shadowing entirely (unlike ordinary closure-following), which this
-    # codebase doesn't build for such a narrow case — so the violation must
-    # not be offered as fixable at all, rather than leaving a stale
-    # annotation behind once the module-level binding is renamed out from
-    # under it. Two violations (a parameter- and a return-annotation
-    # reference) also exercise `_annotation_referenced_names()`'s cache-hit
-    # branch and the return-annotation branch of its own walk.
     source = """from __future__ import annotations
 
 class Response:
