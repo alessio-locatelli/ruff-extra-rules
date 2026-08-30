@@ -443,8 +443,6 @@ def test_open_or_update_sends_a_didchange_for_an_already_open_file(tmp_path: Pat
 def test_open_or_update_propagates_lsp_error_when_the_server_fails(
     tmp_path: Path, stub_kwargs: dict[str, bool]
 ) -> None:
-    # Left uncaught: analysis.decide_candidates() converts this to CheckUnavailableError, since silently
-    # treating it as "inconclusive" would let a dead ty session masquerade as a clean, empty result.
     client = _StubLSPClient(**stub_kwargs)
     session = _session_with_stub_client(client)
 
