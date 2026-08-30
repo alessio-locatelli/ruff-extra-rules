@@ -302,35 +302,21 @@ def test_calculate_semantic_value_chained_attributes() -> None:
     assert calculate_semantic_value("result", rhs_source, rhs_node, has_type_annotation=False) >= 20
 
 
-# ---------------------------------------------------------------------------
-# _adds_verbosity_or_context
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("var_name", "rhs_source", "expected"),
     [
-        ("raw_data", "fetch_data()", True),  # Descriptive prefix.
-        ("raw_headers", 'kwargs.get("headers")', True),  # Var contains RHS key, more verbose.
-        ("user_email", 'data.get("email")', True),  # .get() with more context.
-        ("translations", "orjson.loads(data)", True),  # Generic parse func, descriptive name.
-        ("user_config", "json.load(f)", True),  # Generic parse func, multi-part name.
-        ("data", "json.loads(data)", False),  # Parse func but generic variable name.
-        ("configuration", "loads(data)", True),  # Parse function as a bare Name node.
-        ("x", "42", False),  # No verbosity added.
-        # Branch coverage: Subscript RHS with a variable (non-constant)
-        # slice — rhs_key_or_method stays None.
+        ("raw_data", "fetch_data()", True),
+        ("raw_headers", 'kwargs.get("headers")', True),
+        ("user_email", 'data.get("email")', True),
+        ("translations", "orjson.loads(data)", True),
+        ("user_config", "json.load(f)", True),
+        ("data", "json.loads(data)", False),
+        ("configuration", "loads(data)", True),
+        ("x", "42", False),
         ("user_obj", "obj[key]", False),
-        # Branch coverage: Call RHS where func is a Subscript, not
-        # Name/Attribute.
         ("configuration", 'funcs["load"](data)', False),
-        # Branch coverage: Pattern 3 (.get() call) where the key is not in
-        # the var name.
         ("x", 'data.get("email")', False),
-        # Branch coverage: Pattern 4 parse func where func is a Subscript.
         ("parsed_data", 'parsers["json"](data)', True),
-        # Branch coverage: Pattern 4 parse func but var name is generic
-        # (in generic_names).
         ("result", "json.loads(data)", False),
     ],
     ids=[
