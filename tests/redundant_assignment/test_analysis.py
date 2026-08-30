@@ -716,11 +716,6 @@ def test_get_source_segment_returns_empty_string_without_end_position() -> None:
     assert _tracker("x = 1")._get_source_segment(node) == ""
 
 
-# ---------------------------------------------------------------------------
-# detect_redundancy() / lifecycle properties
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("source", "var_name", "pattern"),
     [
