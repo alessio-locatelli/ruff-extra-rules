@@ -1,7 +1,3 @@
-"""Standard-library-only JSON-RPC/LSP client over stdio. See ADR-0035,
-ADR-0041, and `docs/audits/type-checker-selection-for-redundant-type-conversion.md`.
-"""
-
 from __future__ import annotations
 
 import json
