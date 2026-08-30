@@ -1,5 +1,3 @@
-"""Variable tracking and redundancy pattern detection for TR5."""
-
 from __future__ import annotations
 
 import ast
@@ -17,9 +15,9 @@ type UsageContext = Literal["attribute_or_subscript_assignment", "augmented_assi
 
 
 class PatternType(Enum):
-    IMMEDIATE_SINGLE_USE = auto()  # x = "foo"; func(x=x)
-    SINGLE_USE = auto()  # x = calc(); return x
-    LITERAL_IDENTITY = auto()  # foo = "foo"
+    IMMEDIATE_SINGLE_USE = auto()
+    SINGLE_USE = auto()
+    LITERAL_IDENTITY = auto()
 
 
 @dataclass(slots=True)
