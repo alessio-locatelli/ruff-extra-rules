@@ -645,9 +645,6 @@ def test_finalize_resyncs_and_keeps_open_when_persistent(tmp_path: Path) -> None
 
 
 def test_finalize_swallows_lsp_error_when_persistent_resync_fails(tmp_path: Path) -> None:
-    # finalize() runs from decide_candidates()'s own `finally` -- it must
-    # never raise, even when the connection to `ty` is already lost by the
-    # time it runs.
     client = _StubLSPClient(notify_raises=True)
     session = _session_with_stub_client(client, keep_open=True, root=tmp_path)
     filepath = tmp_path / "f.py"
