@@ -65,11 +65,6 @@ class UsageInfo:
 class VariableLifecycle:
     assignment: AssignmentInfo
     uses: list[UsageInfo]
-    # True when the RHS's underlying Name/Attribute reference is itself
-    # reassigned (or mutated via the same exact reference) somewhere
-    # between this assignment and its single use — see detect_redundancy
-    # for why that disqualifies "redundant assignment" entirely, not just
-    # its autofix (issue #74).
     rhs_reference_reassigned_before_use: bool = False
 
     @property
@@ -78,12 +73,6 @@ class VariableLifecycle:
 
     @property
     def is_immediate_use(self) -> bool:
-        """First use is 0-1 statements after the assignment.
-
-        Uses in different scopes (closures) are never considered immediate,
-        even if their statement index appears close, because they're in
-        nested functions and the variable is captured by the closure.
-        """
         if not self.uses:
             return False
         first_use = self.uses[0]
