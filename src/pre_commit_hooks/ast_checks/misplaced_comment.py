@@ -34,19 +34,18 @@ ERROR_CODE = "TR7"
 
 IGNORE_PATTERN = ignore_pattern_for("TR7")
 
-# Linter pragma patterns that should NEVER be moved
 LINTER_PRAGMA_PATTERNS = [
-    r"#\s*noqa",  # flake8, ruff
-    r"#\s*type:\s*ignore",  # mypy, pyright
-    r"#\s*pragma:",  # coverage, general pragma
-    r"#\s*pylint:",  # pylint
-    r"#\s*pyright:",  # pyright
-    r"#\s*mypy:",  # mypy
-    r"#\s*flake8:",  # flake8
-    r"#\s*ruff:",  # ruff
-    r"#\s*bandit:",  # bandit
-    r"#\s*nosec",  # bandit
-    r"#\s*isort:",  # isort
+    r"#\s*noqa",
+    r"#\s*type:\s*ignore",
+    r"#\s*pragma:",
+    r"#\s*pylint:",
+    r"#\s*pyright:",
+    r"#\s*mypy:",
+    r"#\s*flake8:",
+    r"#\s*ruff:",
+    r"#\s*bandit:",
+    r"#\s*nosec",
+    r"#\s*isort:",
 ]
 _COMPILED_LINTER_PATTERNS = {re.compile(p) for p in LINTER_PRAGMA_PATTERNS}
 
