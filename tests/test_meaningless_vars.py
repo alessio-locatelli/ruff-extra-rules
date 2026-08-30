@@ -1689,17 +1689,6 @@ def test_autofix_follows_closure_into_type_alias_value() -> None:
 
 
 def test_autofix_follows_closure_into_generic_functions_own_annotation_despite_body_shadowing() -> None:
-    # a PEP 695 generic function's parameter/return annotations
-    # run in the type parameters' own implicit scope, not the function's own
-    # body/parameter scope — confirmed against CPython that a body-local
-    # reassignment of the annotated name has no effect on what the
-    # annotation itself resolves to (it's evaluated once, at `def` time,
-    # before the body's own local ever exists). The previous fix lumped
-    # these annotations into `_own_scope_children`, filtered by
-    # `_binds_name_in_nested_scope`'s *body*-shadow check — so `inner`'s own
-    # unrelated `data = 1` reassignment made the annotation look shadowed
-    # and left it completely unrenamed, even though it should have followed
-    # the outer rename like any other enclosing-scope reference.
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1721,12 +1710,8 @@ def test_autofix_follows_closure_into_generic_functions_own_annotation_despite_b
         fixed_content = filepath.read_text()
 
     assert "def inner[T](value: payload):" in fixed_content
-    assert "data = 1" in fixed_content  # Body's own local reassignment untouched.
+    assert "data = 1" in fixed_content
     module_namespace: dict[str, Any] = {}
-    # dont_inherit=True: see test_autofix_still_follows_annotation_closure_without_deferred_annotations
-    # — this test file's own `from __future__ import annotations` would
-    # otherwise leak into the compiled fixture regardless of what
-    # fixed_content itself contains.
     exec(  # noqa: S102
         compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec", dont_inherit=True), module_namespace
     )
