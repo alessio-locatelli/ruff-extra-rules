@@ -823,24 +823,6 @@ class VariableTracker(ast.NodeVisitor):
         use: UsageInfo,
         scope_id: int,
     ) -> bool:
-        """True when `assignment`'s RHS reads a Name/Attribute reference
-        that is itself reassigned (or augmented-assigned) between
-        `assignment` and `use` — the "snapshot the old value before
-        reassigning it" hazard from issue #74. Inlining the RHS text at
-        `use` in that case would read the reference's new state instead of
-        the one captured at assignment time, silently changing behavior.
-
-        For a Name RHS (`old = x`), only rebinding `x` itself is unsafe —
-        mutating the object `x` refers to (e.g. `x.attr = ...`) doesn't
-        create this hazard, since `old` and `x` still alias the same
-        object either way. For an Attribute RHS (`old = obj.attr`), both
-        rebinding `obj` itself and reassigning any attribute/subscript of
-        `obj` are treated as unsafe — the latter conservatively, since this
-        tracker doesn't record *which* attribute was reassigned.
-
-        See `_suspension_point_between` for the Call/Attribute suspension
-        hazard and the method-call branch below for the receiver hazard.
-        """
         rhs_node = assignment.rhs_node
 
         if isinstance(rhs_node, ast.Name):
@@ -875,10 +857,6 @@ class VariableTracker(ast.NodeVisitor):
         if isinstance(rhs_node, ast.Call) and isinstance(rhs_node.func, ast.Attribute):
             base = _unwind_to_base_name(rhs_node.func)
             if base is not None:
-                # Bisect from the RHS's own end line, not the assignment's
-                # start line, and exclude the use's own statement (see
-                # exclude_enclosing_stmt below) — both can reference `base`
-                # again without that being a mutation.
                 rhs_end_line = rhs_node.end_lineno if rhs_node.end_lineno is not None else assignment.line
                 return self._reference_reassigned_in_range(
                     base.id,
