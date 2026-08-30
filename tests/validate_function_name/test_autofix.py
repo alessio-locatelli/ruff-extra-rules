@@ -63,9 +63,6 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
         (_from_fixture("safe_small.py", "get_config"), FixOutcome.APPLIED),
         (_from_fixture("safe_small.py", "get_active"), FixOutcome.APPLIED),
         (_from_fixture("safe_small.py", "get_items"), FixOutcome.APPLIED),
-        # Neither function matches a naming heuristic strongly enough for
-        # process_file to suggest a rename, so should_autofix is exercised
-        # directly with a hand-built Suggestion instead.
         (
             _with_suggestion(
                 None,
@@ -87,12 +84,6 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
             FixOutcome.FAILED,
         ),
         (_from_fixture("unsafe_large.py", "get_user_data"), FixOutcome.DECLINED),
-        # apply_fix can only find self.x/cls.x call sites within the same
-        # class body, not external calls through a differently-named
-        # receiver (e.g. reader.get_report() in a free function elsewhere
-        # in the file). Auto-fixing the definition without being able to
-        # find every such call site would break real, unrenamed callers,
-        # so should_autofix must refuse methods outright rather than risk it.
         (
             _via_process_file(
                 'class Reader:\n    def get_data(self):\n        f = open("f.txt")\n        return f.read()\n\n\n'
@@ -130,8 +121,6 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
             ),
             FixOutcome.DECLINED,
         ),
-        # A function with 20+ lines of code (excluding docstring) is too
-        # large to safely auto-fix.
         (
             _with_suggestion(
                 "def get_data():\n{}\n    return x0\n".format("\n".join(f"    x{i} = {i}" for i in range(20))),
@@ -142,8 +131,6 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
             ),
             FixOutcome.DECLINED,
         ),
-        # A function with control-flow nesting depth > 1 is too complex to
-        # safely auto-fix.
         (
             _with_suggestion(
                 "def get_data(flag, items):\n"
@@ -159,7 +146,6 @@ def _with_suggestion(source: str | None, **suggestion_kwargs: object) -> Callabl
             ),
             FixOutcome.DECLINED,
         ),
-        # A docstring's own lines don't count against the size limit.
         (
             _via_process_file(
                 'def get_data():\n    """A short docstring\n    spanning two lines.\n    """\n'
