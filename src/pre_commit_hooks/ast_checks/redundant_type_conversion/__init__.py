@@ -91,17 +91,6 @@ class RedundantTypeConversionCheck(BaseCheck):
         return True
 
     def get_prefilter_pattern(self) -> list[str] | None:
-        # Widens to "check every file" once a persistent daemon might already be running (ADR-0041): a
-        # file can be a dependency of an already-tracked one without having any redundant-conversion
-        # candidate of its own -- the narrow, candidate-name-based prefilter below would otherwise skip
-        # that file and its direct-input lifecycle entirely, silently
-        # reopening the exact cross-file gap this decision exists to close.
-        #
-        # Function-local: a module-level import here would make `daemon.py`
-        # already be a cached submodule by the time `python -m
-        # ...redundant_type_conversion.daemon` tries to run it as `__main__`
-        # (this package's own `__init__.py` runs first), which trips a
-        # `RuntimeWarning` and corrupts its stdout-based startup protocol.
         from . import daemon  # noqa: PLC0415
 
         if daemon.socket_exists_for(Path.cwd()):
