@@ -1,10 +1,3 @@
-"""Glob matching in `ruff`'s own dialect, plus the anchoring every pattern
-source shares.
-
-See `docs/adr/0049-per-file-ignores.md` and
-`docs/adr/0046-exclude-glob-semantics.md`.
-"""
-
 from __future__ import annotations
 
 import functools
