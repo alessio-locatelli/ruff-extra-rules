@@ -163,12 +163,6 @@ def test_normalize_for_tokenize(source: str, expected: str) -> None:
 
 
 def test_classify_comment_lines_on_cr_only_source() -> None:
-    # io.StringIO.readline() (unlike ast.parse(), which treats
-    # a bare \r as a line boundary the same as \n/\r\n) doesn't split on a
-    # lone \r at all, so tokenize must not see an old-Mac-style CR-only
-    # file as one giant physical line and skip emitting a COMMENT token on
-    # the line that actually has one — that would silently hide a real
-    # trailing comment on any file using this newline convention.
     source = 'x = 1\rsep = "\\\\"  # trailing comment\rprint(x, sep)\r'
     _comment_only, trailing = classify_comment_lines(source)
     assert trailing == {2}
