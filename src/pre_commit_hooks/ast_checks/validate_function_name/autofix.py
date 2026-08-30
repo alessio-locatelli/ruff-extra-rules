@@ -1,5 +1,3 @@
-"""Safe autofix implementation for function renames."""
-
 from __future__ import annotations
 
 import ast
