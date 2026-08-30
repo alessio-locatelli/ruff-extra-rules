@@ -338,10 +338,6 @@ def test_apply_fix_renames_call_site_on_line_with_non_ascii_text(
 
 
 def test_apply_fix_leaves_subclass_super_call_untouched(tmp_path: Path) -> None:
-    # A subclass's super().get_data() is intentionally left unrenamed.
-    # Rewriting it would be unsafe: if the subclass overrides get_data,
-    # self.get_data() elsewhere resolves dynamically to that override, not
-    # to the base class method being renamed here.
     test_file = tmp_path / "inherit.py"
     test_file.write_text(
         "class Base:\n"
