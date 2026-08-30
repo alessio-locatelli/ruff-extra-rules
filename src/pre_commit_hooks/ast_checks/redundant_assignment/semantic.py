@@ -508,17 +508,6 @@ def _effectful_rhs_use_is_safe_to_inline(use: UsageInfo) -> bool:
     return not use.in_loop and not use.in_lambda and not is_preceded_by_call(use)
 
 
-# Characters that make it unsafe to splice a string literal's raw value
-# directly into an f-string's surrounding text: the two quote characters
-# (would prematurely terminate — or ambiguously extend — the string,
-# without knowing the specific quote style the target f-string uses), a
-# backslash (would be reinterpreted as the start of an escape sequence
-# instead of a literal backslash), brace characters (would open/close a new
-# replacement field instead of appearing as literal text), newlines (would
-# break a single-line f-string), and a NUL byte (CPython's tokenizer
-# rejects any source file containing one, even though it's a perfectly
-# valid character *inside* a string literal like `"\x00"` — splicing it as
-# raw text would turn a fixable file into an unparsable one).
 _FSTRING_SPLICE_UNSAFE_CHARS = frozenset({"'", '"', "\\", "{", "}", "\n", "\r", "\x00"})
 
 
