@@ -527,21 +527,11 @@ def is_safe_to_splice_into_fstring(value: str, encoding: str = "utf-8") -> bool:
 
 
 def fstring_splice_is_safe(rhs_node: ast.expr, use: UsageInfo) -> bool | None:
-    """None when this isn't the f-string-splice scenario at all — RHS isn't
-    a string literal, or the use isn't inside an f-string replacement field
-    — so callers should fall through to the ordinary autofix rules
-    unchanged. True/False when it is: whether the literal's raw value can
-    be spliced directly into the surrounding f-string text instead of
-    being naively re-quoted inside `{}` (issue #72).
-    """
     if not (isinstance(rhs_node, ast.Constant) and isinstance(rhs_node.value, str)):
         return None
     if not use.in_fstring_expression:
         return None
     if use.fstring_field_span is None:
-        # Inside an f-string field, but not as its whole expression (e.g.
-        # `{x.attr}` or `{x!r}`) — no safe way to remove the braces and
-        # splice raw text without changing what the field expression does.
         return False
     return is_safe_to_splice_into_fstring(rhs_node.value)
 
