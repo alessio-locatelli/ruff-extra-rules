@@ -136,9 +136,6 @@ def apply_fixes(
 
 
 def _cleanup_blank_lines_around_removals(source_lines: list[str], removed_lines: set[int]) -> None:
-    """Modifies `source_lines` in place. Only touches blank lines adjacent to a
-    `removed_lines` entry, leaving the rest of the file's blank lines untouched.
-    """
     for removed_idx in sorted(removed_lines):
         blank_above = 0
         idx = removed_idx - 1
@@ -152,9 +149,8 @@ def _cleanup_blank_lines_around_removals(source_lines: list[str], removed_lines:
             blank_below += 1
             idx += 1
 
-        total_blanks = blank_above + 1 + blank_below  # +1 for removed line itself
+        total_blanks = blank_above + 1 + blank_below
 
-        # 3+ consecutive blanks: collapse to at most 1 above, 1 below.
         if total_blanks >= 3:
             if blank_above > 1:
                 for i in range(removed_idx - blank_above, removed_idx - 1):
