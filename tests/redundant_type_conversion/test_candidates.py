@@ -49,8 +49,6 @@ def test_finds_a_candidate_in_any_expression_position(source: str) -> None:
         ("list(\n    x\n)\n", ALL_CONSTRUCTORS),
         ("list(x)\n", frozenset({"str"})),
         ("not_a_builtin(x)\n", ALL_CONSTRUCTORS),
-        # `module.str(x)` isn't a call to the builtin -- `node.func` is an
-        # Attribute, not a bare Name.
         ("module.str(x)\n", ALL_CONSTRUCTORS),
     ],
     ids=[
