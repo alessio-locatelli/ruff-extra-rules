@@ -24,31 +24,6 @@ _LOCK_POLL_INTERVAL_SECONDS = 0.02
 
 
 class CacheManager:
-    """Content-hash-based file cache with mtime optimization.
-
-    Uses SHA-1 content hashing for cache keys with mtime fast-path optimization.
-    Cache is stored in .cache/pre_commit_hooks/ directory in JSON format.
-
-    `cache_version` has no default: a stale value here silently serves
-    outdated results, so every caller must supply one that changes whenever
-    something that could affect a cached result changes. See
-    `ast_checks.CheckOrchestrator._generate_cache_version()` for the one
-    real caller — it derives its version from a hash of its own source tree
-    rather than a hand-maintained constant, which previously caused a real
-    bug (commit 0e3efba) when a change was made without remembering to bump
-    it.
-
-    Example:
-        >>> cache = CacheManager(hook_name="meaningless-vars", cache_version="1")
-        >>> result = cache.get_cached_result(Path("foo.py"))  # uses hook_name
-        >>> if result is None:
-        ...     # Run expensive check
-        ...     violations = check_file("foo.py")
-        ...     cache.set_cached_result(
-        ...         Path("foo.py"), "meaningless-vars", {"violations": violations}
-        ...     )
-    """
-
     __slots__ = ("_cache_dir_unavailable", "_locking_unavailable", "cache_dir", "cache_version", "hook_name")
 
     DEFAULT_CACHE_DIR = Path(".cache/pre_commit_hooks")
