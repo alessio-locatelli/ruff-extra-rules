@@ -279,18 +279,12 @@ def test_different_files_different_cache_paths(cache_manager: CacheManager, tmp_
 def test_get_cached_result_degrades_to_cache_miss_when_lock_times_out(
     cache_manager: CacheManager, sample_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # fcntl.flock's own LOCK_EX blocks indefinitely, with no timeout. A
-    # peer that's still holding the lock past _LOCK_TIMEOUT_SECONDS must
-    # make this raise (and degrade to a cache miss) rather than hang.
     monkeypatch.setattr(cache_module, "_LOCK_TIMEOUT_SECONDS", 0.2)
     monkeypatch.setattr(cache_module, "_LOCK_POLL_INTERVAL_SECONDS", 0.01)
 
     cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
     lock_path = cache_manager._get_cache_path(sample_file).with_suffix(".lock")
 
-    # A distinct file descriptor opened on the same path holds its own,
-    # independent flock -- the same contention a second real process
-    # opening the same lock file would cause.
     with lock_path.open("a", encoding="utf-8") as blocker_fp:
         fcntl.flock(blocker_fp, fcntl.LOCK_EX)
 
