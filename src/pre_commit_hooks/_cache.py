@@ -143,12 +143,8 @@ class CacheManager:
             logger.warning("File: %s, hook name: %s, error: %s", filepath, hook_name, repr(error))
 
     def _get_cache_path(self, filepath: Path) -> Path:
-        """Uses two-level directory structure for better filesystem performance:
-        .cache/pre_commit_hooks/ab/abc123...def.json
-        """
-        # Hash the filepath (not content) to get stable cache location
         file_hash = hashlib.sha1(str(filepath.resolve()).encode(), usedforsecurity=False).hexdigest()
-        cache_subdir = self.cache_dir / file_hash[:2]  # first 2 hex chars as prefix
+        cache_subdir = self.cache_dir / file_hash[:2]
         cache_subdir.mkdir(exist_ok=True)
         return cache_subdir / f"{file_hash}.json"
 
