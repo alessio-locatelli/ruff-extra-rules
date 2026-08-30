@@ -487,8 +487,6 @@ def test_apply_fix_does_not_rename_call_shadowed_by_nested_class(
 def test_apply_fix_does_not_rename_call_shadowed_by_local_import(
     tmp_path: Path,
 ) -> None:
-    # A local import binding the same name shadows the function for the
-    # rest of that scope, same as an assignment would.
     test_file = tmp_path / "module.py"
     test_file.write_text(
         "def get_data():\n"
