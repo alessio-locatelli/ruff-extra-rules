@@ -26,7 +26,6 @@ class PerFileIgnoreList:
     entries: tuple[PerFileIgnore, ...] = ()
 
     def ignored_check_ids(self, filepath: str | Path) -> frozenset[str]:
-        """See `docs/adr/0049-per-file-ignores.md`."""
         if not self.entries:
             return frozenset()
 
