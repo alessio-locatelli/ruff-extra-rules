@@ -81,7 +81,6 @@ def is_purepath_hover(hover_text: str) -> bool:
 
 
 def hover_passes_gate(hover_text: str | None, level: ConfidenceLevel, constructor: str) -> bool:
-    """Cheap pre-filter for whether a candidate is worth the recheck's own cost. See ADR-0035's "Confidence tiering"."""
     if not hover_text or _is_unreliable(hover_text):
         return False
     if _exact_match(hover_text, constructor):
@@ -89,7 +88,6 @@ def hover_passes_gate(hover_text: str | None, level: ConfidenceLevel, constructo
     if level is not ConfidenceLevel.PERMISSIVE:
         return False
     members = _split_top_level_union(hover_text)
-    # See ADR-0035's "Confidence tiering" -- every member must match, not just one.
     if len(members) > 1:
         return all(_exact_match(member, constructor) for member in members)
     return True
