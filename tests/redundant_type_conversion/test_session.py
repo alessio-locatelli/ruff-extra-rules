@@ -473,7 +473,6 @@ def test_close_file_notifies_didclose_and_forgets_an_open_file(tmp_path: Path) -
 
 
 def test_close_file_forgets_the_file_even_when_the_didclose_notification_fails(tmp_path: Path) -> None:
-    # close_file() runs from decide_candidates()'s own `finally` -- it must never raise.
     client = _StubLSPClient(notify_raises=True)
     session = _session_with_stub_client(client)
     filepath = tmp_path / "opened.py"
