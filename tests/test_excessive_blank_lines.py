@@ -50,24 +50,10 @@ def test_ignore_fixtures_are_not_flagged(fixture_path: Path) -> None:
 @pytest.mark.parametrize(
     ("source", "flagged"),
     [
-        # Raw/byte-prefixed docstrings must be detected via the
-        # AST — a raw-text quote-prefix scan misses the r/b prefix entirely
-        # and would treat the whole file as one giant docstring.
         ('r"""Raw docstring."""\n\n\n\nimport os\n', True),
-        # A file with only comments (no code at all) has no first code
-        # line, so the header-end scan runs off the end of the file.
         ("# just a comment\n\n# another comment\n", False),
         ("", False),
-        # The blank run's own line is blank, so the ignore comment goes on
-        # the first code line after it instead.
         ('"""Docstring."""\n\n\n\ndef foo():  # pytriage: TR2\n    pass\n', False),
-        # A trailing # fmt: skip on the anchor line suppresses the violation
-        # the same way the project's own inline ignore comment does — see
-        # docs/adr/0050-format-suppression-pragmas.md. (A standalone
-        # `# fmt: off` line here would instead get swallowed into the
-        # module header by find_module_header_end's own comment handling,
-        # eliminating the violation before ignored_lines is ever
-        # consulted — not what this case means to exercise.)
         ('"""Docstring."""\n\n\n\ndef foo():  # fmt: skip\n    pass\n', False),
     ],
     ids=["raw-prefixed-docstring", "comment-only-file", "empty-file", "inline-ignore", "fmt-skip-anchor-line"],
