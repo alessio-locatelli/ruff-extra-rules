@@ -11,34 +11,16 @@ if TYPE_CHECKING:
 
 
 def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Violation]]) -> int:
-    """Prints every unavailable check, unprocessable file, rule failure, and
-    violation from a completed run. `all_violations` is `orchestrator.
-    process_files()`'s own return value; `orchestrator` itself is also
-    consulted directly for its `unavailable_checks`/`unprocessable_files`/
-    `rule_failures` bookkeeping.
-
-    Returns 0 if nothing was printed, 1 otherwise.
-    """
     exit_code = 0
 
-    # A check that couldn't run at all (missing/misbehaving prerequisite)
-    # is reported once here, not once per file — see CheckUnavailableError's
-    # own docstring. Every other check's own violations are still reported
-    # normally below; this doesn't discard them.
     for _check_id, message in sorted(orchestrator.unavailable_checks):
         print(f"error: {message}", file=sys.stderr)
         exit_code = 1
 
-    # A file that couldn't be read or parsed must never look identical to a
-    # clean file: report it and fail the run, rather than letting it vanish
-    # from all_violations with only a debug log line as evidence.
     for filepath in sorted(orchestrator.unprocessable_files):
         print(f"{filepath}: error: could not be read or parsed; file skipped", file=sys.stderr)
         exit_code = 1
 
-    # A check that crashes on every file it sees must not look like a clean
-    # run merely because no other check reported anything for the same
-    # files — report the specific check and file, and fail the run.
     for filepath, check_id in sorted(orchestrator.rule_failures):
         print(
             f"{filepath}: error: check '{check_id}' raised an unexpected exception; "
@@ -97,12 +79,6 @@ def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Viola
                 hint = " Run with --fix to inline automatically."
             else:
                 hint = ""
-            # Violation.col is a 0-based character offset (matching Python's
-            # own ast.lineno being 1-based but ast.col_offset being
-            # 0-based); +1 here reports the conventional 1-based column
-            # most editors and other diagnostic tools (including ruff
-            # itself) use, so "the first character of the line" reads as
-            # column 1, not 0.
             print(
                 f"{filepath}:{v.line}:{v.col + 1}: {v.error_code}: {tag}{v.message}{hint}",
                 file=sys.stderr,
