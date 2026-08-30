@@ -681,12 +681,9 @@ class VariableTracker(ast.NodeVisitor):
         self.parent_stack.pop()
 
     def visit_Name(self, node: ast.Name) -> None:
-        # Only track loads (uses), not stores (assignments)
         if not isinstance(node.ctx, ast.Load):
             return
 
-        # Skip if we're currently assigning to this variable
-        # (to avoid treating LHS as a use in `x = x + 1`)
         if node.id in self.currently_assigning:
             return
 
@@ -711,18 +708,12 @@ class VariableTracker(ast.NodeVisitor):
         is_keyword_argument_echo = isinstance(immediate_parent, ast.keyword) and immediate_parent.arg == node.id
         is_positional_argument_echo = self._is_positional_argument_echo(node, immediate_parent)
 
-        # Name-load context isn't resolved to anything more specific than
-        # "unknown" — that would need walking parent nodes with a real
-        # parent-tracking system. Only the other two UsageContext values
-        # (set by the assignment-visiting methods above) are ever compared.
-        context: UsageContext = "unknown"
-
         usage = UsageInfo(
             var_name=node.id,
             line=node.lineno,
             col=node.col_offset,
             stmt_index=stmt_index,
-            context=context,
+            context="unknown",
             scope_id=scope_id,
             usage_has_await=usage_has_await,
             in_control_flow=self.control_flow_depth > 0,
