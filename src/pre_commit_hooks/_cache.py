@@ -150,10 +150,8 @@ class CacheManager:
 
     @staticmethod
     def compute_file_hash(filepath: Path) -> str:
-        """Returns SHA-1 hex digest."""
         sha1 = hashlib.sha1(usedforsecurity=False)
         with filepath.open("rb") as f:
-            # Read in 64KB chunks for large files
             for chunk in iter(lambda: f.read(65536), b""):
                 sha1.update(chunk)
         return sha1.hexdigest()
