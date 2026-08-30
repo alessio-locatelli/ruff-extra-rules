@@ -116,9 +116,6 @@ class ValidateFunctionNameCheck(BaseCheck):
                     col=0,
                     message=message,
                     fixable=auto_fixable and reference_status == "safe",
-                    # Violation.fix_data is intentionally untyped (dict[str,
-                    # Any]) at this boundary; see ValidateFunctionNameFixData
-                    # above for the shape check()/fix() actually agree on.
                     fix_data=cast("dict[str, Any]", fix_data),
                 )
             )
