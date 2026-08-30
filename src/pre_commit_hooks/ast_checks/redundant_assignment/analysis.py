@@ -167,24 +167,6 @@ def _call_precedes_target(
 
 
 def is_preceded_by_call(use: UsageInfo) -> bool:
-    """Check if a potentially effectful expression evaluates before `use`.
-
-    Lazily walks `use.enclosing_stmt` looking for `use.node` — deferred to
-    call time (rather than computed eagerly per Name-load during the AST
-    walk) since it's O(statement size); running it for every Name-load
-    would be quadratic for wide expressions (e.g. a large tuple/list/dict
-    literal with many names).
-
-    Used to decide whether inlining a call in place of `use` could reorder
-    side effects relative to a sibling expression — see
-    `redundant_assignment.semantic.should_autofix`'s zero-arg-call carve-out
-    for why this matters (e.g. inlining `value` into
-    `sink(side_effect(), value)` would run the inlined call *after*
-    `side_effect()`, reversed from the original assign-then-use order).
-
-    Returns True conservatively when `use.node`/`use.enclosing_stmt` is
-    unavailable, since safety can't be verified in that case.
-    """
     if use.node is None or use.enclosing_stmt is None:
         return True
     _found, effect_before, _ = _call_precedes_target(use.enclosing_stmt, use.node)
