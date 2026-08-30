@@ -1,5 +1,3 @@
-"""Confidence tiering for TR6 — see ADR-0035 and `docs/rules/redundant-type-conversion.md`."""
-
 from __future__ import annotations
 
 from enum import Enum, auto
