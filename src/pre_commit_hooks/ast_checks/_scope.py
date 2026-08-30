@@ -49,11 +49,6 @@ def iter_within_scope_from(children: Iterable[ast.AST]) -> Iterator[ast.AST]:
 
 
 def collect_scope_names(scope: ast.AST) -> set[str]:
-    """Collect every `Name` identifier bound or read directly within `scope`.
-
-    Excludes names from nested functions/lambdas/comprehensions/classes,
-    matching Python's own scoping rules.
-    """
     return {node.id for node in iter_within_scope(scope) if isinstance(node, ast.Name)}
 
 
