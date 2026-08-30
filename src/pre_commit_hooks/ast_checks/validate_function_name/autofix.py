@@ -192,23 +192,6 @@ def _attr_name_position(node: ast.Attribute, lines: list[str]) -> SourcePosition
 
 
 def _binds_name(node: ast.FunctionDef | ast.AsyncFunctionDef, name: str, target: ast.AST) -> bool:
-    """Whether a function's own scope introduces a new binding for `name`.
-
-    Conservative by design: covers a same-named parameter, a same-named
-    nested def/class anywhere in the body (not crossing further nested scope
-    boundaries), and any plain assignment to `name` anywhere in the body —
-    matching real Python scoping, where a single assignment anywhere in a
-    function makes that name local for the *entire* function. When this
-    returns True, every reference to `name` inside the function refers to
-    that local binding, not an outer scope's definition, so the whole
-    function must be skipped.
-
-    `target` (the function actually being renamed) is excluded from
-    consideration: it may legitimately appear as a nested def matching
-    `name` inside `node`'s body (when `node` is target's enclosing function),
-    and that must not itself count as a shadow, or its own call sites within
-    `node` would be wrongly skipped.
-    """
     args = node.args
     all_args = [
         *args.args,
