@@ -1275,12 +1275,6 @@ def test_is_preceded_by_call_defaults_to_true_for_unknown_container() -> None:
     assert is_preceded_by_call(use) is True
 
 
-# ---------------------------------------------------------------------------
-# classify_comment_lines (used for AssignmentInfo.has_inline_comment /
-# has_comment_above)
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("line", "expected"),
     [
