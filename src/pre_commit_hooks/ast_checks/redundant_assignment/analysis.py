@@ -642,14 +642,6 @@ class VariableTracker(ast.NodeVisitor):
         self.visit(node.value)
 
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
-        """`x := value` (walrus) evaluates `value`, then rebinds `x` to it —
-        the same reassignment hazard `visit_AugAssign` guards against for
-        `_rhs_reference_reassigned`'s snapshot-before-reassignment check
-        (issue #74), just spelled as an expression instead of a statement.
-        `old = x; return (x := 2, old)` must not be inlined into `return
-        (x := 2, x)`, which would read the just-rebound value instead of
-        the one captured at assignment time.
-        """
         self.parent_stack.append(node)
         self.visit(node.value)
         self.parent_stack.pop()
