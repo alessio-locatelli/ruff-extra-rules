@@ -1778,12 +1778,6 @@ def test_collect_replacements_preserves_peer_names_inside_nested_generic_scopes(
 
 
 def test_autofix_does_not_follow_generic_functions_own_annotation_under_deferred_annotations() -> None:
-    # Branch coverage: a generic function's annotation must still be
-    # excluded entirely under `from __future__ import annotations`, exactly
-    # like a non-generic function's — deferred annotations turn every
-    # annotation into an unresolved string, regardless of PEP 695 type
-    # parameters, so this must never fall into the peer-filtered
-    # closure-following path added by the two tests above.
     source = """from __future__ import annotations
 
 def outer(response):
