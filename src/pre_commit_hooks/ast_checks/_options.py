@@ -42,9 +42,6 @@ type CheckOption = EnumOption[Enum]
 
 
 def add_check_arguments(parser: argparse.ArgumentParser, check_id: str, options: Iterable[CheckOption]) -> None:
-    """`default=None` keeps an unset flag distinguishable from one given its
-    default value; see `docs/adr/0047-declarative-option-descriptors.md`.
-    """
     for option in options:
         parser.add_argument(
             option.flag(check_id),
