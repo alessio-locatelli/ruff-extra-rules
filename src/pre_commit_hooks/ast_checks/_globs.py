@@ -31,13 +31,8 @@ _MAX_ALTERNATIVES = 1024
 @functools.cache
 def compile_glob(pattern: str) -> re.Pattern[str]:
     try:
-        # DOTALL: a newline is a legal character in a POSIX file name, so
-        # `?` and `*` have to match one like any other.
         return re.compile(_translate(pattern), re.DOTALL)
     except re.error as error:
-        # A character class carries its members through to the regex as-is,
-        # so a range `ruff` itself rejects (`[z-a]`) surfaces here rather
-        # than in `_translate_class`.
         message = f"`{pattern}` could not be compiled: {error}"
         raise InvalidGlobError(message) from error
 
