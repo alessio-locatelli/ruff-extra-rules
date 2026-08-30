@@ -195,9 +195,6 @@ def test_ignoring_every_check_for_a_file_reports_nothing(project: Path) -> None:
 
 
 def test_a_pattern_naming_a_check_this_hook_cannot_run_is_accepted(project: Path) -> None:
-    # One project-wide table serves both published hooks, so an entry for the
-    # sibling hook's own check is honored where it applies and ignored here;
-    # see ADR-0045.
     _write_config(project, '"tests/**" = ["redundant-type-conversion"]')
     checked = _flagged_file(project, "tests/t.py")
 
