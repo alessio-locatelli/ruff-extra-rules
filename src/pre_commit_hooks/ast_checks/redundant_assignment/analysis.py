@@ -671,15 +671,6 @@ class VariableTracker(ast.NodeVisitor):
         self.uses[key].append(usage)
 
     def visit(self, node: ast.AST) -> None:
-        """Dispatch to the type-specific visit_* method, tracking current_stmt.
-
-        Many statement visitors below (visit_Assign, visit_AnnAssign, ...)
-        don't call self.generic_visit(node) on themselves — they manually
-        visit only the parts they care about — so parent_stack alone can't
-        reconstruct "the enclosing statement" for an arbitrary node. This
-        override catches every ast.stmt as it's dispatched, regardless of
-        which visit_* method (or none) handles it next.
-        """
         if isinstance(node, ast.stmt):
             self.current_stmt = node
         super().visit(node)
