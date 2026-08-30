@@ -117,23 +117,9 @@ def _lifecycle_with_use_node(
     )
 
 
-# ---------------------------------------------------------------------------
-# should_autofix
-#
-# Issue #76 unified autofix eligibility: it's no longer pattern-dependent
-# and no longer gated by a semantic-score ceiling (that ceiling now only
-# governs *reporting*, via should_report_violation's AggressivenessLevel).
-# Autofix is purely mechanical safety — loop/control-flow position, RHS
-# shape/arg count, line length, and call-reordering/deferral hazards.
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("rhs_source", "var_name"),
     [
-        # "unknown" context, no real use node attached, so
-        # is_preceded_by_call defaults to the conservative "unsafe" answer
-        # regardless of RHS shape or variable name.
         ("get_value()", "x"),
         ("func(1, 2)", "x"),
         ("func()", "x"),
@@ -152,7 +138,7 @@ def test_should_autofix_no_node(rhs_source: str, var_name: str) -> None:
     [
         ("obj.attr", True),
         ("func(key=value)", True),
-        ("func(a, b, c)", False),  # Exceeds the 2-arg limit.
+        ("func(a, b, c)", False),
     ],
     ids=["attribute", "keywords", "complex-call-rejected"],
 )
@@ -168,15 +154,6 @@ def test_should_autofix_allows_simple_zero_arg_call() -> None:
 
 @pytest.mark.parametrize("rhs_source", ["get_value()", "obj.attr"], ids=["call", "attribute"])
 def test_should_autofix_rejects_non_immediate_attribute_or_call_use(rhs_source: str) -> None:
-    # Attribute/Call RHS can run arbitrary code when evaluated, so inlining
-    # one is only safe when the use is the very next statement —
-    # otherwise an intervening statement's own effects could end up
-    # reordered relative to it, e.g. `result = pop(queue); queue.clear();
-    # return result` must not become `queue.clear(); return pop(queue)`,
-    # which pops after clearing instead of before. A Constant/Name RHS has
-    # no such hazard (see
-    # test_should_autofix_returns_true_for_single_use_constant_rhs), so
-    # this restriction is specific to Attribute/Call.
     lifecycle = _lifecycle_with_use_node(rhs_source, use_stmt_index=4)
     assert should_autofix(lifecycle) is False
 
@@ -194,9 +171,6 @@ def test_should_autofix_returns_false_for_multiline_rhs() -> None:
 
 
 def test_should_autofix_allows_long_var_name_when_line_length_is_fine() -> None:
-    # A long variable name on its own must not disqualify autofix — only
-    # the real line-length check (using the actual use line, or the
-    # RHS-length estimate as a fallback) may reject it.
     rhs_node = ast.parse("something1", mode="eval").body
     lifecycle = _make_single_use_lifecycle("something1", rhs_node, var_name="myvariablex")
     assert should_autofix(lifecycle) is True
@@ -209,57 +183,35 @@ def test_should_autofix_returns_true_for_single_use_constant_rhs() -> None:
 
 
 def test_should_autofix_returns_false_for_non_call_non_attr_rhs() -> None:
-    # A list literal falls through every isinstance check and reaches the
-    # final ``return False``.
     rhs_node = ast.parse("[1, 2, 3]", mode="eval").body
     lifecycle = _make_single_use_lifecycle("[1, 2, 3]", rhs_node)
     assert should_autofix(lifecycle) is False
 
 
 def test_should_autofix_allows_zero_arg_call() -> None:
-    # Issue #22 gap 2 (now generalized by issue #76 to every pattern, not
-    # just SINGLE_USE): a zero-arg call with nothing else evaluating
-    # before its use (within the use's statement) has no sibling operand
-    # whose order inlining could disturb, so it's safe to inline.
     rhs_node = ast.parse("MeaninglessVarsCheck()", mode="eval").body
     lifecycle = _make_single_use_lifecycle("MeaninglessVarsCheck()", rhs_node, var_name="check", preceded_by_call=False)
     assert should_autofix(lifecycle) is True
 
 
 def test_should_autofix_rejects_zero_arg_call_preceded_by_a_call() -> None:
-    # A zero-arg call must not be inlined when a sibling expression
-    # evaluates before it within the same statement, or inlining reverses
-    # the original execution order. Example: `value = next_value();
-    # sink(side_effect(), value)` must not become `sink(side_effect(),
-    # next_value())` — that runs next_value() after side_effect() instead
-    # of before it.
     rhs_node = ast.parse("next_value()", mode="eval").body
     lifecycle = _make_single_use_lifecycle("next_value()", rhs_node, var_name="value", preceded_by_call=True)
     assert should_autofix(lifecycle) is False
 
 
 def test_should_autofix_allows_call_with_one_arg() -> None:
-    # A call with a single simple argument must be allowed the same
-    # ≤2-arg allowance as a zero-arg call.
     rhs_node = ast.parse("make_check(1)", mode="eval").body
     lifecycle = _make_single_use_lifecycle("make_check(1)", rhs_node, var_name="check")
     assert should_autofix(lifecycle) is True
 
 
 def test_should_autofix_uses_real_use_line_length_when_available() -> None:
-    # Issue #22 gap 1: should_autofix's line-length check must reflect the
-    # *actual* use line when the caller can supply it, not just the
-    # conservative RHS/var-name-based estimate — otherwise a violation can
-    # be reported [FIXABLE] and then silently skipped by apply_fixes' own,
-    # accurate length check.
     rhs_node = ast.parse("ast.parse(source)", mode="eval").body
     lifecycle = _make_single_use_lifecycle("ast.parse(source)", rhs_node, var_name="tree")
 
-    # Without the real use line, the conservative RHS/var-name estimate
-    # says inlining is safe (both are short).
     assert should_autofix(lifecycle) is True
 
-    # _make_single_use_lifecycle fixes the use at line 2 (1-indexed).
     long_use_line = '    violations = check.check(Path("tests/test_something_with_a_long_name.py"), tree, source)'
     source_lines = ["def f():", long_use_line]
     assert should_autofix(lifecycle, source_lines=source_lines) is False
