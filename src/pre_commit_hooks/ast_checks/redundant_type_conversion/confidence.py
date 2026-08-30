@@ -19,9 +19,6 @@ def eligible_constructors(level: ConfidenceLevel) -> frozenset[str]:
 
 
 def _literal_matches_constructor(hover_text: str, constructor: str) -> bool:
-    # Keyed on the literal's own textual spelling, not runtime subtyping --
-    # see ADR-0035's "Confidence tiering" for why bool/int must not be
-    # conflated here.
     if not (hover_text.startswith("Literal[") and hover_text.endswith("]")):
         return False
     inner = hover_text[len("Literal[") : -1]
