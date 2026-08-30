@@ -317,9 +317,6 @@ def test_fix_marks_violation_errored_and_continues_when_apply_fix_raises(
 def test_fix_marks_violation_rejected_when_apply_fix_raises_fix_validation_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # A rename that would produce invalid syntax must be reported distinctly
-    # from an ordinary internal error, so main() can point the user at
-    # filing a bug instead of suggesting --fix will help.
     filepath = tmp_path / "mod.py"
     source = "def get_data() -> bool:\n    return True\n"
     filepath.write_text(source)
