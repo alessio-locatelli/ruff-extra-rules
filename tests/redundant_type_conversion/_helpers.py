@@ -10,14 +10,6 @@ if TYPE_CHECKING:
 
 
 class FakeSession:
-    """Records every call it receives and answers from pre-programmed,
-    "recorded" tables rather than driving a real `ty` process -- this is
-    the "recorded real `ty` responses, captured once and replayed" unit
-    layer issue #108 asks for; the real LSP contract itself is exercised
-    separately in `tests/test_redundant_type_conversion_integration.py`
-    against the real binary.
-    """
-
     __slots__ = (
         "_diagnostics_by_content",
         "_hover_by_position",
