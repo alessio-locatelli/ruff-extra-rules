@@ -150,13 +150,6 @@ def test_git_grep_filter_includes_gitignored_file(tmp_path: Path) -> None:
 
 
 def test_git_grep_filter_match_order_is_independent_of_hash_seed(tmp_path: Path) -> None:
-    # Matches must not come from iterating an unordered `set` of
-    # git's own output paths -- that would make the return order depend on
-    # PYTHONHASHSEED -- randomized per process by default -- rather than on
-    # the input file order (ch. 9: "MUST NOT allow hash-table ... order to
-    # affect the result"). Spawns real subprocesses with different explicit
-    # seeds and asserts they agree, rather than relying on whatever seed
-    # this test's own process happened to already start with.
     git = shutil.which("git")
     assert git is not None
     subprocess.run([git, "init", "-q"], check=True, cwd=tmp_path)  # noqa: S603
