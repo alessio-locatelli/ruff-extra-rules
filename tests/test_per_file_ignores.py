@@ -95,8 +95,6 @@ def test_a_path_pattern_does_not_reach_outside_its_anchor(tmp_path: Path) -> Non
 def test_a_file_outside_the_anchor_is_matched_on_its_name_alone(
     tmp_path: Path, pattern: str, negated: bool, expected: bool
 ) -> None:
-    # Matching a bare file name is unanchored by construction, which is what
-    # makes an `__init__.py` entry cover every package; see ADR-0049.
     anchor = tmp_path / "project"
     ignores = PerFileIgnoreList((_entry(pattern, anchor, negated=negated),))
 
