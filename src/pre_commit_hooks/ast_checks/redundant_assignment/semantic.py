@@ -381,106 +381,54 @@ def should_report_violation(
     assignment = lifecycle.assignment
     is_argument_echo = _is_argument_echo(lifecycle)
 
-    # Don't report assignments inside loops - they often accumulate/track state
-    # across iterations even if they appear to have single use per iteration
     if assignment.in_loop:
         return False
 
     if assignment.in_try:
         return False
 
-    # Skip if there's a comment right above the assignment (any scope)
-    # Comments above variables indicate documentation/explanation intent
     if assignment.has_comment_above:
         return False
 
-    # Skip if there's an inline comment on the assignment line
-    # Inline comments (e.g., type: ignore) indicate intentional code
     if assignment.has_inline_comment and not allow_inline_suppression:
         return False
 
-    # Rule 1: Don't report global scope variables unless prefixed with `_`
     if assignment.in_global_scope and not assignment.var_name.startswith("_"):
         return False
 
-    # Rule 1b: Never report dunder names (`__author__`, `__version__`, ...).
-    # Unlike an ordinary `_private` name, a dunder assignment's target is
-    # conventionally read via attribute access from outside the file
-    # (packaging metadata, doc generators, `importlib.metadata` fallbacks),
-    # so the assignment itself is the API surface even when this file only
-    # references the name once — inlining it would delete that surface.
     if assignment.var_name.startswith("__") and assignment.var_name.endswith("__"):
         return False
 
-    # Rule 2: Don't report if RHS has await expression
-    # Inlining await expressions requires parentheses which is bulky:
-    #   json_resp = await resp.json(); return json_resp['key']  # noqa: ERA001
-    # Would become: return (await resp.json())['key']  # ugly
     if assignment.rhs_has_await:
         return False
 
-    # Rule 3: Don't report if inlining would likely exceed the line length
     if _would_exceed_line_length(lifecycle):
         return False
 
-    # Rule 4: Don't report if-else ternary operators
     if isinstance(assignment.rhs_node, ast.IfExp):
         return False
 
-    # Rule 5: Don't report if inlining would require parentheses
-    # Example: len_prefix = len(x) + 1; arr[len_prefix:] would need arr[(len(x) + 1):]
     if _would_require_parentheses(assignment.rhs_node):
         return False
 
-    # Rule 6: Don't report if RHS contains non-deterministic function calls
-    # Functions like time.time(), random.random(), etc. return different values
-    # on each call, so inlining them can change program semantics
     if _contains_nondeterministic_call(assignment.rhs_node):
         return False
 
-    # Rule 7: Don't report "magic number" patterns - numeric/simple literals
-    # where the variable name provides semantic meaning
-    # Examples: max_search_depth = 10, line_spacing = 1.2, user_id = 101749141
     if not is_argument_echo and _is_named_constant_pattern(assignment.var_name, assignment.rhs_node):
         return False
 
-    # Rule 8: Don't report when assignment is outside control flow but usage is inside
-    # This handles pytest.raises pattern where setup is intentionally separated:
-    #   sample_class = SampleClass()  # setup outside  # noqa: ERA001
-    #   with pytest.raises(Error):     # usage inside
-    #       sample_class.method()  # noqa: ERA001
     if not assignment.in_control_flow and lifecycle.uses and all(use.in_control_flow for use in lifecycle.uses):
         return False
 
-    # Rule 9: Don't report when assignment is inside control flow but usage is outside
-    # This handles context manager pattern to reduce nesting:
-    #   with file.open() as f:
-    #       config = load(f)  # assignment inside  # noqa: ERA001
-    #   # Use config outside to avoid deep nesting
-    #   data = config.get(...)  # noqa: ERA001
     if assignment.in_control_flow and lifecycle.uses and all(not use.in_control_flow for use in lifecycle.uses):
         return False
 
-    # Rule 10: Don't report when all usages are inside a comprehension
-    # Inlining would re-evaluate the RHS expression on every iteration,
-    # causing a performance regression. For example:
-    #   iso_country = obj.iso_country          # cached once  # noqa: ERA001
-    #   result = [x for x in items if x.country == iso_country]  # O(1) lookup  # noqa: ERA001
-    # Inlining would become O(n) attribute lookups inside the comprehension.
     if lifecycle.uses and all(use.in_comprehension for use in lifecycle.uses):
         return False
 
     if is_argument_echo:
         return True
 
-    # Rule 11 (conservative level only): a Call RHS returns some domain
-    # object the tracker can't inspect, so a name that isn't a generic
-    # placeholder (`result`, `value`, ...) or a restatement of the callee
-    # itself (`check = MeaninglessVarsCheck()`) is presumed to be the author
-    # deliberately documenting what that call returns — e.g. `warning =
-    # conn.recv()` or `ci_headers = CIMultiDict(headers)` — rather than a
-    # redundant restatement of it. Doesn't apply to the permissive level,
-    # which instead falls through to the semantic-value ceiling below.
     if (
         level is AggressivenessLevel.CONSERVATIVE
         and isinstance(assignment.rhs_node, ast.Call)
@@ -488,14 +436,6 @@ def should_report_violation(
     ):
         return False
 
-    # Rule 12 (conservative level only): a module-level string constant
-    # named with the same convention Rule 7 already exempts for numeric
-    # values (`_GREY = "rgb(201, 203, 207)"`) reads as a deliberate,
-    # reusable declaration even when this file happens to use it only
-    # once — unlike a local `x = "foo"` used once, which is exactly the
-    # redundant pattern this check targets regardless of name shape.
-    # Doesn't apply to the permissive level, which still flags these like
-    # any other single-use string assignment.
     if (
         level is AggressivenessLevel.CONSERVATIVE
         and assignment.in_global_scope
