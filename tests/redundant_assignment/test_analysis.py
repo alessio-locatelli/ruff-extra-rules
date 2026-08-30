@@ -98,8 +98,6 @@ def example():
     print(x)
 """
     lifecycle = _lifecycle_for(source, "x")
-    # Two uses: the read in `x += 2` (augmented assignment) and the use
-    # in `print(x)`.
     assert len(lifecycle.uses) == 2
 
 
