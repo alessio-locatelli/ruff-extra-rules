@@ -344,9 +344,6 @@ class VariableTracker(ast.NodeVisitor):
     visit_AsyncFunctionDef = visit_FunctionDef  # noqa: N815
 
     def visit_For(self, node: ast.For | ast.AsyncFor) -> None:
-        # node.iter runs once, not per-iteration; node.orelse runs only if
-        # the loop completes without `break` — conditional like an if/try
-        # branch, not unconditional like ordinary code after the loop.
         self._record_compound_target_rebindings(node.target, self._get_current_stmt_index())
         self.visit(node.iter)
         self.loop_depth += 1
