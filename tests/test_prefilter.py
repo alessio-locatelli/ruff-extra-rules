@@ -134,9 +134,6 @@ def test_git_grep_filter_includes_untracked_file(tmp_path: Path) -> None:
 
 
 def test_git_grep_filter_includes_gitignored_file(tmp_path: Path) -> None:
-    # The same root cause as the untracked case above, but for a
-    # file matched by .gitignore -- explicitly naming a file on this hook's
-    # own CLI must still check it, regardless of VCS ignore status.
     git = shutil.which("git")
     assert git is not None
 
