@@ -90,9 +90,6 @@ def test_ignores_a_call_missing_its_own_end_position(null_out: Callable[[ast.Cal
         "import re as str\n\n\n",
         "from os import path as str\n\n\n",
         "import str.helpers\n\n\n",
-        # Deliberately scope-blind (see _scan): a binding inside
-        # an unrelated function elsewhere in the module still disables
-        # every same-named candidate module-wide.
         "def other():\n    str = 5\n\n\n",
         "for str in range(3):\n    pass\n\n\n",
         "with open('f') as str:\n    pass\n\n\n",
@@ -123,10 +120,6 @@ def test_ignores_a_call_missing_its_own_end_position(null_out: Callable[[ast.Cal
     ],
 )
 def test_ignores_a_call_whose_constructor_name_is_shadowed(shadowing_statement: str) -> None:
-    # A bare `str(x)` call must not be treated as the builtin constructor
-    # when `str` itself is rebound somewhere in the module -- removing the
-    # "conversion" in that case calls a *different*, user-defined callable,
-    # which can change behavior rather than being a safe no-op.
     source = f"{shadowing_statement}func(str(x))\n"
     assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
 
