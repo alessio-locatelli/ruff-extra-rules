@@ -303,12 +303,6 @@ class VariableTracker(ast.NodeVisitor):
         return children
 
     def _get_source_segment(self, node: ast.expr) -> str:
-        """Reuses self._ast_lines (computed once in __init__) via
-        fast_get_source_segment instead of ast.get_source_segment's own
-        per-call re-split of the whole file — called once per assignment
-        across the whole file, so the difference is O(source size) total
-        instead of O(assignments x source size).
-        """
         return fast_get_source_segment(self.source, self._ast_lines, node) or ""
 
     def _is_simple_name_target(self, target: ast.expr) -> bool:
