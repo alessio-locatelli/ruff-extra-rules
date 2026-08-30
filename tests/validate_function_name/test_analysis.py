@@ -41,9 +41,6 @@ def _func(source: str, name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
 
 
 def test_attach_parents_handles_deeply_nested_source_without_recursion_error() -> None:
-    # A recursive implementation hits Python's default recursion limit
-    # (1000) around this depth, even though ast.parse itself accepts
-    # source nested far deeper than this as ordinary, valid Python.
     source = "x = " + "not " * 1500 + "True\n"
     tree = ast.parse(source)
 
@@ -59,8 +56,6 @@ def test_attach_parents_handles_deeply_nested_source_without_recursion_error() -
     ("source", "func_name", "flags"),
     [
         (
-            # get_or_create updating a module-level cache must not be
-            # flagged as mutation.
             """
 import structlog
 from structlog.typing import FilteringBoundLogger
@@ -161,8 +156,6 @@ def get_data(regular, /, posonly, *args, kwonly=None, **kwargs):
             {"mutates_args": True},
         ),
         (
-            # Limitation: only checks the first attribute level
-            # (settings.database, not deeper).
             """
 def get_config(settings):
     '''Get config and update nested attributes.'''
@@ -195,8 +188,6 @@ def get_config(settings):
             {"network_write": True, "network_read": False},
         ),
         (
-            # A networking call whose verb isn't in the read or write verb
-            # lists (e.g. DELETE) doesn't set either flag.
             "def get_data(url):\n    return httpx.delete(url)\n",
             "get_data",
             {"network_read": False, "network_write": False},
@@ -211,9 +202,6 @@ def get_config(settings):
         ("def get_data(form):\n    return form.is_valid()\n", "get_data", {"validates": True}),
         ("def get_data(items):\n    return items.transform()\n", "get_data", {"transforms": True}),
         (
-            # Returning a variable that was assigned from a get_* call
-            # counts as delegation, same as returning the get_* call
-            # directly.
             "def get_wrapper(key):\n    value = get_value(key)\n    return value\n",
             "get_wrapper",
             {"delegates_get": True},
@@ -230,8 +218,6 @@ def get_config(settings):
             {"collects": True},
         ),
         (
-            # Assigning to an attribute of something that isn't a parameter
-            # (or self) isn't argument mutation.
             "def get_data():\n    some_module.CONFIG = {}\n    return 1\n",
             "get_data",
             {"mutates_args": False},
@@ -253,8 +239,6 @@ def get_config(settings):
             {"mutates_args": False},
         ),
         (
-            # A while-loop that calls .exists() (the find_root pattern) is
-            # treated as a search/find heuristic.
             "def get_root(path):\n    while not path.exists():\n        path = path.parent\n    return path\n",
             "get_root",
             {"searches": True},
@@ -316,26 +300,16 @@ def get_config(settings):
             {"delegates_get": True},
         ),
         (
-            # Calling a get_* function directly in a return (not first
-            # assigned to a variable) doesn't register a delegation-tracked
-            # variable, though the direct-return check still detects the
-            # delegation itself.
             "def get_wrapper():\n    print(get_value())\n    return get_value()\n",
             "get_wrapper",
             {"delegates_get": True},
         ),
         (
-            # A tuple-unpacking assignment target isn't tracked as a
-            # delegated variable name, so 'a' was never registered — even
-            # though it holds the result of get_raw_pair() — and returning
-            # it isn't detected as delegation.
             "def get_pair():\n    a, b = get_raw_pair()\n    return a\n",
             "get_pair",
             {"delegates_get": False},
         ),
         (
-            # A mutation-verb call whose func isn't `obj.verb(...)` (e.g. a
-            # bare name call) isn't attributed to any variable.
             "def get_data(x):\n    update(x)\n    return x\n",
             "get_data",
             {"mutates_args": False},
@@ -356,7 +330,6 @@ def get_config(settings):
             {"returns_class": True},
         ),
         (
-            # Mirrors CacheManager.get_cached_result (issue #110).
             (
                 "def get_config():\n"
                 "    if refresh:\n"
@@ -368,7 +341,6 @@ def get_config(settings):
             {"disk_read": False, "parses": False},
         ),
         (
-            # Mirrors get_session (issue #110).
             (
                 "def get_value(key):\n"
                 "    try:\n"
@@ -492,8 +464,6 @@ def get_config(settings):
             {"disk_read": True},
         ),
         (
-            # Unlike a list comprehension, a generator expression is lazy --
-            # open() doesn't run until a caller iterates the result, if ever.
             "def get_data(paths):\n    return (open(p) for p in paths)\n",
             "get_data",
             {"disk_read": False},
@@ -595,8 +565,6 @@ def get_config(settings):
     ],
 )
 def test_analyze_function_flags(source: str, func_name: str, flags: dict[str, bool]) -> None:
-    # FunctionBehavior's keys aren't literals here, since `flags` is a
-    # dynamic per-case mapping; TypedDict is a plain dict at runtime.
     analysis = cast("dict[str, bool]", analyze_function(_func(source, func_name)))
 
     for flag, expected in flags.items():
@@ -836,10 +804,6 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
             ),
             {"Session": True},
         ),
-        # `.read()`'s own func is an Attribute rooted at a Call (`open('f')`),
-        # not a Name, so `_call_name` can't resolve it to "read" -- only
-        # "open" is checked here; the resolvable-.read() case is covered at
-        # the analyze_function level (disk_read still True from `open` alone).
         ("def get_data():\n    if open('f').read():\n        return 1\n    return 0\n", {"open": False}),
         ("def get_data():\n    while open('f').read():\n        pass\n    return 1\n", {"open": False}),
         ("def get_data():\n    for x in open('f'):\n        pass\n    return 1\n", {"open": False}),
@@ -852,11 +816,6 @@ def _conditional_by_call_name(source: str, func_name: str) -> dict[str, bool]:
             {"open": True},
         ),
         (
-            # Deliberately conservative: a genexp's outermost iterable is
-            # technically evaluated eagerly in real Python, but the whole
-            # GeneratorExp subtree is treated as conditional anyway, since a
-            # false negative here is far cheaper than the false positive
-            # this rule exists to fix.
             "def get_data():\n    return (x for x in open('f'))\n",
             {"open": True},
         ),
@@ -939,15 +898,10 @@ def test_iter_own_scope_conditional_tagging(source: str, expected: dict[str, boo
             {"Base", "open"},
         ),
         (
-            # A class body's own top-level statements run immediately when
-            # the class statement is reached -- unlike a nested method body.
             "def get_data():\n    class Helper:\n        x = open('f')\n    return 1\n",
             {"open"},
         ),
         (
-            # PEP 649 (default in 3.14) defers annotation evaluation until
-            # something reads __annotations__ -- unlike a default value, a
-            # return annotation doesn't run when this def statement does.
             "def get_data():\n    def helper() -> open('f'):\n        pass\n    return 1\n",
             set(),
         ),
@@ -980,11 +934,6 @@ def test_iter_own_scope_scope_boundary(source: str, expected_call_names: set[str
 
 
 def test_iter_own_scope_handles_deep_if_nesting_without_recursion_error() -> None:
-    # Iterative (explicit stack), not recursive -- see attach_parents for the
-    # analogous concern with expression nesting. 90 is close to the deepest
-    # nesting ast.parse itself will accept (CPython's tokenizer caps
-    # indentation at 100 levels), well within what a recursive
-    # implementation of this traversal would blow Python's call stack on.
     depth = 90
     lines = ["def get_data():"]
     lines.extend("    " * (level + 1) + "if True:" for level in range(depth))
@@ -994,7 +943,7 @@ def test_iter_own_scope_handles_deep_if_nesting_without_recursion_error() -> Non
 
     func_node = _func(source, "get_data")
 
-    assert list(_iter_own_scope(func_node))  # must not raise RecursionError
+    assert list(_iter_own_scope(func_node))
 
 
 @pytest.mark.parametrize(
@@ -1100,7 +1049,6 @@ def get_mock_response(**kwargs):
 
 
 def test_async_get_function_is_flagged(tmp_path: Path) -> None:
-    # Async get_* functions must be flagged, not just sync ones.
     source = """
 import requests
 
@@ -1126,8 +1074,6 @@ class Fetcher:
     ids=["call-result-as-func", "subscript-as-func"],
 )
 def test_call_name_returns_none_for_non_name_non_attribute_func(expr: str) -> None:
-    # A call whose func is neither a Name nor an Attribute (e.g. the result
-    # of another call, or a subscript) has no readable dotted name.
     node = ast.parse(expr, mode="eval").body
     assert isinstance(node, ast.Call)
     assert _call_name(node.func) is None
@@ -1142,13 +1088,9 @@ def test_call_name_returns_none_for_non_name_non_attribute_func(expr: str) -> No
         ("@get_deco().method\ndef get_data():\n    pass\n", None),
     ],
     ids=[
-        # A decorator that's a call whose own func isn't Name/Attribute
-        # (e.g. `@factory()()`) can't be resolved to a name.
         "call-with-unresolvable-func",
         "attribute-form",
         "name-form",
-        # An Attribute decorator whose base isn't a plain Name (e.g. the
-        # result of a call) can't be resolved to a dotted name.
         "attribute-with-unresolvable-base",
     ],
 )
@@ -1166,9 +1108,6 @@ def test_decorator_name(source: str, expected: str | None) -> None:
         ("@staticmethod\n@abc.abstractmethod\ndef get_data():\n    pass\n", True),
     ],
     ids=[
-        # A decorator that isn't a Name/Attribute/resolvable Call is
-        # skipped (continue) rather than crashing, and doesn't count as
-        # override/abstract.
         "unresolvable-decorator-skipped",
         "attribute-form-detected",
         "continues-past-non-matching-decorator",
@@ -1194,7 +1133,6 @@ def test_get_base_name_returns_none_for_unsupported_expression() -> None:
         "def get_data():\n    return compute_stuff()\n",
     ],
     ids=[
-        # No return statement at all, so nothing to suggest a rename for.
         "docstring-only-no-return",
         "non-return-single-statement",
         "bare-return",
@@ -1278,18 +1216,12 @@ def test_extract_first_verb(docstring_line: str, verb: str | None) -> None:
 @pytest.mark.parametrize(
     ("source", "func_name", "suggested_name", "reason"),
     [
-        # collect_suggestions only ever calls suggest_name_for with
-        # get_-prefixed names (test_ and get_ prefixes are mutually
-        # exclusive), so the test_-prefix guard is exercised directly here.
         (
             "def test_something():\n    pass\n",
             "test_something",
             "test_something",
             "function looks like a test",
         ),
-        # Likewise, collect_suggestions already filters out
-        # override/abstractmethod-decorated functions before calling
-        # suggest_name_for, so that guard is exercised directly here too.
         (
             "@override\ndef get_data():\n    pass\n",
             "get_data",
