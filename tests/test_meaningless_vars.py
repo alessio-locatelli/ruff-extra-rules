@@ -1654,15 +1654,6 @@ def test_autofix_preserves_type_alias_peer_reference_inside_nested_lambda(
 
 
 def test_autofix_follows_closure_into_type_alias_value() -> None:
-    # A `type` alias's own `value` expression is lazily evaluated but still
-    # closes over its enclosing scope for any name that isn't one of its own
-    # peer type parameters — confirmed against CPython. Covers the other
-    # side of the fix above: peer names must be filtered out of the
-    # replacement mapping, but everything else must still follow the rename
-    # — including a type parameter's own bound that, unlike the previous
-    # test, does *not* reference a peer (branch coverage for
-    # `_type_param_defaults_and_bounds` yielding a non-empty, non-peer expr
-    # alongside a non-empty filtered mapping).
     source = """def outer(response):
     data: Payload = response.json()
 
