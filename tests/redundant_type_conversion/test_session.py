@@ -651,7 +651,7 @@ def test_finalize_swallows_lsp_error_when_persistent_resync_fails(tmp_path: Path
     uri = filepath.resolve().as_uri()
     session._open_versions[uri] = 1
 
-    session.finalize(filepath, "pristine source\n")  # must not raise
+    session.finalize(filepath, "pristine source\n")
 
 
 def test_on_notification_records_a_publish_diagnostics_uri() -> None:
