@@ -1331,7 +1331,6 @@ def f():
 
 
 def test_has_comment_above_false_first_statement_in_function() -> None:
-    # Branch coverage: an assignment with no comment line above it.
     source = """
 def f():
     data = "foo"
