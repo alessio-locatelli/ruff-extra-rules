@@ -291,12 +291,8 @@ def test_check_and_fix_detect_comment_on_cr_only_source(tmp_path: Path) -> None:
 
 
 def test_fix_write_failure_reports_failed_outcome(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    # fix() must catch atomic_write_text()'s OSError and return a failed
-    # outcome instead of letting it propagate uncaught.
     source = "result = func(\n    arg\n)  # Comment here\n"
 
-    # Point at a path inside a directory that doesn't exist so the
-    # temp-file-then-rename write raises OSError.
     filepath = tmp_path / "missing_dir" / "test.py"
 
     tree = ast.parse(source)
@@ -306,10 +302,6 @@ def test_fix_write_failure_reports_failed_outcome(tmp_path: Path, caplog: pytest
     with caplog.at_level("DEBUG"):
         fix_result = check.fix(filepath, violations, source, tree)
     assert FixOutcome.APPLIED not in fix_result.outcomes
-    # The write failure must be attributed to the violations it
-    # actually affected, not left indistinguishable from "never attempted"
-    # — the orchestrator's own report otherwise misleadingly suggests
-    # re-running --fix, which would just fail identically again.
     assert fix_result.outcomes == (FixOutcome.FAILED,) * len(violations)
     assert all(record.levelname == "DEBUG" for record in caplog.records)
 
