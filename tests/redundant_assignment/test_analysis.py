@@ -251,9 +251,6 @@ def func():
 
 
 def test_attribute_target_nested_in_tuple_tracked_as_usage() -> None:
-    # An Attribute/Subscript element inside a tuple-unpacking target
-    # (`obj.attr, first = ...`) reads `obj`, same as a bare `obj.attr =
-    # value` would.
     source = """
 def func(obj):
     obj.attr, first = compute()
