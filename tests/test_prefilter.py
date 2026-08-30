@@ -105,14 +105,6 @@ def test_git_grep_filter_includes_permission_denied_tracked_file(tmp_path: Path)
 
 
 def test_git_grep_filter_includes_file_deleted_since_discovery(tmp_path: Path) -> None:
-    # A file that's vanished between the caller's file list
-    # being built and this call (e.g. deleted after pre-commit computed
-    # the changed-file list but before this hook ran) produces *no*
-    # signal from `git grep` at all -- exit code 1, empty stdout, empty
-    # stderr, indistinguishable from "pattern genuinely absent from an
-    # existing file". That silence must not be trusted as proof of "no
-    # match" -- the file must still be kept as a candidate rather than
-    # dropped with no trace.
     git = shutil.which("git")
     assert git is not None
 
