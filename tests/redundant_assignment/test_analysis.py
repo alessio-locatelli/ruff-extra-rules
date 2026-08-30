@@ -222,16 +222,11 @@ def outer():
 
 
 def test_named_expr_rebinding_skipped_for_global_variable() -> None:
-    # Branch coverage: a walrus target declared `global` in this scope
-    # must not be tracked as a rebinding use here — matching
-    # visit_AugAssign's own global exclusion, since a global rebinding
-    # isn't a local snapshot hazard this tracker resolves.
     source = """
 def func():
     global x
     return (x := 1)
 """
-    # Must not raise; global walrus targets are silently skipped.
     _tracker(source).visit(ast.parse(source))
 
 
