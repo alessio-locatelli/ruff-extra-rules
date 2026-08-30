@@ -1125,11 +1125,6 @@ def test_evaluation_order_children_assign_yields_value_before_targets() -> None:
     assert children == [(assign_node.value, False), (assign_node.targets[0], False)]
 
 
-# ---------------------------------------------------------------------------
-# is_preceded_by_call
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("source", "var_name", "expected"),
     [
