@@ -274,7 +274,6 @@ def outer():
     return app
 """
     lifecycle = _lifecycle_for(source, "app")
-    # Two uses: @app.route("/") and return app.
     assert len(lifecycle.uses) == 2
 
 
