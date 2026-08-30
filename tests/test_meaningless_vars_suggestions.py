@@ -1037,7 +1037,6 @@ def test_db_fetch_method_evidence_produces_suggestions(source: str, target: str,
 
 
 def test_db_fetch_method_evidence_excludes_fetchnumpy() -> None:
-    # See docs/adr/0038-meaningless-vars-results-vocabulary-boundary.md
     source = "def f(conn):\n    results = conn.fetchnumpy()\n    return results\n"
 
     _assert_plan_for(source, "results", None, None, meaningless_names=_WITH_RESULTS)
