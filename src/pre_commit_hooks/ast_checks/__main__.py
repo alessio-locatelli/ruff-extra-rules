@@ -26,22 +26,6 @@ def _install_sigterm_handler() -> None:
 
 
 def run(argv: list[str] | None = None, *, entrypoint: Callable[[list[str] | None], int] | None = None) -> int:
-    """Process-level wrapper around `main()`.
-
-    Installs graceful SIGTERM handling and turns a cancellation (Ctrl-C or
-    SIGTERM) into a short stderr message and exit code 1 — the same
-    non-success code every other incomplete-run outcome already returns
-    (see `main()`'s own docstring) — instead of letting a raw
-    `KeyboardInterrupt` traceback reach the user.
-
-    Cancellation stops at the next safe opportunity, not instantly: an
-    in-flight `atomic_write_text()`/`_write_cache()` call either finishes
-    (its temp-file-then-`replace()` rename already committed) or rolls back
-    completely (its `finally` clause removes the temp file, leaving the
-    real file untouched) before the interrupt can propagate further — never
-    partway through a single file's own replacement. Once that safe point
-    is reached, no further files are processed.
-    """
     _install_sigterm_handler()
     try:
         return (main if entrypoint is None else entrypoint)(argv)
