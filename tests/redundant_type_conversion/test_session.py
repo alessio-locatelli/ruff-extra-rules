@@ -101,7 +101,7 @@ class _ScriptedSelfTestSession(FakeSession):
 
 def test_run_self_test_passes_with_correctly_behaving_diagnostics(tmp_path: Path) -> None:
     session = _ScriptedSelfTestSession()
-    _run_self_test(session, tmp_path)  # must not raise
+    _run_self_test(session, tmp_path)
 
 
 @pytest.mark.parametrize(
