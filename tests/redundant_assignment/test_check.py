@@ -277,7 +277,6 @@ def auto_clear_fixture():
     cache_prefixes = ("responses", "redirects")
     process(cache_prefixes)
 """,
-        # RHS is 26 chars: len('("responses", "redirects")') = 26 >= 25.
         """
 def func():
     prefixes = ("responses", "redirects")
