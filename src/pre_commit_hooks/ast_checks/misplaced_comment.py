@@ -1,13 +1,3 @@
-"""misplaced-comment - move trailing comments off closing-bracket-only lines.
-
-TR7: a comment trailing a line that contains only closing brackets
-should move to the expression line instead (inline if it fits within 88
-chars, otherwise as a preceding comment). Linter pragma comments (noqa,
-type-checker ignores, coverage pragmas, etc.) are never moved.
-
-Inline ignore: # pytriage: TR7
-"""
-
 from __future__ import annotations
 
 import functools
