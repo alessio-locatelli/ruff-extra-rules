@@ -8,18 +8,16 @@ from .confidence import PUREPATH_HOVER_NAMES
 
 @dataclass(slots=True, frozen=True)
 class Candidate:
-    """One `constructor(argument)` call eligible to be flagged; redundancy is decided later, in `session.py`."""
-
     constructor: str
     call: ast.Call
     arg: ast.expr
-    line: int  # 1-indexed, matching Violation.line
-    call_start_col: int  # 0-indexed UTF-8 byte offset (ast.col_offset)
+    line: int
+    call_start_col: int
     call_end_col: int
     arg_start_col: int
     arg_end_col: int
-    wrapped_in_len: bool  # See ADR-0035's `len()` sink exclusion.
-    in_equality_comparison: bool  # See ADR-0035's Path-vs-str comparison exclusion.
+    wrapped_in_len: bool
+    in_equality_comparison: bool
 
 
 def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidate]:
