@@ -23,15 +23,8 @@ class _Piece(NamedTuple):
 
 _STAR = _Piece(".*", fixed_width=False, is_star=True)
 
-# `]`, `^` and `\` carry their own meaning to `re` inside a class. `[`, `&`,
-# `|` and `~` are ordinary members in a glob, but `re` reads them as its
-# own set operators and warns about them on the user's stderr.
 _CLASS_MEMBERS_TO_ESCAPE = "^\\][&|~"
 
-# Alternation is what a backtracking engine explores exhaustively, so a
-# pattern spelling out more ways to match than this is refused rather than
-# left to stall every file it is tried against. See
-# `docs/adr/0046-exclude-glob-semantics.md`.
 _MAX_ALTERNATIVES = 1024
 
 
