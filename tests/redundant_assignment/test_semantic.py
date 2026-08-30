@@ -246,27 +246,20 @@ def test_is_generic_call_result_name(var_name: str, rhs_source: str, *, expected
     assert _is_generic_call_result_name(var_name, rhs_node) is expected
 
 
-# ---------------------------------------------------------------------------
-# calculate_semantic_value
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("var_name", "rhs_source", "minimum"),
     [
-        ("x", "a + b", 15),  # BinOp adds 15.
-        ("x", "1 if c else 0", 20),  # IfExp adds 20.
-        ("has_permission", "check_something()", 50),  # has_ prefix.
-        ("formatted_result", "raw_ts", 60),  # transformative verb.
-        ("item_count", "len(items)", 40),  # descriptive suffix.
-        ("result", "[x for x in items]", 30),  # list comprehension.
-        ("result", "-value", 10),  # unary op.
-        ("func", "lambda x: x * 2", 25),  # lambda.
-        ("x", "a" * 85, 35),  # very long expression (80+ chars).
-        ("x", "a" * 65, 25),  # long expression (60+ chars).
-        ("x", "some_function_with_exactly_45_characters()", 10),  # medium length (40-60 chars).
-        # Multipart name bonus in isolation: identical RHS, only the name
-        # differs, and the multipart name scores strictly higher.
+        ("x", "a + b", 15),
+        ("x", "1 if c else 0", 20),
+        ("has_permission", "check_something()", 50),
+        ("formatted_result", "raw_ts", 60),
+        ("item_count", "len(items)", 40),
+        ("result", "[x for x in items]", 30),
+        ("result", "-value", 10),
+        ("func", "lambda x: x * 2", 25),
+        ("x", "a" * 85, 35),
+        ("x", "a" * 65, 25),
+        ("x", "some_function_with_exactly_45_characters()", 10),
         ("user_email_address", "get_email()", 30),
     ],
     ids=[
@@ -292,11 +285,8 @@ def test_calculate_semantic_value_at_least(var_name: str, rhs_source: str, minim
 @pytest.mark.parametrize(
     ("var_name", "rhs_source", "expected"),
     [
-        ("result", "obj[x][y]", 20),  # 2 chains (+20).
-        ("my_value", "func()[x][y]", 40),  # 3+ chains (+30) + 2-part name (+10).
-        # Name moderately longer than the RHS (ratio between 1.1x and
-        # 1.3x) scores +5, distinct from the +15 given to a name that's
-        # significantly (>1.3x) longer.
+        ("result", "obj[x][y]", 20),
+        ("my_value", "func()[x][y]", 40),
         ("another", '"test"', 5),
     ],
     ids=["two-subscript-chains", "three-plus-chains-with-multipart-name", "name-moderately-longer-than-rhs"],
