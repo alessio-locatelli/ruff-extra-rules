@@ -1,5 +1,3 @@
-"""File discovery: turning the CLI's raw filename arguments into a concrete list of files to check."""
-
 from __future__ import annotations
 
 import contextlib
