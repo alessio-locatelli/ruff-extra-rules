@@ -1326,14 +1326,6 @@ def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_sco
 
 
 def test_autofix_follows_closure_through_scope_that_itself_contains_a_shadowing_nested_scope() -> None:
-    # `_binds_name_in_nested_scope()` must not descend into a
-    # *further*-nested function/lambda/comprehension when checking whether
-    # the scope it was actually asked about binds the name. `middle` itself
-    # doesn't shadow `data`, but `middle`'s own body contains `deeper`,
-    # which does — `_iter_own_scope_descendants()` must not walk straight
-    # into `deeper`'s body too, or it would wrongly conclude `middle`
-    # itself shadows `data`, and skip `middle`'s own legitimate closure
-    # reference.
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1357,7 +1349,7 @@ def test_autofix_follows_closure_through_scope_that_itself_contains_a_shadowing_
 
         fixed_content = filepath.read_text()
 
-    assert "def deeper():\n            data = " in fixed_content  # deeper's own local, untouched
+    assert "def deeper():\n            data = " in fixed_content
     module_namespace: dict[str, Any] = {}
     exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
