@@ -159,7 +159,6 @@ def _mark_call_ids(operand: ast.expr, ids: set[int]) -> None:
 
 
 def _hover_would_miss_the_argument(arg: ast.expr) -> bool:
-    # See ADR-0035's "Detection method" for why neither shape can be hovered reliably.
     if isinstance(arg, ast.Call):
         return True
     return any(
