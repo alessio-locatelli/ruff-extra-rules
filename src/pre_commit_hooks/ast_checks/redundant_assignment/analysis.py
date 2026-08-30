@@ -623,23 +623,11 @@ class VariableTracker(ast.NodeVisitor):
             self.currently_assigning.clear()
 
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
-        """`x += 1` reads `x` (to get its current value) and then mutates it in
-        place, so the read is tracked as a usage — this prevents false
-        positives for patterns like:
-            if condition:
-                msg = "foo"
-            else:
-                msg = "bar"
-            msg += " suffix"  # This USES the conditional value
-
-        It's not tracked as a new assignment: it mutates an existing
-        variable rather than producing a fresh one that could be inlined.
-        """
         scope_id = self._get_current_scope_id()
         stmt_index = self._get_current_stmt_index()
 
         if self._is_simple_name_target(node.target):
-            assert isinstance(node.target, ast.Name)  # Type narrowing
+            assert isinstance(node.target, ast.Name)
             var_name = node.target.id
 
             if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
@@ -648,13 +636,7 @@ class VariableTracker(ast.NodeVisitor):
 
             self._track_rebinding_use(var_name, node.lineno, node.col_offset, scope_id, stmt_index)
         else:
-            # AugAssign.target is Name | Attribute | Subscript; the Name
-            # case is handled above.
-            assert isinstance(node.target, ast.Attribute | ast.Subscript)  # Type narrowing
-            # `obj.attr += 1` both reads and reassigns `obj.attr`, same as
-            # `obj.attr = value` — track it the same way so a snapshot
-            # taken via `old = obj.attr` (see _rhs_reference_reassigned)
-            # sees this as a reassignment of the reference it read from.
+            assert isinstance(node.target, ast.Attribute | ast.Subscript)
             self._track_attribute_or_subscript_base_usage(node.target, stmt_index)
 
         self.visit(node.value)
