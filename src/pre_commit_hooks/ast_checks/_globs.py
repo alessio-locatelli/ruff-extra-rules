@@ -163,9 +163,6 @@ def _translate_stars(pattern: str, index: int) -> tuple[_Piece, int]:
 
 
 def _class_end(pattern: str, index: int) -> int:
-    """Just past the `]` closing the class opening at `index`, or past the end
-    of `pattern` when there is none.
-    """
     cursor = index + 1
     if cursor < len(pattern) and pattern[cursor] in "!^":
         cursor += 1
