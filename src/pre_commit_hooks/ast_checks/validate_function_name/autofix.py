@@ -30,13 +30,6 @@ type RepositoryReferenceStatus = Literal["safe", "external", "unavailable"]
 
 
 def _count_nesting_depth(func_node: _FuncNode) -> int:
-    """0 = no nesting, 1 = single level of control flow, etc.
-
-    Iterative (explicit stack), not recursive: see `attach_parents` for why
-    a recursive AST walk isn't safe against ordinary, valid Python here
-    (e.g. `not not not ... True` chains deep enough to hit Python's default
-    recursion limit).
-    """
     max_depth = 0
     stack: list[tuple[ast.AST, int]] = [(stmt, 0) for stmt in func_node.body]
     while stack:
