@@ -1,5 +1,3 @@
-"""Diagnostic formatting: turning a completed run's violations and failures into the printed report and exit code."""
-
 from __future__ import annotations
 
 import sys
