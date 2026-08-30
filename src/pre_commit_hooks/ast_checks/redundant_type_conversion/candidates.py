@@ -21,19 +21,6 @@ class Candidate:
 
 
 def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidate]:
-    """Every `name(single_positional_arg)` call anywhere in `tree` where `name` is one of `eligible`'s constructors.
-
-    Excludes: keyword/zero/multi-argument calls, a starred argument, a
-    generator-expression argument, a call spanning multiple physical
-    lines (see ADR-0035's "Detection method"), a shadowed constructor
-    name, every candidate in a module with a wildcard import, and an
-    argument the hover can't describe as a whole
-    (`_hover_would_miss_the_argument()`). All scanned in
-    one `_scan()` pass over `tree` -- `_scan()` already collects every
-    structurally-eligible call (`raw_candidates` below) while it computes
-    `shadowed`, so this never needs its own second pass over `tree` just
-    to re-find them.
-    """
     scan = _scan(tree, eligible)
     if scan.has_wildcard_import:
         return []
