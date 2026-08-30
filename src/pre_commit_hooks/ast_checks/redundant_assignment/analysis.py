@@ -359,8 +359,6 @@ class VariableTracker(ast.NodeVisitor):
     visit_AsyncFor = visit_For  # noqa: N815
 
     def visit_While(self, node: ast.While) -> None:
-        # node.test repeats every iteration, unlike node.orelse (see
-        # visit_For above for both).
         self.loop_depth += 1
         self.visit(node.test)
         for stmt in node.body:
