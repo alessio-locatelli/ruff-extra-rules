@@ -11,7 +11,6 @@ class AggressivenessLevel(Enum):
     PERMISSIVE = auto()
 
 
-# Transformative verbs that indicate semantic value
 TRANSFORMATIVE_VERBS = {
     "formatted",
     "parsed",
@@ -34,7 +33,6 @@ TRANSFORMATIVE_VERBS = {
     "deserialized",
 }
 
-# Boolean/descriptive prefixes that indicate semantic value
 DESCRIPTIVE_PREFIXES = {
     "has_",
     "is_",
@@ -48,7 +46,6 @@ DESCRIPTIVE_PREFIXES = {
     "does_",
 }
 
-# Descriptive suffixes that indicate semantic value
 DESCRIPTIVE_SUFFIXES = {
     "_count",
     "_flag",
