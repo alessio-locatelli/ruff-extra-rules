@@ -223,10 +223,6 @@ class ExcessiveBlankLinesCheck(BaseCheck):
         if not violations:
             return FixResult.for_violations(violations, FixOutcome.DECLINED)
 
-        # Recompute independently rather than trusting the passed
-        # violations, same as misplaced_comment.fix(): a stale or
-        # caller-supplied violations list must never cause an ignored blank
-        # run to be collapsed anyway.
         file_violations = check_file_violations(source, tree)
         if not file_violations:
             return FixResult.for_violations(violations, FixOutcome.DECLINED)
@@ -239,12 +235,6 @@ class ExcessiveBlankLinesCheck(BaseCheck):
         try:
             atomic_write_text(filepath, fixed_content, encoding, source)
         except OSError:
-            # Debug-only: the returned outcome already reports this
-            # cleanly as [FIX FAILED] — an ERROR-level .exception() call
-            # here would just leak a redundant raw traceback onto the
-            # user's stderr by default (nothing in this codebase configures
-            # logging, so Python's own lastResort handler prints WARNING+
-            # straight to stderr).
             logger.debug("Failed to write %s", filepath, exc_info=True)
             return FixResult.for_violations(violations, FixOutcome.FAILED)
         else:
