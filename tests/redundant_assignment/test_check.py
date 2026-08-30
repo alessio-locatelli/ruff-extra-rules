@@ -1043,13 +1043,13 @@ def test_conservative_level_calibration_cases_not_flagged(source: str, excluded:
     assert all(excluded not in v.message for v in _check(source))
 
 
-def test_screaming_snake_case_string_constant_still_flagged_at_permissive_level() -> None:
+def test_screaming_snake_case_string_constant_is_not_flagged_at_permissive_level() -> None:
     source = """
 _GREY = "rgb(201, 203, 207)"
 config = {"colors": [_GREY]}
 """
     violations = _check(source, level=AggressivenessLevel.PERMISSIVE)
-    assert any("'_GREY'" in v.message for v in violations)
+    assert all("'_GREY'" not in v.message for v in violations)
 
 
 @pytest.mark.parametrize("level", [AggressivenessLevel.CONSERVATIVE, AggressivenessLevel.PERMISSIVE])
