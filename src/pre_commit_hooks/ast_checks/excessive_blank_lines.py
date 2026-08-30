@@ -134,11 +134,8 @@ def fix_file_content(source: str, tree: ast.Module) -> str:
             last_header_line = i + 1
             break
 
-    # Excludes the header's own trailing blank lines.
     new_lines = lines[:last_header_line]
 
-    # Blank lines are only collapsed between the header and the first code
-    # line; once the first code line is seen, every blank line is preserved.
     blank_count = 0
     found_first_code_line = False
     blank_line_start_idx = last_header_line
@@ -152,19 +149,13 @@ def fix_file_content(source: str, tree: ast.Module) -> str:
                 blank_line_start_idx = i
             blank_count += 1
             if not found_first_code_line:
-                # Handled once we see what comes next (below).
                 pass
             else:
                 new_lines.append(line)
         else:
             if not found_first_code_line and blank_count > 0:
-                # PEP 8 requires 2 blank lines before top-level class/function definitions.
                 target_blank_count = min(2, blank_count) if _is_class_or_function_def(line) else 1
 
-                # Append the appropriate number of blank lines. target_blank_count
-                # is always <= blank_count (min(2, blank_count) or 1 when
-                # blank_count > 0), and i == blank_line_start_idx + blank_count,
-                # so blank_line_start_idx + j < i holds for every j in range.
                 for j in range(target_blank_count):
                     new_lines.append(lines[blank_line_start_idx + j])
 
