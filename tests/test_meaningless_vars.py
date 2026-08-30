@@ -1304,14 +1304,6 @@ def outer(response):
 def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_scope(
     autofix_meaningless_vars: Callable[[str], str],
 ) -> None:
-    # `_binds_name_in_nested_scope()` must scan only the nested
-    # function's *own* scope, not its `_outer_scope_children()` (decorators,
-    # defaults, annotations without type params) — those run in the
-    # *enclosing* scope (see ADR 0023 for this rename-safety scope model).
-    # A walrus target inside a default value must not be treated as a
-    # body-level shadow, or the default would get renamed while the
-    # body's closure read was left stale, splitting one variable into two
-    # and breaking the fixed code at runtime.
     source = """def outer(response):
     data: Payload = response.json()
 
