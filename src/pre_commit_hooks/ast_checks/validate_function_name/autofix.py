@@ -231,21 +231,6 @@ def _is_rebound_in_scope(scope_node: ast.AST, name: str, target: ast.AST) -> boo
 
 
 class _ReferenceCollector(ast.NodeVisitor):
-    """Collects exact source positions of true references to one function.
-
-    Only ever visits `Name`/`Attribute` nodes reached via normal AST
-    traversal, so it structurally cannot match text inside string/byte
-    literals or comments. For methods, only `self.name`/`cls.name` accesses
-    within the same class body are considered references, so identically
-    named methods on unrelated classes are never touched. `super().name()`
-    calls in subclasses are intentionally left alone: renaming them would be
-    unsafe if the subclass overrides the method, since `self.name()` then
-    resolves dynamically to the subclass's own (differently named) method.
-    For free functions, a nested function/lambda that shadows the name (its
-    own parameter, or any local binding to that name) is skipped entirely,
-    so a same-named local helper's own call sites are never touched.
-    """
-
     def __init__(self, old_name: str, target: ast.AST, lines: list[str], *, is_method: bool) -> None:
         self.old_name = old_name
         self.is_method = is_method
