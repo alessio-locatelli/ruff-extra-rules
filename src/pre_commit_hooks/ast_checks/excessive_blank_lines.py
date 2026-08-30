@@ -43,16 +43,6 @@ def _format_message(blank_count: int, target: int) -> str:
 
 
 def find_module_header_end(lines: list[str], tree: ast.Module) -> int:
-    """Module header includes: shebang, encoding, docstring, copyright/comments.
-
-    Comments aren't part of the AST, so they still need a text scan, but the
-    docstring's own extent is taken directly from the parsed module rather
-    than re-derived from raw text. This correctly handles raw-prefixed
-    docstrings (an r-string) that a naive quote-prefix text scan would miss
-    (byte strings can't be docstrings at all, per Python's own semantics).
-
-    Returns index (0-based) where module header ends.
-    """
     start_idx = 0
 
     if (
@@ -61,17 +51,14 @@ def find_module_header_end(lines: list[str], tree: ast.Module) -> int:
         and isinstance(tree.body[0].value, ast.Constant)
         and isinstance(tree.body[0].value.value, str)
     ):
-        # end_lineno is 1-indexed, so it's already the 0-indexed line after it
         start_idx = tree.body[0].end_lineno or 0
 
     for i in range(start_idx, len(lines)):
         stripped = lines[i].strip()
 
-        # Empty lines and comments (shebang, encoding, copyright) are header
         if not stripped or stripped.startswith("#"):
             continue
 
-        # First code line (import, class, def, assignment, etc)
         return i
 
     return len(lines)
