@@ -187,7 +187,7 @@ def test_corrupted_cache_returns_miss_instead_of_crashing(cache_manager: CacheMa
 
 
 def test_cache_write_errors_do_not_crash(cache_manager: CacheManager, sample_file: Path, temp_cache_dir: Path) -> None:
-    with restricted_permissions(temp_cache_dir, 0o444, restore=0o755):  # read-only dir triggers a write error
+    with restricted_permissions(temp_cache_dir, 0o444, restore=0o755):
         cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
 
 
