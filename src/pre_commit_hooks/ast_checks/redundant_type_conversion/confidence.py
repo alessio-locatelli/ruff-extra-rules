@@ -45,7 +45,6 @@ def _is_unreliable(hover_text: str) -> bool:
 
 
 def _split_top_level_union(hover_text: str) -> list[str]:
-    # Only split where bracket depth is zero -- see ADR-0035's "Confidence tiering".
     members: list[str] = []
     depth = 0
     start = 0
