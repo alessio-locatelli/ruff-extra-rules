@@ -32,14 +32,6 @@ def apply_fixes(
     source: str,
     encoding: str = "utf-8",
 ) -> FixResult:
-    """A VERY conservative implementation that only fixes violations marked as
-    fixable by strict semantic analysis. It only handles the simplest cases:
-    - Not in loops or control flow
-    - Immediate single use
-    - Simple RHS (constants, names, single-level attributes)
-    - Short variable names
-    - Very low semantic value
-    """
     fixable_violations = [v for v in violations if v.fixable]
 
     if not fixable_violations:
@@ -47,11 +39,6 @@ def apply_fixes(
 
     source_lines = source.splitlines(keepends=True)
 
-    # Sort by (use_line, use_col) descending: when two fixable assignments
-    # are inlined on the same use line, the rightmost one must be replaced
-    # first, since a replacement's length can differ from the variable name
-    # it replaces and shift every column after it on that line. Violations
-    # missing use_line (filtered out in the loop below) sort last.
     def _use_position(v: Violation) -> tuple[int, int]:
         raw_fix_data = v.fix_data
         if not raw_fix_data or raw_fix_data.get("use_line") is None:
@@ -66,9 +53,6 @@ def apply_fixes(
     removed_lines: set[int] = set()
 
     for violation in fixable_violations:
-        # use_line/use_col are None when the violation didn't have exactly
-        # one use (see RedundantAssignmentCheck.check) — that's the only
-        # shape this can safely auto-fix.
         raw_fix_data = violation.fix_data
         if not raw_fix_data or raw_fix_data.get("use_line") is None:
             continue
@@ -86,12 +70,6 @@ def apply_fixes(
         rhs_source = fix_data["rhs_source"].strip()
         var_name = fix_data["var_name"]
 
-        # A field span is recorded whenever the use is a whole f-string
-        # replacement field, regardless of the RHS's type (see
-        # analysis.UsageInfo.fstring_field_span). Only a string-literal RHS
-        # needs the splice path below — falls through to the ordinary
-        # inlining path for any other RHS type (e.g. a Name or a number),
-        # which needs no requoting and so isn't buggy as-is.
         fstring_start = fix_data.get("fstring_field_start_col")
         fstring_end = fix_data.get("fstring_field_end_col")
         fstring_literal_value = (
@@ -100,11 +78,6 @@ def apply_fixes(
         if fstring_literal_value is not None:
             assert fstring_start is not None
             assert fstring_end is not None
-            # Once it's confirmed a string literal, the splice is the
-            # *only* correct fix for it — declining here (rather than
-            # falling through to the generic path below) is what avoids
-            # issue #72's original bug: the generic path's plain text
-            # substitution would re-quote this same value inside `{}`.
             if not is_safe_to_splice_into_fstring(fstring_literal_value, encoding):
                 continue
             if not _apply_fstring_splice_fix(
@@ -122,21 +95,12 @@ def apply_fixes(
 
         use_line = source_lines[use_line_idx]
 
-        # Word boundaries so 'x' doesn't match inside 'max' or 'index'.
         pattern = r"\b" + re.escape(var_name) + r"\b"
 
         matches = tuple(re.finditer(pattern, use_line))
 
-        # use_col is a UTF-8 byte offset (from ast.col_offset); match.start()
-        # is a character offset, so convert before comparing.
         use_char_col = byte_col_to_char_col(use_line, use_col)
 
-        # Usually resolves to one of the regex matches directly. But a
-        # chained assignment's use line can coincide with another
-        # violation's assign line (e.g. `x = 1; y = x; return y`): y's fix
-        # is applied first and blanks the `y = x` line, so x's own use on
-        # that same line is gone by the time x's fix runs. Skip rather than
-        # inline into now-unrelated text.
         target_match = next((m for m in matches if m.start() == use_char_col), None)
         if target_match is None:
             continue
