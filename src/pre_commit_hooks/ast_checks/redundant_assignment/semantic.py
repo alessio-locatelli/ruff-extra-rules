@@ -356,16 +356,6 @@ def _is_named_constant_pattern(var_name: str, rhs_node: ast.expr) -> bool:
 
 
 def _is_named_string_constant_pattern(var_name: str, rhs_node: ast.expr) -> bool:
-    """A module-level SCREAMING_SNAKE_CASE name (PEP 8's constant
-    convention, leading underscores stripped first) reads as a deliberate,
-    reusable declaration even for a string RHS. Unlike
-    `_is_named_constant_pattern` above, this can't reuse its
-    "underscore-separated part count" check: every candidate reaching here
-    already has a leading underscore (Rule 1 in `should_report_violation`),
-    which alone satisfies that test regardless of casing. Requiring the
-    stripped name to be all-uppercase is what actually distinguishes a
-    constant from an ordinary private variable.
-    """
     if not isinstance(rhs_node, ast.Constant):
         return False
 
