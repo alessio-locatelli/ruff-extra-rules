@@ -421,11 +421,6 @@ class VariableTracker(ast.NodeVisitor):
         self.parent_stack.pop()
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        """A lambda's body doesn't execute where it's defined — it executes
-        later, whenever (and however many times, including zero) the
-        lambda is called. Uses inside it must never be treated as
-        "the same execution point" as the surrounding statement.
-        """
         self.lambda_depth += 1
         self.generic_visit(node)
         self.lambda_depth -= 1
