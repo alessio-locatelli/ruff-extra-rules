@@ -1180,19 +1180,6 @@ def test_autofix_never_offered_when_same_scope_rebinds_via_non_name_construct(so
 
 
 def test_autofix_never_offered_for_module_global_read_in_function() -> None:
-    # A module-level `data` read via `global data` inside a
-    # function isn't a *new* binding at all — it's the same variable being
-    # renamed. `_binds_name_in_nested_scope` must not treat `global data`
-    # as shadowing (that blanket, conservative rule is right for the
-    # nonlocal-mutation case but wrong here) -- doing so would skip the
-    # function's own body entirely and leave `return data` referencing a
-    # name that no longer exists after the module-level rename — a
-    # NameError the moment the function is called. Rather than trying to
-    # safely follow the reference (impossible: `global data`'s own "data"
-    # is a plain string, not a rewritable ast.Name), check() simply never
-    # offers a fix for a name mentioned in any `global`/`nonlocal`
-    # anywhere in scope (ch. 2: "MUST NOT perform an auto-fix that can
-    # change runtime behavior").
     source = """data = None
 
 
