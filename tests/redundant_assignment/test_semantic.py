@@ -217,23 +217,16 @@ def test_should_autofix_uses_real_use_line_length_when_available() -> None:
     assert should_autofix(lifecycle, source_lines=source_lines) is False
 
 
-# ---------------------------------------------------------------------------
-# _is_generic_call_result_name
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("var_name", "rhs_source", "expected"),
     [
         ("result", "get_value()", True),
         ("value", "get_value()", True),
-        ("x", "get_value()", True),  # Too short (<=2 chars) to carry any domain meaning.
-        ("check", "MeaninglessVarsCheck()", True),  # Restates the callee's own name.
-        ("state", "me.state(State)", True),  # Restates the callee's own (attribute) name.
+        ("x", "get_value()", True),
+        ("check", "MeaninglessVarsCheck()", True),
+        ("state", "me.state(State)", True),
         ("warning", "conn.recv()", False),
         ("ci_headers", "CIMultiDict(headers)", False),
-        # Branch coverage: the called function is neither a Name nor an
-        # Attribute (e.g. a subscript), so callee_name stays None.
         ("something_descriptive", "funcs[0]()", False),
     ],
     ids=[
