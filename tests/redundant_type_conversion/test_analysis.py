@@ -236,10 +236,6 @@ def test_decide_candidates_permissive_includes_mutable_constructors() -> None:
 
 
 class _SessionRaisingFromOpenOrUpdate(FakeSession):
-    """A `FakeSession` whose `open_or_update()` raises `LSPError` on one call, mimicking a `ty server` that died
-    mid-run -- see `TySession.open_or_update()`'s own contract.
-    """
-
     __slots__ = ("_call_count", "_raise_on_call")
 
     def __init__(
