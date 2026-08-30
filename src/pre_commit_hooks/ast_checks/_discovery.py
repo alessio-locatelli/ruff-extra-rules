@@ -60,26 +60,6 @@ def _matches(absolute: PurePosixPath, relative: PurePosixPath, pattern: str, anc
 
 
 def expand_directories(filenames: list[str]) -> list[str]:
-    """Expand any directory argument into the `.py` files it contains.
-
-    pre-commit/prek's own `types: [python]` hook contract (`.pre-commit-hooks.yaml`)
-    always passes individual files, never a directory, so this only matters
-    for direct CLI use (e.g. `ruff-extra-rules src/`, the form this
-    project's own dev docs use — see AGENTS.md). Without it, a directory
-    argument reached `CheckOrchestrator.process_files()` as a single
-    unexpanded path: git grep's own directory pathspec support made it
-    recurse and report matches for files *inside* that directory, but those
-    resolved paths never matched the literal directory path in
-    `git_grep_filter`'s own input map, so every result was silently
-    discarded as unresolvable — the run reported zero violations, exit code
-    0, having actually checked nothing.
-
-    Each directory entry in `filenames` is replaced by the `.py` files found
-    under it (see `_list_python_files_in_dir`); a non-directory entry (an
-    ordinary file, or a path that doesn't exist at all) is kept as-is so the
-    existing unreadable/unprocessable-file reporting still applies to it
-    downstream.
-    """
     expanded: list[str] = []
     for name in filenames:
         path = Path(name)
