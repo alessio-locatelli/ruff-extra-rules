@@ -79,7 +79,6 @@ def versions(directory: Path) -> dict[str, str]:
     except OSError as error:
         message = f"{directory}: could not be listed; check the path and its permissions."
         raise ValueError(message) from error
-    # `uv build` writes this one into its own output directory.
     entries = [entry for entry in entries if entry.name != ".gitignore"]
     wheels = [entry for entry in entries if entry.name.endswith(".whl")]
     sdists = [entry for entry in entries if entry.name.endswith(".tar.gz")]
