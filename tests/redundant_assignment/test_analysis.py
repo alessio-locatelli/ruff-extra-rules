@@ -293,17 +293,11 @@ def factory():
 
 
 def test_track_attribute_assignment_with_non_name_base() -> None:
-    # Branch coverage: when the target of an assignment is something like
-    # ``func().attr = v`` (a method-call result), unwinding the Attribute
-    # chain leads to a Call node, not a Name.
-    # _track_attribute_or_subscript_base_usage must skip tracking rather
-    # than crashing.
     source = """
 def outer():
     get_obj().attr = "value"
     return 42
 """
-    # Must not raise; call-result targets are silently skipped.
     _tracker(source).visit(ast.parse(source))
 
 
