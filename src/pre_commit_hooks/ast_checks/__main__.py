@@ -1,8 +1,3 @@
-"""Entry point for running ast_checks as a module.
-
-Usage: python -m pre_commit_hooks.ast_checks
-"""
-
 from __future__ import annotations
 
 import logging
