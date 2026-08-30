@@ -139,7 +139,7 @@ def test_decide_candidates_conservative_excludes_mutable_constructors() -> None:
     )
 
     assert redundant == []
-    assert session.opened_content == []  # never even worth opening the baseline
+    assert session.opened_content == []
 
 
 def test_decide_candidates_opens_one_baseline_before_all_hovers() -> None:
