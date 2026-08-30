@@ -192,11 +192,6 @@ def test_cache_write_errors_do_not_crash(cache_manager: CacheManager, sample_fil
 
 
 def test_construction_does_not_crash_when_cache_dir_is_unavailable(tmp_path: Path, sample_file: Path) -> None:
-    # CacheManager.__init__ must not let mkdir()'s PermissionError
-    # (or any other OSError creating/tagging the cache dir) propagate
-    # uncaught and crash the whole hook -- it must degrade to uncached
-    # execution instead. A read-only parent directory means the cache dir
-    # itself can never be created.
     readonly_parent = tmp_path / "readonly_parent"
     readonly_parent.mkdir()
 
