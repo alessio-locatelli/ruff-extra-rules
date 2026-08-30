@@ -70,10 +70,6 @@ def read_framed_message(stream: IO[bytes]) -> dict[str, Any] | None:
 
 
 def write_framed_message(stream: IO[bytes], payload: dict[str, Any]) -> None:
-    """Write `payload` as one `Content-Length`-framed JSON message to `stream`, flushing immediately.
-
-    See `read_framed_message` for why this is shared beyond `LSPClient` itself.
-    """
     body = json.dumps(payload).encode("utf-8")
     header = f"Content-Length: {len(body)}\r\n\r\n".encode("ascii")
     stream.write(header)
