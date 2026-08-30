@@ -412,13 +412,6 @@ class VariableTracker(ast.NodeVisitor):
     visit_AsyncWith = visit_With  # noqa: N815
 
     def visit_Match(self, node: ast.Match) -> None:
-        """`node.subject` always evaluates unconditionally when the `Match`
-        statement itself is reached — only each case's pattern/guard/body
-        runs conditionally (if its pattern/guard matches), same as an
-        if/elif branch. See visit_If's docstring (issue #73) for why the
-        subject must be visited outside the incremented
-        `control_flow_depth`.
-        """
         self.parent_stack.append(node)
         self.visit(node.subject)
         self.control_flow_depth += 1
