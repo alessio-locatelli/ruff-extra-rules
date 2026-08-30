@@ -75,7 +75,7 @@ def decide_candidates(
                 hover_text = session.hover(filepath, candidate.line - 1, hover_char)
                 if not hover_passes_gate(hover_text, level, candidate.constructor):
                     continue
-                assert hover_text is not None  # hover_passes_gate() already rejected None/empty above
+                assert hover_text is not None
 
                 if candidate.wrapped_in_len and not is_exact_match(hover_text, candidate.constructor):
                     continue
