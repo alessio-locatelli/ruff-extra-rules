@@ -272,26 +272,12 @@ def exceeds_line_length_when_inlined(
 
 
 def _would_require_parentheses(rhs_node: ast.expr) -> bool:
-    """True when the RHS contains operations that would need parentheses if
-    inlined into a subscript, attribute access, or other typical usage
-    context.
-
-    Examples that need parentheses:
-        len_prefix = len(x) + 1  # Used in subscript: arr[len(x) + 1]
-        result = a or b          # Used in subscript: dict[a or b]
-        value = x and y          # Used in call: func(x and y)
-    """
-    # Binary operations (+, -, *, /, //, %, **, <<, >>, |, ^, &, @)
-    # Need parentheses when used in subscripts, attribute access, or calls
     if isinstance(rhs_node, ast.BinOp):
         return True
 
-    # Boolean operations (and, or) need parentheses in most contexts
     if isinstance(rhs_node, ast.BoolOp):
         return True
 
-    # Comparison operations (==, !=, <, >, <=, >=, is, is not, in, not in)
-    # Need parentheses in most contexts
     return isinstance(rhs_node, ast.Compare)
 
 
