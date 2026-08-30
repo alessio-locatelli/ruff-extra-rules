@@ -369,8 +369,6 @@ def _setup_executable(tmp_path: Path) -> Path:
 
 
 def _verify_permission_preserved(target: Path) -> None:
-    # mkstemp creates its temp file mode 0600; the executable bit on a
-    # script being fixed must survive the rename, not silently regress.
     assert target.read_text() == "new\n"
     assert stat.S_IMODE(target.stat().st_mode) == 0o755
 
