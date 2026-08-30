@@ -362,11 +362,6 @@ def test_apply_fix_leaves_subclass_super_call_untouched(tmp_path: Path) -> None:
 
 
 def test_apply_fix_does_not_rename_nested_shadowing_function(tmp_path: Path) -> None:
-    # A nested function that redefines the same name shadows the outer
-    # one. Renaming the outer get_data must not touch the nested
-    # get_data's own call site inside outer_caller: that call resolves to
-    # the nested definition, not the module-level function being renamed
-    # here.
     test_file = tmp_path / "module.py"
     test_file.write_text(
         "def get_data():\n"
