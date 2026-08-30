@@ -293,7 +293,6 @@ def test_apply_fix_updates_free_function_call_sites(tmp_path: Path) -> None:
 
 
 def test_apply_fix_refuses_when_a_call_site_line_is_format_suppressed(tmp_path: Path) -> None:
-    # See docs/adr/0050-format-suppression-pragmas.md.
     test_file = tmp_path / "module.py"
     test_file.write_text(
         "def get_data():\n"
