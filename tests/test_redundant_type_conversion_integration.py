@@ -1,15 +1,3 @@
-"""Integration layer for TR6: runs the real `ty` binary (pinned as a dev
-dependency, see pyproject.toml), sharing one warm `ty server` session
-across this whole module -- mirroring the check's own production design
-(one session per hook invocation, not one per file/query).
-
-The bulk of this check's own detection logic is unit-tested against
-recorded/fake session responses in `tests/redundant_type_conversion/`,
-for speed and determinism; this file exists specifically so a real `ty`
-version bump is automatically checked for staleness against those
-recordings on every CI run, per issue #108's own testing decisions.
-"""
-
 from __future__ import annotations
 
 import ast
