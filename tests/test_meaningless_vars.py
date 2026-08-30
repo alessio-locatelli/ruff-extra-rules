@@ -1039,18 +1039,6 @@ def test_autofix_does_not_rename_shadowed_reference_in_nested_scope(source: str,
 
 
 def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
-    # A nested function's `nonlocal data` declaration means its own `data =
-    # "mutated"` Store isn't a shadowing local binding — it mutates the
-    # *outer* variable directly. Renaming the outer variable but leaving
-    # `nonlocal data` untouched (its name is a plain string, not a
-    # rewritable ast.Name) would produce `SyntaxError: no binding for
-    # nonlocal 'data' found`. Rather than relying on atomic_write_text()'s
-    # compile() check to reject that after the fact, check() itself refuses
-    # to suggest a fix at all when it detects `nonlocal`/`global` mentions
-    # of the name anywhere in scope (see
-    # MeaninglessNameVisitor._referenced_via_global_or_nonlocal) — so the
-    # violation is honestly reported as unfixable, not offered and then
-    # rejected.
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1076,7 +1064,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
         fixed_content = filepath.read_text()
 
     assert fixed_content == source
-    ast.parse(fixed_content)  # Left untouched, so it's still valid Python.
+    ast.parse(fixed_content)
 
 
 @pytest.mark.parametrize(
