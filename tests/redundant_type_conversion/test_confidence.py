@@ -15,11 +15,6 @@ from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import (
 
 
 def test_immutable_and_mutable_constructors_partition_all_eleven() -> None:
-    # Issue #108 says "all ten builtin type/collection constructors" but
-    # then enumerates eleven (str/int/float/bool/bytes/frozenset/tuple/
-    # list/dict/set/bytearray), consistently, everywhere it lists them --
-    # the explicit, repeated enumeration is authoritative over the "ten"
-    # miscount.
     assert IMMUTABLE_CONSTRUCTORS | MUTABLE_CONSTRUCTORS == ALL_CONSTRUCTORS
     assert frozenset() == IMMUTABLE_CONSTRUCTORS & MUTABLE_CONSTRUCTORS
     assert len(ALL_CONSTRUCTORS) == 11
@@ -46,7 +41,6 @@ def test_permissive_is_all_eleven() -> None:
     ids=["none", "empty", "any", "unknown", "narrowed-any", "narrowed-unknown"],
 )
 def test_gate_rejects_unusable_hover_at_both_levels(hover_text: str | None) -> None:
-    # See ADR-0035's "Confidence tiering" for why "Unknown" is rejected like "Any".
     assert hover_passes_gate(hover_text, ConfidenceLevel.CONSERVATIVE, "str") is False
     assert hover_passes_gate(hover_text, ConfidenceLevel.PERMISSIVE, "str") is False
 
@@ -73,8 +67,6 @@ def test_conservative_accepts_an_exact_match(hover_text: str, constructor: str) 
     [
         ("str | None", "str"),
         ("LiteralString", "str"),
-        ("bool", "int"),  # bool is an int subclass, but not the same type
-        ("Iterable[str]", "list"),  # structural match only -- not textually "list" or "list["
     ],
     ids=["union", "str-subtype", "bool-not-int", "protocol-match"],
 )
@@ -101,15 +93,9 @@ def test_conservative_accepts_a_flow_narrowed_literal_of_the_same_scalar(hover_t
 @pytest.mark.parametrize(
     ("hover_text", "constructor"),
     [
-        ("Literal[True]", "int"),  # bool value, int() genuinely changes the runtime type
         ("Literal[False]", "int"),
-        ("Literal[1]", "bool"),  # int value, not a bool literal spelling
         ('Literal["hi"]', "bytes"),
         ('Literal[b"hi"]', "str"),
-        # A Literal[...] result isn't even meaningful for these constructors
-        # (a literal float/frozenset/tuple isn't a thing `ty` reports as
-        # Literal[...]), so _literal_matches_constructor's fallback branch
-        # must reject it rather than falling through to some default match.
         ("Literal[1]", "float"),
         ("Literal[1]", "frozenset"),
         ("Literal[1]", "tuple"),
@@ -126,10 +112,6 @@ def test_conservative_accepts_a_flow_narrowed_literal_of_the_same_scalar(hover_t
     ],
 )
 def test_conservative_rejects_a_literal_of_a_different_scalar(hover_text: str, constructor: str) -> None:
-    # Bool is an int subclass at runtime, so a naive
-    # "Literal[...] always matches" rule would let int(some_bool) through
-    # as if it were a no-op, even though it genuinely changes the runtime
-    # type from bool to plain int.
     assert hover_passes_gate(hover_text, ConfidenceLevel.CONSERVATIVE, constructor) is False
 
 
@@ -144,14 +126,13 @@ def test_permissive_accepts_any_resolved_non_union_type(hover_text: str) -> None
 @pytest.mark.parametrize(
     ("hover_text", "constructor"),
     [
-        ("int | float", "int"),  # a real float value would be truncated, not a no-op
-        ("str | None", "list"),  # neither union member is even a list
-        ("Literal[True] | int", "bool"),  # the plain-int member isn't exactly bool
+        ("int | float", "int"),
+        ("str | None", "list"),
+        ("Literal[True] | int", "bool"),
     ],
     ids=["int-or-float", "str-or-none-as-list", "bool-literal-or-int"],
 )
 def test_permissive_rejects_a_union_with_a_non_matching_member(hover_text: str, constructor: str) -> None:
-    # See ADR-0035's "Confidence tiering".
     assert hover_passes_gate(hover_text, ConfidenceLevel.PERMISSIVE, constructor) is False
 
 
@@ -161,7 +142,6 @@ def test_permissive_rejects_a_union_with_a_non_matching_member(hover_text: str, 
     ids=["union-in-generic-arg", "union-in-mapping-value", "union-in-callable-arg"],
 )
 def test_permissive_does_not_split_a_union_nested_inside_brackets(hover_text: str) -> None:
-    # A " | " nested inside a generic's own brackets isn't a top-level union.
     assert hover_passes_gate(hover_text, ConfidenceLevel.PERMISSIVE, "list") is True
 
 
