@@ -880,49 +880,6 @@ class VariableTracker(ast.NodeVisitor):
         assign_col: int,
         use: UsageInfo,
     ) -> bool:
-        """True if a yield/yield from/await occurs strictly after the
-        assignment and before the use.
-
-        `stmt_index` alone can't order two entries that tie on it, and a tie
-        arises two different ways:
-
-        - The suspension point sits in the use's own statement (e.g.
-          `return (await refresh(), value)[1]`), where it could still
-          evaluate before or after the use within that one statement — that
-          case is resolved by `_suspension_precedes_use`'s real
-          evaluation-order walk instead of assumed safe.
-        - The suspension point sits in a *different*, known statement that's
-          merely nested in the same coarse block as the use (an if/with/try
-          body doesn't get its own stmt_index — see
-          VariableTracker.suspension_points), so `_suspension_precedes_use`
-          can't see it at all: that walk only looks inside the use's own
-          statement. Ordinary top-to-bottom source position (line, then
-          column) settles this instead — the point and the use are two
-          distinct, unconditionally-sequenced statements within the same
-          straight-line block, so whichever comes first textually also runs
-          first (loop bodies that could revisit this point on a later
-          iteration are excluded earlier, via `assignment.in_loop` in
-          `should_report_violation`).
-
-        A suspension point in a genuinely earlier statement (`stmt_index`
-        strictly less) needs neither check: unlike a tie, nothing about
-        *that* statement's evaluation order relative to the use is in
-        question. And when `use.enclosing_stmt` itself is unknown (some
-        UsageInfo variants, e.g. an augmented-assignment rebinding marker,
-        never record it), same-vs-different can't be told apart, nor can
-        source position stand in for it (the marker's own position is the
-        rebound name, not necessarily where the hazard actually occurs), so
-        this defers to `_suspension_precedes_use`'s own conservative
-        fallback rather than guessing.
-
-        The bisect boundary itself includes `assign_col`, not just
-        `(assign_line, assign_stmt_index)` — semicolon-separated statements
-        nested in the same coarse block (e.g. `cached = obj.attr; await
-        other(); return cached`) can share both line and stmt_index with
-        the assignment, and `bisect_right` would otherwise skip straight
-        past a point that ties on both, the same way `line` alone once hid
-        a same-line reassignment (see `_reference_reassigned_in_range`).
-        """
         points = self.suspension_points.get(scope_id)
         if not points:
             return False
