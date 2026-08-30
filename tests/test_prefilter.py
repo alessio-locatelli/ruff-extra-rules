@@ -179,13 +179,6 @@ def test_git_grep_filter_match_order_is_independent_of_hash_seed(tmp_path: Path)
 
 
 def test_git_grep_filter_skips_unresolvable_git_paths(tmp_path: Path) -> None:
-    # Defensive: if git's null-separated output includes a path that
-    # doesn't resolve back to one of the requested filepaths, it's skipped
-    # rather than included as a bogus match.
-    #
-    # The file content deliberately doesn't contain "data" so the assertion
-    # can only pass via the mocked git-grep-success branch, not by
-    # coincidentally falling through to the Python substring fallback.
     file1 = tmp_path / "file1.py"
     file1.write_text("value = 1\n")
 
