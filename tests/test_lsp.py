@@ -189,10 +189,6 @@ def test_request_after_server_exits_raises_instead_of_hanging(tmp_path: Path) ->
 
 
 def test_request_raises_lsp_error_when_server_exits_without_responding(tmp_path: Path) -> None:
-    # Covers the reader loop's finally block actually delivering a failure
-    # to a request that's still pending when the connection is lost (as
-    # opposed to LSPTimeoutError, which fires from the requester's own side
-    # without the reader loop's involvement).
     with _spawn_fake_server(tmp_path) as client, pytest.raises(LSPError, match="LSP connection closed"):
         client.request("die_immediately", timeout=5.0)
 
