@@ -125,7 +125,6 @@ def test_glob_matches(pattern: str, candidate: str, expected: bool) -> None:
     assert glob_matches(pattern, candidate) is expected
 
 
-# `ruff 0.16.1` refuses each of these too, rather than quietly matching nothing.
 @pytest.mark.parametrize(
     ("pattern", "needle"),
     [
@@ -136,8 +135,6 @@ def test_glob_matches(pattern: str, candidate: str, expected: bool) -> None:
         ("{a,b", "leaves a `{` unclosed"),
         ("a}", "closes a `{` that was never opened"),
         ("a\\", "ends with an unfinished escape"),
-        # `{a,aa}` repeated overlaps with itself, which a backtracking engine
-        # explores exhaustively; the ceiling turns a stall into a rejection.
         ("{a,aa}" * 30 + "b", "more than 1024 ways to match"),
     ],
     ids=[
