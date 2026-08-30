@@ -685,9 +685,6 @@ def func(items):
 
 
 def test_suspension_precedes_use_fallback_for_use_without_node() -> None:
-    # Branch coverage: an augmented-assignment use doesn't track a node, so
-    # a same-statement await tie can't be resolved by evaluation order —
-    # _suspension_precedes_use falls back to treating it as a hazard.
     source = """
 async def f(obj):
     cached = obj.attr
