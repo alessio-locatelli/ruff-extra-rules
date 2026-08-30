@@ -50,14 +50,6 @@ _EQUALITY_OPS = (ast.Eq, ast.NotEq, ast.In, ast.NotIn, ast.Is, ast.IsNot)
 
 @dataclass(slots=True, frozen=True)
 class _RawCandidate:
-    """A `name(single_positional_arg)` call found during `_scan()`'s own walk, already past every *local*
-    structural filter (arg shape, single-line span, an argument the hover can describe as a whole) --
-    everything about it that
-    doesn't depend on whole-module shadowing, which isn't known until the scan finishes. `find_candidates()`
-    applies the final `eligible - shadowed` filter against this already-narrow list instead of re-walking `tree`
-    a second time just to re-find the same calls.
-    """
-
     constructor: str
     call: ast.Call
     arg: ast.expr
