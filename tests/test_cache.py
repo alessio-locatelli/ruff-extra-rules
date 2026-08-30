@@ -124,13 +124,6 @@ def test_cache_version_mismatch(temp_cache_dir: Path, sample_file: Path) -> None
 
 
 def test_cache_version_mismatch_recovers_on_rewrite(temp_cache_dir: Path, sample_file: Path) -> None:
-    # A version bump must not pin a file to permanent cache misses.
-    # set_cached_result() must not load the on-disk blob (still tagged
-    # with the old version) and only patch individual keys, leaving the
-    # stale version tag in place forever — every later run would then keep
-    # missing and rewriting under the same never-updated old tag. Writing
-    # a fresh result under the new version must actually persist that
-    # version, so the immediately following read is a hit.
     cache_v1 = CacheManager(cache_dir=temp_cache_dir, cache_version="1.0.0")
     cache_v1.set_cached_result(sample_file, "test-hook", {"violations": ["old"]})
 
