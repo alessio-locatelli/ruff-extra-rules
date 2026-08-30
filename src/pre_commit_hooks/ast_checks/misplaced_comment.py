@@ -84,18 +84,6 @@ class _MisplacedComment:
 def _scan_misplaced_comments(
     tokens: tuple[tokenize.TokenInfo, ...],
 ) -> list[_MisplacedComment]:
-    """Find comments trailing bracket-only closing lines.
-
-    Shared by check() and fix() so both agree on what counts as a violation.
-    Dedupes by bracket_line: a line like `))  # comment` visits the scan once
-    per closing bracket token, but is one violation, not one per bracket.
-
-    Groups tokens by physical line once, up front: a physical line's own
-    trailing comment, if any, is always among that same line's own tokens
-    (`tokenize` never emits a `COMMENT` past its own line's `NEWLINE`), so
-    a bracket's verdict only ever depends on its own line's token group,
-    never on anything past it.
-    """
     tokens_by_line: dict[int, list[tokenize.TokenInfo]] = {}
     for token in tokens:
         tokens_by_line.setdefault(token.start[0], []).append(token)
