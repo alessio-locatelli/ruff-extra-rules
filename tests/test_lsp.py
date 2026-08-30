@@ -163,7 +163,7 @@ def test_close_kills_the_process_when_it_never_exits_on_its_own(tmp_path: Path) 
 def test_close_is_idempotent(tmp_path: Path) -> None:
     client = _spawn_fake_server(tmp_path)
     client.close()
-    client.close()  # must not raise or hang on an already-closed connection
+    client.close()
     assert client._close_called is True
 
 
