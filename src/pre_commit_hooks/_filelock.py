@@ -17,10 +17,6 @@ __all__ = ["locked", "locking_is_available"]
 
 
 def locking_is_available() -> bool:
-    """Whether `locked()` can actually be called on this platform -- callers that don't already have their
-    own persistent "unavailable" flag (e.g. `CacheManager._locking_unavailable`) should check this before
-    calling `locked()`, or hit its own `assert` instead of degrading gracefully.
-    """
     return fcntl is not None
 
 
