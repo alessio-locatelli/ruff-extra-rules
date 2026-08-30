@@ -16,21 +16,6 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 @pytest.fixture(autouse=True)
 def _isolated_from_this_repositorys_own_configuration(request: pytest.FixtureRequest) -> Iterator[None]:
-    """This repository configures itself in its own `pyproject.toml`,
-    `fix = true` included (ADR-0045). Tests run with the working directory
-    at the repository root, so without this every `main()` call under test
-    would discover that table and start rewriting files the test never
-    asked it to. Equivalent to passing `--isolated`.
-
-    A test that exercises discovery itself opts out with
-    `@pytest.mark.uses_project_config`, having pointed the working
-    directory at its own temporary project first.
-
-    Deliberately not the shared `monkeypatch` fixture: requesting it here
-    would set it up before every module-level autouse fixture in the suite
-    and so tear it down after them, inverting an ordering other modules
-    already depend on (see `test_main.py`'s own SIGTERM-handler fixture).
-    """
     if "uses_project_config" in request.keywords:
         yield
         return
