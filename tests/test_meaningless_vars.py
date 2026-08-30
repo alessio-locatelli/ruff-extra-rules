@@ -1514,14 +1514,6 @@ def test_autofix_follows_closure_into_type_parameter_bound_and_default() -> None
 
 
 def test_autofix_does_not_rename_type_parameter_bound_referencing_a_peer_type_parameter() -> None:
-    # within one `type_params` list, a *later* type parameter's
-    # own bound/default expression can reference an *earlier* type
-    # parameter by name — confirmed against CPython that this resolves to
-    # the peer type parameter, not to whatever the enclosing scope happens
-    # to bind under the same name. Treating every bound/default expression
-    # as an unconditional enclosing-scope reference (previous test) would
-    # wrongly rename such a reference, repointing it at the renamed outer
-    # variable instead of the peer it actually resolves to.
     source = """def outer(response):
     data: Payload = response.json()
 
