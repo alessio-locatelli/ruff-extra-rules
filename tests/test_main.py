@@ -75,16 +75,6 @@ def test_run_returns_mains_exit_code_normally(monkeypatch: pytest.MonkeyPatch) -
 def test_real_sigterm_mid_run_stops_gracefully_without_leftover_temp_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A SIGTERM delivered mid-run (e.g. prek's own timeout, or a CI job
-    killing this process) must unwind through run()'s KeyboardInterrupt
-    handling -- proven with a real `os.kill()`-delivered signal, not a
-    mocked exception, since converting SIGTERM into a catchable exception is
-    exactly the new behavior under test. `atomic_write_text()`'s own
-    try/finally cleanup on an arbitrary exception is already covered
-    elsewhere (test_atomic_write_text's directory-raises case in
-    tests/test_base.py); what's new here is that a real SIGTERM actually
-    reaches that cleanup at all instead of terminating the process outright.
-    """
     filepaths = []
     for i in range(10):
         filepath = tmp_path / f"module_{i}.py"
@@ -123,14 +113,8 @@ def test_real_sigterm_mid_run_stops_gracefully_without_leftover_temp_files(
 
     assert exit_code == 1
     assert "Interrupted." in capsys.readouterr().err
-    # Stopped before every file was processed -- the signal actually cut
-    # the run short rather than being silently ignored.
     assert calls < len(filepaths)
-    # Every fix that did run replaced its target atomically: no dangling
-    # temp file left behind by a write the signal happened to interrupt.
     assert list(tmp_path.glob("*.tmp")) == []
-    # Every file on disk is still valid Python -- either untouched or fully
-    # fixed, never a partial write.
     for filepath_str in filepaths:
         content = Path(filepath_str).read_text()
         assert content in {"data = requests.get(url)\n", "response = requests.get(url)\n"}
