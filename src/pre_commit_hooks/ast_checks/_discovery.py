@@ -22,10 +22,6 @@ _CURRENT_DIR = PurePosixPath()
 
 
 class ExcludePattern(NamedTuple):
-    """A glob plus the directory it resolves against; see
-    `docs/adr/0046-exclude-glob-semantics.md`.
-    """
-
     pattern: str
     anchor: Path
 
