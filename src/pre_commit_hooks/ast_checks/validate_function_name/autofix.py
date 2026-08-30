@@ -173,16 +173,11 @@ def is_autofix_safe(function_index: FunctionIndex, suggestion: Suggestion) -> bo
 
 
 def _def_name_position(lines: list[str], func_node: _FuncNode) -> SourcePosition:
-    """Searches only the `def`/`async def` line, starting at the node's own
-    column offset, so it can never match text elsewhere in the file.
-    """
     line_idx = func_node.lineno - 1
-    # AST line numbers are always valid for the source that produced them.
     assert line_idx < len(lines)
 
     pattern = re.compile(rf"\bdef\s+({re.escape(func_node.name)})\b")
     match = pattern.search(lines[line_idx], func_node.col_offset)
-    # The def keyword and name are always present on their own line.
     assert match is not None
 
     return (func_node.lineno, match.start(1))
