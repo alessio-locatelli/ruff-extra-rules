@@ -452,9 +452,6 @@ def test_fix_validation_error_exposes_path_and_syntax_error(tmp_path: Path) -> N
 
 
 def test_atomic_write_text_aborts_when_disk_content_no_longer_matches_expected_source(tmp_path: Path) -> None:
-    # expected_source stands in for what a caller read before computing its
-    # own fix -- a mismatch against the file's real current bytes means
-    # something else changed it in between, and the write must never land.
     target = tmp_path / "mod.py"
     target.write_text("x = 1\n")
 
