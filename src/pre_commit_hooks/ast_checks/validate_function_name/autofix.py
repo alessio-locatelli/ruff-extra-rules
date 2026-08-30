@@ -218,17 +218,6 @@ def _binds_name(node: ast.FunctionDef | ast.AsyncFunctionDef, name: str, target:
 
 
 def _is_rebound_in_scope(scope_node: ast.AST, name: str, target: ast.AST) -> bool:
-    """Whether `name` is rebound directly within `scope_node`'s own execution
-    context (module or enclosing function), outside any nested scope.
-
-    A reassignment like `get_data = fake` permanently rebinds the name for
-    the rest of that scope's runtime lifetime (Python has no block scoping),
-    so any `Load` reference could refer to the new value instead of the
-    function being renamed. Detecting this precisely requires control-flow
-    analysis this tool doesn't do, so when a rebinding is found anywhere in
-    the scope, the caller should refuse to rename at all rather than risk
-    renaming a reference that no longer points at the target function.
-    """
     for child in iter_within_scope(scope_node):
         if child is target:
             continue
