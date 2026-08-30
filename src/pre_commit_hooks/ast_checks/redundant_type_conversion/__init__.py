@@ -1,7 +1,3 @@
-"""TR6: redundant builtin type-conversion calls. See
-`docs/rules/redundant-type-conversion.md` and ADR-0035.
-"""
-
 from __future__ import annotations
 
 import re
