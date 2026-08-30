@@ -777,12 +777,8 @@ class VariableTracker(ast.NodeVisitor):
                 all_uses = self.uses.get(key, [])
                 relevant_uses = [use for use in all_uses if use.stmt_index >= assignment.stmt_index]
 
-                # Variables captured by closures should not be marked as redundant.
                 child_scopes = self._get_child_scopes(scope_id)
 
-                # A child scope's `nonlocal` declaration means the closure
-                # captures and potentially modifies this variable, so the
-                # outer assignment must not be flagged as redundant.
                 is_captured_by_nonlocal = any(
                     (child_scope_id, var_name) in self.nonlocal_vars for child_scope_id in child_scopes
                 )
@@ -794,8 +790,6 @@ class VariableTracker(ast.NodeVisitor):
                     child_uses = self.uses.get(child_key, [])
                     relevant_uses.extend(child_uses)
 
-                # If there's a subsequent assignment to the same variable,
-                # only include uses up to that assignment
                 next_assignment = None
                 for other_assignment in assignment_list:
                     if other_assignment.stmt_index > assignment.stmt_index and (
@@ -804,8 +798,6 @@ class VariableTracker(ast.NodeVisitor):
                         next_assignment = other_assignment
 
                 if next_assignment:
-                    # Keep ALL child scope uses since they're closures, even
-                    # past the next assignment.
                     relevant_uses = [
                         use
                         for use in relevant_uses
