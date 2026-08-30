@@ -232,23 +232,12 @@ def _index_unique_undecorated_functions(
 
 
 class VariableTracker(ast.NodeVisitor):
-    """Builds a map of variable lifecycles: where each variable is assigned and where it's used, across scopes."""
-
     def __init__(
         self, source: str, comment_only_lines: set[int], trailing_comment_lines: set[int], tree: ast.Module
     ) -> None:
         self.source = source
         self.source_lines = source.splitlines()
-        # For _get_source_segment only: split on the same line boundaries
-        # ast's own lineno/end_lineno use, unlike self.source_lines above
-        # (see split_lines_like_ast).
         self._ast_lines = split_lines_like_ast(source)
-        # Passed in by the caller rather than computed here — see
-        # AssignmentInfo.has_comment_above/has_inline_comment for why a
-        # tokenize-based classification is needed instead of a naive text
-        # scan, and RedundantAssignmentCheck.check() for why it's tokenized
-        # once there (shared with the ignored-lines lookup) instead of
-        # this constructor tokenizing `source` again on its own.
         self._comment_only_lines = comment_only_lines
         self._trailing_comment_lines = trailing_comment_lines
 
@@ -256,43 +245,30 @@ class VariableTracker(ast.NodeVisitor):
         self._call_positional_info: dict[int, tuple[bool, dict[int, int]]] = {}
 
         self.current_scope_id = 0
-        self.scope_stack: list[int] = [0]  # 0 = module scope
+        self.scope_stack: list[int] = [0]
         self.stmt_index_stack: list[int] = [0]
         self.assignments: dict[tuple[int, str], list[AssignmentInfo]] = {}
         self.uses: dict[tuple[int, str], list[UsageInfo]] = {}
-        # scope_id -> (line, stmt_index, col, enclosing_stmt) of each
-        # yield/yield from/await, in visit order — see
-        # _suspension_point_between.
         self.suspension_points: dict[int, list[tuple[int, int, int, ast.stmt | None]]] = {}
         self.global_vars: set[tuple[int, str]] = set()
         self.nonlocal_vars: set[tuple[int, str]] = set()
 
-        # So the LHS of an assignment is never itself treated as a use.
         self.currently_assigning: set[str] = set()
 
         self.loop_depth = 0
 
-        # if/try/with/match — excludes loops, tracked separately above.
         self.control_flow_depth = 0
 
         self.try_depth = 0
 
         self.comprehension_depth = 0
 
-        # A use inside a lambda body executes later (and possibly
-        # repeatedly, or never) at call time, not once at the point the
-        # lambda is defined.
         self.lambda_depth = 0
 
         self.parent_stack: list[ast.AST] = []
 
-        # Innermost enclosing statement of whatever node is currently being
-        # visited, updated in visit() below. Stored on each UsageInfo (not
-        # searched here) so is_preceded_by_call's evaluation-order walk can
-        # run lazily, later, only for the rare usages that need it.
         self.current_stmt: ast.stmt | None = None
 
-        # child_scope_id -> parent_scope_id, for closure detection.
         self.scope_parents: dict[int, int] = {}
 
     def _enter_scope(self) -> None:
