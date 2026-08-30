@@ -1,35 +1,3 @@
-"""validate_function_name - Detect get_* functions and suggest better names.
-
-TR4: Functions with get_ prefix should use more descriptive names based on
-their behavior (e.g., load_, fetch_, calculate_, is_, iter_).
-
-This hook detects functions prefixed with `get_` and suggests more specific
-names based on behavioral analysis:
-
-- Boolean returns → is_*
-- Disk I/O → load_*/save_*
-- Network I/O → fetch_*/send_*
-- Generators → iter_*
-- Aggregation → calculate_*
-- Parsing → parse_*
-- Searching → find_*
-- Validation → validate_*
-- Collection → extract_*
-- Object creation → create_*
-- Mutation → update_*
-
-This check runs as part of the grouped `ruff-extra-rules` hook:
-
-    python -m pre_commit_hooks.ast_checks [--fix] <files>
-
-Suppression:
-    Add inline comment to suppress: # pytriage: TR4
-
-Example:
-    def get_users() -> list[User]:  # pytriage: TR4
-        return User.objects.all()
-"""
-
 from __future__ import annotations
 
 import logging
