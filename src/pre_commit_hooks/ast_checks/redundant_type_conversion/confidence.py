@@ -77,7 +77,6 @@ PUREPATH_HOVER_NAMES = frozenset({"Path", "PurePath", "PosixPath", "WindowsPath"
 
 
 def is_purepath_hover(hover_text: str) -> bool:
-    # See ADR-0035's Path-vs-str comparison exclusion.
     return any(member in PUREPATH_HOVER_NAMES for member in _split_top_level_union(hover_text))
 
 
