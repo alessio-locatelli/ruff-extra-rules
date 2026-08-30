@@ -293,8 +293,6 @@ def test_an_unusable_file_is_still_reported_when_every_check_is_ignored(
     ],
 )
 def test_a_pattern_is_resolved_against_its_anchor(tmp_path: Path, pattern: str, expected: bool) -> None:
-    # `ruff` resolves the pattern before matching, so one that walks out and
-    # back in still names what it looks like; see ADR-0046.
     anchor = tmp_path / "project"
     spelled = pattern.format(anchor=anchor.name, absolute=anchor)
     ignores = PerFileIgnoreList((_entry(spelled, anchor),))
