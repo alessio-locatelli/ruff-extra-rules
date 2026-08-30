@@ -51,19 +51,6 @@ class CacheManager:
 
     @contextlib.contextmanager
     def _locked(self, cache_file: Path) -> Iterator[None]:
-        """Hold an exclusive advisory lock while reading and rewriting a cache file.
-
-        Multiple hook processes (e.g. under prek's parallel execution) can
-        target the same per-file cache blob for different hook names at the
-        same time. Without this lock, a read-modify-write race would let one
-        process's write silently clobber another's (lost update).
-
-        `TimeoutError` (raised by `_filelock.locked()` if the lock can't be
-        acquired within `_LOCK_TIMEOUT_SECONDS`) is a subclass of `OSError`,
-        so both `get_cached_result` and `set_cached_result`'s existing
-        `except OSError` already treat it the same as any other cache
-        failure — degrade to an uncached result, don't crash.
-        """
         lock_file = cache_file.with_suffix(".lock")
         with locked(
             lock_file, timeout_seconds=_LOCK_TIMEOUT_SECONDS, poll_interval_seconds=_LOCK_POLL_INTERVAL_SECONDS
