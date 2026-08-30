@@ -644,9 +644,6 @@ def func():
 
 
 def test_for_else_use_is_not_in_loop_but_is_control_flow() -> None:
-    # `node.orelse` doesn't repeat, but it's conditional on the loop
-    # completing without `break` — not the same as ordinary code after the
-    # loop, which always runs.
     source = """
 def func(items):
     value = compute()
