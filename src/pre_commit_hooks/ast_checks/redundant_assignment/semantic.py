@@ -264,16 +264,8 @@ def exceeds_line_length_when_inlined(
     rhs_source: str,
     use_line: str,
     *,
-    max_length: int = 79,  # PEP 8 default
+    max_length: int = 79,
 ) -> bool:
-    """True if replacing `var_name` with `rhs_source` on `use_line` would exceed `max_length`.
-
-    This is the exact check (given the real usage line) shared by
-    `should_autofix` (deciding whether to report `[FIXABLE]`) and
-    `autofix.apply_fixes`'s `_can_safely_inline` (deciding whether to actually
-    apply the fix). Both must agree, or a violation can be reported fixable
-    and then silently skipped by `--fix`.
-    """
     len_diff = len(rhs_source) - len(var_name)
     new_line_len = len(use_line.rstrip("\n\r")) + len_diff
     return new_line_len > max_length
