@@ -119,34 +119,6 @@ _POTENTIALLY_EFFECTFUL_NODE_TYPES = (
 
 
 def _evaluation_order_children(node: ast.AST) -> Iterator[tuple[ast.AST, bool]]:
-    """Yield `node`'s children in Python's actual evaluation order.
-
-    Each child is paired with whether it's *conditionally* evaluated —
-    i.e. it might run zero times at runtime, unlike everything else here
-    which always runs exactly once if its parent does. Inlining a call into
-    a conditional position is just as unsafe as inlining it somewhere with
-    a preceding effect: both change whether/when the call actually fires
-    relative to the original, unconditional assignment.
-
-    `ast.iter_child_nodes` matches evaluation order and unconditional-ness
-    for most expression types, since their `_fields` are declared
-    left-to-right in evaluation order (BinOp.left before .right, Call.func
-    before .args before .keywords, etc.) and don't skip children at
-    runtime. The exceptions handled explicitly here:
-    - `ast.Dict`: `_fields` are `('keys', 'values')` — every key, then
-      every value — but Python evaluates each key/value *pair* together,
-      interleaved (e.g. `{"a": f(), x: 1}` evaluates "a", f(), x, 1 — not
-      "a", x, f(), 1). A `None` key marks `**unpacking`, which evaluates
-      only the paired value.
-    - `ast.Assign`: `_fields` are `('targets', 'value', ...)`, but Python
-      evaluates the RHS `value` *before* the target(s) (relevant when a
-      target is `obj.attr` or `obj[key]`, whose base expression `obj` is
-      itself evaluated then, after `value`).
-    - `ast.IfExp` (ternary): `test` always evaluates, but exactly one of
-      `body`/`orelse` does — never both, and never unconditionally.
-    - `ast.BoolOp` (`and`/`or`): short-circuits, so only the first operand
-      is guaranteed to evaluate; the rest are conditional on earlier ones.
-    """
     if isinstance(node, ast.Dict):
         for key, value in zip(node.keys, node.values, strict=True):
             if key is not None:
