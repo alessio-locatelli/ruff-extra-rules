@@ -38,11 +38,6 @@ class CacheManager:
         self.cache_dir = cache_dir or self.DEFAULT_CACHE_DIR
         self.hook_name = hook_name
         self.cache_version = cache_version
-        # Set by _ensure_cache_dir() below on failure. Checked first by
-        # get_cached_result()/set_cached_result() so a cache directory that
-        # was never available doesn't pay a doomed mkdir()/file-hash attempt
-        # (and log another warning) on every single file for the rest of
-        # this run — one warning at construction is enough.
         self._cache_dir_unavailable = False
         self._locking_unavailable = not locking_is_available()
         if self._locking_unavailable:
