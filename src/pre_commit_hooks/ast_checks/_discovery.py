@@ -97,18 +97,6 @@ _GIT_STATUS_TIMEOUT_SECONDS = 5
 _PROCESS_STOP_TIMEOUT_SECONDS = 1
 _CAN_STREAM_IGNORED_STATUS = os.name == "posix"
 
-# Well-known packaging/tooling directory names, most of which are named in
-# this project's own .gitignore -- every one of these gets created by this
-# project's own routine `mypy`/`pytest`/`ruff`/`build`/`uv sync` commands, so
-# warning about them unconditionally fired on essentially every
-# directory-argument run rather than the occasional case ADR 0028
-# anticipated (ADR 0029). `.ruff_cache` isn't itself named in this
-# repository's top-level .gitignore -- ruff writes its own nested
-# `.ruff_cache/.gitignore` containing `*`, which is what makes `git status`
-# collapse it to a single ignored-directory line the same way a
-# name-matched pattern would. None of these names are ever used for
-# hand-written source, so skipping them costs nothing a directly-ignored
-# `.py` file (still always reported below) wouldn't already catch.
 _NON_SOURCE_DIRECTORY_NAMES = frozenset(
     {
         "__pycache__",
