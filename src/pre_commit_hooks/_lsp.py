@@ -87,17 +87,6 @@ def _message(*, method: str, params: dict[str, Any] | None, msg_id: int | None =
 
 
 class LSPClient:
-    """One child language-server process over Content-Length-framed JSON-RPC via stdio.
-
-    A server-to-client *request* (carries both `id` and `method`) is
-    silently left unanswered -- `ty server` has not been observed to block
-    on one. A server-to-client *notification* (carries `method` but no
-    `id`, e.g. `textDocument/publishDiagnostics`) is instead handed to
-    `on_notification`, if one was given; with none, it's dropped the same
-    way a request is. Not thread-safe for concurrent `request()`/
-    `notify()` calls.
-    """
-
     __slots__ = (
         "_close_called",
         "_connection_lost",
