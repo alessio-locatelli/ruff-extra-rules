@@ -69,11 +69,6 @@ DESCRIPTIVE_SUFFIXES = {
 
 
 def _count_chained_operations(node: ast.expr) -> int:
-    """Examples:
-    foo.bar.baz -> 2 (two attribute accesses)
-    obj[x][y][z] -> 3 (three subscripts)
-    func()[key].attr -> 2 (subscript + attribute)
-    """
     count = 0
     current = node
 
@@ -82,12 +77,10 @@ def _count_chained_operations(node: ast.expr) -> int:
             count += 1
             current = current.value
         elif isinstance(current, ast.Call):
-            # Only count the call if it's chained with something else.
             if count > 0:
                 count += 1
             current = current.func
         else:
-            # Reached the base of the chain.
             break
 
     return count
