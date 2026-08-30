@@ -70,16 +70,10 @@ def test_git_grep_filter_regex_pattern(sample_files: list[str]) -> None:
 
 
 def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None:
-    # Exercises the actual git-grep-succeeded (returncode == 0) and
-    # git-grep-found-nothing (returncode == 1) branches without mocking
-    # subprocess. The other tests here use files outside any git repo, so
-    # `git grep` always errors out and they only ever exercise the Python
-    # fallback path.
     git = shutil.which("git")
     assert git is not None
 
     with contextlib.chdir(tmp_path):
-        # Args are hardcoded test setup, not untrusted input.
         subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
 
         file1 = tmp_path / "file1.py"
