@@ -231,9 +231,6 @@ def test_unavailable_cache_dir_short_circuits_without_touching_filesystem(
 def test_write_cache_cleans_up_temp_file_on_write_error(
     cache_manager: CacheManager,
 ) -> None:
-    # The mkstemp-created temp file is removed even when writing to it fails
-    # partway (e.g. non-JSON-serializable data), instead of being left
-    # behind.
     cache_file = cache_manager.cache_dir / "some_hash.json"
 
     with pytest.raises(TypeError):
