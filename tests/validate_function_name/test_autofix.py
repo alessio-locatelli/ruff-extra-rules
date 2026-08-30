@@ -316,9 +316,6 @@ def test_apply_fix_refuses_when_a_call_site_line_is_format_suppressed(tmp_path: 
 def test_apply_fix_renames_call_site_on_line_with_non_ascii_text(
     tmp_path: Path,
 ) -> None:
-    # ast.col_offset is a UTF-8 byte offset, not a character
-    # offset. Non-ASCII text earlier on a call site's line must not throw
-    # off the position used to rename it.
     test_file = tmp_path / "module.py"
     test_file.write_text(
         "def get_data():\n"
