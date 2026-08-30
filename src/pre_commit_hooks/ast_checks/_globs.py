@@ -16,11 +16,6 @@ class InvalidGlobError(ValueError):
 
 
 class _Piece(NamedTuple):
-    """One translated token. `fixed_width` is what makes the piece safe to
-    put inside an atomic group (see `_join`); an alternation branch or a
-    recursive `**` component is not.
-    """
-
     regex: str
     fixed_width: bool
     is_star: bool = False
