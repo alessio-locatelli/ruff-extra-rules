@@ -1063,10 +1063,6 @@ def test_detect_redundancy(source: str, var_name: str, pattern: PatternType | No
 
 
 def test_match_statement_case_body_use_not_immediate() -> None:
-    # A use inside a match/case body must be treated as control flow (like
-    # an if/elif branch), not as an ordinary use that always runs —
-    # otherwise it could be reported/autofixed as if the case always
-    # matched.
     source = """
 def f(command):
     value = make()
