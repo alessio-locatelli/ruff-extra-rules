@@ -1,8 +1,3 @@
-"""Which checks a given file opts out of.
-
-See `docs/adr/0049-per-file-ignores.md`.
-"""
-
 from __future__ import annotations
 
 import os
