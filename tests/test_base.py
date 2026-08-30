@@ -108,9 +108,6 @@ def test_fast_get_source_segment_returns_none_without_end_position() -> None:
     ids=["lf", "crlf", "cr", "no-trailing-newline", "form-feed-is-not-a-boundary", "empty"],
 )
 def test_split_lines_like_ast_matches_ast_own_line_numbering(source: str) -> None:
-    # ast._splitlines_no_ff is the private stdlib function
-    # split_lines_like_ast deliberately reimplements rather than depends
-    # on directly; this proves the two stay in agreement.
     assert split_lines_like_ast(source) == ast._splitlines_no_ff(source)  # type: ignore[attr-defined]
 
 
