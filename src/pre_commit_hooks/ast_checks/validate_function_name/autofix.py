@@ -292,12 +292,6 @@ def _resolve_rename_scope(tree: ast.Module, func_node: _FuncNode) -> tuple[ast.A
 
 
 def apply_fix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
-    """AST-scoped rename: renames the function definition itself plus true
-    call-site references (`Name`/`Attribute` nodes reached via normal AST
-    traversal) within the scope the function is visible in. Never touches
-    string/byte literals, comments, or identically-named symbols in
-    unrelated scopes (e.g. a same-named method on a different class).
-    """
     try:
         source, encoding = read_source_with_encoding(filepath)
     except (OSError, SyntaxError, UnicodeDecodeError, LookupError) as error:
@@ -322,9 +316,6 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
 
     scope_node, is_method = _resolve_rename_scope(tree, func_node)
 
-    # A reassignment (`get_data = fake`) or shadowing import anywhere in the
-    # same scope means some Load references may no longer point at this
-    # function; refuse to rename call sites we can't safely tell apart.
     if not is_method and _is_rebound_in_scope(scope_node, func_node.name, func_node):
         return FixOutcome.DECLINED
 
@@ -332,9 +323,6 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
     collector.visit(scope_node)
     positions.extend(collector.positions)
 
-    # Checked against every reference's own line too, not just the
-    # definition line collect_suggestions() already gated on -- see
-    # docs/adr/0050-format-suppression-pragmas.md.
     ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
     if any(line_num in ignored_lines for line_num, _col in positions):
         return FixOutcome.DECLINED
@@ -343,17 +331,11 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
     new_name = suggestion.suggested_name
     old_len = len(old_name)
 
-    # Positions come from real ast.Name/Attribute nodes resolved against
-    # this same tree/source, so line/col are always in range and the text
-    # at each position always equals old_name.
-    for line_num, col in sorted(set(positions), reverse=True):  # pytriage: TR6 -- dedupes, not redundant
+    for line_num, col in sorted(set(positions), reverse=True):  # pytriage: TR6
         line_idx = line_num - 1
         line = lines[line_idx]
         lines[line_idx] = line[:col] + new_name + line[col + old_len :]
 
-    # suggested_name is always != func_node.name (collect_suggestions only
-    # emits a Suggestion when they differ), so replacing at least one
-    # position always changes the source.
     new_source = "".join(lines)
 
     try:
