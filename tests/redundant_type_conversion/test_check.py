@@ -64,8 +64,6 @@ def test_tracks_direct_inputs() -> None:
 def test_prefilter_pattern_matches_the_configured_levels_eligible_constructors(
     level: ConfidenceLevel, expected: set[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Narrowed to eligible_constructors(level), not every constructor TR6 knows about -- not the widened
-    # "check everything" None a real daemon for this exact repository would otherwise trigger (ADR-0041).
     monkeypatch.setattr(daemon_module, "socket_exists_for", lambda _root: False)
     pattern = RedundantTypeConversionCheck(level=level).get_prefilter_pattern()
     assert pattern is not None
