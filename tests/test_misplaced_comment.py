@@ -82,11 +82,7 @@ def test_check_detects_trailing_comment(source: str, line: int, *, fixable: bool
     [
         "result = func(\n    arg  # Comment inline on expression\n)\n",
         "result = func(\n    arg\n)  # Comment  # pytriage: TR7\n",
-        # `[1, 2][0]  # c`: tokens between the first `]` and the comment aren't COMMENT.
         "items = [1, 2][0]  # not a bracket-only line\n",
-        # An fmt:off block wrapping the bracket line suppresses the
-        # violation the same way the project's own inline ignore comment
-        # does — see docs/adr/0050-format-suppression-pragmas.md.
         "# fmt: off\nresult = func(\n    arg\n)  # Comment here\n# fmt: on\n",
     ],
     ids=["correctly-placed", "inline-ignore", "tokens-between-bracket-and-comment", "fmt-off-suppressed"],
