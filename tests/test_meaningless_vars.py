@@ -479,9 +479,6 @@ def test_reassignment_suppresses_suggestions() -> None:
 
 
 def test_model_validator_decorator_skips_arg_check() -> None:
-    # A function decorated with an irrelevant decorator is still checked
-    # for meaningless arg names, while one decorated with
-    # ``@model_validator`` (in either bare or called form) is exempt.
     source = """class Model:
     @staticmethod
     def plain(data):
