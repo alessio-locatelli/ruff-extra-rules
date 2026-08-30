@@ -300,9 +300,6 @@ def test_a_pattern_is_resolved_against_its_anchor(tmp_path: Path, pattern: str, 
     assert ("a-check" in ignores.ignored_check_ids(anchor / "src" / "mod.py")) is expected
 
 
-# Every expectation below was measured against `ruff 0.16.1`. Each pattern
-# carries a directory, so the anchored half of the rule decides it -- the
-# file's own name never matches these.
 @pytest.mark.parametrize(
     ("pattern", "relative", "expected"),
     [
