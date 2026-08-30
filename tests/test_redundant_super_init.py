@@ -333,10 +333,6 @@ def test_check_flags_only_redundant_forwarding(source: str, *, flagged: bool) ->
     ("source", "expected_substring"),
     [
         (
-            # When an intermediate class (no __init__ of its own) has
-            # multiple bases, a non-Name base (can't be resolved) is
-            # skipped, and the search continues into the remaining bases
-            # rather than stopping there.
             """class GrandBase:
     def __init__(self):
         pass
@@ -353,8 +349,6 @@ class Child(Middle):
             "Middle.__init__()",
         ),
         (
-            # Multiple inheritance: each base is checked independently,
-            # and a violation is reported per non-accepting base.
             """class Base1:
     def __init__(self):
         pass
