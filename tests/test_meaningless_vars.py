@@ -2039,13 +2039,6 @@ def process():
 
 
 def test_check_reports_character_offset_not_byte_offset_before_multibyte_text() -> None:
-    # ast.col_offset is a UTF-8 *byte* offset, not a character
-    # offset -- storing it on Violation.col directly reports a column too
-    # far right on any line with non-ASCII text before the violation
-    # (ch. 7: "MUST report ... column information accurately"; ch. 20:
-    # "MUST handle multibyte Unicode characters correctly"). "café; " is 6
-    # characters but 7 UTF-8 bytes ('é' is 2 bytes), so a byte-offset
-    # column would over-count "data"'s own position by one.
     source = "café; data = requests.get(url)\n"
     violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
         Path("module.py"), ast.parse(source), source
