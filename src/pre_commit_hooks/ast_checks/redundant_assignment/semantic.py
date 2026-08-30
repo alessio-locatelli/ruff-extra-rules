@@ -187,14 +187,8 @@ def calculate_semantic_value(
     *,
     has_type_annotation: bool = False,
 ) -> int:
-    """The score ranges from 0-100:
-    - 0-20: No semantic value (redundant assignment, can auto-fix)
-    - 21-49: Marginal value (report but don't auto-fix)
-    - 50-100: Clear value (skip entirely)
-    """
     score = 0
 
-    # e.g. "raw_headers = kwargs.get('headers')".
     if _adds_verbosity_or_context(var_name, rhs_source, rhs_node):
         score += 50
 
