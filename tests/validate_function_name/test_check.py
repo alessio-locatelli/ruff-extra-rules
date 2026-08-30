@@ -278,13 +278,6 @@ def test_fix_rechecks_repository_references_before_writing(tmp_path: Path) -> No
 def test_fix_returns_a_failure_outcome_when_apply_fix_fails_without_raising(
     tmp_path: Path,
 ) -> None:
-    # apply_fix() can fail internally (e.g. a write error) and simply
-    # return a declined outcome rather than raising; that must not be reported as
-    # fixed. The write goes through atomic_write_text's
-    # temp-file-then-rename, which only needs the parent directory to be
-    # writable (not the target file itself, since rename() doesn't check
-    # the destination's permission bits) — so the directory, not the file,
-    # has to be read-only to force a write failure here.
     filepath = tmp_path / "mod.py"
     source = "def get_data() -> bool:\n    return True\n"
     filepath.write_text(source)
