@@ -154,8 +154,6 @@ def test_an_uncompilable_pattern_is_rejected(pattern: str, needle: str) -> None:
 
 
 def test_an_anchored_pattern_keeps_its_alternation_rather_than_expanding_it() -> None:
-    # One pattern per branch would be 2**n of them for n adjacent groups, so
-    # the alternation stays in the pattern for the matcher to handle.
     assert anchored_pattern("{a,b}{c,d}/x.py", Path("/p")) == "/p/{a,b}{c,d}/x.py"
 
 
