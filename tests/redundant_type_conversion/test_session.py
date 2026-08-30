@@ -71,12 +71,6 @@ def test_diagnostic_key_ignores_a_character_column_shift() -> None:
 
 
 class _ScriptedSelfTestSession(FakeSession):
-    """A `FakeSession` pre-loaded with the exact before/after diagnostics
-    `_run_self_test` will ask for, keyed by control fixture content --
-    lets a test drive `_run_self_test`'s own pass/fail branches without a
-    real `ty` process.
-    """
-
     __slots__ = ("_raises",)
 
     def __init__(
