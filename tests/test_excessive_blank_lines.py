@@ -63,9 +63,6 @@ def test_check_edge_cases(source: str, *, flagged: bool) -> None:
 
 
 def test_leading_blank_lines_before_first_code_with_no_header() -> None:
-    # No docstring/comment header, just leading blank lines before the
-    # first code line, so the whole leading run is treated as the gap
-    # before the first code line.
     assert _check("\n\n\nimport os\n") == [
         (
             "Excessive blank lines (3) should be collapsed to 1. Add "
