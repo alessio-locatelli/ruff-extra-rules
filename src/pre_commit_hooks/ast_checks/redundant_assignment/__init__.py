@@ -98,7 +98,7 @@ class RedundantAssignmentCheck(BaseCheck):
             comments,
         ) = find_ignored_lines_and_classify_comments_and_pytriage(source, IGNORE_PATTERN)
 
-        tracker = VariableTracker(source, comment_only_lines, trailing_comment_lines)
+        tracker = VariableTracker(source, comment_only_lines, trailing_comment_lines, tree)
         tracker.visit(tree)
         lifecycles = tracker.build_lifecycles()
 

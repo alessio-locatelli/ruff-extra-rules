@@ -474,8 +474,10 @@ def _is_named_string_constant_pattern(var_name: str, rhs_node: ast.expr) -> bool
     return var_name.lstrip("_").isupper()
 
 
-def _is_keyword_argument_echo(lifecycle: VariableLifecycle) -> bool:
-    return lifecycle.is_single_use and lifecycle.uses[0].is_keyword_argument_echo
+def _is_argument_echo(lifecycle: VariableLifecycle) -> bool:
+    return lifecycle.is_single_use and (
+        lifecycle.uses[0].is_keyword_argument_echo or lifecycle.uses[0].is_positional_argument_echo
+    )
 
 
 def should_report_violation(
@@ -486,7 +488,7 @@ def should_report_violation(
     allow_inline_suppression: bool = False,
 ) -> bool:
     assignment = lifecycle.assignment
-    is_keyword_argument_echo = _is_keyword_argument_echo(lifecycle)
+    is_argument_echo = _is_argument_echo(lifecycle)
 
     # Don't report assignments inside loops - they often accumulate/track state
     # across iterations even if they appear to have single use per iteration
@@ -548,7 +550,7 @@ def should_report_violation(
     # Rule 7: Don't report "magic number" patterns - numeric/simple literals
     # where the variable name provides semantic meaning
     # Examples: max_search_depth = 10, line_spacing = 1.2, user_id = 101749141
-    if not is_keyword_argument_echo and _is_named_constant_pattern(assignment.var_name, assignment.rhs_node):
+    if not is_argument_echo and _is_named_constant_pattern(assignment.var_name, assignment.rhs_node):
         return False
 
     # Rule 8: Don't report when assignment is outside control flow but usage is inside
@@ -577,7 +579,7 @@ def should_report_violation(
     if lifecycle.uses and all(use.in_comprehension for use in lifecycle.uses):
         return False
 
-    if is_keyword_argument_echo:
+    if is_argument_echo:
         return True
 
     # Rule 11 (conservative level only): a Call RHS returns some domain

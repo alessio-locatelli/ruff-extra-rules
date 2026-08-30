@@ -19,6 +19,11 @@ Unnecessary intermediate variables add cognitive load without providing value. H
 x = "foo"
 func(x=x)
 
+# Redundant - same idea, positional: only recognized when `func` is defined
+# exactly once, undecorated, in this file, and its parameter at that
+# position is also named `x`:
+func(x)
+
 # Redundant - simple pass-through:
 result = get_value()
 return result

@@ -11,6 +11,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 - `redundant-dict-get` (TR9) reports local `.get()` calls whose key presence is already proven. It is report-only.
 - `redundant-dict-get` recognizes bounded control-flow, aliases, relational containers, and required-`TypedDict` proofs. It keeps literal and variable-key facts distinct, accepts collection membership only from plain loop targets and trusted builtins, and discards facts after rebinding, mutation, unsafe assignments, context-manager exits, `try` `else` transitions, and match fall-through. Its `level` setting defaults to `conservative`; `aggressive` retains direct `dict[...]` annotation heuristics.
 
+### Changed
+
+- `redundant-assignment` now reports an assignment whose only use is `func(name)` — a positional argument echoing the variable's own name — at the default (conservative) level, when `name` binds to a same-named parameter of a `func` defined exactly once, undecorated, in the same file. Ambiguous, decorated, cross-file, or attribute-accessed callees are left alone, since resolving those isn't exact evidence. See [ADR-0060](docs/adr/0060-redundant-assignment-positional-argument-echo.md).
+
 ## [0.2.2] - 2026-08-22
 
 ### Changed

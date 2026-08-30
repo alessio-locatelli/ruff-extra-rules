@@ -257,6 +257,18 @@ def caller() -> int:
             "func(days_with_routes_in_a_row=42)",
         ),
         (
+            """def func(days_with_routes_in_a_row: int) -> int:
+    return days_with_routes_in_a_row
+
+
+def caller() -> int:
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row = 42",
+            "func(42)",
+        ),
+        (
             """def f():
     v = obj.attr
     use(v)
@@ -304,6 +316,7 @@ def caller() -> int:
     ids=[
         "simple-constant",
         "keyword-argument-echo",
+        "positional-argument-echo",
         "simple-attribute",
         "fstring-field-non-string-rhs",
         "fstring-field-name-rhs",

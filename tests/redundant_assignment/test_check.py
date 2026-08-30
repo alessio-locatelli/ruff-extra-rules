@@ -1400,6 +1400,46 @@ def caller() -> int:
     return func(days_with_routes_in_a_row)
 """,
             "days_with_routes_in_a_row",
+            True,
+        ),
+        (
+            """
+def func(days_with_routes_in_a_row: int) -> int:
+    return days_with_routes_in_a_row
+
+
+def func(days_with_routes_in_a_row: str) -> str:
+    return days_with_routes_in_a_row
+
+
+def caller() -> int:
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
+            False,
+        ),
+        (
+            """
+@decorator
+def func(days_with_routes_in_a_row: int) -> int:
+    return days_with_routes_in_a_row
+
+
+def caller() -> int:
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
+            False,
+        ),
+        (
+            """
+def caller(obj) -> int:
+    days_with_routes_in_a_row = 42
+    return obj.func(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
             False,
         ),
     ],
@@ -1409,10 +1449,13 @@ def caller() -> int:
         "descriptive-prefix-call-rhs-echo",
         "different-keyword-not-echo",
         "call-rhs-positional-not-echo",
-        "positional-argument-not-echo",
+        "positional-argument-echo",
+        "positional-argument-ambiguous-not-echo",
+        "positional-argument-decorated-not-echo",
+        "positional-argument-attribute-call-not-echo",
     ],
 )
-def test_keyword_argument_echo_reporting(source: str, var_name: str, *, reported: bool) -> None:
+def test_argument_echo_reporting(source: str, var_name: str, *, reported: bool) -> None:
     violations = _check(source)
     if reported:
         assert any(var_name in v.message for v in violations)
