@@ -1,8 +1,3 @@
-"""Drives one long-lived `ty server` LSP session for TR6 — see
-docs/audits/type-checker-selection-for-redundant-type-conversion.md for why
-`ty`, driven over LSP, was chosen.
-"""
-
 from __future__ import annotations
 
 import atexit
