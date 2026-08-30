@@ -150,25 +150,6 @@ def _repository_reference_status(filepath: Path, name: str) -> RepositoryReferen
 
 
 def is_autofix_safe(function_index: FunctionIndex, suggestion: Suggestion) -> bool:
-    """Determine if a suggestion is safe to auto-fix.
-
-    Safe autofix criteria (ALL must be met):
-    1. High confidence (not "no confident suggestion")
-    2. Not a method (see below)
-    3. Function is small (< 20 lines of code, excluding docstring)
-    4. Simple control flow (max nesting depth ≤ 1)
-    5. Single return point (at most one return statement)
-
-    Methods are never auto-fixed: `apply_fix` can only find `self.x`/`cls.x`
-    call sites within the same class body, not external calls through a
-    differently-named receiver (e.g. `reader.get_report()` in a free
-    function elsewhere in the file). Renaming the definition without being
-    able to find every such call site would break real, unrenamed callers.
-
-    `function_index` must come from `index_function_nodes` on a tree that's
-    already parent-linked (see `attach_parents`).
-    """
-    # Check 1: Confidence
     if suggestion.reason == "no confident suggestion":
         return False
 
@@ -176,21 +157,17 @@ def is_autofix_safe(function_index: FunctionIndex, suggestion: Suggestion) -> bo
     if func_node is None:
         return False
 
-    # Check 2: Not a method
     if isinstance(getattr(func_node, "parent", None), ast.ClassDef):
         return False
 
-    # Check 3: Size (< 20 lines excluding docstring)
     line_count = _count_function_lines(func_node)
     if line_count >= 20:
         return False
 
-    # Check 4: Complexity (nesting depth ≤ 1)
     nesting = _count_nesting_depth(func_node)
     if nesting > 1:
         return False
 
-    # Check 5: Single return (≤ 1 return statement)
     returns = _count_returns(func_node)
     return returns <= 1
 
