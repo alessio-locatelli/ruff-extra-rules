@@ -240,17 +240,8 @@ def test_python_fallback_includes_unreadable_files(tmp_path: Path, caplog: pytes
 
         matches = git_grep_filter([str(file1), str(file2)], "data")
 
-        # Unreadable files are kept in; the hook itself surfaces the read error.
         assert str(file2) in matches
 
-    # Both the git-unavailable fallback and this file's own
-    # unreadable-file fallback are self-healing (the caller already keeps
-    # the file in as a candidate and the actual hook cleanly reports the
-    # read failure downstream) -- logging them at ERROR/.exception() level
-    # would leak a raw traceback onto the user's stderr by default
-    # (nothing in this codebase configures logging, so Python's own
-    # lastResort handler prints WARNING+ straight to stderr), duplicating
-    # and cluttering the clean diagnostic the hook already prints.
     assert all(record.levelname == "DEBUG" for record in caplog.records)
 
 
