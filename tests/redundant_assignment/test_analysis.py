@@ -1129,11 +1129,6 @@ def test_evaluation_order_children_assign_yields_value_before_targets() -> None:
     ("source", "var_name", "expected"),
     [
         (
-            # The evaluation-order check must be AST-based, not
-            # line/column-text-based — a text heuristic sees an empty
-            # same-line prefix for `x` here and wrongly calls it safe, even
-            # though side_effect() (on the previous physical line, same
-            # statement) already ran first.
             """
 def f():
     x = make()
@@ -1146,9 +1141,6 @@ def f():
             True,
         ),
         (
-            # Attribute/subscript access (e.g. a @property getter) can
-            # run arbitrary code just like a call, so a sibling attribute
-            # access must count as "preceding" too.
             """
 def f():
     value = make()
@@ -1158,9 +1150,6 @@ def f():
             True,
         ),
         (
-            # ast.Dict's own _fields order is ('keys', 'values') — every
-            # key, then every value — which does NOT match Python's real
-            # per-pair evaluation order.
             """
 def f():
     x = make()
@@ -1170,8 +1159,6 @@ def f():
             True,
         ),
         (
-            # Branch coverage: a dict literal that doesn't contain the
-            # target at all (and has no calls in it) must be walked fully.
             """
 def f():
     x = make()
@@ -1181,8 +1168,6 @@ def f():
             False,
         ),
         (
-            # x as the very first key (nothing evaluates before it, not
-            # even its own paired value) is still safe.
             """
 def f():
     x = make()
@@ -1192,9 +1177,6 @@ def f():
             False,
         ),
         (
-            # Branch coverage: a None key marks **unpacking (evaluates
-            # only the paired value) — a value after one must still see it
-            # as a preceding effect if that unpacked expression is a call.
             """
 def f():
     x = make()
@@ -1204,9 +1186,6 @@ def f():
             True,
         ),
         (
-            # Python evaluates `obj.attr = value` by computing `value`
-            # *before* `obj` — the opposite of ast.Assign's own _fields
-            # order.
             """
 def f():
     x = make()
@@ -1216,8 +1195,6 @@ def f():
             True,
         ),
         (
-            # Exactly one of a ternary's body/orelse ever runs — a call
-            # used there might not execute at all.
             """
 def f():
     x = make()
@@ -1227,8 +1204,6 @@ def f():
             True,
         ),
         (
-            # `and`/`or` short-circuit, so only the first operand is
-            # guaranteed to evaluate.
             """
 def f():
     x = make()
@@ -1238,9 +1213,6 @@ def f():
             True,
         ),
         (
-            # Branch coverage: a ternary that doesn't contain the target
-            # at all must still be walked fully — and since IfExp's `test`
-            # invokes `__bool__`, it's still a preceding effect.
             """
 def f():
     x = make()
@@ -1250,10 +1222,6 @@ def f():
             True,
         ),
         (
-            # Branch coverage: a BoolOp that doesn't contain the target at
-            # all must still be walked fully — and since BoolOp invokes
-            # `__bool__` on its left operand, it's still a preceding
-            # effect.
             """
 def f():
     x = make()
@@ -1263,8 +1231,6 @@ def f():
             True,
         ),
         (
-            # The BoolOp fix must stay precise: the *first* operand always
-            # evaluates unconditionally, so `sink(x and flag)` is safe.
             """
 def f():
     x = make()
@@ -1274,9 +1240,6 @@ def f():
             False,
         ),
         (
-            # The issue's own motivating idiom must remain safe: `check`
-            # is the receiver of `check.check(...)`, evaluated before any
-            # of that call's own arguments — nothing precedes it.
             """
 def f():
     check = MeaninglessVarsCheck()
