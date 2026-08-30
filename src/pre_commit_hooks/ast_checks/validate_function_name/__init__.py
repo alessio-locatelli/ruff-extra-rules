@@ -130,16 +130,6 @@ class ValidateFunctionNameCheck(BaseCheck):
         _tree: ast.Module,
         _encoding: str = "utf-8",
     ) -> FixResult:
-        """Apply fixes for function naming violations.
-
-        Note: apply_fix() re-reads the file itself (and detects its own
-        encoding via read_source_with_encoding) rather than using `source`/
-        `encoding` here. Unlike check(), this isn't a pure inefficiency to
-        remove: when a file has multiple get_ functions to rename, applying
-        one rename can shift the text a later rename's positions were
-        computed against, so each apply_fix() call re-reads the
-        just-written file to stay correct against the current file state.
-        """
         if not violations:
             return FixResult.for_violations(violations, FixOutcome.DECLINED)
 
@@ -167,19 +157,6 @@ class ValidateFunctionNameCheck(BaseCheck):
             except ConcurrentModificationError:
                 outcomes[index] = FixOutcome.ABORTED
             except Exception:
-                # A bug in apply_fix() itself, distinct from
-                # FixValidationError above: mark it so the orchestrator's
-                # post-fix re-check reports this specific violation as
-                # [FIX ERRORED] rather than an ordinary, retryable
-                # [FIXABLE] — re-running --fix would just fail here
-                # identically again.
-                # Debug-only: the outcome assignment below already reports
-                # this cleanly as [FIX ERRORED] — an ERROR-level
-                # .exception() call here would just leak a redundant raw
-                # traceback onto the user's stderr by default (nothing
-                # in this codebase configures logging, so Python's own
-                # lastResort handler prints WARNING+ straight to
-                # stderr).
                 logger_check.debug("Failed to apply fix for %s in %s", suggestion.func_name, filepath, exc_info=True)
                 outcomes[index] = FixOutcome.ERRORED
 
