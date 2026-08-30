@@ -35,12 +35,6 @@ class LSPTimeoutError(LSPError):
 
 
 def byte_col_to_utf16_col(line: str, byte_col: int) -> int:
-    """UTF-8 byte offset (`ast.col_offset`) to a UTF-16 code-unit offset (LSP's own wire encoding).
-
-    Not the same as `ast_checks._base.byte_col_to_char_col`'s character
-    offset -- a character outside the Basic Multilingual Plane is one
-    `str` character but two UTF-16 code units.
-    """
     prefix = line.encode("utf-8")[:byte_col].decode("utf-8")
     return len(prefix.encode("utf-16-le")) // 2
 
