@@ -295,9 +295,6 @@ class VariableTracker(ast.NodeVisitor):
         return self.stmt_index_stack[-1] if self.stmt_index_stack else 0
 
     def _get_child_scopes(self, scope_id: int) -> list[int]:
-        """All direct and indirect child scopes of `scope_id`, to detect closures —
-        variables assigned in an outer scope but used in nested function scopes.
-        """
         children = []
         for child_id, parent_id in self.scope_parents.items():
             if parent_id == scope_id:
