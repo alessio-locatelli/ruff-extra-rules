@@ -524,14 +524,6 @@ class VariableTracker(ast.NodeVisitor):
         self.currently_assigning.clear()
 
     def _record_compound_target_rebindings(self, target: ast.expr, stmt_index: int) -> None:
-        """Registers every Name a compound target rebinds — tuple/list
-        unpacking, a chained assignment, a for-loop target, or a with-as
-        target — none of which visit_Assign's simple-name path tracks as a
-        real AssignmentInfo. Each is recorded via a marker
-        (AssignmentInfo.is_rebinding_marker), not a full candidate: its
-        line/col may point at a statement that also binds sibling names,
-        which apply_fixes has no business touching.
-        """
         scope_id = self._get_current_scope_id()
 
         if isinstance(target, ast.Name):
