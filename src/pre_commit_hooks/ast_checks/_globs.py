@@ -65,9 +65,6 @@ def _escaped(path: str) -> str:
 
 
 def relative_to_anchor(absolute: PurePosixPath, anchor: Path) -> PurePosixPath | None:
-    """A file outside the anchor is never matched by that anchor's patterns;
-    see `docs/adr/0046-exclude-glob-semantics.md`.
-    """
     try:
         return absolute.relative_to(PurePosixPath(anchor))
     except ValueError:
