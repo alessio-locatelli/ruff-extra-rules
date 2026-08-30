@@ -1582,12 +1582,6 @@ def test_autofix_does_not_reuse_a_nested_functions_own_mapping_for_its_default()
 
 
 def test_autofix_does_not_rename_a_nested_functions_own_type_parameter_bound_via_its_own_scope() -> None:
-    # `data`'s reassignment inside `inner`'s own body causes
-    # `_collect_scope_replacements()` to be entered directly on `inner`.
-    # Its child walk must not reach into `inner.type_params` too, or it
-    # would rename `T`'s bound (which references the peer type parameter
-    # `data`, unaffected by the body-local reassignment) to a name nothing
-    # else binds.
     source = """def outer(response):
     def inner[data, T: data](response2):
         data = response2.json()
