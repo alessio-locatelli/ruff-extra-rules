@@ -77,11 +77,6 @@ class CacheManager:
             self._cache_dir_unavailable = True
 
     def get_cached_result(self, filepath: Path, hook_name: str | None = None) -> dict[str, Any] | None:
-        """Uses mtime fast-path: if mtime unchanged, skip expensive hash computation.
-        If mtime changed, verify with content hash.
-
-        `hook_name` defaults to the hook name this CacheManager was constructed with.
-        """
         hook_name = hook_name or self.hook_name
         if self._cache_dir_unavailable or self._locking_unavailable:
             return None
@@ -99,11 +94,9 @@ class CacheManager:
                 if cache_data.get("version") != self.cache_version:
                     return None
 
-                # Fast path: mtime + size check (no hashing needed)
                 if cache_data.get("mtime") == stat.st_mtime_ns and cache_data.get("size") == stat.st_size:
                     return cache_data.get("hook_results", {}).get(hook_name)
 
-                # Slow path: mtime changed, verify with content hash
                 file_hash = self.compute_file_hash(filepath)
                 if cache_data.get("file_hash") == file_hash:
                     cache_data["mtime"] = stat.st_mtime_ns
@@ -115,8 +108,6 @@ class CacheManager:
             logger.warning("File: %s, hook name: %s, error: %s", filepath, hook_name, repr(error))
             return None
         else:
-            # Neither the fast nor slow path above returned: the content
-            # hash didn't match, so the cache is genuinely stale.
             return None
 
     def set_cached_result(self, filepath: Path, hook_name: str, hook_result: dict[str, Any]) -> None:
