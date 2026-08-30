@@ -75,10 +75,6 @@ def test_ignores_a_non_candidate_call(source: str, eligible: frozenset[str]) -> 
     ids=["call-missing-end-position", "argument-missing-end-position"],
 )
 def test_ignores_a_call_missing_its_own_end_position(null_out: Callable[[ast.Call], None]) -> None:
-    # Mirrors _base.py's fast_get_source_segment: a real ast.parse() call
-    # always has end position info, but a synthetically constructed/edited
-    # node might not -- this guards find_candidates() against indexing a
-    # missing end_lineno/end_col_offset rather than assuming it's always set.
     tree = ast.parse("list(x)\n")
     call = next(node for node in ast.walk(tree) if isinstance(node, ast.Call))
     null_out(call)
