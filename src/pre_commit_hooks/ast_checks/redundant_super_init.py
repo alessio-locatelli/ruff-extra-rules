@@ -1,12 +1,3 @@
-"""Check for redundant **kwargs forwarding to parent __init__ methods.
-
-TR3: Detects when a class forwards **kwargs to a parent __init__ that
-accepts no arguments. This is a logic error that creates misleading inheritance
-patterns.
-
-Inline ignore: # pytriage: TR3, placed on the __init__ definition line.
-"""
-
 from __future__ import annotations
 
 import ast
