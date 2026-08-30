@@ -255,11 +255,8 @@ def test_record_direct_input_if_session_active_promotes_a_probed_daemon(
 
     record_direct_input_if_session_active(filepath, "source\n")
 
-    # fake having recorded the notification is itself proof it became the active session --
-    # comparing identity directly against a `_FakeNotifiableSession` (not a full `PersistentSession`)
-    # is a mypy non-overlapping-identity error, not just redundant.
     assert fake.direct_inputs == [(filepath, "source\n")]
-    fake.close()  # atexit.register(_session.close) only stores the reference; this proves it's callable
+    fake.close()
 
 
 def test_record_direct_input_if_session_active_is_a_no_op_when_no_daemon_is_reachable(
