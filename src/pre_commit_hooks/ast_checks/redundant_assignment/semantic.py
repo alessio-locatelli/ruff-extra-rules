@@ -282,13 +282,7 @@ def _would_require_parentheses(rhs_node: ast.expr) -> bool:
 
 
 def _contains_nondeterministic_call(node: ast.expr) -> bool:
-    """Non-deterministic functions (time-related, random, UUID, etc.) return
-    different values on each call, so inlining them can change program
-    semantics.
-    """
-    # Known non-deterministic function/method names
     nondeterministic_names = {
-        # time module functions
         "time",
         "perf_counter",
         "perf_counter_ns",
@@ -298,11 +292,9 @@ def _contains_nondeterministic_call(node: ast.expr) -> bool:
         "process_time_ns",
         "thread_time",
         "thread_time_ns",
-        # datetime functions
         "now",
         "today",
         "utcnow",
-        # random module functions
         "random",
         "randint",
         "choice",
@@ -311,11 +303,9 @@ def _contains_nondeterministic_call(node: ast.expr) -> bool:
         "randrange",
         "uniform",
         "gauss",
-        # uuid functions
         "uuid",
         "uuid1",
         "uuid4",
-        # system functions
         "getpid",
         "getppid",
     }
