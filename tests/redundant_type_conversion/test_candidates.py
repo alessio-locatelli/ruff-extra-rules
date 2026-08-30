@@ -203,7 +203,6 @@ def test_finds_multiple_independent_candidates_on_different_lines() -> None:
     ],
 )
 def test_ignores_a_candidate_whose_argument_the_hover_cannot_describe(source: str) -> None:
-    # See ADR-0035's "Detection method".
     assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
 
 
@@ -233,8 +232,6 @@ def test_ignores_a_candidate_whose_argument_the_hover_cannot_describe(source: st
     ],
 )
 def test_a_candidate_whose_argument_ends_on_its_own_last_token_is_still_found(source: str) -> None:
-    # Each of these ends on a token belonging to the argument expression
-    # itself, so hovering it describes the whole argument.
     assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) != []
 
 
