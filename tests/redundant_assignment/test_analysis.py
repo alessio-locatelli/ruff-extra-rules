@@ -289,7 +289,6 @@ def factory():
     return validator
 """
     lifecycle = _lifecycle_for(source, "validator")
-    # Two uses: @validator.register (decorator) and return validator.
     assert len(lifecycle.uses) == 2
 
 
