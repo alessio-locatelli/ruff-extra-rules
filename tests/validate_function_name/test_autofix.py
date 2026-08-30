@@ -554,8 +554,6 @@ def test_apply_fix_does_not_rename_call_shadowed_by_nested_assignment(
 def test_apply_fix_renames_reference_inside_non_shadowing_async_function(
     tmp_path: Path,
 ) -> None:
-    # A nested async function whose own body doesn't shadow old_name is
-    # descended into, so a real reference inside it is still renamed.
     test_file = tmp_path / "module.py"
     test_file.write_text(
         "def get_data():\n"
