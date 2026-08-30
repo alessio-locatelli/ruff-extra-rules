@@ -1,5 +1,3 @@
-"""Auto-fix implementation for TR5 redundant assignments."""
-
 from __future__ import annotations
 
 import ast
