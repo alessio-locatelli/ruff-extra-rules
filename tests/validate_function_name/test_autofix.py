@@ -530,9 +530,6 @@ def test_apply_fix_does_not_rename_call_shadowed_by_nested_async_function(
 def test_apply_fix_does_not_rename_call_shadowed_by_nested_assignment(
     tmp_path: Path,
 ) -> None:
-    # A plain local assignment inside a nested function shadows the outer
-    # function's name for that nested function's own body, same as a
-    # parameter or nested def/class would.
     test_file = tmp_path / "module.py"
     test_file.write_text(
         "def get_data():\n"
