@@ -554,7 +554,6 @@ class VariableTracker(ast.NodeVisitor):
             self._track_attribute_or_subscript_base_usage(target, stmt_index)
 
     def _track_attribute_or_subscript_base_usage(self, node: ast.Attribute | ast.Subscript, stmt_index: int) -> None:
-        """In `obj.attr = value` or `obj[key] = value`, `obj` is being read, so it counts as a usage."""
         scope_id = self._get_current_scope_id()
 
         base = _unwind_to_base_name(node)
