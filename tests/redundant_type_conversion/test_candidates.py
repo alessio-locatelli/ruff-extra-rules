@@ -22,13 +22,13 @@ def test_finds_every_constructor_as_a_call_argument(constructor: str) -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        "y = str(x)\n",  # assignment RHS
-        "return str(x)\n",  # return statement (module-level is invalid, wrapped below)
-        "func(str(x))\n",  # call argument
-        "[str(x)]\n",  # list element
-        "func(key=str(x))\n",  # keyword argument value
-        "f'{str(x)}'\n",  # f-string interpolation
-        "y: str = str(x)\n",  # annotated assignment RHS
+        "y = str(x)\n",
+        "return str(x)\n",
+        "func(str(x))\n",
+        "[str(x)]\n",
+        "func(key=str(x))\n",
+        "f'{str(x)}'\n",
+        "y: str = str(x)\n",
     ],
     ids=["assign-rhs", "return", "call-arg", "list-element", "keyword-value", "fstring", "annotated-assign"],
 )
