@@ -421,8 +421,6 @@ def test_apply_fix_does_not_rename_parameter_shadowed_call(tmp_path: Path) -> No
 def test_apply_fix_does_not_rename_lambda_parameter_shadowed_reference(
     tmp_path: Path,
 ) -> None:
-    # A lambda parameter with the same name shadows the outer function for
-    # the lambda's own body, same as a nested function's parameter would.
     test_file = tmp_path / "module.py"
     test_file.write_text(
         "def get_data():\n"
