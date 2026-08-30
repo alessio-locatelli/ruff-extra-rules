@@ -1477,19 +1477,6 @@ def f(x: data) -> result:
 
 
 def test_autofix_follows_closure_into_type_parameter_bound_and_default() -> None:
-    # a PEP 695 type parameter's own `bound`/`default_value`
-    # expression is evaluated lazily, but through a real closure over the
-    # scope enclosing the `def` — confirmed against CPython to respect
-    # ordinary shadowing rules, unlike a deferred annotation (previous
-    # test). None of these were visited by the rename traversal at all, so
-    # a nested type parameter bound/default referencing an outer local was
-    # silently left stale, raising `NameError` the moment it was accessed
-    # (e.g. via `__bound__`/`__default__`). Covers all three type parameter
-    # kinds (`TypeVar`'s own `bound` and `default_value`, `TypeVarTuple`'s
-    # and `ParamSpec`'s own `default_value`) in one fixture; `**Q` (no
-    # default at all — a non-default type parameter must precede every
-    # defaulted one) is branch coverage for a `ParamSpec`/`TypeVarTuple`
-    # with nothing to yield.
     source = """def outer(response):
     data: Payload = response.json()
 
