@@ -81,8 +81,6 @@ def test_which_checks_a_file_ignores(
 
 
 def test_a_path_pattern_does_not_reach_outside_its_anchor(tmp_path: Path) -> None:
-    # Matching a path against an anchor it does not live under would make the
-    # outcome depend on where the process happened to start; see ADR-0046.
     anchor = tmp_path / "project"
     ignores = PerFileIgnoreList((_entry("src/**", anchor),))
 
