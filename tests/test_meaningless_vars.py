@@ -525,7 +525,6 @@ def test_name_collision_suffixes_suggestion() -> None:
 
 
 def test_tokenize_error_handling() -> None:
-    # Deliberately malformed so tokenizing may raise partway through.
     source = "def func():\n    data = 1  # missing closing quote"
 
     violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
