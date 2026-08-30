@@ -139,7 +139,7 @@ def test_cache_version_mismatch_recovers_on_rewrite(temp_cache_dir: Path, sample
 
 def test_compute_file_hash(sample_file: Path) -> None:
     hash1 = CacheManager.compute_file_hash(sample_file)
-    assert len(hash1) == 40  # SHA-1 is 40 hex chars
+    assert len(hash1) == 40
 
     hash2 = CacheManager.compute_file_hash(sample_file)
     assert hash1 == hash2
