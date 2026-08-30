@@ -240,8 +240,6 @@ def func():
 
 
 def test_starred_tuple_target_recorded_as_rebinding() -> None:
-    # A Starred element inside a tuple-unpacking target (`a, *b = ...`)
-    # rebinds `first` just like a plain Name element would.
     source = """
 def func():
     first = None
