@@ -273,8 +273,6 @@ class _ReferenceCollector(ast.NodeVisitor):
 
     def visit_Name(self, node: ast.Name) -> None:
         if not self.is_method and node.id == self.old_name and isinstance(node.ctx, ast.Load):
-            # col_offset is a UTF-8 byte offset; convert to a character
-            # offset before it's used to index into the line as a str.
             char_col = byte_col_to_char_col(self.lines[node.lineno - 1], node.col_offset)
             self.positions.append((node.lineno, char_col))
         self.generic_visit(node)
