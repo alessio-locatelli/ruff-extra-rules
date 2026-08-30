@@ -194,10 +194,6 @@ def test_request_raises_lsp_error_when_server_exits_without_responding(tmp_path:
 
 
 def test_reader_loop_marks_connection_lost_on_a_malformed_frame(tmp_path: Path) -> None:
-    # A malformed frame from the server (missing Content-Length) makes
-    # read_framed_message raise inside the reader loop's own try block -- this
-    # must be caught, not crash the thread silently, and still mark the
-    # connection lost so a later request fails fast instead of hanging.
     with _spawn_fake_server(tmp_path) as client:
         client.notify("send_garbage")
         client._reader.join(timeout=5)
