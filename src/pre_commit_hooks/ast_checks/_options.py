@@ -1,11 +1,3 @@
-"""Option declarations shared by the CLI parser and the `pyproject.toml` loader.
-
-A check declares each option once, here; the command-line flag, the TOML
-key, the accepted values, and the check's own `__init__` kwarg are all
-derived from that declaration. See
-`docs/adr/0047-declarative-option-descriptors.md`.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
