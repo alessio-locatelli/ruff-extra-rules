@@ -2060,16 +2060,11 @@ def other():
     result = 42
     return result
 """
-    # Point at a path inside a directory that doesn't exist so write_text()
-    # raises OSError.
     filepath = tmp_path / "missing_dir" / "test.py"
 
     tree = ast.parse(source)
     check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
     violations = check.check(filepath, tree, source)
-    # "result = 42" has no autofix pattern match, so it's non-fixable —
-    # included specifically so the marking loop below has both a fixable
-    # and a non-fixable violation to distinguish between.
     assert {v.fixable for v in violations} == {True, False}
     candidate = next(violation for violation in violations if violation.fixable)
     violations.append(
@@ -2085,12 +2080,6 @@ def other():
 
     with caplog.at_level("DEBUG"):
         fix_result = check.fix(filepath, violations, source, tree)
-    # the write failure must be attributed to the violations it
-    # actually affected, not left indistinguishable from "never attempted"
-    # — the orchestrator's own report otherwise misleadingly suggests
-    # re-running --fix, which would just fail identically again. A
-    # non-fixable violation was never part of this attempt at all, so it
-    # must be left alone rather than also marked failed.
     assert fix_result.outcomes == tuple(
         FixOutcome.FAILED if violation is candidate else FixOutcome.DECLINED for violation in violations
     )
