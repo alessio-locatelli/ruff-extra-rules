@@ -28,7 +28,7 @@ class SuperInitChecker(ast.NodeVisitor):
     def __init__(self, filename: str) -> None:
         self.filename = filename
         self.violations: list[tuple[int, str]] = []
-        self.classes: dict[str, ast.ClassDef] = {}  # Track class definitions
+        self.classes: dict[str, ast.ClassDef] = {}
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.classes[node.name] = node
