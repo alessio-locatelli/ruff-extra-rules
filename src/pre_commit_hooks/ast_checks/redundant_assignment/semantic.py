@@ -453,13 +453,6 @@ def should_report_violation(
     return semantic_score <= _report_score_ceiling(level, pattern)
 
 
-# Placeholder names that add no descriptive value of their own — matching
-# the generic-name sets already used elsewhere in this module (Pattern 4 of
-# `_adds_verbosity_or_context`, `_is_named_constant_pattern`) plus a handful
-# of common synonyms, including `tree` (an `ast.parse()`-style result has no
-# more specific conventional name). A name this short (<=2 characters, e.g.
-# `x`) is treated as equally generic — too short to carry any domain
-# meaning either way.
 _GENERIC_CALL_RESULT_NAMES = frozenset(
     {
         "data",
@@ -481,13 +474,6 @@ _GENERIC_CALL_RESULT_NAMES = frozenset(
 
 
 def _is_generic_call_result_name(var_name: str, rhs_node: ast.Call) -> bool:
-    """True when `var_name` adds no descriptive value beyond what
-    `rhs_node`'s call already conveys — either a placeholder generic enough
-    to carry no domain meaning on its own, or a name that just restates the
-    callee it's assigned from (`check = MeaninglessVarsCheck()`, `state =
-    me.state(...)`) rather than describing the domain value the call
-    returns (`warning = conn.recv()`).
-    """
     if len(var_name) <= 2:
         return True
 
