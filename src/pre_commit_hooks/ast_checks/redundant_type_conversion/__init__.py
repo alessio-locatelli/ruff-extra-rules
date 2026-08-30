@@ -29,7 +29,6 @@ if TYPE_CHECKING:
 
 IGNORE_PATTERN = ignore_pattern_for("TR6")
 
-# See docs/rules/redundant-type-conversion.md's Suppression section.
 THIRD_PARTY_IGNORE_PATTERN = re.compile(r"#\s*(?:type|pyright|ty)\s*:\s*ignore\b", re.IGNORECASE)
 
 ERROR_CODE = "TR6"
