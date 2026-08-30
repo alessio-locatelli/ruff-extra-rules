@@ -84,7 +84,6 @@ class RedundantTypeConversionCheck(BaseCheck):
 
     @property
     def cacheable(self) -> bool:
-        """See ADR-0034."""
         return False
 
     @property
