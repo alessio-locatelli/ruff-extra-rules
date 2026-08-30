@@ -490,10 +490,6 @@ def test_atomic_write_text_accepts_a_stateful_encoding_whose_bytes_dont_round_tr
 
 
 def test_atomic_write_text_aborts_when_disk_content_no_longer_decodes(tmp_path: Path) -> None:
-    # A concurrent edit that leaves bytes no longer valid in the original
-    # encoding (e.g. a half-written save, or content switched to a
-    # different encoding) is still a change this check must catch, not let
-    # UnicodeDecodeError escape as an unrelated internal error.
     target = tmp_path / "mod.py"
     target.write_text("x = 1\n")
     expected_source = target.read_text()
