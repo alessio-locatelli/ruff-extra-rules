@@ -2013,9 +2013,6 @@ def test_repeated_binding_leaves_the_file_unchanged() -> None:
 
 
 def test_autofix_replaces_name_on_line_with_non_ascii_text() -> None:
-    # ast.col_offset is a UTF-8 byte offset, not a character
-    # offset. Non-ASCII text earlier on the same line as the meaningless
-    # name must not throw off the position used to locate and replace it.
     source = """import requests
 
 def process():
