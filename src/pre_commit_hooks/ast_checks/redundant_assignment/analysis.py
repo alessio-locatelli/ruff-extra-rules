@@ -976,7 +976,6 @@ def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
 
 
 def _is_literal_identity(lifecycle: VariableLifecycle) -> bool:
-    """True for a literal identity assignment, e.g. `foo = "foo"` (case- and underscore-insensitive)."""
     assignment = lifecycle.assignment
     rhs_node = assignment.rhs_node
 
@@ -987,7 +986,6 @@ def _is_literal_identity(lifecycle: VariableLifecycle) -> bool:
         if var_name == literal_value:
             return True
 
-        # Allow underscore differences too, e.g. variable FOO vs literal "foo"
         if var_name.replace("_", "") == literal_value.replace("_", ""):
             return True
 
