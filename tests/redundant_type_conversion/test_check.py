@@ -279,11 +279,6 @@ def test_check_skips_a_line_with_a_third_party_suppression_comment(
     monkeypatch: pytest.MonkeyPatch, comment: str
 ) -> None:
     source = f"y = str(x)  {comment}\n"
-    # No recorded responses at all: if the check tried to reach the
-    # session for this candidate, FakeSession.open_or_update/hover would
-    # raise a KeyError-free but semantically wrong empty/None result --
-    # asserting opened_content stays empty is the real proof it never got
-    # that far.
     session = FakeSession(diagnostics_by_content={}, hover_by_position={})
     _patch_session(monkeypatch, session)
 
