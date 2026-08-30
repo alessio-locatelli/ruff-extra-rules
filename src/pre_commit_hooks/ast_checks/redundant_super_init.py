@@ -103,16 +103,10 @@ def _parent_accepts_args(class_node: ast.ClassDef, classes: dict[str, ast.ClassD
                 return True
             if args.kwonlyargs:
                 return True
-            # `self` only lands in posonlyargs when the signature marks it
-            # positional-only too (e.g. `def __init__(self, /, x)`), so a
-            # lone posonly entry there is just `self`, not a real parameter.
             return bool(args.posonlyargs and len(args.posonlyargs) > 1)
 
-    # No __init__ found on this class itself; fall back to its bases.
     for base in class_node.bases:
         if isinstance(base, ast.Name):
-            # Can't inspect a built-in/imported type's own __init__, but
-            # Exception and its subclasses accept **kwargs through BaseException.
             if base.id in ("Exception", "BaseException"):
                 return True
             parent = classes.get(base.id)
