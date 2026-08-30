@@ -1,10 +1,3 @@
-"""A single, reusable exclusive-advisory-file-lock primitive, shared by
-`_cache.py` (its own per-file cache blob) and
-`redundant_type_conversion/daemon.py` (its spawn-if-absent critical section)
-rather than each reimplementing the same poll-with-timeout logic
-independently.
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -14,10 +7,6 @@ from typing import TYPE_CHECKING
 try:
     import fcntl
 except ImportError:  # pragma: win32 cover
-    # POSIX-only; see docs/adr/0020-behavioral-contract-audit-cross-platform-behavior.md.
-    # Every caller must check its own availability (e.g. CacheManager's
-    # _locking_unavailable) before ever calling locked() -- this module makes
-    # no platform-degradation decision of its own.
     fcntl = None  # type: ignore[assignment]
 
 if TYPE_CHECKING:
