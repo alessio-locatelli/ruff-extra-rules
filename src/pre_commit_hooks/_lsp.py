@@ -27,7 +27,7 @@ DEFAULT_REQUEST_TIMEOUT_SECONDS = 10.0
 
 
 class LSPError(Exception):
-    """A JSON-RPC error response, or a lost connection (EOF, broken pipe, malformed frame)."""
+    pass
 
 
 class LSPTimeoutError(LSPError):
