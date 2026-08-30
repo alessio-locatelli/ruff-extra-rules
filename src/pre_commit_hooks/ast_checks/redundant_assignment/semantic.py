@@ -505,28 +505,6 @@ def _report_score_ceiling(level: AggressivenessLevel, pattern: PatternType) -> i
 
 
 def _effectful_rhs_use_is_safe_to_inline(use: UsageInfo) -> bool:
-    """True if inlining a Call or Attribute RHS at `use` won't change how
-    often, when, or relative to what else it executes.
-
-    Applies to both — not just Call — because attribute access can run
-    arbitrary code too (a `@property` getter or `__getattr__`/descriptor),
-    exactly like `_POTENTIALLY_EFFECTFUL_NODE_TYPES` already treats it for
-    evaluation-order purposes elsewhere in this package. A Name/Constant
-    RHS needs none of this: it gives the same value no matter when or how
-    many times it's evaluated, given the single-assignment invariant (and,
-    for Name, the "reference reassigned before use" exclusion) already
-    enforced elsewhere in this module.
-
-    Two independent risks:
-    - Repeated/deferred execution: a use inside a loop or lambda body runs
-      0, 1, or many times, at a different point than the original
-      assignment (once, immediately) — e.g. `x = make(); for _ in r: f(x)`
-      would turn one call into N, and `x = make(); return lambda: x` would
-      defer the call to whenever (if ever) the lambda is later invoked.
-    - Reordering: a sibling expression evaluated before `use` within its
-      statement (see `is_preceded_by_call`) could run before the inlined
-      expression, when it used to run after.
-    """
     return not use.in_loop and not use.in_lambda and not is_preceded_by_call(use)
 
 
