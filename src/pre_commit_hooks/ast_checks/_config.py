@@ -251,7 +251,6 @@ def resolve(
         )
         raise ConfigError(message)
 
-    # See ADR-0045.
     configured_fix = _table_bool(table, "fix", source, default=False)
     configured_exclude = _exclude_patterns(_table_string_list(table, "exclude", source) or (), root, "exclude", source)
     configured_select = _table_check_ids(table, "select", source, known_check_ids)
