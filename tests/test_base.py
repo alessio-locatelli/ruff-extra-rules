@@ -426,16 +426,11 @@ def test_atomic_write_text(
     "content",
     [
         "def broken(:\n",
-        # Valid per the grammar alone (ast.parse accepts it) but invalid at
-        # compile time — a fix producing this must be rejected too, not
-        # just fixes with a plain grammar error.
         "return 1\n",
     ],
     ids=["grammar-error", "compile-time-only-error"],
 )
 def test_atomic_write_text_rejects_invalid_syntax(tmp_path: Path, content: str) -> None:
-    # A bad fix must never reach disk: validation runs before the temp file
-    # is even created, so the target keeps its prior content untouched.
     target = tmp_path / "mod.py"
     target.write_text("old = 1\n")
 
