@@ -15,8 +15,6 @@ __all__ = ["PerFileIgnore", "PerFileIgnoreList"]
 
 @dataclass(frozen=True, slots=True)
 class PerFileIgnore:
-    """`pattern` never carries the leading `!` that sets `negated`."""
-
     pattern: str
     anchor: Path
     negated: bool
