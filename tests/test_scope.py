@@ -82,9 +82,6 @@ def test_iter_within_scope_starts_inside_a_function_scope() -> None:
             False,
             {"values"},
         ),
-        # PEP 572: a `:=` target inside a comprehension binds to the scope
-        # enclosing the comprehension, not the comprehension's own scope —
-        # unlike the comprehension's `for`-loop variable, which stays hidden.
         (
             "def outer():\n    return [y for x in range(3) if (found := x) and found.bit_length()]\n",
             False,
@@ -95,9 +92,6 @@ def test_iter_within_scope_starts_inside_a_function_scope() -> None:
             False,
             {"deep"},
         ),
-        # A walrus inside a lambda binds to the lambda's own scope, even if
-        # the lambda sits inside a comprehension — it must not bubble up
-        # further, unlike a walrus directly inside the comprehension.
         (
             "def outer():\n    return [(lambda: (local := 1))() for item in range(3)]\n",
             False,
