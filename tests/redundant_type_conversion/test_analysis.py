@@ -277,8 +277,6 @@ def test_decide_candidates_converts_a_lost_session_to_check_unavailable_error(ra
 
 
 class _SessionRaisingFromHover(FakeSession):
-    """Simulates an unexpected, non-LSPError failure mid-candidate to test decide_candidates() cleanup."""
-
     __slots__ = ()
 
     def hover(self, _filepath: Path, _line0: int, _char_utf16: int) -> str | None:
