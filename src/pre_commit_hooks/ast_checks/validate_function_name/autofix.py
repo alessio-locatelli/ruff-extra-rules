@@ -184,12 +184,8 @@ def _def_name_position(lines: list[str], func_node: _FuncNode) -> SourcePosition
 
 
 def _attr_name_position(node: ast.Attribute, lines: list[str]) -> SourcePosition:
-    """Locates the attribute name in `obj.attr`."""
-    # Always populated for a real node from a parsed tree.
     assert node.end_lineno is not None
     assert node.end_col_offset is not None
-    # end_col_offset is a UTF-8 byte offset; convert to a character offset
-    # before subtracting the (character) length of the attribute name.
     line = lines[node.end_lineno - 1]
     char_end = byte_col_to_char_col(line, node.end_col_offset)
     return (node.end_lineno, char_end - len(node.attr))
