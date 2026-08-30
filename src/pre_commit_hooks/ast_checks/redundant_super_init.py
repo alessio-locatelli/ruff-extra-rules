@@ -155,7 +155,7 @@ class RedundantSuperInitCheck(BaseCheck):
                     check_id=self.check_id,
                     error_code=self.error_code,
                     line=line_num,
-                    col=0,  # This check doesn't track a specific column.
+                    col=0,
                     message=message,
                     fixable=False,
                 )
