@@ -36,10 +36,6 @@ logger_check = logging.getLogger("validate_function_name_check")
 
 
 class ValidateFunctionNameFixData(TypedDict):
-    """Constructed by check(), read back by fix() to re-apply the same
-    suggestion computed during check() rather than recomputing it.
-    """
-
     suggestion: Suggestion
 
 
