@@ -148,25 +148,6 @@ def _call_precedes_target(
     target: ast.AST,
     effect_types: tuple[type, ...] = _POTENTIALLY_EFFECTFUL_NODE_TYPES,
 ) -> tuple[bool, bool, bool]:
-    """Walk `node`'s children in evaluation order looking for `target`.
-
-    It's AST-based rather than text/line-based specifically so it stays
-    correct across multi-line statements, where a sibling operand's
-    physical line/column says nothing about evaluation order. `target` is
-    matched by identity, not structural equality.
-
-    Returns a (found, effect_before_target, node_is_or_contains_effect) triple:
-    - found: whether `target` is `node` itself or within its subtree
-    - effect_before_target: whether a node matching `effect_types` (see
-      `_POTENTIALLY_EFFECTFUL_NODE_TYPES`) fully evaluated before reaching
-      `target`, OR `target` is only conditionally reachable (see
-      `_evaluation_order_children`) — only meaningful when `found` is True
-    - node_is_or_contains_effect: whether `node` itself matches (or
-      contains a node matching) `effect_types` that has fully evaluated —
-      only meaningful when `found` is False, since a call containing
-      `target` among its own arguments doesn't fire until after `target`
-      (and everything else in it) is evaluated
-    """
     if node is target:
         return True, False, False
 
