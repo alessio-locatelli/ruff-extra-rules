@@ -333,9 +333,6 @@ def _spawn(root: Path, *, on_notification: Callable[[str, dict[str, Any]], None]
     try:
         client = LSPClient(_TY_COMMAND, cwd=root, on_notification=on_notification)
     except OSError as error:
-        # Not just FileNotFoundError: ty resolving on PATH but failing to
-        # launch (no execute permission, a corrupt binary, ...) raises a
-        # different OSError subclass, but means the same thing here.
         raise CheckUnavailableError(_INSTALL_HINT) from error
 
     try:
