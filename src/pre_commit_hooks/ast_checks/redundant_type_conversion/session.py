@@ -349,17 +349,11 @@ def _spawn(root: Path, *, on_notification: Callable[[str, dict[str, Any]], None]
 
 
 def _run_self_test(session: RedundancySession, root: Path) -> None:
-    """Positive/negative control pair against `session` -- see ADR-0035's "Failure handling".
-
-    `session` is typed as the structural `RedundancySession`, not the
-    concrete `TySession`, so a test can substitute a fake one.
-    """
     try:
         redundant_path = root / "redundant_control.py"
         redundant_path.write_text(_REDUNDANT_CONTROL_BEFORE, encoding="utf-8")
         redundant_before = session.open_or_update(redundant_path, _REDUNDANT_CONTROL_BEFORE)
         redundant_after = session.open_or_update(redundant_path, _REDUNDANT_CONTROL_AFTER)
-        # Diffed, not required to be literally empty -- see _diagnostic_key.
         if redundant_after - redundant_before:
             raise CheckUnavailableError(_SELF_TEST_FAILED_HINT)
 
