@@ -50,10 +50,6 @@ def test_install_sigterm_handler_degrades_when_signal_signal_unavailable(
     with caplog.at_level("DEBUG"):
         _install_sigterm_handler()  # must not raise
 
-    # ch. 31: "MUST NOT consider a test that merely checks that the process
-    # did not crash sufficient evidence of correctness" -- also verify the
-    # actual degraded behavior: no handler was installed, and the fallback
-    # is logged rather than silent.
     assert signal.getsignal(signal.SIGTERM) is original_handler
     assert "Could not install a SIGTERM handler" in caplog.text
 
