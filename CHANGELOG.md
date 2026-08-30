@@ -13,6 +13,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ### Changed
 
+- `redundant-assignment` no longer reports module-level uppercase string constants at the aggressive level, preserving named configuration values that carry a stable meaning beyond their single use.
 - `redundant-assignment` now reports an assignment whose only use is `func(name)` — a positional argument echoing the variable's own name — at the default (conservative) level, when `name` binds to a same-named parameter of a `func` defined exactly once, undecorated, in the same file. Ambiguous, decorated, cross-file, or attribute-accessed callees are left alone, since resolving those isn't exact evidence. See [ADR-0060](docs/adr/0060-redundant-assignment-positional-argument-echo.md).
 
 ## [0.2.2] - 2026-08-22

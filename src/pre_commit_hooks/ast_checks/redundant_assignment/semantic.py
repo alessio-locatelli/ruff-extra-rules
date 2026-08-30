@@ -436,11 +436,7 @@ def should_report_violation(
     ):
         return False
 
-    if (
-        level is AggressivenessLevel.CONSERVATIVE
-        and assignment.in_global_scope
-        and _is_named_string_constant_pattern(assignment.var_name, assignment.rhs_node)
-    ):
+    if assignment.in_global_scope and _is_named_string_constant_pattern(assignment.var_name, assignment.rhs_node):
         return False
 
     semantic_score = calculate_semantic_value(
