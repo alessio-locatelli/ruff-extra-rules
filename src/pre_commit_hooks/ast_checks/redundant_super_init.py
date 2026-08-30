@@ -90,8 +90,6 @@ def _is_super_init_call(node: ast.Call) -> bool:
 
 
 def _forwards_kwargs(node: ast.Call) -> bool:
-    # **kwargs forwarding is a `keyword` node with `arg=None` (not
-    # `ast.Starred`, which is only for bare `*args` unpacking).
     return any(keyword.arg is None for keyword in node.keywords)
 
 
