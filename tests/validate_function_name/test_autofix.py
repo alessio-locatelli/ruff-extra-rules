@@ -644,16 +644,7 @@ def test_apply_fix_renames_reference_inside_non_shadowing_async_function(
         "stale-lineno",
         "read-error",
         "syntax-error",
-        # `get_data = fake` permanently rebinds the module-level name for
-        # the rest of the module's runtime lifetime (Python has no block
-        # scoping), so a later `get_data()` may no longer refer to the
-        # function being renamed — any reassignment of the function's own
-        # name anywhere in scope makes it unsafe to trust any Load
-        # reference, so apply_fix must refuse entirely.
         "name-rebound-by-assignment",
-        # An import shadowing the function name anywhere in its own
-        # defining scope also blocks the rename (not just a plain
-        # assignment).
         "name-rebound-via-import",
     ],
 )
