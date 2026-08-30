@@ -310,13 +310,6 @@ def test_record_direct_input_if_session_active_memoizes_a_terminal_probe_failure
 
 
 class _StubLSPClient:
-    """A minimal stand-in for `LSPClient`'s own request/notify interface --
-    lets `TySession.hover`/`close_file`'s own logic be unit-tested directly
-    without a real `ty` process, mirroring `FakeSession`'s role one layer
-    down (that fakes a whole `TySession`; this fakes the LSP client a real
-    `TySession` drives).
-    """
-
     __slots__ = ("hover_raises", "hover_result", "notify_calls", "notify_hook", "notify_raises")
 
     def __init__(self, *, hover_result: object = None, hover_raises: bool = False, notify_raises: bool = False) -> None:
