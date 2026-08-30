@@ -80,15 +80,6 @@ def index_function_nodes(tree: ast.Module) -> FunctionIndex:
 
 
 def should_autofix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
-    """Re-reads and re-parses `filepath` from disk, then defers to `is_autofix_safe`.
-
-    Only used by `fix()`, which needs the file's current on-disk state (an
-    earlier rename in the same batch may already have written to it) — see
-    its own docstring. `check()` already holds a parsed, parent-linked tree
-    of the exact source it was given, and calls `is_autofix_safe` directly
-    against that instead, to avoid re-reading/re-parsing the file once per
-    suggestion.
-    """
     try:
         tree = ast.parse(read_source(filepath))
     except (OSError, SyntaxError, UnicodeDecodeError, LookupError) as error:
