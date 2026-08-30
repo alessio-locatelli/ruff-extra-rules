@@ -86,10 +86,6 @@ def test_fix_ignores_stale_violation(source: str, tmp_path: Path) -> None:
     test_file.write_text(source)
     check = ExcessiveBlankLinesCheck()
 
-    # A caller-supplied violations list can be stale — e.g. an ignore
-    # comment was added since, or a previous fix in the same run already
-    # collapsed the blank run — so fix() must recheck the current source
-    # rather than trusting it.
     stale_violation = ViolationFactory.build(check_id=check.check_id, error_code=check.error_code)
 
     assert FixOutcome.APPLIED not in check.fix(test_file, [stale_violation], source, ast.parse(source)).outcomes
