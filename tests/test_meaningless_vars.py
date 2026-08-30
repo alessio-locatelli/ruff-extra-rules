@@ -731,7 +731,7 @@ def test_autofix_follows_closure_reference_into_comprehension() -> None:
         fixed_content = filepath.read_text()
 
     assert "data" not in fixed_content
-    ast.parse(fixed_content)  # Must still be valid Python.
+    ast.parse(fixed_content)
 
 
 def test_walrus_rebinding_suppresses_suggestion() -> None:
