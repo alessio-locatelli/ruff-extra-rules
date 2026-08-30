@@ -179,16 +179,6 @@ def _can_safely_inline(
 
 
 def _try_literal_eval_str(rhs_source: str) -> str | None:
-    """`rhs_source`'s decoded value if it's a string-literal expression,
-    None otherwise (not a literal at all, e.g. a Name/Attribute/Call, or a
-    literal of some other type). Deliberately doesn't check splice safety
-    (see semantic.is_safe_to_splice_into_fstring) — the caller must treat
-    "is a string literal" and "is safe to splice" as separate questions:
-    once RHS is confirmed a string literal, the splice is the *only*
-    correct fix (see apply_fixes), so an unsafe one must be declined
-    outright, not silently swapped for the generic (buggy, re-quoting)
-    path used for non-string RHS types.
-    """
     try:
         value = ast.literal_eval(rhs_source)
     except ValueError, SyntaxError:
