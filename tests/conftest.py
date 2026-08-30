@@ -1,12 +1,3 @@
-"""Shared, session-wide test fixtures.
-
-See `docs/adr/0041-persistent-ty-daemon-for-cross-file-reanalysis.md`: a test exercising
-`redundant-type-conversion`'s real, unmocked session against this repo's own working directory can spawn a
-real, detached daemon process rooted at this repo -- unlike the plain, per-invocation `ty server` process it
-replaced, a daemon deliberately outlives the process that spawned it. This is a defensive backstop, not a
-substitute for isolating any individual test's own `Path.cwd()` (e.g. via `monkeypatch.chdir`).
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
