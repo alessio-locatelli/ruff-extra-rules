@@ -278,24 +278,24 @@ def test_len_shadowed_anywhere_in_the_module_disables_the_len_wrap_marker() -> N
 @pytest.mark.parametrize(
     "source",
     [
-        "y = matches == str(x)\n",  # bare right-hand operand
-        "y = str(x) == matches\n",  # bare left-hand operand
-        "y = matches != str(x)\n",  # !=
-        "y = str(x) in matches\n",  # in
-        "y = str(x) not in matches\n",  # not in
-        "y = matches == [str(x)]\n",  # list literal
-        "y = matches == (str(x),)\n",  # tuple literal
-        "y = matches == {str(x)}\n",  # set literal
-        "y = matches == [str(x), other]\n",  # one of several list elements
-        "y = a < matches == str(x)\n",  # chained comparison, still an Eq pair
-        "y = {str(x): 1} == other\n",  # dict key
-        "y = {1: str(x)} == other\n",  # dict value
-        "y = {**other, str(x): 1} == thing\n",  # dict key alongside a `**` unpack (a None key)
-        "y = matches == [(str(x),)]\n",  # tuple nested inside a list
-        "y = matches == {'paths': [str(x)]}\n",  # list nested inside a dict value
-        "y = matches == [[str(x)]]\n",  # list nested inside a list
-        "y = str(x) is matches\n",  # is
-        "y = str(x) is not matches\n",  # is not
+        "y = matches == str(x)\n",
+        "y = str(x) == matches\n",
+        "y = matches != str(x)\n",
+        "y = str(x) in matches\n",
+        "y = str(x) not in matches\n",
+        "y = matches == [str(x)]\n",
+        "y = matches == (str(x),)\n",
+        "y = matches == {str(x)}\n",
+        "y = matches == [str(x), other]\n",
+        "y = a < matches == str(x)\n",
+        "y = {str(x): 1} == other\n",
+        "y = {1: str(x)} == other\n",
+        "y = {**other, str(x): 1} == thing\n",
+        "y = matches == [(str(x),)]\n",
+        "y = matches == {'paths': [str(x)]}\n",
+        "y = matches == [[str(x)]]\n",
+        "y = str(x) is matches\n",
+        "y = str(x) is not matches\n",
     ],
     ids=[
         "eq-rhs",
@@ -319,7 +319,6 @@ def test_len_shadowed_anywhere_in_the_module_disables_the_len_wrap_marker() -> N
     ],
 )
 def test_a_candidate_used_as_an_equality_operand_is_marked(source: str) -> None:
-    # See ADR-0035's Path-vs-str comparison exclusion.
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
     assert candidate.in_equality_comparison is True
 
