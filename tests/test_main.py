@@ -121,11 +121,6 @@ def test_real_sigterm_mid_run_stops_gracefully_without_leftover_temp_files(
 
 
 def test_real_invocation_does_not_leak_a_traceback_onto_stderr(tmp_path: Path) -> None:
-    """Only a real subprocess -- not an in-process call -- can observe this:
-    pytest's own logging-capture plugin hides what an actual end user's
-    terminal would show (ch. 7: "MUST NOT emit uncontrolled human-oriented
-    text into a machine-readable output stream").
-    """
     filepath = tmp_path / "unreadable.py"
     filepath.write_text("data = requests.get(url)\n")
 
