@@ -16,22 +16,12 @@ logger = logging.getLogger("redundant_assignment")
 
 
 class RedundantAssignmentFixData(TypedDict):
-    """Constructed by RedundantAssignmentCheck.check(), read back here by
-    apply_fixes(). Must stay JSON-serializable (no AST nodes/lifecycle
-    objects) — detect_redundancy() only returns a pattern for single-use
-    lifecycles, so use_line/use_col are always concrete ints, never absent.
-    """
-
     pattern: str
     assign_line: int
     var_name: str
     rhs_source: str
     use_line: int
     use_col: int
-    # Byte-offset span of the enclosing f-string replacement field (see
-    # analysis.UsageInfo.fstring_field_span) when the single use is a
-    # string literal spliced directly into an f-string's text (issue #72).
-    # None for every other fix (the overwhelming majority).
     fstring_field_start_col: int | None
     fstring_field_end_col: int | None
 
