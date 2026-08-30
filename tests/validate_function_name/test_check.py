@@ -339,10 +339,6 @@ def test_fix_marks_violation_rejected_when_apply_fix_raises_fix_validation_error
 def test_fix_rejects_only_the_violation_whose_write_produces_invalid_syntax(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # fix() loops over violations one at a time, re-reading the file
-    # between each rename. If a later rename's write is rejected, an
-    # earlier one that already committed in this same call must stay —
-    # nothing rolls it back.
     filepath = tmp_path / "mod.py"
     source = (
         "def get_config():\n"
