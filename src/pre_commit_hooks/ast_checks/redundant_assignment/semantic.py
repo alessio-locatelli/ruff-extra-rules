@@ -87,20 +87,9 @@ def _count_chained_operations(node: ast.expr) -> int:
 
 
 def _adds_verbosity_or_context(var_name: str, rhs_source: str, rhs_node: ast.expr) -> bool:
-    """True when the variable name provides more descriptive or domain-specific
-    information than the RHS expression conveys on its own.
-
-    Examples that add verbosity/context:
-        raw_headers = kwargs.get("headers")  # "raw_" prefix adds meaning
-        translations = orjson.loads(f.read())  # describes what data is
-        firestore_client = db.client()  # more specific than "client"
-        user_email = data["email"]  # more verbose than just "email"
-    """
     var_lower = var_name.lower()
     rhs_lower = rhs_source.lower()
 
-    # Pattern 1: Variable has descriptive prefix not in RHS
-    # Examples: raw_headers, parsed_data, validated_input
     descriptive_word_prefixes = {
         "raw",
         "parsed",
@@ -136,30 +125,20 @@ def _adds_verbosity_or_context(var_name: str, rhs_source: str, rhs_node: ast.exp
         if first_part in descriptive_word_prefixes and first_part not in rhs_lower:
             return True
 
-    # Pattern 2: Variable name is more verbose/explicit than dict/kwargs access
-    # Examples:
-    #   raw_headers = kwargs.get("headers")  # adds "raw_" prefix  # noqa: ERA001
-    #   user_email = data["email"]  # adds "user_" prefix  # noqa: ERA001
-    #   firestore_client = db.client()  # more specific type name  # noqa: ERA001
     if isinstance(rhs_node, ast.Subscript | ast.Call):
         rhs_key_or_method = None
 
         if isinstance(rhs_node, ast.Subscript):
             if isinstance(rhs_node.slice, ast.Constant):
                 rhs_key_or_method = str(rhs_node.slice.value).lower()
-        # Must be ast.Call — the outer guard ensures Subscript | Call.
         elif isinstance(rhs_node.func, ast.Attribute):
             rhs_key_or_method = rhs_node.func.attr.lower()
         elif isinstance(rhs_node.func, ast.Name):
             rhs_key_or_method = rhs_node.func.id.lower()
 
-        # Example: "raw_headers" contains "headers" but adds "raw_"
-        # Example: "firestore_client" contains "client" but adds "firestore_"
         if rhs_key_or_method and rhs_key_or_method in var_lower and var_lower != rhs_key_or_method:
             return True
 
-    # Pattern 3: Variable name is a .get() call with more context
-    # Example: raw_headers = kwargs.get("headers")  # noqa: ERA001
     if (
         isinstance(rhs_node, ast.Call)
         and isinstance(rhs_node.func, ast.Attribute)
@@ -167,16 +146,10 @@ def _adds_verbosity_or_context(var_name: str, rhs_source: str, rhs_node: ast.exp
         and rhs_node.args
         and isinstance(rhs_node.args[0], ast.Constant)
     ):
-        # Likely kwargs.get() or dict.get().
         key_name = str(rhs_node.args[0].value).lower()
-        # If var name contains the key but is longer/different, it adds context.
         if key_name in var_lower and len(var_name) > len(key_name):
             return True
 
-    # Pattern 4: Generic parsing/loading functions with descriptive variable names
-    # Examples: translations = orjson.loads(...), config = json.load(...)
-    # The variable name describes WHAT the data is (domain/semantics)
-    # while the RHS just shows HOW it's loaded (generic operation)
     if isinstance(rhs_node, ast.Call):
         generic_parse_functions = {
             "loads",
@@ -196,8 +169,6 @@ def _adds_verbosity_or_context(var_name: str, rhs_source: str, rhs_node: ast.exp
         elif isinstance(rhs_node.func, ast.Name):
             func_name = rhs_node.func.id.lower()
 
-        # If it's a generic parse function and variable name is multi-part or long,
-        # and not a generic placeholder name like "data" or "result"
         generic_names = {"data", "result", "value", "output", "obj", "dict"}
         if (
             func_name in generic_parse_functions
