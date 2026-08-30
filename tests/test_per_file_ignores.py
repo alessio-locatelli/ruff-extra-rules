@@ -266,9 +266,6 @@ def test_an_invalid_flag_value_exits_two(
 def test_an_unusable_file_is_still_reported_when_every_check_is_ignored(
     project: Path, capsys: pytest.CaptureFixture[str], content: str | None
 ) -> None:
-    # Switching every check off for a file says nothing about whether the
-    # file itself is usable, and an input the user named must never be
-    # skipped in silence (behavioral contract chapter 13).
     _write_config(project, '"**" = ["meaningless-vars"]')
     filepath = project / "module.py"
     if content is not None:
