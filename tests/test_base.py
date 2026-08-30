@@ -466,9 +466,6 @@ def test_atomic_write_text_aborts_when_disk_content_no_longer_matches_expected_s
 def test_atomic_write_text_detects_modification_that_happened_after_expected_source_was_captured(
     tmp_path: Path,
 ) -> None:
-    # Simulates the exact race this guards against: a caller reads "x = 1\n",
-    # some other process (an editor, a concurrent worker) overwrites the file
-    # in between, and only then does the caller's own fix try to write back.
     target = tmp_path / "mod.py"
     target.write_text("x = 1\n")
     expected_source = target.read_text()
