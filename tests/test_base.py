@@ -254,9 +254,6 @@ def test_record_suppression_usage_skips_a_nonmatching_comment() -> None:
             {2, 3, 4},
         ),
         (
-            # An unrelated standalone comment inside an active fmt:off block
-            # is neither fmt:on nor yapf:enable, so it doesn't close the
-            # block -- just an ordinary comment line within it.
             "x = 1\n# fmt: off\n# just a comment\na=1\n# fmt: on\ny = 2\n",
             {2, 3, 4, 5},
         ),
@@ -289,9 +286,6 @@ def test_record_suppression_usage_skips_a_nonmatching_comment() -> None:
             {1, 2, 3, 4, 5, 6, 7},
         ),
         (
-            # Ruff's own SuppressionKind::from_comment (ruff_python_trivia)
-            # recognizes fmt:skip interspersed with another pragma on the
-            # same comment.
             "a = [1,2,3,4,5]  # fmt: skip  # noqa: E501\nb = 2\n",
             {1},
         ),
@@ -300,24 +294,18 @@ def test_record_suppression_usage_skips_a_nonmatching_comment() -> None:
             {1},
         ),
         (
-            # "fmt: skipper" must not be mistaken for "fmt: skip".
             "a = 1  # fmt: skipper\nb = 2\n",
             set(),
         ),
         (
-            # Documented trade-off -- see docs/adr/0050-format-suppression-pragmas.md.
             "a = call(\n    [\n        '1',  # fmt: skip\n        '2',\n    ],\n    b\n)\nz = 1\n",
             {1, 2, 3, 4, 5, 6, 7},
         ),
         (
-            # Documented limitation -- see docs/adr/0050-format-suppression-pragmas.md.
             "@Test\n# fmt: off\n@Test2(a,b)\n# fmt: on\ndef test(): ...\nz = 1\n",
             {2, 3, 4},
         ),
         (
-            # DEDENT (like ENDMARKER) reports the line past the file's real
-            # content when it ends inside an indented suite -- must not
-            # leak into an unterminated fmt:off's suppressed range.
             "# fmt: off\ndef f():\n    x = 1\n",
             {1, 2, 3},
         ),
