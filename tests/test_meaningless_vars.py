@@ -757,12 +757,6 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
     ("source", "expected_snippet"),
     [
         (
-            # a comprehension's *first* `for` clause's iterable
-            # is evaluated in the enclosing scope, before the
-            # comprehension's own for-target ("data" here) starts shadowing
-            # anything — must still be renamed even though the
-            # comprehension's own body (also "data") is correctly left
-            # alone.
             """def outer(response):
     data: Payload = response.json()
     return [data for data in data]
@@ -770,10 +764,6 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
             "return [data for data in payload]",
         ),
         (
-            # Branch coverage: a *later* generator's iterable (unlike the
-            # first) runs inside the comprehension's own scope — but it's
-            # still not shadowed here (the for-targets are x/z, not
-            # "data"), so it's an ordinary closure reference.
             """def outer(response, xs):
     data: Payload = response.json()
     return [x for x in xs for z in data]
@@ -781,9 +771,6 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
             "for z in payload",
         ),
         (
-            # Branch coverage: dict comprehensions have their own
-            # key/value/generators shape, distinct from list/set/generator
-            # comprehensions.
             """def outer(response, xs):
     data: Payload = response.json()
     return {x: data for x in xs}
@@ -791,11 +778,6 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
             "{x: payload for x in xs}",
         ),
         (
-            # a parameter default and a parameter/return
-            # annotation are both evaluated at def-time in the enclosing
-            # scope (not the function's own body scope) — must be renamed
-            # even though the parameter itself ("data") also shadows the
-            # name within the function's own body.
             """def outer(response):
     data: Payload = response.json()
 
@@ -807,8 +789,6 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
             "def inner(x: payload = payload) -> payload:",
         ),
         (
-            # Branch coverage: *args/**kwargs annotations go through the
-            # same vararg/kwarg-inclusive path as regular parameters.
             """def outer(response):
     data: Payload = response.json()
 
@@ -820,12 +800,6 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
             "def inner(*args: payload, **kwargs: payload):",
         ),
         (
-            # Branch coverage: when a function has PEP 695 type parameters
-            # but the renamed name isn't one of them, its annotations still
-            # move into the type parameters' own implicit scope (unlike a
-            # plain function, where they're evaluated in the enclosing
-            # scope directly) — but aren't shadowed there either, so they
-            # must still be renamed.
             """def outer(response):
     data: Payload = response.json()
 
@@ -837,8 +811,6 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
             "def inner[T](x: payload) -> T:",
         ),
         (
-            # Branch coverage: a lambda's own default value, distinct code
-            # path from a def's.
             """def outer(response):
     data: Payload = response.json()
     return lambda x=data: x
@@ -846,9 +818,6 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
             "return lambda x=payload: x",
         ),
         (
-            # Branch coverage: a function with type parameters, a
-            # parameter annotation, but no *return* annotation at all —
-            # distinct from the previous case, which has both.
             """def outer(response):
     data: Payload = response.json()
 
@@ -884,7 +853,7 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
         fixed_content = filepath.read_text()
 
     assert expected_snippet in fixed_content
-    ast.parse(fixed_content)  # Must still be valid Python.
+    ast.parse(fixed_content)
 
 
 @pytest.mark.parametrize(
