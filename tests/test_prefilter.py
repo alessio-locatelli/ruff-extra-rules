@@ -88,13 +88,6 @@ def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None
 
 
 def test_git_grep_filter_includes_permission_denied_tracked_file(tmp_path: Path) -> None:
-    # `git grep` reports a permission-denied file only as an
-    # "error: failed to stat" line on stderr -- it still exits 0 (if
-    # another requested file matched) or 1 (if none did), the same exit
-    # codes as an ordinary match/non-match. Looking only at stdout would
-    # silently vanish this file from the candidate list: never checked,
-    # never reported, and the whole run could exit 0 as if it had never
-    # existed.
     git = shutil.which("git")
     assert git is not None
 
