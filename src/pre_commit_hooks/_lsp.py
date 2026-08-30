@@ -40,13 +40,6 @@ def byte_col_to_utf16_col(line: str, byte_col: int) -> int:
 
 
 def read_framed_message(stream: IO[bytes]) -> dict[str, Any] | None:
-    """One `Content-Length`-framed JSON message, or `None` on a clean EOF before any header bytes arrive.
-
-    Shared by `LSPClient` (talking to a real `ty server` over stdio) and
-    `redundant_type_conversion/daemon.py`'s own client/server socket protocol
-    (ADR-0041) -- both use the same wire framing, just over a different
-    transport.
-    """
     header = b""
     while not header.endswith(b"\r\n\r\n"):
         chunk = stream.read(1)
