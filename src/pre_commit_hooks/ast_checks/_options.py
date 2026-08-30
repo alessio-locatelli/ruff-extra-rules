@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 class ConfigError(Exception):
-    """Reported with exit code 2; see `docs/adr/0045-pyproject-toml-configuration.md`."""
+    pass
 
 
 @dataclass(frozen=True, slots=True)
