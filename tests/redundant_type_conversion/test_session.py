@@ -479,7 +479,7 @@ def test_close_file_forgets_the_file_even_when_the_didclose_notification_fails(t
     uri = filepath.resolve().as_uri()
     session._open_versions[uri] = 1
 
-    session.close_file(filepath)  # must not raise
+    session.close_file(filepath)
 
     assert uri not in session._open_versions
 
