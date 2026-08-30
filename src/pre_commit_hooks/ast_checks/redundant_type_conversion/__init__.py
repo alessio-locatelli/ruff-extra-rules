@@ -88,7 +88,6 @@ class RedundantTypeConversionCheck(BaseCheck):
 
     @property
     def tracks_direct_inputs(self) -> bool:
-        """See ADR-0041."""
         return True
 
     def get_prefilter_pattern(self) -> list[str] | None:
