@@ -152,7 +152,6 @@ def test_sync_lazy_accessor_property_suggestion_is_not_fixable(tmp_path: Path) -
 
 
 def test_fix_skips_unsafe_suggestion(tmp_path: Path) -> None:
-    # A suggestion should_autofix rejects (e.g. a method) isn't applied.
     filepath = tmp_path / "mod.py"
     source = 'class Reader:\n    def get_data(self):\n        f = open("f.txt")\n        return f.read()\n'
     filepath.write_text(source)
