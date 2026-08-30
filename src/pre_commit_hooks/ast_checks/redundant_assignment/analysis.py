@@ -944,18 +944,10 @@ def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
     if not lifecycle.is_single_use:
         return None
 
-    # Variables captured by closures should NEVER be considered redundant.
     for use in lifecycle.uses:
         if use.scope_id != lifecycle.assignment.scope_id or use.in_lambda:
             return None
 
-    # A Call/Attribute RHS with its single textual use inside a loop the
-    # assignment itself isn't part of is reusing a value hoisted out of
-    # the loop, not merely forwarding it once — inlining would turn one
-    # evaluation into N (or zero). A Constant/Name RHS has no such risk
-    # (re-evaluating either gives the identical value every time), so it's
-    # excluded here the same way should_autofix already treats those two
-    # kinds as unconditionally safe to inline everywhere.
     if (
         isinstance(lifecycle.assignment.rhs_node, ast.Attribute | ast.Call)
         and lifecycle.uses[0].in_loop
@@ -963,42 +955,23 @@ def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
     ):
         return None
 
-    # Augmented-assignment targets (x += 1) can never be inlined: the "use"
-    # IS an assignment target, and replacing it with the RHS expression
-    # produces invalid syntax (`x = 5; x += 1` -> `5 += 1`). This also isn't
-    # the read-then-pass-through pattern TR5 targets — the variable is
-    # being mutated, not merely forwarded.
     for use in lifecycle.uses:
         if use.context == "augmented_assignment":
             return None
 
-    # A "mutation-only" use (`state.attr = ...` or `state[key] = ...`) never
-    # reads the assigned value at all, so it isn't a redundant pass-through
-    # either — unlike the augmented-assignment case above, inlining it would
-    # stay syntactically valid (`me.state(State).attr = ...`), but silently
-    # change behavior whenever the RHS isn't guaranteed to return the same
-    # object on a second evaluation (e.g. a factory/accessor rather than a
-    # cached singleton) — something this tracker has no way to verify.
     for use in lifecycle.uses:
         if use.context == "attribute_or_subscript_assignment":
             return None
 
-    # "Snapshot the old value before reassigning it" (issue #74): the RHS's
-    # reference is itself reassigned/mutated between the assignment and its
-    # use, so the two accesses observe genuinely different states — this
-    # isn't a redundant assignment forwarding the same value at all.
     if lifecycle.rhs_reference_reassigned_before_use:
         return None
 
-    # Pattern 3: Literal identity (e.g., foo = "foo")
     if _is_literal_identity(lifecycle):
         return PatternType.LITERAL_IDENTITY
 
-    # Pattern 1: Immediate single use
     if lifecycle.is_immediate_use:
         return PatternType.IMMEDIATE_SINGLE_USE
 
-    # Pattern 2: Single use anywhere
     return PatternType.SINGLE_USE
 
 
