@@ -910,49 +910,9 @@ class VariableTracker(ast.NodeVisitor):
         include_any_usage: bool = False,
         exclude_enclosing_stmt: ast.stmt | None = None,
     ) -> bool:
-        """`self.assignments[key]`/`self.uses[key]` are each built by a
-        single top-to-bottom AST walk within one scope, so entries for a
-        fixed `key` already arrive in non-decreasing `stmt_index` *and*
-        `line` order — bisecting to the range start avoids rescanning
-        every earlier assignment/use of `name`, which would otherwise make
-        a long chain of single-use aliases to the same shared name (e.g.
-        `v0 = shared` through `vN = shared`) quadratic in the number of
-        aliases.
-
-        The bisect start boundary is `(assign_line, assign_stmt_index)`,
-        not either alone — `line` and `stmt_index` can each tie while the
-        other still orders two entries correctly (see test_detect_redundancy's
-        "sharing-coarse-stmt-index" and "sharing-a-physical-line" cases), so
-        only the composite excludes exactly the assignment's own position
-        (and nothing genuinely later) regardless of which one ties.
-
-        `end_stmt_index` is still checked alongside `line` at the end of
-        the range, as before: it excludes a candidate in a later, unrelated
-        top-level statement even in the rare case `line` alone wouldn't.
-        This stays a heuristic (may under-report/under-fix, never
-        mis-fixes), not full control-flow analysis.
-
-        `include_any_usage` treats *any* in-range use of `name` — not just
-        an augmented-assignment or attribute/subscript-assignment context —
-        as disqualifying. Used for a method-call RHS (`buf.tell()`), where
-        the receiver can be mutated by another method call with no
-        assignment syntax at all.
-
-        `exclude_enclosing_stmt` skips a use belonging to that exact
-        statement — the use's own statement reads `name` again just to
-        reach the use (e.g. `obj` in `obj.consume(value)`, read to look up
-        `.consume`), the same way the assignment's own statement reads it
-        to reach the RHS. Neither is an intervening mutation.
-        """
         key = (scope_id, name)
         start_key = (assign_line, assign_stmt_index)
 
-        # Indexed iteration, not `some_list[start:]` — a slice eagerly
-        # copies the entire remaining tail before the loop even starts,
-        # which would silently reintroduce the O(N) cost per lookup (and
-        # O(N^2) overall across N aliases) that bisecting to `start` was
-        # meant to avoid, even though the loop itself `break`s almost
-        # immediately in the common case.
         assignments = self.assignments.get(key)
         if assignments:
             start = bisect.bisect_right(assignments, start_key, key=lambda a: (a.line, a.stmt_index))
@@ -962,12 +922,6 @@ class VariableTracker(ast.NodeVisitor):
                     break
                 return True
 
-        # Unlike `assignments` above, `uses` is never actually empty here:
-        # visiting the RHS expression that got us into this method always
-        # records at least a self-referential use of `name` (e.g. `value`
-        # in `old = value`, or `obj` in `old = obj.attr`) at the
-        # assignment's own line/stmt_index — bisected past below, but
-        # enough to guarantee the list itself is non-empty.
         uses = self.uses.get(key, [])
         start = bisect.bisect_right(uses, start_key, key=lambda u: (u.line, u.stmt_index))
         for i in range(start, len(uses)):
