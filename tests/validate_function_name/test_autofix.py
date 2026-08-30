@@ -248,11 +248,6 @@ def test_apply_fix_renames_recursive_call(tmp_path: Path) -> None:
 
 
 def test_apply_fix_updates_call_site_of_nested_target_function(tmp_path: Path) -> None:
-    # Renaming a *nested* function must update its own call
-    # site within the enclosing function. The enclosing scope legitimately
-    # contains a def matching the target's own name (it IS the target),
-    # which must not be mistaken for an unrelated shadowing definition
-    # that would cause the whole scope to be skipped.
     test_file = tmp_path / "module.py"
     test_file.write_text(
         "def outer():\n"
