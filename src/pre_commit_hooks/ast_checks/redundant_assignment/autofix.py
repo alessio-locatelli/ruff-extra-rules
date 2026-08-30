@@ -175,7 +175,6 @@ def _can_safely_inline(
     if exceeds_line_length_when_inlined(var_name, rhs_source, use_line):
         return False
 
-    # Multiline RHS expressions are complex and shouldn't be auto-fixed.
     return not ("\n" in rhs_source or "\r" in rhs_source)
 
 
