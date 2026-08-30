@@ -365,9 +365,6 @@ def test_shadowing_an_unrelated_name_does_not_disable_the_equality_marker() -> N
     ids=["single-import", "multiple-purepath-imports"],
 )
 def test_importing_path_from_pathlib_itself_does_not_disable_the_equality_marker(import_statement: str) -> None:
-    # An ordinary, correct `from pathlib import Path` must not
-    # be treated as shadowing pathlib's own class -- that's the overwhelmingly
-    # common case this whole exclusion exists for.
     source = f"{import_statement}y = matches == [str(x)]\n"
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
     assert candidate.in_equality_comparison is True
