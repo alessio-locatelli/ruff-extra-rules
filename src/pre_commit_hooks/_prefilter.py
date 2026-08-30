@@ -1,10 +1,3 @@
-"""Batch file pre-filtering using git grep for performance.
-
-This module provides fast file filtering using git grep to eliminate files
-that don't need processing. Falls back to Python substring search if git
-is unavailable.
-"""
-
 from __future__ import annotations
 
 import logging
