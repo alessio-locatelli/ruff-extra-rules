@@ -413,8 +413,6 @@ def test_atomic_write_text(
 ) -> None:
     target = setup(tmp_path)
 
-    # A directory in place of the target makes the write fail without ever
-    # renaming over it, exercising the cleanup path.
     ctx = pytest.raises(IsADirectoryError) if raises_error else nullcontext()
     with ctx:
         atomic_write_text(target, "new\n", "utf-8", "old\n")
