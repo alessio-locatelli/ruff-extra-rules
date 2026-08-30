@@ -348,11 +348,6 @@ def test_a_candidate_is_not_marked_as_an_equality_operand_otherwise(source: str)
     ids=["class-def", "reassignment", "imported-from-elsewhere", "a-different-pathlib-class-aliased-to-the-name"],
 )
 def test_a_locally_shadowed_purepath_name_disables_the_equality_marker(shadowing_statement: str) -> None:
-    # `ty`'s hover shows a bare class name with no module info, so a
-    # locally defined/rebound "Path" is indistinguishable from
-    # `pathlib.Path` by hover text alone -- deliberately scope-blind and
-    # conservative, since this marker only ever *suppresses* a report,
-    # never adds one.
     source = f"{shadowing_statement}y = matches == [str(x)]\n"
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
     assert candidate.in_equality_comparison is False
