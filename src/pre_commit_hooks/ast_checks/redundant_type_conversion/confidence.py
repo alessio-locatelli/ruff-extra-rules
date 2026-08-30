@@ -67,7 +67,6 @@ def _split_top_level_union(hover_text: str) -> list[str]:
 
 
 def is_exact_match(hover_text: str, constructor: str) -> bool:
-    """Whether `hover_text` is genuinely `constructor`'s own type, not just accepted by a weak recheck sink."""
     if _exact_match(hover_text, constructor):
         return True
     members = _split_top_level_union(hover_text)
