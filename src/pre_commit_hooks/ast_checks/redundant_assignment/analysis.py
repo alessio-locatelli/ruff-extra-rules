@@ -656,12 +656,6 @@ class VariableTracker(ast.NodeVisitor):
         self._track_rebinding_use(var_name, node.target.lineno, node.target.col_offset, scope_id, stmt_index)
 
     def _track_rebinding_use(self, var_name: str, line: int, col: int, scope_id: int, stmt_index: int) -> None:
-        """Records that `var_name` was rebound (augmented-assignment or
-        walrus) at this point — not a fresh `AssignmentInfo` (neither is a
-        standalone statement TR5 could itself flag as redundant), but a
-        "use" `_rhs_reference_reassigned` recognizes as disqualifying a
-        snapshot taken from `var_name` earlier in the same scope.
-        """
         usage = UsageInfo(
             var_name=var_name,
             line=line,
