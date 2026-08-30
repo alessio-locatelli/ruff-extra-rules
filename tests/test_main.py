@@ -22,10 +22,6 @@ if TYPE_CHECKING:
 
 @pytest.fixture(autouse=True)
 def _restore_sigterm_handler() -> Iterator[None]:
-    # Every test in this module either installs the real SIGTERM handler or
-    # calls run() (which does the same as a side effect) -- restore
-    # whatever was in place before so a test here can't leave a handler
-    # live for unrelated tests running later in the same process.
     original = signal.getsignal(signal.SIGTERM)
     yield
     signal.signal(signal.SIGTERM, original)
