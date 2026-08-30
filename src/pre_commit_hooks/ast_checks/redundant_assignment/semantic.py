@@ -538,37 +538,10 @@ def fstring_splice_is_safe(rhs_node: ast.expr, use: UsageInfo) -> bool | None:
 
 def should_autofix(
     lifecycle: VariableLifecycle,
-    # Source lines of the file being analyzed (no line endings), used to
-    # check the *actual* usage line's length so the `[FIXABLE]` label
-    # matches what `apply_fixes` will really do. When omitted (e.g. direct
-    # unit tests), falls back to the conservative RHS-length estimate.
     source_lines: list[str] | None = None,
 ) -> bool:
-    """Whether a *reported* violation (see `should_report_violation`) is
-    also mechanically safe to inline. This is the only gate on autofix
-    eligibility (issue #76) — pattern-independent, and with no separate,
-    softer semantic-score ceiling narrowing it further below whatever was
-    already reported. "Mechanically safe" means:
-    - NOT inside a loop or other control flow
-    - RHS is a single line, and inlining it doesn't exceed the line length
-      on the actual usage line
-    - RHS is a constant or name (always safe — see
-      `_effectful_rhs_use_is_safe_to_inline`), or an attribute (any chain
-      depth) or call whose use is the very next statement after the
-      assignment, runs exactly once at the point the assignment already
-      runs — never inside a loop/lambda, and with nothing effectful
-      evaluating before it within its statement (see
-      `_effectful_rhs_use_is_safe_to_inline`) — with a call additionally
-      capped at 2 positional args and no keywords, or vice versa, so
-      inlining doesn't turn the use site into a visually complex expression
-    - No f-string-splice hazard (issue #72); the RHS-aliasing hazard (issue
-      #74) is already ruled out upstream by `detect_redundancy` refusing to
-      report that pattern at all, so it never reaches this function
-    """
     assignment = lifecycle.assignment
 
-    # A loop body can accumulate/track state across iterations even with a
-    # single textual use; control flow means it's unclear which branch runs.
     if assignment.in_loop:
         return False
     if assignment.in_control_flow:
@@ -581,10 +554,6 @@ def should_autofix(
     if fstring_splice_is_safe(assignment.rhs_node, lifecycle.uses[0]) is False:
         return False
 
-    # Prefer the exact check against the real usage line; fall back to the
-    # conservative RHS-length estimate (stricter threshold than reporting,
-    # since a wrong autofix is more costly than a missed report) when the
-    # usage line isn't available.
     use_line_idx = lifecycle.uses[0].line - 1
     if source_lines is not None and 0 <= use_line_idx < len(source_lines):
         if exceeds_line_length_when_inlined(assignment.var_name, rhs_source, source_lines[use_line_idx]):
@@ -597,26 +566,12 @@ def should_autofix(
     if isinstance(rhs_node, ast.Constant | ast.Name):
         return True
 
-    # Attribute and Call RHS can both run arbitrary code when evaluated
-    # (see _effectful_rhs_use_is_safe_to_inline), so inlining either one is
-    # only safe when the use is the very next statement after the
-    # assignment (lifecycle.is_immediate_use) — otherwise an intervening
-    # statement's own effects could end up running before or after the
-    # inlined expression's, when they didn't originally. Example:
-    # `result_data = pop(queue); queue.clear(); return result_data` must
-    # not become `queue.clear(); return pop(queue)`, which pops after
-    # clearing instead of before.
     if not lifecycle.is_immediate_use:
         return False
 
     if isinstance(rhs_node, ast.Attribute):
         return _effectful_rhs_use_is_safe_to_inline(lifecycle.uses[0])
 
-    # Only when the use runs exactly once at the same point the call
-    # already runs (see _effectful_rhs_use_is_safe_to_inline) — otherwise
-    # inlining can change how often the call executes, e.g. moving it from
-    # once (at the assignment) into a loop body that runs N times.
-    # Example: datetime.now(UTC), str(value), len(items)
     if isinstance(rhs_node, ast.Call) and _effectful_rhs_use_is_safe_to_inline(lifecycle.uses[0]):
         if len(rhs_node.args) <= 2 and not rhs_node.keywords:
             return True
