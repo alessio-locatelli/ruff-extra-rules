@@ -157,18 +157,15 @@ def test_decide_candidates_opens_one_baseline_before_all_hovers() -> None:
 
 
 def test_decide_candidates_skips_a_len_wrapped_candidate_that_is_not_an_exact_match() -> None:
-    # See ADR-0035's `len()` sink exclusion.
     source = "len(set(op_ids))\n"
     redundant, session = _decide(
         source,
-        diagnostics_by_content={source: frozenset()},  # "len(op_ids)\n" deliberately not recorded
+        diagnostics_by_content={source: frozenset()},
         hover_by_position={(0, 13): "list[int]"},
         level=ConfidenceLevel.PERMISSIVE,
     )
 
     assert redundant == []
-    # The expensive synthetic-rewrite-and-recheck must never run once the
-    # len()-wrap exclusion alone already decided this candidate.
     assert session.opened_content == [source]
 
 
