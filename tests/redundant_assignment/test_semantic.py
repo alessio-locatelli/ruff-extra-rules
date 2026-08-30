@@ -30,14 +30,6 @@ def _make_single_use_lifecycle(
     in_control_flow: bool = False,
     preceded_by_call: bool = False,
 ) -> VariableLifecycle:
-    """Build a minimal VariableLifecycle for direct should_autofix tests.
-
-    The use's node/enclosing_stmt are built from a real parsed statement (not
-    hand-faked AST nodes) so analysis.is_preceded_by_call sees a genuinely
-    consistent tree: `{var_name}.method()` when preceded_by_call is False
-    (var_name is the first thing evaluated), or
-    `sink(side_effect(), {var_name})` when True (a sibling call precedes it).
-    """
     assignment = AssignmentInfo(
         var_name=var_name,
         line=1,
@@ -70,7 +62,6 @@ def _make_single_use_lifecycle(
 
 
 def _lifecycle_no_node(rhs_source: str, var_name: str = "x") -> VariableLifecycle:
-    """A lifecycle whose use has no real AST node attached (unknown context)."""
     rhs_node = ast.parse(rhs_source, mode="eval").body
     assignment = AssignmentInfo(
         var_name=var_name,
@@ -92,10 +83,6 @@ def _lifecycle_with_use_node(
     rhs_source: str,
     var_name: str = "x",
     use_stmt_source: str = "x.method()",
-    # Defaults to immediate (assignment at stmt_index 0, use at 1) — an
-    # Attribute/Call RHS use must be the very next statement to be
-    # mechanically safe to inline (issue #76). Callers testing a
-    # non-immediate use pass a larger value explicitly.
     use_stmt_index: int = 1,
 ) -> VariableLifecycle:
     rhs_node = ast.parse(rhs_source, mode="eval").body
