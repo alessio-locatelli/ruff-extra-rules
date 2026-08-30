@@ -98,7 +98,6 @@ def test_request_returns_result(tmp_path: Path) -> None:
 
 
 def test_a_large_stderr_write_does_not_deadlock_the_server(tmp_path: Path) -> None:
-    # Draining stderr in the background keeps a full pipe from blocking the server and stalling every request.
     with _spawn_fake_server(tmp_path) as client:
         response = client.request("spam_stderr_then_respond", {"hello": "world"}, timeout=5.0)
         assert response == {"hello": "world"}
