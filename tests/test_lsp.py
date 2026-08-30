@@ -217,9 +217,6 @@ def test_missing_on_notification_silently_drops_a_server_notification(tmp_path: 
 
 
 def test_on_notification_is_never_called_for_a_server_to_client_request(tmp_path: Path) -> None:
-    # client/registerCapability carries both id and method -- it must stay
-    # in the "silently unanswered request" path, not be mistaken for a
-    # notification just because it shares the same method-dispatch shape.
     received: list[tuple[str, dict[str, Any]]] = []
     with _spawn_fake_server(
         tmp_path, on_notification=lambda method, params: received.append((method, params))
