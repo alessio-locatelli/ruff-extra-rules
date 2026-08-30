@@ -1,7 +1,3 @@
-"""Entry point for `python -m pre_commit_hooks.ast_checks.redundant_type_conversion`: runs the persistent
-`ty` daemon server (see `daemon.py` and ADR-0041). `_spawn_daemon()` is this module's own, sole caller.
-"""
-
 from __future__ import annotations
 
 import sys
