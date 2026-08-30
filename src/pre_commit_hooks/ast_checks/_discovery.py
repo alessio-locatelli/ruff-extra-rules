@@ -71,56 +71,13 @@ def expand_directories(filenames: list[str]) -> list[str]:
 
 
 def _list_python_files_in_dir(directory: Path) -> list[str]:
-    """`.py` files under `directory`, as resolved absolute paths regardless
-    of whether `directory` itself was given as a relative or absolute
-    string — `git ls-files` always reports paths relative to whatever `-C`
-    directory it was run against, so returning its output as-is would make
-    a directory argument's expansion inconsistent with a plain file
-    argument (passed through in whatever form the caller used); resolving
-    both branches the same way keeps that consistent (ch. 13: "MUST handle
-    relative and absolute paths consistently").
-
-    Prefers `git ls-files --cached --others --exclude-standard` — tracked
-    plus untracked-but-not-`.gitignore`d, so a brand-new file that hasn't
-    been `git add`ed yet matches `git_grep_filter`'s own treatment of that
-    same file when it's named explicitly instead of via its containing
-    directory (ADR 0024) — and falls back to a plain recursive glob outside
-    a git repo or when git itself is unavailable. A genuinely `.gitignore`d
-    file is still excluded (avoids sweeping in `.venv`/build artifacts that
-    happen to live under the given directory, ADR 0015), but
-    `_warn_about_ignored_python_files` below reports that exclusion instead
-    of leaving it silent (ADR 0028, issue #67).
-    """
     resolved_dir = directory.resolve()
     try:
         cmd: list[str | Path] = ["git", "-C", directory, "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
-        # cmd is built entirely from this function's own hardcoded git
-        # subcommand/flags plus a directory supplied by this hook's own CLI
-        # invocation (never from untrusted external input), so no shell is
-        # involved and no argument here can inject another command.
-        # errors="surrogateescape": paths are just bytes on Linux, never
-        # required to be valid UTF-8 -- the default strict decoding would
-        # otherwise raise UnicodeDecodeError for an oddly-encoded filename
-        # and force falling all the way back to the untracked, non
-        # `.gitignore`-aware rglob below for the *entire* directory, sweeping
-        # in `.venv`/build artifacts to dodge one bad filename. surrogateescape
-        # is the same handler `os.fsdecode()` already uses for filesystem
-        # paths, so it never raises and round-trips back to the exact file
-        # when resolved below.
         git_ls_files_result = subprocess.run(  # noqa: S603
             cmd, capture_output=True, text=True, errors="surrogateescape", check=False, timeout=30
         )
         if git_ls_files_result.returncode == 0 and not git_ls_files_result.stderr:
-            # git ls-files reports the *index*, not the working tree: a
-            # tracked file deleted from disk without `git rm` still shows up
-            # here even though it no longer exists. A directory scan isn't
-            # asking about that specific file by name (unlike an explicit
-            # file argument, which git_grep_filter always still surfaces so
-            # its own removal is reported) -- it's asking "what's currently
-            # under here", so a stale index entry is silently dropped rather
-            # than reported as a fake unreadable file (ch. 12: "MUST avoid
-            # relying on stale file lists when the user explicitly requests
-            # a current filesystem state").
             python_files = sorted(
                 str(candidate)
                 for f in git_ls_files_result.stdout.split("\0")
@@ -129,12 +86,6 @@ def _list_python_files_in_dir(directory: Path) -> list[str]:
             _warn_about_ignored_python_files(directory)
             return python_files
     except subprocess.SubprocessError, FileNotFoundError, subprocess.TimeoutExpired:
-        # Self-healing: falls back to the equivalent rglob scan below.
-        # Debug-only — an ERROR-level .exception() call here would leak a
-        # raw traceback onto the user's stderr by default (nothing in this
-        # codebase configures logging, so Python's own lastResort handler
-        # prints WARNING+ straight to stderr) for a condition nothing
-        # actually failed at from the user's perspective.
         logger.debug("git ls-files failed", exc_info=True)
 
     return sorted(str(p) for p in resolved_dir.rglob("*.py"))
