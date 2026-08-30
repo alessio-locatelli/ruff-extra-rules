@@ -137,11 +137,6 @@ def caller(it: Iterator[int]) -> None:
 
 
 def _diagnostic_key(diagnostic: dict[str, Any]) -> tuple[Any, ...]:
-    # Excludes character columns: the synthetic rewrite shifts every other
-    # diagnostic's own column on the same line, which would make an
-    # unrelated, unchanged diagnostic look "new" after the rewrite --
-    # confirmed empirically against real ty. Line numbers are kept (a
-    # same-line rewrite never shifts those).
     rng = diagnostic.get("range") or {}
     start = rng.get("start") or {}
     end = rng.get("end") or {}
@@ -191,7 +186,6 @@ class TySession:
                 self._dirty_uris.add(uri)
 
     def open_or_update(self, filepath: Path, content: str) -> frozenset[tuple[Any, ...]]:
-        """Opens or updates `filepath`'s in-memory-only content (never touches disk) and returns its diagnostics."""
         uri = filepath.resolve().as_uri()
         if uri in self._open_versions:
             self._open_versions[uri] += 1
@@ -216,7 +210,6 @@ class TySession:
         return frozenset(_diagnostic_key(item) for item in items)
 
     def hover(self, filepath: Path, line0: int, char_utf16: int) -> str | None:
-        """The statically-inferred type at (0-indexed line, UTF-16 column), or `None` on failure by design."""
         uri = filepath.resolve().as_uri()
         try:
             response = self._client.request(
@@ -242,7 +235,6 @@ class TySession:
         return contextlib.nullcontext()
 
     def close_file(self, filepath: Path) -> None:
-        """Discards `filepath`'s in-memory document."""
         uri = filepath.resolve().as_uri()
         if uri in self._open_versions:
             try:
@@ -291,7 +283,6 @@ class TySession:
             if self._last_reconciled_digests.get(uri) != digest
         }
         self._direct_input_digests.clear()
-        # Discard prior analysis notifications before observing this batch's effects.
         self._await_ty_catching_up()
         with self._dirty_uris_lock:
             self._dirty_uris.clear()
