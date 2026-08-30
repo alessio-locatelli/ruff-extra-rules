@@ -119,12 +119,6 @@ def test_decide_candidates_hovers_the_arguments_own_last_character() -> None:
 
 
 def test_decide_candidates_handles_a_multibyte_final_character_in_the_argument() -> None:
-    # The hover position must not be computed by subtracting 1 directly in
-    # UTF-8 *byte* space from the argument's own end offset -- that offset
-    # is only a valid boundary when the argument's own last character is
-    # single-byte in UTF-8. For a multi-byte final character (e.g. 'é', 2
-    # bytes), subtracting a raw byte would land mid-character and raise
-    # UnicodeDecodeError on otherwise ordinary, valid Python source.
     source = "y = str(é)\n"
     redundant, session = _decide(
         source,
