@@ -79,11 +79,6 @@ def test_fix_always_declines() -> None:
 
 
 def test_check_never_calls_get_session_when_the_file_has_no_real_candidate(monkeypatch: pytest.MonkeyPatch) -> None:
-    # "print(1)" matches the "int(" prefilter substring pattern at the file
-    # level, but find_candidates() correctly rejects it at the AST level
-    # (print isn't an eligible constructor) -- get_session(), which starts
-    # `ty` on this process's first call, must never be reached for a file
-    # like this.
     source = "print(1)\n"
     monkeypatch.setattr(tri006_module, "get_session", _fail_if_called)
 
