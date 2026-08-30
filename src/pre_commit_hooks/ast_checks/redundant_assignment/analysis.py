@@ -401,8 +401,6 @@ class VariableTracker(ast.NodeVisitor):
     visit_TryStar = visit_Try  # noqa: N815
 
     def visit_With(self, node: ast.With | ast.AsyncWith) -> None:
-        # Each item's optional_vars (`as target`) rebinds on entry, same
-        # hazard as a for-loop target above.
         self.control_flow_depth += 1
         stmt_index = self._get_current_stmt_index()
         for item in node.items:
