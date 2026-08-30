@@ -50,34 +50,12 @@ class UsageInfo:
     scope_id: int
     usage_has_await: bool = False
     in_control_flow: bool = False
-    # Independent of whether the *assignment* is in a loop — used to reject
-    # inlining a call whose single textual use would actually execute
-    # repeatedly.
     in_loop: bool = False
-    # A use inside a lambda body executes later (and possibly repeatedly, or
-    # never) at call time, not once at the point the lambda is defined.
     in_lambda: bool = False
     in_comprehension: bool = False
-    # Identity of the node for this use, not just its position. None for
-    # usage kinds that don't track it.
     node: ast.expr | None = None
-    # The statement containing `node`, for is_preceded_by_call below. Stored
-    # (not eagerly evaluated) so its O(statement size) evaluation-order walk
-    # only runs for the rare usages that actually need it (should_autofix's
-    # zero-arg-call carve-out) instead of every Name-load in the file.
     enclosing_stmt: ast.stmt | None = None
-    # Whether this use sits anywhere inside an f-string replacement field
-    # (`ast.FormattedValue`) — used to gate the naive text-substitution
-    # autofix, which would otherwise re-quote a string literal inside `{}`
-    # (issue #72).
     in_fstring_expression: bool = False
-    # Byte-offset (start, end) span of the *entire* enclosing
-    # `ast.FormattedValue` (braces, any conversion/format spec, all of it)
-    # when this use IS that field's whole expression (no conversion, no
-    # format spec, single line) — the one shape where a string literal can
-    # be safely spliced as raw text in place of the field. None otherwise,
-    # including when in_fstring_expression is True but the use is only
-    # part of a larger field expression (e.g. `{x.attr}`).
     fstring_field_span: tuple[int, int] | None = None
     is_keyword_argument_echo: bool = False
     is_positional_argument_echo: bool = False
