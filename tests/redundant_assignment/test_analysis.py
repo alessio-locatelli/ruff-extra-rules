@@ -231,10 +231,6 @@ def func():
 
 
 def test_tuple_unpacking_rebinding_skipped_for_global_variable() -> None:
-    # Branch coverage: a tuple-unpacking target declared `global` in this
-    # scope must not be recorded as a rebinding marker here either — same
-    # exclusion as the plain-Name assignment path and the walrus case
-    # above.
     source = """
 def func():
     global x
