@@ -635,7 +635,7 @@ def test_finalize_resyncs_and_keeps_open_when_persistent(tmp_path: Path) -> None
 
     session.finalize(filepath, "pristine source\n")
 
-    assert uri in session._open_versions  # still tracked, not discarded
+    assert uri in session._open_versions
     assert client.notify_calls == [
         (
             "textDocument/didChange",
