@@ -31,7 +31,7 @@ class LSPError(Exception):
 
 
 class LSPTimeoutError(LSPError):
-    """A request got no response within its own timeout."""
+    pass
 
 
 def byte_col_to_utf16_col(line: str, byte_col: int) -> int:
