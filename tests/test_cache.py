@@ -261,7 +261,7 @@ def test_cache_path_uses_two_level_structure(cache_manager: CacheManager, sample
     cache_path = cache_manager._get_cache_path(sample_file)
 
     assert cache_path.parent.parent == cache_manager.cache_dir
-    assert len(cache_path.parent.name) == 2  # two-char prefix
+    assert len(cache_path.parent.name) == 2
 
 
 def test_different_files_different_cache_paths(cache_manager: CacheManager, tmp_path: Path) -> None:
