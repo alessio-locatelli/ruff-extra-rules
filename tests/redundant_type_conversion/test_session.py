@@ -130,11 +130,6 @@ def test_spawn_raises_check_unavailable_error_when_ty_is_not_on_path(
 def test_spawn_raises_check_unavailable_error_when_ty_exists_but_is_not_executable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # _spawn must catch more than just FileNotFoundError -- `ty` resolving
-    # on PATH but failing to actually launch (missing execute permission
-    # here; a corrupt/wrong-format binary raises the same way) must raise
-    # this check's own actionable CheckUnavailableError, not an uncaught
-    # PermissionError.
     not_executable = tmp_path / "not-really-ty"
     not_executable.write_text("#!/bin/sh\necho fake ty\n")
     not_executable.chmod(0o644)
