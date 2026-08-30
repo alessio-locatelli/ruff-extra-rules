@@ -288,7 +288,7 @@ def test_apply_fix_updates_free_function_call_sites(tmp_path: Path) -> None:
     file_content = test_file.read_text()
     new_name = suggestion.suggested_name
     assert f"def {new_name}():" in file_content
-    assert file_content.count(f"{new_name}()") == 3  # def + two call sites
+    assert file_content.count(f"{new_name}()") == 3
     assert "get_data" not in file_content
 
 
