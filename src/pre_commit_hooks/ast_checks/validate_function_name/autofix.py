@@ -283,11 +283,6 @@ def _is_self_like_receiver(value: ast.expr) -> bool:
 
 
 def _resolve_rename_scope(tree: ast.Module, func_node: _FuncNode) -> tuple[ast.AST, bool]:
-    """Returns (scope_node, is_method) — scope_node is the enclosing class (for
-    methods, so unrelated classes are never touched), the enclosing function
-    (for nested/closure functions), or the whole module (for top-level
-    functions). `tree` must already have parent links attached.
-    """
     parent = getattr(func_node, "parent", None)
     if isinstance(parent, ast.ClassDef):
         return parent, True
