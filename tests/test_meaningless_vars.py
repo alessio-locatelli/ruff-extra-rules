@@ -544,8 +544,6 @@ def test_check_ids() -> None:
 def test_prefilter_pattern() -> None:
     patterns = MeaninglessVarsCheck().get_prefilter_pattern()
 
-    # Returns ALL meaningless names so files with only 'result =' aren't
-    # silently skipped during pre-filtering.
     assert patterns is not None
     assert "data" in patterns
     assert "result" in patterns
