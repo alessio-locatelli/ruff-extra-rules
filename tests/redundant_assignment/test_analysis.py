@@ -87,9 +87,6 @@ def example():
     print(x)
     return x
 """
-    # Second assignment (x = x + 1) has two uses (print and return). First
-    # assignment (x = 1) has one use (x + 1 RHS). Neither should be
-    # flagged as redundant because both have multiple uses.
     assert _check(source) == []
 
 
