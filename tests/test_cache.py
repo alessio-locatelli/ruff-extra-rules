@@ -243,15 +243,6 @@ def test_write_cache_cleans_up_temp_file_on_write_error(
 def test_write_cache_does_not_follow_a_symlink_planted_at_the_old_predictable_temp_name(
     cache_manager: CacheManager, tmp_path: Path
 ) -> None:
-    # _write_cache() must not write through a fixed `<hash>.tmp` sibling
-    # (`cache_file.with_suffix(".tmp")`), predictable from the cache
-    # file's own name alone. Anyone able to write to cache_dir could
-    # pre-plant a symlink at that exact path pointing at a file the
-    # running user can write but doesn't intend to touch; a plain
-    # `open(..., "w")` follows a symlink, so the write would land on the
-    # symlink's target instead of a fresh file. Sourcing the temp file
-    # from `tempfile.mkstemp()` instead means a pre-planted symlink at a
-    # fixed name is simply never used.
     cache_file = cache_manager.cache_dir / "some_hash.json"
     victim = tmp_path / "victim.txt"
     victim.write_text("do not touch\n")
@@ -263,7 +254,7 @@ def test_write_cache_does_not_follow_a_symlink_planted_at_the_old_predictable_te
     assert victim.read_text() == "do not touch\n"
     assert cache_file.is_file()
     assert not cache_file.is_symlink()
-    assert old_predictable_temp_path.is_symlink()  # untouched, still points at victim
+    assert old_predictable_temp_path.is_symlink()
 
 
 def test_cache_path_uses_two_level_structure(cache_manager: CacheManager, sample_file: Path) -> None:
