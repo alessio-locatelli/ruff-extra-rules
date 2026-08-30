@@ -46,7 +46,6 @@ def _count_returns(func_node: _FuncNode) -> int:
 
 
 def _count_function_lines(func_node: _FuncNode) -> int:
-    """Line count excludes the docstring, if any."""
     docstring_lines = 0
     if (
         func_node.body
