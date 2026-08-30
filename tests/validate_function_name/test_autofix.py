@@ -178,10 +178,6 @@ def test_should_autofix(
 
 
 def test_apply_fix_does_not_corrupt_unrelated_string_literal(tmp_path: Path) -> None:
-    # Renaming a method must not touch an identically-spelled dict key.
-    # Calls apply_fix directly: should_autofix never routes methods to it
-    # (see test_should_autofix's "rejects-methods" case), but apply_fix's
-    # own scoping must still be safe if invoked directly.
     test_file = tmp_path / "reader.py"
     test_file.write_text(
         "class Reader:\n"
