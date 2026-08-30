@@ -177,12 +177,6 @@ _SUSPENSION_NODE_TYPES = (ast.Yield, ast.YieldFrom, ast.Await)
 
 
 def _suspension_precedes_use(use: UsageInfo) -> bool:
-    """Same evaluation-order walk as `is_preceded_by_call`, filtered to
-    suspension points only — for a same-statement case like `return (await
-    refresh(), value)[1]`, `value`'s own stmt_index ties with the await's,
-    so the coarse per-statement check in `_suspension_point_between` can't
-    tell the two apart; this resolves it by real evaluation order instead.
-    """
     if use.node is None or use.enclosing_stmt is None:
         return True
     _found, effect_before, _ = _call_precedes_target(use.enclosing_stmt, use.node, _SUSPENSION_NODE_TYPES)
