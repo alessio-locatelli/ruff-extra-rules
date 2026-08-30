@@ -333,12 +333,6 @@ def _contains_nondeterministic_call(node: ast.expr) -> bool:
 
 
 def _is_named_constant_pattern(var_name: str, rhs_node: ast.expr) -> bool:
-    """A "named constant" pattern gives semantic meaning to an otherwise-magic
-    numeric literal, and should not be flagged:
-        max_search_depth = 10  # explains what 10 means
-        line_spacing = 1.2  # explains what 1.2 represents
-        user_id = 101749141  # gives meaning to the ID
-    """
     if not isinstance(rhs_node, ast.Constant):
         return False
 
