@@ -19,14 +19,6 @@ __all__ = ["CacheManager"]
 
 logger = logging.getLogger("cache")
 
-# How long _locked() waits for another process's lock before giving up.
-# fcntl.flock(LOCK_EX) alone blocks indefinitely; under prek's parallel
-# execution (see _locked's own docstring) a slow or stuck peer holding this
-# lock must not be able to hang every other process waiting on the same
-# per-file cache blob forever. A crashed process releases its flock
-# automatically when its file descriptor closes (the OS does this even on
-# SIGKILL), so this is only ever reached by a peer that's still genuinely
-# running — a generous ceiling, not a tight one.
 _LOCK_TIMEOUT_SECONDS = 10.0
 _LOCK_POLL_INTERVAL_SECONDS = 0.02
 
