@@ -24,12 +24,6 @@ _COMPREHENSION_NODES: tuple[type[ast.AST], ...] = (
     ast.GeneratorExp,
 )
 
-# Comprehensions are transparent here (unlike in SCOPE_NODES): a walrus
-# (`:=`) target inside one binds to the nearest *enclosing* non-comprehension
-# scope per PEP 572, not to the comprehension's own scope, so hunting for one
-# must still look inside nested comprehensions. It must not cross into a
-# nested function/lambda/class though — that binds its own walrus targets
-# locally, not to whatever scope contains the comprehension.
 _WALRUS_BOUNDARY = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
 
