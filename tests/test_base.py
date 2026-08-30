@@ -382,9 +382,6 @@ def _setup_symlink(tmp_path: Path) -> Path:
 
 
 def _verify_symlink_updated_in_place(target: Path) -> None:
-    # replace() acts on the directory entry it's given; writing through the
-    # symlink path directly would turn the tracked symlink into a plain
-    # file instead of updating what it points to.
     real_target = target.parent / "real.py"
     assert target.is_symlink()
     assert target.resolve() == real_target
