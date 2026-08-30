@@ -152,8 +152,6 @@ def test_the_command_line_replaces_the_configured_patterns(project: Path) -> Non
 
 
 def test_a_command_line_pattern_is_anchored_at_the_working_directory(project: Path) -> None:
-    # `--exclude` anchors the same way, so the two flags agree on what a
-    # relative pattern means; see ADR-0046.
     nested = project / "services"
     ignored = _flagged_file(project, "services/src/mod.py")
 
