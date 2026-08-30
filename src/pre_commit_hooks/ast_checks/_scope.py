@@ -36,15 +36,6 @@ def _walrus_targets(node: ast.AST) -> Iterator[ast.Name]:
 
 
 def iter_within_scope(node: ast.AST) -> Iterator[ast.AST]:
-    """Yield descendants of `node` without crossing into a nested scope.
-
-    A nested function/lambda/comprehension/class is itself yielded (so
-    callers can still inspect e.g. its name or parameters), but traversal
-    does not continue into its body, since it introduces independent Python
-    scoping — a binding inside it doesn't affect `node`'s own scope. The one
-    exception is a walrus (`:=`) target inside a comprehension, which PEP
-    572 binds to `node`'s own scope rather than the comprehension's.
-    """
     yield from iter_within_scope_from(ast.iter_child_nodes(node))
 
 
