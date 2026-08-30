@@ -12,7 +12,7 @@ __all__ = ["InvalidGlobError", "anchored_pattern", "compile_glob", "glob_matches
 
 
 class InvalidGlobError(ValueError):
-    """Raised for a pattern `ruff` itself would refuse to compile."""
+    pass
 
 
 class _Piece(NamedTuple):
