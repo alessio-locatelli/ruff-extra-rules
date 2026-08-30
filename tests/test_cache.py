@@ -215,11 +215,6 @@ def test_construction_detects_pre_existing_read_only_cache_dir(tmp_path: Path) -
 def test_unavailable_cache_dir_short_circuits_without_touching_filesystem(
     temp_cache_dir: Path, sample_file: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Once the cache directory is known unavailable, later calls
-    # must not repeat the doomed mkdir() attempt (and its warning) per file
-    # -- set_cached_result() must not hash the file's full content before
-    # even reaching the (failing) mkdir() check, which would waste work on
-    # every processed file for the rest of the run.
     cache = CacheManager(cache_dir=temp_cache_dir, hook_name="test-hook", cache_version="1")
     cache._cache_dir_unavailable = True
 
