@@ -67,11 +67,11 @@ _TY_COMMAND = ("ty", "server")
 
 _HOVER_DOC_SEPARATOR = re.compile(r"\n-{3,}\n")
 
-# See docs/adr/0039-tr6-unavailable-message-scope-and-wording.md.
 _MIN_TY_VERSION = "0.0.64"
 
 _INSTALL_HINT = (
-    "redundant-type-conversion (TR6) requires Astral's `ty` type checker on PATH. Install it with "
+    "redundant-type-conversion (TR6) requires Astral's `ty` type checker on PATH; this release was "
+    f"validated with ty>={_MIN_TY_VERSION}. Install it with "
     "`uv tool install ty`, or add `ty` as a dev dependency of your own project and commit with that virtual "
     "environment active, or opt out with `--ignore=redundant-type-conversion`. "
     "See https://github.com/astral-sh/ty."
