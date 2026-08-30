@@ -49,9 +49,6 @@ def test_locked_releases_lock_on_exit(tmp_path: Path) -> None:
     with locked(lock_path, timeout_seconds=1.0, poll_interval_seconds=0.01):
         pass
 
-    # A fresh acquisition attempt must succeed immediately -- the previous
-    # `with` block's own exit must have actually released the flock, not
-    # just returned without unlocking.
     with lock_path.open("a", encoding="utf-8") as fp:
         fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
         fcntl.flock(fp, fcntl.LOCK_UN)
