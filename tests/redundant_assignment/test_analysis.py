@@ -1117,10 +1117,6 @@ def test_lifecycle_is_immediate_use_with_closure() -> None:
 
 
 def test_evaluation_order_children_assign_yields_value_before_targets() -> None:
-    # Branch coverage + contract test: for ast.Assign,
-    # _evaluation_order_children must yield the RHS value before the
-    # target(s) — the opposite of Assign._fields, which lists targets
-    # first — matching Python's real evaluate-RHS-then-target(s) order.
     tree = ast.parse("x.attr = value_expr")
     assign_node = tree.body[0]
     assert isinstance(assign_node, ast.Assign)
