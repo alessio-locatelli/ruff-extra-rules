@@ -119,13 +119,6 @@ def test_git_grep_filter_includes_file_deleted_since_discovery(tmp_path: Path) -
 
 
 def test_git_grep_filter_includes_untracked_file(tmp_path: Path) -> None:
-    # A file that exists, is readable, and was passed
-    # explicitly, but was never `git add`ed, is invisible to a plain `git
-    # grep` -- it exits 1 with empty stdout *and* empty stderr, identical
-    # to "searched and found no match". That must not be trusted as proof
-    # of "no match" and silently dropped -- otherwise a brand-new file
-    # linted directly via the CLI (before `git add`) could report zero
-    # violations for content that was never actually examined.
     git = shutil.which("git")
     assert git is not None
 
@@ -134,7 +127,6 @@ def test_git_grep_filter_includes_untracked_file(tmp_path: Path) -> None:
 
         untracked = tmp_path / "untracked.py"
         untracked.write_text("data = 1\n")
-        # Deliberately not `git add`ed.
 
         matches = git_grep_filter([str(untracked)], "data", fixed_string=True)
 
