@@ -22,16 +22,7 @@ def locking_is_available() -> bool:
 
 @contextlib.contextmanager
 def locked(lock_path: Path, *, timeout_seconds: float, poll_interval_seconds: float) -> Iterator[None]:
-    """Hold an exclusive advisory lock on `lock_path` for the duration of the `with` block.
-
-    Polls with a non-blocking lock attempt instead of a single blocking
-    `LOCK_EX`, so a peer that's still holding the lock past `timeout_seconds`
-    raises `TimeoutError` rather than hanging this process indefinitely. A
-    crashed process releases its flock automatically when its file
-    descriptor closes (the OS does this even on SIGKILL), so this is only
-    ever reached by a peer that's still genuinely running.
-    """
-    assert fcntl is not None  # callers must check their own platform availability first
+    assert fcntl is not None
     with lock_path.open("a", encoding="utf-8") as lock_fp:
         deadline = time.monotonic() + timeout_seconds
         while True:
