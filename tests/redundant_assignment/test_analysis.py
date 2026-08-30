@@ -302,11 +302,6 @@ def outer():
 
 
 def test_track_attribute_assignment_key_already_in_uses() -> None:
-    # Branch coverage: when the same variable is the base of two separate
-    # attribute assignments (``obj.x = 1`` then ``obj.y = 2``), the second
-    # call to _track_attribute_or_subscript_base_usage finds the key
-    # already present in self.uses and must append rather than create a
-    # new list.
     source = """
 def outer():
     obj = make_obj()
@@ -315,7 +310,6 @@ def outer():
     return obj
 """
     lifecycle = _lifecycle_for(source, "obj")
-    # obj is used in: obj.x = 1, obj.y = 2, return obj -> 3 uses.
     assert len(lifecycle.uses) == 3
 
 
