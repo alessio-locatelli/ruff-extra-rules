@@ -83,6 +83,7 @@ class UsageInfo:
     # part of a larger field expression (e.g. `{x.attr}`).
     fstring_field_span: tuple[int, int] | None = None
     is_keyword_argument_echo: bool = False
+    is_positional_argument_echo: bool = False
 
 
 @dataclass(slots=True)
@@ -297,10 +298,60 @@ def _suspension_precedes_use(use: UsageInfo) -> bool:
     return effect_before
 
 
+def _collect_module_binding_facts(tree: ast.Module) -> tuple[bool, dict[str, int], set[str]]:
+    has_wildcard_import = False
+    function_name_counts: dict[str, int] = {}
+    shadowing: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            function_name_counts[node.name] = function_name_counts.get(node.name, 0) + 1
+        elif isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names):
+            has_wildcard_import = True
+        elif isinstance(node, ast.arg):
+            shadowing.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            shadowing.add(node.id)
+        elif isinstance(node, ast.alias):
+            shadowing.add((node.asname or node.name).split(".")[0])
+        elif isinstance(node, ast.MatchAs | ast.MatchStar) and node.name is not None:
+            shadowing.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest is not None:
+            shadowing.add(node.rest)
+        elif isinstance(node, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple | ast.ClassDef):  # noqa: SIM114
+            shadowing.add(node.name)
+        elif isinstance(node, ast.ExceptHandler) and node.name is not None:
+            shadowing.add(node.name)
+    return has_wildcard_import, function_name_counts, shadowing
+
+
+def _index_unique_undecorated_functions(
+    tree: ast.Module,
+) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    has_wildcard_import, all_function_name_counts, shadowed = _collect_module_binding_facts(tree)
+    if has_wildcard_import:
+        return {}
+
+    top_level_by_name: dict[str, list[ast.FunctionDef | ast.AsyncFunctionDef]] = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
+            top_level_by_name.setdefault(stmt.name, []).append(stmt)
+
+    return {
+        name: nodes[0]
+        for name, nodes in top_level_by_name.items()
+        if len(nodes) == 1
+        and not nodes[0].decorator_list
+        and all_function_name_counts[name] == 1
+        and name not in shadowed
+    }
+
+
 class VariableTracker(ast.NodeVisitor):
     """Builds a map of variable lifecycles: where each variable is assigned and where it's used, across scopes."""
 
-    def __init__(self, source: str, comment_only_lines: set[int], trailing_comment_lines: set[int]) -> None:
+    def __init__(
+        self, source: str, comment_only_lines: set[int], trailing_comment_lines: set[int], tree: ast.Module
+    ) -> None:
         self.source = source
         self.source_lines = source.splitlines()
         # For _get_source_segment only: split on the same line boundaries
@@ -315,6 +366,9 @@ class VariableTracker(ast.NodeVisitor):
         # this constructor tokenizing `source` again on its own.
         self._comment_only_lines = comment_only_lines
         self._trailing_comment_lines = trailing_comment_lines
+
+        self.functions = _index_unique_undecorated_functions(tree)
+        self._call_positional_info: dict[int, tuple[bool, dict[int, int]]] = {}
 
         self.current_scope_id = 0
         self.scope_stack: list[int] = [0]  # 0 = module scope
@@ -897,6 +951,7 @@ class VariableTracker(ast.NodeVisitor):
             fstring_field_span = (immediate_parent.col_offset, immediate_parent.end_col_offset)
 
         is_keyword_argument_echo = isinstance(immediate_parent, ast.keyword) and immediate_parent.arg == node.id
+        is_positional_argument_echo = self._is_positional_argument_echo(node, immediate_parent)
 
         # Name-load context isn't resolved to anything more specific than
         # "unknown" — that would need walking parent nodes with a real
@@ -921,12 +976,48 @@ class VariableTracker(ast.NodeVisitor):
             in_fstring_expression=in_fstring_expression,
             fstring_field_span=fstring_field_span,
             is_keyword_argument_echo=is_keyword_argument_echo,
+            is_positional_argument_echo=is_positional_argument_echo,
         )
 
         key = (scope_id, node.id)
         if key not in self.uses:
             self.uses[key] = []
         self.uses[key].append(usage)
+
+    def _positional_info_for(self, call: ast.Call) -> tuple[bool, dict[int, int]]:
+        cached = self._call_positional_info.get(id(call))
+        if cached is None:
+            has_starred = any(isinstance(arg, ast.Starred) for arg in call.args)
+            index_by_id = {id(arg): index for index, arg in enumerate(call.args)}
+            cached = (has_starred, index_by_id)
+            self._call_positional_info[id(call)] = cached
+        return cached
+
+    def _is_positional_argument_echo(self, node: ast.Name, immediate_parent: ast.AST | None) -> bool:
+        if not isinstance(immediate_parent, ast.Call):
+            return False
+
+        call = immediate_parent
+        has_starred, index_by_id = self._positional_info_for(call)
+        if has_starred:
+            return False
+
+        if not isinstance(call.func, ast.Name):
+            return False
+
+        definition = self.functions.get(call.func.id)
+        if definition is None:
+            return False
+
+        index = index_by_id.get(id(node))
+        if index is None:
+            return False
+
+        positional_params = definition.args.posonlyargs + definition.args.args
+        if index >= len(positional_params):
+            return False
+
+        return positional_params[index].arg == node.id
 
     def build_lifecycles(self) -> list[VariableLifecycle]:
         lifecycles: list[VariableLifecycle] = []

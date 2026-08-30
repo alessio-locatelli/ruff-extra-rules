@@ -20,7 +20,7 @@ from tests.redundant_assignment._helpers import _check
 
 
 def _tracker(source: str) -> VariableTracker:
-    return VariableTracker(source, *classify_comment_lines(source))
+    return VariableTracker(source, *classify_comment_lines(source), ast.parse(source))
 
 
 def _lifecycle_for(source: str, var_name: str) -> VariableLifecycle:
@@ -426,6 +426,252 @@ def caller():
 def test_is_keyword_argument_echo(source: str, var_name: str, *, expected: bool) -> None:
     lifecycle = _lifecycle_for(source, var_name)
     assert lifecycle.uses[0].is_keyword_argument_echo is expected
+
+
+@pytest.mark.parametrize(
+    ("source", "var_name", "expected"),
+    [
+        (
+            """
+def func(days_with_routes_in_a_row):
+    return days_with_routes_in_a_row
+
+
+def caller():
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
+            True,
+        ),
+        (
+            """
+def caller():
+    x = 42
+    return func(x)
+""",
+            "x",
+            False,
+        ),
+        (
+            """
+def func(x):
+    return x
+
+
+def func(x):
+    return x
+
+
+def caller():
+    x = 42
+    return func(x)
+""",
+            "x",
+            False,
+        ),
+        (
+            """
+@decorator
+def func(x):
+    return x
+
+
+def caller():
+    x = 42
+    return func(x)
+""",
+            "x",
+            False,
+        ),
+        (
+            """
+def caller(obj):
+    x = 42
+    return obj.func(x)
+""",
+            "x",
+            False,
+        ),
+        (
+            """
+def func(x, y):
+    return x, y
+
+
+def caller(items):
+    x = 42
+    return func(*items, x)
+""",
+            "x",
+            False,
+        ),
+        (
+            """
+def func(*args):
+    return args
+
+
+def caller():
+    x = 42
+    return func(1, 2, x)
+""",
+            "x",
+            False,
+        ),
+        (
+            """
+def func(days_with_routes_in_a_row):
+    return days_with_routes_in_a_row
+
+
+def caller(func):
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
+            False,
+        ),
+        (
+            """
+def func(days_with_routes_in_a_row):
+    return days_with_routes_in_a_row
+
+
+def caller():
+    func = other_func
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
+            False,
+        ),
+        (
+            """
+def outer():
+    def helper(days_with_routes_in_a_row):
+        return days_with_routes_in_a_row
+
+
+def caller():
+    days_with_routes_in_a_row = 42
+    return helper(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
+            False,
+        ),
+        (
+            """
+class Foo:
+    def helper(self, days_with_routes_in_a_row):
+        return days_with_routes_in_a_row
+
+
+def caller():
+    days_with_routes_in_a_row = 42
+    return helper(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
+            False,
+        ),
+        (
+            """
+def func(days_with_routes_in_a_row):
+    return days_with_routes_in_a_row
+
+
+def caller():
+    days_with_routes_in_a_row = 42
+    del func
+    return func(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
+            False,
+        ),
+        (
+            """
+def func(days_with_routes_in_a_row):
+    return days_with_routes_in_a_row
+
+
+def caller(value):
+    days_with_routes_in_a_row = 42
+    match value:
+        case _ as func:
+            return func(days_with_routes_in_a_row)
+    return None
+""",
+            "days_with_routes_in_a_row",
+            False,
+        ),
+        (
+            """
+from other_module import *
+
+
+def func(days_with_routes_in_a_row):
+    return days_with_routes_in_a_row
+
+
+def caller():
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
+            False,
+        ),
+        (
+            """
+def func(days_with_routes_in_a_row):
+    return days_with_routes_in_a_row
+
+
+def caller(value):
+    days_with_routes_in_a_row = 42
+    match value:
+        case {"key": _, **func}:
+            return func(days_with_routes_in_a_row)
+    return None
+""",
+            "days_with_routes_in_a_row",
+            False,
+        ),
+        (
+            """
+def func(days_with_routes_in_a_row):
+    return days_with_routes_in_a_row
+
+
+def caller[func]():
+    days_with_routes_in_a_row = 42
+    return func(days_with_routes_in_a_row)
+""",
+            "days_with_routes_in_a_row",
+            False,
+        ),
+    ],
+    ids=[
+        "positional-echo",
+        "undefined-callee-not-echo",
+        "ambiguous-name-not-echo",
+        "decorated-callee-not-echo",
+        "attribute-call-not-echo",
+        "preceding-starred-arg-not-echo",
+        "index-consumed-by-vararg-not-echo",
+        "callee-shadowed-by-parameter-not-echo",
+        "callee-shadowed-by-local-reassignment-not-echo",
+        "callee-is-nested-function-not-echo",
+        "callee-is-method-not-echo",
+        "callee-shadowed-by-del-not-echo",
+        "callee-shadowed-by-match-capture-not-echo",
+        "wildcard-import-not-echo",
+        "callee-shadowed-by-match-mapping-rest-not-echo",
+        "callee-shadowed-by-type-parameter-not-echo",
+    ],
+)
+def test_is_positional_argument_echo(source: str, var_name: str, *, expected: bool) -> None:
+    lifecycle = _lifecycle_for(source, var_name)
+    assert lifecycle.uses[0].is_positional_argument_echo is expected
 
 
 def test_for_iterator_use_is_not_in_loop() -> None:
