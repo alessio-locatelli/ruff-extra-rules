@@ -204,13 +204,6 @@ def test_construction_does_not_crash_when_cache_dir_is_unavailable(tmp_path: Pat
 
 
 def test_construction_detects_pre_existing_read_only_cache_dir(tmp_path: Path) -> None:
-    # A cache dir that already exists (from a prior run) with
-    # its CACHEDIR.TAG already written makes both mkdir(exist_ok=True) and
-    # the "if not tag_file.exists()" write-skip succeed without ever
-    # attempting a write, so a directory later chmodded read-only (or
-    # mounted read-only) looks exactly like an available one -- the
-    # os.access(W_OK) check exists specifically to catch this case, which
-    # neither a raised OSError nor a first write attempt would.
     existing_cache_dir = tmp_path / "cache"
     CacheManager(cache_dir=existing_cache_dir, hook_name="test-hook", cache_version="1")
 
