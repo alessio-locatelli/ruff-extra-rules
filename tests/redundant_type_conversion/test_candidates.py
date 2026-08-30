@@ -125,9 +125,6 @@ def test_ignores_a_call_whose_constructor_name_is_shadowed(shadowing_statement: 
 
 
 def test_an_aliased_dotted_import_shadows_only_its_alias_not_the_top_level_component() -> None:
-    # `import str.helpers as helper` binds only `helper`, not `str` -- the
-    # dotted path's own top-level component is only implicitly bound when
-    # there's no `as` clause at all (see test above).
     source = "import str.helpers as helper\n\n\nfunc(str(x))\n"
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
     assert candidate.constructor == "str"
