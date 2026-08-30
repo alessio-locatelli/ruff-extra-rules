@@ -180,11 +180,6 @@ def test_close_still_cleans_up_after_the_server_already_exited_on_its_own(tmp_pa
 
 
 def test_request_after_server_exits_raises_instead_of_hanging(tmp_path: Path) -> None:
-    # The server process is already gone by the time this block exits, so
-    # its stdin pipe is broken -- close() must tolerate that (it swallows
-    # LSPError from its own shutdown handshake) rather than this test
-    # leaking an unclosed, already-broken pipe for the GC to warn about
-    # later.
     with _spawn_fake_server(tmp_path) as client:
         client.notify("exit", {})
         client._process.wait(timeout=5)
