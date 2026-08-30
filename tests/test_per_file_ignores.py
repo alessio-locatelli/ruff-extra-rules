@@ -229,8 +229,6 @@ def test_an_invalid_configured_table_exits_two_and_names_its_source(
 def test_the_configured_table_is_validated_even_when_the_command_line_replaces_it(
     project: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # An override must not launder an invalid file into an accepted one; see
-    # ADR-0045.
     _write_config(project, '"a.py" = ["nope"]')
     filepath = _flagged_file(project, "mod.py")
 
