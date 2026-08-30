@@ -490,11 +490,6 @@ def _is_generic_call_result_name(var_name: str, rhs_node: ast.Call) -> bool:
     return callee_name is not None and var_lower in callee_name.lower()
 
 
-# Score ceiling a violation's `calculate_semantic_value` must be at or under
-# to be reported. At the conservative level, `should_autofix()` doesn't
-# narrow these further with a separate, stricter semantic-value ceiling of
-# its own — see ADR-0032. The permissive ceiling (49, i.e. score < 50)
-# reports every case up to that bar.
 _CONSERVATIVE_REPORT_CEILING = {
     PatternType.IMMEDIATE_SINGLE_USE: 10,
     PatternType.LITERAL_IDENTITY: 10,
