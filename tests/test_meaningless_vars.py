@@ -664,12 +664,6 @@ def test_autofix_no_fixable_violations() -> None:
 
 
 def test_autofix_follows_closure_reference_into_nested_function() -> None:
-    # Renaming only the assignment while leaving a nested
-    # function's free-variable reference untouched would leave the
-    # closure reading a name that no longer exists in its enclosing scope
-    # (NameError at call time) — ch. 2: "MUST NOT perform an auto-fix that
-    # can change runtime behavior"; "MUST ensure that a fix does not change
-    # name binding or scope unintentionally".
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -691,9 +685,6 @@ def test_autofix_follows_closure_reference_into_nested_function() -> None:
 
     assert "data" not in fixed_content
     module_namespace: dict[str, Any] = {}
-    # "<meaningless_vars_fixture>", not a real path: a filename resolving to a
-    # path on disk (e.g. "test.py") makes coverage.py try to trace it as a
-    # source file and fail the run.
     exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
     class FakeResponse:
