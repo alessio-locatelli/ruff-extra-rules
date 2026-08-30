@@ -63,9 +63,6 @@ def test_git_grep_filter_empty_input() -> None:
 
 
 def test_git_grep_filter_regex_pattern(sample_files: list[str]) -> None:
-    # If files aren't in a git repo, this falls back to Python substring
-    # search, which doesn't support regex, so the pattern used here must
-    # work either way.
     matches = git_grep_filter(sample_files, "def get_", fixed_string=False)
 
     assert len(matches) >= 1
