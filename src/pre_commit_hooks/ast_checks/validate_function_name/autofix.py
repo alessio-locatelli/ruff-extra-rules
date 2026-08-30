@@ -279,11 +279,6 @@ class _ReferenceCollector(ast.NodeVisitor):
 
 
 def _is_self_like_receiver(value: ast.expr) -> bool:
-    """Whether an attribute's receiver refers to the current instance/class.
-
-    Matches `self.x` and `cls.x` only. `super().x` is deliberately excluded:
-    see `_ReferenceCollector`.
-    """
     return isinstance(value, ast.Name) and value.id in ("self", "cls")
 
 
