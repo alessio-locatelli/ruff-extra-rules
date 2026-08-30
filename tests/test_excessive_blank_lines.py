@@ -122,8 +122,6 @@ def test_fix_leading_blank_lines_before_first_code_with_no_header(
 def test_fix_write_failure_reports_failed_outcome(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     bad_source = (FIXTURES_DIR / "bad" / "header_spacing.py").read_text()
 
-    # Point at a path inside a directory that doesn't exist so write_text()
-    # raises OSError.
     test_file = tmp_path / "missing_dir" / "module.py"
 
     tree = ast.parse(bad_source)
@@ -132,10 +130,6 @@ def test_fix_write_failure_reports_failed_outcome(tmp_path: Path, caplog: pytest
     with caplog.at_level("DEBUG"):
         fix_result = check.fix(test_file, violations, bad_source, tree)
     assert FixOutcome.APPLIED not in fix_result.outcomes
-    # The write failure must be attributed to the violations it
-    # actually affected, not left indistinguishable from "never attempted"
-    # — the orchestrator's own report otherwise misleadingly suggests
-    # re-running --fix, which would just fail identically again.
     assert fix_result.outcomes == (FixOutcome.FAILED,) * len(violations)
     assert all(record.levelname == "DEBUG" for record in caplog.records)
 
