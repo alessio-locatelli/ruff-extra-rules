@@ -228,12 +228,6 @@ def test_apply_fix_does_not_rename_unrelated_class_method(tmp_path: Path) -> Non
 
 
 def test_apply_fix_renames_recursive_call(tmp_path: Path) -> None:
-    # A recursive call inside the renamed function must not be
-    # mistaken for a nested definition that shadows the outer function.
-    # Builds the Suggestion directly: this recursive counter doesn't match
-    # any of process_file's behavioral heuristics, but apply_fix's own
-    # AST-scoping logic is what's under test here, independent of
-    # suggestion detection.
     test_file = tmp_path / "module.py"
     test_file.write_text("def get_data(n):\n    if n <= 0:\n        return 0\n    return get_data(n - 1) + 1\n")
 
