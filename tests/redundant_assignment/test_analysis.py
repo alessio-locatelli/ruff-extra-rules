@@ -1280,25 +1280,14 @@ def test_is_preceded_by_call_defaults_to_true_for_unknown_container() -> None:
     [
         ("x = value  # this is a comment", True),
         ("x = value", False),
-        ('x = "hello # world"', False),  # `#` inside a string, not a comment.
-        ('x = "foo"  # comment', True),  # `#` in both string and as a comment.
-        ('x = "test#test"  # real comment', True),  # String with `#` followed by a real comment.
-        ('x = "test # not a comment"', False),  # Only a string containing `#`.
-        ('x = ""  # comment', True),  # Empty string then comment.
-        # A single-quote inside a double-quoted string (e.g.
-        # "it's") must not be mistaken for a comment delimiter.
+        ('x = "hello # world"', False),
+        ('x = "foo"  # comment', True),
+        ('x = "test#test"  # real comment', True),
+        ('x = "test # not a comment"', False),
+        ('x = ""  # comment', True),
         ('x = "it\'s fine"', False),
         ('x = "it\'s fine"  # comment', True),
-        # A naive single-char-lookback escape check would treat this
-        # closing quote as itself escaped (only the immediately preceding
-        # backslash checked, not the full run), leaving the scanner stuck
-        # "inside" the string through the rest of the line — silently
-        # hiding a real trailing comment, which --fix would then delete
-        # along with the assignment it decorated.
         ('x = "\\\\"  # comment', True),
-        # An embedded, unescaped quote inside a triple-quoted
-        # string desyncs a single-quote-at-a-time toggle from the real
-        # triple-quote delimiter, again hiding a real trailing comment.
         ('x = """a"b"""  # comment', True),
     ],
     ids=[
