@@ -1,12 +1,3 @@
-"""Shared Python lexical-scope traversal for AST-based checks.
-
-Multiple checks need to walk an AST subtree without crossing into a nested
-scope's own bindings — a name bound inside a nested function, lambda,
-comprehension, or class body doesn't affect the enclosing scope's name
-resolution. Each check used to hand-roll its own `ast.NodeVisitor` for this;
-this module is the one shared implementation of that traversal.
-"""
-
 from __future__ import annotations
 
 import ast
