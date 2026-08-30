@@ -267,11 +267,6 @@ def test_fix_is_noop_when_nothing_to_fix(source: str, tmp_path: Path) -> None:
     ids=["inline-placement", "preceding-placement"],
 )
 def test_fix_preserves_crlf_on_touched_lines(source: str, fixed_source: str, tmp_path: Path) -> None:
-    # fix() must not hardcode "\n" when rewriting the expression
-    # and bracket lines -- that would silently convert a CRLF file's
-    # touched lines to LF (ch. 3: "MUST preserve the intended newline
-    # convention"; ch. 21: "MUST NOT unexpectedly reformat unrelated
-    # code").
     test_file = tmp_path / "test.py"
     test_file.write_bytes(source.encode())
     tree = ast.parse(source)
