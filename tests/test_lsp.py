@@ -206,16 +206,12 @@ def test_on_notification_receives_a_server_notification(tmp_path: Path) -> None:
     with _spawn_fake_server(
         tmp_path, on_notification=lambda method, params: received.append((method, params))
     ) as client:
-        # The fake server's own "send_notification" handler writes the
-        # notification before acknowledging this request -- by the time
-        # request() returns, the reader loop has already processed it.
         client.request("send_notification", {"uri": "file:///a.py", "items": []})
 
     assert received == [("textDocument/publishDiagnostics", {"uri": "file:///a.py", "items": []})]
 
 
 def test_missing_on_notification_silently_drops_a_server_notification(tmp_path: Path) -> None:
-    # No on_notification given -- must not raise or hang, same as before this callback existed.
     with _spawn_fake_server(tmp_path) as client:
         assert client.request("send_notification", {"uri": "file:///a.py", "items": []}) is None
 
