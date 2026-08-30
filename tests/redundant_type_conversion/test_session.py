@@ -614,9 +614,6 @@ def test_finalize_discards_when_not_persistent(tmp_path: Path) -> None:
 
 
 def test_finalize_discards_a_file_outside_root_even_when_persistent(tmp_path: Path) -> None:
-    # A daemon (keep_open=True) must never adopt a file outside its own root into its own persistent
-    # state (ADR-0041) -- treated exactly like a non-persistent session instead: closed, not kept open,
-    # so it can never resurface in some later, unrelated run.
     client = _StubLSPClient()
     session = _session_with_stub_client(client, keep_open=True, root=tmp_path / "repo")
     outside_root = tmp_path / "elsewhere.py"
