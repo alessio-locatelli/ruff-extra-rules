@@ -48,7 +48,7 @@ def test_install_sigterm_handler_degrades_when_signal_signal_unavailable(
     )
 
     with caplog.at_level("DEBUG"):
-        _install_sigterm_handler()  # must not raise
+        _install_sigterm_handler()
 
     assert signal.getsignal(signal.SIGTERM) is original_handler
     assert "Could not install a SIGTERM handler" in caplog.text
