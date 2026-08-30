@@ -167,11 +167,6 @@ def test_verbose_flag_surfaces_the_underlying_exception_on_stderr(tmp_path: Path
 
 
 def test_verbose_flag_does_not_change_violations_or_exit_code(tmp_path: Path) -> None:
-    """Ch. 27: "MUST ensure that debug logging does not change lint
-    results" / "does not change auto-fix behavior" -- --verbose only
-    reconfigures logging, so an ordinary (non-crashing) violation must be
-    reported identically with or without it.
-    """
     filepath = tmp_path / "violates.py"
     filepath.write_text("data = requests.get(url)\n")
 
