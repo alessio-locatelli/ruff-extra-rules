@@ -740,9 +740,6 @@ def func():
             PatternType.SINGLE_USE,
         ),
         (
-            # An augmented-assignment target (`x += 1`) can't be inlined —
-            # the result (`5 += 1`) is invalid syntax — and isn't the
-            # read-then-forward pattern TR5 targets anyway.
             """
 def func():
     x = 5
@@ -752,12 +749,6 @@ def func():
             None,
         ),
         (
-            # Issue #76 calibration case: a "single-purpose accessor
-            # assigned then immediately mutated" (`state = me.state(State);
-            # state.value = 5`) is never even read — the sole use is a
-            # mutation, not a pass-through — so it isn't a redundant
-            # assignment either, regardless of how low its semantic score
-            # would otherwise be.
             """
 def func(me):
     state = me.state(State)
@@ -767,11 +758,6 @@ def func(me):
             None,
         ),
         (
-            # "Snapshot the old value before reassigning it" (issue #74):
-            # `value` is rebound between the tracked assignment and its
-            # use, so `old_value` and a later inlined `value` would read
-            # genuinely different states — this isn't a redundant
-            # assignment at all.
             """
 def func(value):
     old_value = value
@@ -782,10 +768,6 @@ def func(value):
             None,
         ),
         (
-            # Same hazard via an augmented assignment, which both mutates
-            # and rebinds `value` — the "reassign or mutate" half of issue
-            # #74's phrasing not covered by the plain-reassignment case
-            # above.
             """
 def func(value):
     old_value = value
@@ -796,11 +778,6 @@ def func(value):
             None,
         ),
         (
-            # Same hazard, but the reassignment mutates the exact
-            # attribute reference (`obj.attr`) the RHS read from, rather
-            # than rebinding a plain name. An intervening, unrelated read
-            # of `obj` between the assignment and the mutation must not
-            # itself be mistaken for the hazard.
             """
 def func(obj):
     old_attr = obj.attr
@@ -812,10 +789,6 @@ def func(obj):
             None,
         ),
         (
-            # Same hazard via an augmented assignment to the attribute
-            # reference itself (`obj.attr += 1` both reads and reassigns
-            # `obj.attr`, mirroring the plain-name augmented-assignment
-            # case above).
             """
 def func(obj):
     old_attr = obj.attr
@@ -826,10 +799,6 @@ def func(obj):
             None,
         ),
         (
-            # An Attribute RHS whose base doesn't unwind to a plain name
-            # (e.g. a call result) has no trackable reference to check for
-            # reassignment, so it isn't disqualified by the issue #74
-            # guard — it's just an ordinary redundant assignment.
             """
 def func():
     old = get_obj().attr
@@ -839,10 +808,6 @@ def func():
             PatternType.IMMEDIATE_SINGLE_USE,
         ),
         (
-            # `obj` is read again *after* old_attr's own use, with no
-            # mutation anywhere — not a snapshot hazard. This later,
-            # out-of-range read must stop the range scan rather than being
-            # mistaken for an in-range one.
             """
 def func(obj):
     old_attr = obj.attr
@@ -854,13 +819,6 @@ def func(obj):
             PatternType.SINGLE_USE,
         ),
         (
-            # `x` is reassigned only in the `else` branch, mutually
-            # exclusive with the `if` branch that uses `old` — `x` can
-            # never actually change on the path that reaches `return old`.
-            # Statements nested in different branches of the same
-            # if/else share one coarse stmt_index, so this must rely on
-            # source order (the reassignment is textually after the use)
-            # rather than stmt_index alone to avoid a false hazard.
             """
 def func(cond, x):
     old = x
@@ -873,10 +831,6 @@ def func(cond, x):
             PatternType.IMMEDIATE_SINGLE_USE,
         ),
         (
-            # A walrus expression rebinds `x` within the same statement
-            # that uses `v` — inlining `v` as `x` here would read the
-            # just-rebound value (2) instead of the one captured at
-            # assignment time.
             """
 def func(x):
     v = x
@@ -886,12 +840,6 @@ def func(x):
             None,
         ),
         (
-            # `old`'s assignment, the `self._server_session =
-            # ...` reassignment, and `old`'s own use are all nested inside
-            # the same top-level `if`, so they share one coarse
-            # stmt_index. Bisecting the hazard scan on stmt_index (instead
-            # of line) would skip straight past the reassignment, silently
-            # missing this snapshot-before-reassignment hazard.
             """
 def func(self):
     if isinstance(self._server_session, EmptyServerSession):
@@ -904,11 +852,6 @@ def func(self):
             None,
         ),
         (
-            # Two semicolon-separated statements on one
-            # physical line have the same `line` but distinct
-            # `stmt_index`. Bisecting the hazard scan on line alone (the
-            # fix for the coarse-stmt_index case above) would skip straight
-            # past this same-line reassignment.
             """
 def func(x):
     old = x; x = 2
@@ -918,10 +861,6 @@ def func(x):
             None,
         ),
         (
-            # `buf` is never reassigned and `resume_location` is never
-            # touched via an assignment-target — only read again via other
-            # method calls (`buf.seek`/`buf.write`) that mutate its
-            # position with no assignment syntax at all.
             """
 def func(buf, size_location):
     resume_location = buf.tell()
@@ -934,9 +873,6 @@ def func(buf, size_location):
             None,
         ),
         (
-            # `obj` has no other usage in between, so the method-call
-            # receiver check must not over-fire just because the RHS
-            # happens to be a method call.
             """
 def func(obj):
     value = obj.compute()
@@ -947,9 +883,6 @@ def func(obj):
             PatternType.SINGLE_USE,
         ),
         (
-            # A multiline call can reference its own receiver again inside
-            # its own argument list — that self-reference must not be
-            # mistaken for an intervening usage of `obj`.
             """
 def func(obj):
     value = obj.compute(
@@ -961,10 +894,6 @@ def func(obj):
             PatternType.IMMEDIATE_SINGLE_USE,
         ),
         (
-            # The use's own statement (`obj.consume(value)`) reads `obj`
-            # again just to look up `.consume` — that self-reference must
-            # not be mistaken for an intervening usage either, the same
-            # way the assignment's own statement's self-reference isn't.
             """
 def func(obj):
     value = obj.compute()
@@ -974,10 +903,6 @@ def func(obj):
             PatternType.IMMEDIATE_SINGLE_USE,
         ),
         (
-            # A `yield` between the assignment and the use lets arbitrary
-            # external code run, so re-evaluating a Call RHS at the use
-            # site isn't guaranteed to reproduce the value captured before
-            # the yield.
             """
 def func():
     start_bytes = get_cache_bytes()
@@ -988,8 +913,6 @@ def func():
             None,
         ),
         (
-            # Same suspension-point hazard via `await` instead of `yield`,
-            # and an Attribute RHS instead of a Call.
             """
 async def func(obj):
     cached = obj.attr
@@ -1000,12 +923,6 @@ async def func(obj):
             None,
         ),
         (
-            # Assignment, await, and use are all nested inside the same
-            # `if` body, so they share one coarse stmt_index — the tie
-            # can't be resolved by walking the use's own statement alone
-            # (that statement is just `return cached`, which contains no
-            # suspension point), since the await is a separate, earlier
-            # statement in the same block.
             """
 async def func(obj, cond):
     if cond:
@@ -1018,11 +935,6 @@ async def func(obj, cond):
             None,
         ),
         (
-            # `await` is a sibling statement *after* the use, still nested
-            # in the same `if` body (same coarse stmt_index) — the value is
-            # fully consumed before the coroutine can ever suspend, so this
-            # must not be flagged as a hazard just because it's a different
-            # statement from the tie above.
             """
 async def func(obj, cond):
     if cond:
@@ -1034,11 +946,6 @@ async def func(obj, cond):
             PatternType.IMMEDIATE_SINGLE_USE,
         ),
         (
-            # Same hazard as the two cases above, but semicolon-separated
-            # onto one physical line — assignment, await, and use tie on
-            # *both* line and stmt_index, so the bisect boundary must not
-            # skip the await point just because it looks identical to the
-            # assignment's own position.
             """
 async def func(obj, cond):
     if cond:
@@ -1049,8 +956,6 @@ async def func(obj, cond):
             None,
         ),
         (
-            # `yield value` reads `value` before suspending, so a yield at
-            # the use's own statement isn't a suspension hazard.
             """
 def func(obj):
     value = obj.compute()
@@ -1060,7 +965,6 @@ def func(obj):
             PatternType.IMMEDIATE_SINGLE_USE,
         ),
         (
-            # `yield from` is the same suspension hazard as a plain `yield`.
             """
 def func():
     start_bytes = get_cache_bytes()
@@ -1071,9 +975,6 @@ def func():
             None,
         ),
         (
-            # `topology` is hoisted before a loop it isn't part of, then
-            # read once per iteration — inlining would run
-            # `self._get_topology()` N times instead of once.
             """
 def func(self, items):
     topology = self._get_topology()
@@ -1084,11 +985,6 @@ def func(self, items):
             None,
         ),
         (
-            # The assignment and its sole use share the same loop, unlike
-            # the hoisted-before-a-loop case above — not the loop-hoist
-            # hazard (assignment.in_loop is already True), though still
-            # subject to should_report_violation's own separate,
-            # unconditional in-loop exclusion.
             """
 def func(items):
     for item in items:
@@ -1099,10 +995,6 @@ def func(items):
             PatternType.IMMEDIATE_SINGLE_USE,
         ),
         (
-            # A Constant RHS hoisted before a loop is still redundant —
-            # unlike a Call/Attribute RHS, re-evaluating a constant gives
-            # the identical value every time, so the loop-hoist hazard
-            # above doesn't apply to it.
             """
 def func(items):
     x = 5
@@ -1113,9 +1005,6 @@ def func(items):
             PatternType.IMMEDIATE_SINGLE_USE,
         ),
         (
-            # `value`'s only use is in the `for` loop's iterator
-            # expression, not its body — the iterator evaluates exactly
-            # once, so this isn't the loop-hoist hazard above.
             """
 def func():
     value = 1
@@ -1126,8 +1015,6 @@ def func():
             PatternType.IMMEDIATE_SINGLE_USE,
         ),
         (
-            # The scope's only suspension point precedes this assignment,
-            # not the gap between it and its use — no hazard.
             """
 async def func(obj):
     await something()
