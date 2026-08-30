@@ -61,7 +61,6 @@ def test_cross_file_call_site_conversion_is_flagged_at_permissive() -> None:
 
 
 def test_cross_file_call_site_conversion_is_not_flagged_at_conservative() -> None:
-    # list/dict/set/bytearray are copy-producing -- excluded by default.
     violations = _check(BAD_ROOT / "cross_file_call_site.py")
 
     assert violations == []
