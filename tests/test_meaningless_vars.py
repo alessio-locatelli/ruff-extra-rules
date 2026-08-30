@@ -1379,14 +1379,6 @@ def test_autofix_assigns_outer_name_first_when_nested_closure_precedes_assignmen
 
 
 def test_autofix_does_not_rename_annotation_under_deferred_annotations() -> None:
-    # With `from __future__ import annotations` (PEP 563)
-    # active, every annotation is stored as a string and resolved later
-    # against the function's *module* globals, never the enclosing
-    # function's locals — unlike a default value, it is never a true
-    # closure reference. Renaming an annotation that happens to share a
-    # name with an outer local must not follow it anyway — that would
-    # point the (module-global-resolved) annotation at a name that only
-    # exists as a local, breaking `typing.get_type_hints()` at runtime.
     source = """from __future__ import annotations
 
 data = int
@@ -1410,7 +1402,7 @@ def outer(response):
 
         fixed_content = filepath.read_text()
 
-    assert "def inner(x: data):" in fixed_content  # annotation untouched
+    assert "def inner(x: data):" in fixed_content
     module_namespace: dict[str, Any] = {}
     exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
 
