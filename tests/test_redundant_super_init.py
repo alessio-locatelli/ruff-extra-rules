@@ -148,8 +148,6 @@ class Child(Base):
             False,
         ),
         (
-            # No **kwargs parameter at all means nothing can be redundantly
-            # forwarded.
             """class Base:
     def __init__(self):
         pass
@@ -164,8 +162,6 @@ class Child(Base):
         ),
         ("class Foo:\n    pass\n", False),
         (
-            # super().__init__() called with no ** forwarding is never
-            # flagged, even though the class itself accepts **kwargs.
             """class Base:
     def __init__(self):
         pass
@@ -179,8 +175,6 @@ class Child(Base):
             False,
         ),
         (
-            # A call that looks similar (e.g. self.setup(**kwargs)) but
-            # isn't super().__init__ must not be mistaken for one.
             """class Base:
     def __init__(self):
         pass
@@ -196,7 +190,6 @@ class Child(Base):
             False,
         ),
         (
-            # super().other_method(**kwargs) isn't a super().__init__ call.
             """class Base:
     def __init__(self):
         pass
@@ -209,8 +202,6 @@ class Child(Base):
             False,
         ),
         (
-            # A bare `super.__init__(**kwargs)` (no call parens on `super`)
-            # isn't the `super()` pattern this check looks for.
             """class Base:
     def __init__(self):
         pass
@@ -223,8 +214,6 @@ class Child(Base):
             False,
         ),
         (
-            # obj().__init__(**kwargs) where obj() isn't `super()` is not
-            # flagged.
             """class Base:
     def __init__(self):
         pass
@@ -237,9 +226,6 @@ class Child(Base):
             False,
         ),
         (
-            # A base class expressed as something other than a plain Name
-            # (e.g. an attribute access like `module.Base`) can't be
-            # resolved, so it's skipped rather than flagged.
             """import external
 
 class Child(external.Base):
@@ -249,8 +235,6 @@ class Child(external.Base):
             False,
         ),
         (
-            # A base class not defined in this file (e.g. imported) can't
-            # be introspected, so it's never flagged.
             """from somewhere import ExternalBase
 
 class Child(ExternalBase):
@@ -296,8 +280,6 @@ class Child(Base):
             False,
         ),
         (
-            # `self` alone as a positional-only parameter is not itself an
-            # argument the caller can pass.
             """class Base:
     def __init__(self, /):
         pass
