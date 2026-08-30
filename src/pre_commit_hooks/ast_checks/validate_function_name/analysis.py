@@ -1,5 +1,3 @@
-"""AST analysis and behavior detection for function naming."""
-
 from __future__ import annotations
 
 import ast
@@ -30,13 +28,11 @@ class Suggestion:
 
 
 def read_source(path: Path) -> str:
-    """Read source code from a file, honoring a PEP 263 encoding declaration."""
     source, _encoding = read_source_with_encoding(path)
     return source
 
 
 def _call_name(node: ast.AST) -> str | None:
-    """Return a readable dotted name for a call (e.g., 'requests.get' or 'open')."""
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -55,7 +51,6 @@ def decorator_name(d: ast.AST) -> str | None:
     if isinstance(d, ast.Name):
         return d.id
     if isinstance(d, ast.Attribute):
-        # e.g. abc.abstractmethod
         return _call_name(d)
     return None
 
@@ -87,27 +82,25 @@ def _is_context_manager(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> bo
 
 
 class FunctionBehavior(TypedDict):
-    """Detected behavior flags used by `suggest_name_for` to pick a naming pattern. See ADR-0037."""
-
     is_property: bool
-    disk_read: bool  # open(), .read_text(), .load(), etc.
-    disk_write: bool  # .write(), .save(), .dump()
-    network_read: bool  # e.g. requests.get
-    network_write: bool  # e.g. requests.post
+    disk_read: bool
+    disk_write: bool
+    network_read: bool
+    network_write: bool
     outputs: bool
-    returns_bool: bool  # based on the return annotation, not the return values
-    aggregates: bool  # sum/min/max/mean/etc.
+    returns_bool: bool
+    aggregates: bool
     creates_object: bool
     mutates_args: bool
     yields: bool
-    parses: bool  # json.loads, yaml.safe_load, etc.
-    renders: bool  # json.dumps, yaml.dump, etc.
+    parses: bool
+    renders: bool
     searches: bool
     validates: bool
     transforms: bool
-    delegates_get: bool  # calls, and returns, another get_* function's result
-    collects: bool  # builds up a list/dict and returns it
-    returns_class: bool  # returns a class object, not an instance
+    delegates_get: bool
+    collects: bool
+    returns_class: bool
 
 
 def _is_wildcard_pattern(pattern: ast.pattern) -> bool:
@@ -115,10 +108,6 @@ def _is_wildcard_pattern(pattern: ast.pattern) -> bool:
 
 
 def _block_diverges(stmts: list[ast.stmt]) -> bool:
-    """True if running `stmts` in order is guaranteed to exit via return,
-    raise, break, or continue before reaching the end of the block --
-    i.e. control can never fall through to whatever follows this block.
-    """
     return any(_stmt_diverges(stmt) for stmt in stmts)
 
 
@@ -143,16 +132,6 @@ def _stmt_diverges(stmt: ast.stmt) -> bool:
 
 
 def _stmt_narrows_scope(stmt: ast.stmt) -> bool:
-    """True if this statement guarantees later siblings in the same block
-    are reached, if at all, only through a path its own primary body
-    didn't take -- an implicit else/handler, even when none is written.
-
-    Broader than `_stmt_diverges`: an `if`/`try` whose primary body always
-    diverges narrows what follows even without a matching `else`/handler
-    that itself diverges -- e.g. a guard-clause `if cached: return cached`
-    with no `else` still means the next statement only runs on a cache
-    miss, same as if it were nested in an `else`. See ADR-0037.
-    """
     if isinstance(stmt, ast.If):
         return _block_diverges(stmt.body)
     if isinstance(stmt, (ast.Try, ast.TryStar)):
@@ -161,13 +140,6 @@ def _stmt_narrows_scope(stmt: ast.stmt) -> bool:
 
 
 def _seed_block(stmts: list[ast.stmt], *, base_conditional: bool) -> list[tuple[ast.AST, bool]]:
-    """Pairs each statement in a block with its conditional state.
-
-    Once an earlier sibling narrows scope (see `_stmt_narrows_scope`),
-    every statement after it in the same block is only reached via a path
-    that sibling didn't take -- an implicit guard, the same as if it were
-    nested in an `else`, even though it isn't. See ADR-0037.
-    """
     pairs: list[tuple[ast.AST, bool]] = []
     reachable = True
     for stmt in stmts:
@@ -178,20 +150,10 @@ def _seed_block(stmts: list[ast.stmt], *, base_conditional: bool) -> list[tuple[
 
 
 def _iter_own_scope(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[tuple[ast.AST, bool]]:
-    """Yields (node, conditional) for every node in func_node's own execution scope. See ADR-0037."""
     yield from _iter_scope(list(reversed(_seed_block(func_node.body, base_conditional=False))))
 
 
 def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, bool]]:
-    """Core traversal behind `_iter_own_scope`, seeded from an arbitrary
-    (node, conditional) stack instead of always a function's own body --
-    reused by the while-loop search heuristic below to scan a single loop's
-    subtree with the same scope/conditional rules, relative to that loop.
-
-    Iterative (explicit stack), not recursive: see attach_parents for why.
-    Mutates `seed` in place as the stack; both call sites below pass a fresh
-    list literal, never one the caller reuses afterward.
-    """
     stack = seed
     while stack:
         node, conditional = stack.pop()
@@ -201,8 +163,6 @@ def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, boo
             stack.extend((d, conditional) for d in reversed(node.decorator_list))
             stack.extend((d, conditional) for d in reversed(node.args.defaults))
             stack.extend((d, conditional) for d in reversed(node.args.kw_defaults) if d is not None)
-            # Annotations (param and return) are deferred under PEP 649 --
-            # not evaluated when this def statement runs, unlike defaults.
         elif isinstance(node, ast.Lambda):
             stack.append((node.args, conditional))
         elif isinstance(node, ast.ClassDef):
@@ -224,8 +184,6 @@ def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, boo
             stack.extend(reversed(_seed_block(node.orelse, base_conditional=True)))
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             stack.append((node.iter, conditional))
-            # The target is only assigned once the iterator yields an item,
-            # same as the body -- unlike `iter`, which always evaluates.
             stack.append((node.target, True))
             stack.extend(reversed(_seed_block(node.body, base_conditional=True)))
             stack.extend(reversed(_seed_block(node.orelse, base_conditional=True)))
@@ -234,9 +192,6 @@ def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, boo
             for handler in reversed(node.handlers):
                 stack.extend(reversed(_seed_block(handler.body, base_conditional=True)))
             stack.extend(reversed(_seed_block(node.orelse, base_conditional=True)))
-            # A finally block always runs once the try is reached, whether
-            # the body succeeded, raised, or returned -- unlike the branches
-            # above, it isn't skippable, so it inherits conditional as-is.
             stack.extend(reversed(_seed_block(node.finalbody, base_conditional=conditional)))
         elif isinstance(node, ast.Match):
             stack.append((node.subject, conditional))
@@ -254,10 +209,6 @@ def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, boo
 
 
 def _is_capitalized_call(func: ast.expr) -> bool:
-    """True for a bare `Foo(...)` or qualified `mod.Foo(...)`/`self.Foo(...)`
-    call whose final dotted component starts with an uppercase letter -- the
-    Python convention for a class/constructor.
-    """
     if isinstance(func, ast.Name):
         return bool(func.id) and func.id[0].isupper()
     if isinstance(func, ast.Attribute):
@@ -326,7 +277,6 @@ def analyze_function(
         "returns_class": False,
     }
 
-    # Collect parameter names to distinguish argument mutation from cache updates
     param_names: set[str] = set()
     for arg in func_node.args.args:
         param_names.add(arg.arg)
@@ -345,14 +295,11 @@ def analyze_function(
         ):
             flags["is_property"] = True
 
-    # Rely only on the annotation, not on inspecting actual return values.
     if func_node.returns is not None:
         ann = func_node.returns
         if isinstance(ann, ast.Name) and ann.id == "bool":
             flags["returns_bool"] = True
 
-    # Populated below, consumed by the delegation/collection detection
-    # further down in this function.
     get_assigned_vars: set[str] = set()
     created_containers: set[str] = set()
     appended_to: set[str] = set()
@@ -368,17 +315,9 @@ def analyze_function(
 
     for node, conditional in own_scope_nodes:
         if isinstance(node, (ast.Yield, ast.YieldFrom)):
-            # A yield anywhere in the body -- even behind a guard -- makes
-            # the whole function a generator, so this isn't gated on
-            # `conditional` the way the verb flags below are.
             flags["yields"] = True
         if isinstance(node, ast.Call):
             name = _call_name(node.func)
-            # Verb flags below are evidence of what this function's defining
-            # action is, so they only count when the call is reached
-            # unconditionally -- a call nested behind a guard (an `if`/`try`
-            # cache-or-construct-on-miss fallback, e.g.) doesn't dominate the
-            # function's own name the way an always-run call does.
             if name and not conditional:
                 lname = name.lower()
                 if lname == "open" or lname.endswith((".read", ".read_text", ".read_bytes", ".load")):
@@ -421,14 +360,10 @@ def analyze_function(
                     for t in parent.targets:
                         if isinstance(t, ast.Name):
                             get_assigned_vars.add(t.id)
-                # direct return of call handled later
 
-        # Mutation detection spans this Assign branch, the AugAssign branch
-        # below, and the append/extend/add Call branch further down.
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name):
-                    # x = [] or x = {} or x = list()/dict()
                     if isinstance(node.value, (ast.List, ast.Dict)):
                         created_containers.add(target.id)
                     if (
@@ -438,8 +373,6 @@ def analyze_function(
                     ):
                         created_containers.add(target.id)
 
-                # Only flag mutation if we're modifying a parameter or its attributes
-                # (not module-level caches/globals like _cache[key] = value)
                 if isinstance(target, ast.Attribute):
                     base_name = _get_base_name(target)
                     if base_name and (base_name in param_names or base_name == "self"):
@@ -455,14 +388,11 @@ def analyze_function(
                 if base_name and (base_name in param_names or base_name == "self"):
                     flags["mutates_args"] = True
             else:
-                # An augmented assignment target is always a Name,
-                # Attribute, or Subscript.
                 assert isinstance(target, ast.Name)
                 if target.id in param_names:
                     flags["mutates_args"] = True
         if isinstance(node, ast.Call):
             name = _call_name(node.func)
-            # 'x.append(...)' -> node.func is Attribute with value Name('x')
             if (
                 name
                 and any(
@@ -487,11 +417,6 @@ def analyze_function(
                 if var_name in param_names or var_name == "self":
                     flags["mutates_args"] = True
 
-        # Heuristic for a find_root-style function: a while loop polling
-        # .exists()/.parent (e.g. walking up a filesystem tree). Only trusted
-        # when the loop itself is unconditionally reached, and scanned with
-        # the same scope-aware traversal so a nested def/lambda/genexp inside
-        # the loop can't leak a match into this function's own evidence.
         if isinstance(node, ast.While) and not conditional:
             for sub, sub_conditional in _iter_scope([(node, False)]):
                 if sub_conditional:
@@ -503,8 +428,6 @@ def analyze_function(
                 if isinstance(sub, ast.Attribute) and sub.attr == "parent":
                     has_loop_checking_exists_or_parent = True
 
-    # Delegation: the function returns a variable assigned by get_*, or
-    # returns a call to get_* directly.
     for node, _conditional in own_scope_nodes:
         if isinstance(node, ast.Return):
             if isinstance(node.value, ast.Call):
@@ -517,7 +440,6 @@ def analyze_function(
                 flags["collects"] = True
             if isinstance(node.value, ast.Name) and node.value.id in defined_classes:
                 flags["returns_class"] = True
-            # type()/type[...] calls are metaclass operations.
             if isinstance(node.value, ast.Call):
                 call_name = _call_name(node.value.func)
                 if call_name == "type":
@@ -547,15 +469,6 @@ def analyze_function(
 
 
 def attach_parents(node: ast.AST) -> None:
-    """Attach parent references to AST nodes for better analysis.
-
-    Iterative (explicit stack), not recursive: this runs on every file
-    `collect_suggestions` processes, unconditionally and over the whole
-    tree, so its traversal depth is the file's full AST depth — a
-    recursive version hits Python's default recursion limit around 1000
-    levels of nesting (e.g. `not not not ... True`), well within what
-    `ast.parse` itself still accepts as valid, ordinary-looking Python.
-    """
     stack = [node]
     while stack:
         current = stack.pop()
@@ -565,15 +478,6 @@ def attach_parents(node: ast.AST) -> None:
 
 
 def _get_base_name(node: ast.expr) -> str | None:
-    """Get the base name from an expression (handles nested attributes).
-
-    Examples:
-        x -> "x"
-        x.y -> "x"
-        x.y.z -> "x"
-        x[0] -> "x"
-        x[0].y -> "x"
-    """
     if isinstance(node, ast.Name):
         return node.id
     if isinstance(node, ast.Attribute):
@@ -584,11 +488,6 @@ def _get_base_name(node: ast.expr) -> str | None:
 
 
 def is_simple_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-    """True for a single 'return self.attr'/'return obj[attr]'/'return obj.get(...)'
-    body — these are idiomatic getters and should not be flagged.
-    """
-    # A function's body is never empty (Python requires at least one
-    # statement), so only the post-docstring-strip check below can be.
     body = _body_without_docstring(func_node)
     if not body:
         return False
@@ -653,14 +552,6 @@ def is_lazy_self_accessor(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> 
 
 
 def process_file(filepath: Path) -> list[Suggestion]:
-    """Read and parse a file standalone, then return naming suggestions.
-
-    Thin convenience wrapper around `collect_suggestions` for callers (e.g.
-    tests) that only have a path, not an already-parsed tree/source. The
-    orchestrator-driven check() path must call `collect_suggestions` directly
-    with its own shared tree/source instead of this, to avoid re-reading and
-    re-parsing a file the orchestrator already parsed once.
-    """
     try:
         source = read_source(filepath)
     except (OSError, SyntaxError, UnicodeDecodeError, LookupError) as error:
@@ -679,7 +570,6 @@ def process_file(filepath: Path) -> list[Suggestion]:
 def collect_suggestions(
     filepath: Path, tree: ast.Module, source: str, ignored_lines: set[int] | None = None
 ) -> list[Suggestion]:
-    """`filepath` is used only to tag returned Suggestions; `tree` must already be parsed from `source`."""
     attach_parents(tree)
 
     candidates = [
@@ -691,7 +581,6 @@ def collect_suggestions(
         and not is_simple_accessor(node)
     ]
     if not candidates:
-        # See ADR-0040.
         return []
 
     if ignored_lines is None:
@@ -748,12 +637,6 @@ def first_docstring_line(
 
 
 def extract_first_verb(docstring_line: str) -> str | None:
-    """
-    Examples:
-        "Combine the parameters..." -> "combine"
-        "Build a new instance..." -> "build"
-        "Merge two dictionaries..." -> "merge"
-    """
     if not docstring_line:
         return None
 
@@ -761,7 +644,6 @@ def extract_first_verb(docstring_line: str) -> str | None:
     if not words:
         return None
 
-    # The first word is usually the verb, unless it's a leading article.
     first_word = words[0]
     if first_word in {"a", "an", "the"}:
         if len(words) > 1:
@@ -772,7 +654,6 @@ def extract_first_verb(docstring_line: str) -> str | None:
 
 
 def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis: FunctionBehavior) -> tuple[str, str]:
-    """Returns (suggested_name, reason); first matching category below wins."""
     old = func_node.name
     entity = derive_entity_from_name(old)
 
@@ -802,8 +683,6 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
     if first_line:
         docstring_verb = extract_first_verb(first_line)
 
-    # These verbs should be used directly, bypassing the analysis-based
-    # heuristics below.
     recognized_verbs = {
         "combine",
         "compose",
@@ -828,17 +707,11 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
         reason = "@property: prefer noun name rather than verb"
         return suggested, reason
 
-    # A generator's calling contract (must be iterated, can't be used as a
-    # plain return value) is a stronger, unambiguous signal than any verb
-    # guessed from a call inside its body, so this is checked before the
-    # verb-guessing categories below.
     if analysis["yields"]:
         suggested = f"iter_{entity}" if entity else "iter"
         reason = "generator/iterator"
         return suggested, reason
 
-    # Functions that create test objects (mock/factory/fixture patterns)
-    # should use the create_ prefix.
     test_patterns = {
         "mock",
         "stub",
@@ -856,7 +729,6 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
         suggested = f"create_{entity}" if entity else "create"
         return suggested, "creates test object/mock/fixture"
 
-    # Collection/parsing/extraction is checked before create/update below.
     if analysis["collects"]:
         if analysis["parses"]:
             suggested = f"parse_{entity}" if entity else "parse"
@@ -876,7 +748,6 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
         reason = "searches or finds an item (filesystem or structure)"
         return suggested, reason
 
-    # Writes are checked before reads.
     if analysis["disk_write"] or analysis["network_write"]:
         verb = "save_to" if analysis["disk_write"] else "send"
         suggested = f"{verb}_{entity}" if entity else f"{verb}"
