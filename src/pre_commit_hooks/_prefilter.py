@@ -61,13 +61,7 @@ def _python_fallback_filter(filepaths: Sequence[str], pattern: str) -> list[str]
                 if pattern in content:
                     matches.append(filepath)
         except OSError, UnicodeDecodeError:
-            # Debug-only: the file is kept in as a candidate below, and the
-            # hook's own downstream read (_read_source) cleanly reports this
-            # same failure to the user — an ERROR-level .exception() call
-            # here would just leak a redundant raw traceback onto stderr by
-            # default (see git_grep_filter's own except block above).
             logger.debug("File: %s", filepath, exc_info=True)
-            # Include file if we can't read it (let hook handle error)
             matches.append(filepath)
     return matches
 
