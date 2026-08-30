@@ -193,11 +193,6 @@ def _apply_fstring_splice_fix(
     fstring_end: int,
     literal_value: str,
 ) -> bool:
-    """Replaces an entire f-string replacement field (e.g. `{org}`, braces
-    included) with `literal_value` spliced directly into the surrounding
-    text — mutates `source_lines` in place. Returns False (and leaves
-    `source_lines` untouched) if inlining would exceed the line length.
-    """
     use_line = source_lines[use_line_idx]
     start_char = byte_col_to_char_col(use_line, fstring_start)
     end_char = byte_col_to_char_col(use_line, fstring_end)
