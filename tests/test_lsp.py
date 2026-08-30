@@ -148,17 +148,11 @@ def test_close_kills_the_process_when_shutdown_handshake_hangs(tmp_path: Path) -
 
 
 def test_close_kills_the_process_when_it_never_exits_on_its_own(tmp_path: Path) -> None:
-    # Distinct from test_close_kills_the_process_when_shutdown_handshake_hangs
-    # above: that test's fake server actually processes close()'s own
-    # follow-up shutdown/exit messages and exits cleanly on its own, so
-    # process.wait() never times out there. Here the server stops reading
-    # stdin entirely, so close()'s own process.wait(timeout) genuinely
-    # times out and its kill() fallback is what actually ends the process.
     client = _spawn_fake_server(tmp_path)
     client._next_id += 1
     msg_id = client._next_id
     client._write({"jsonrpc": "2.0", "id": msg_id, "method": "spin_forever", "params": {}})
-    time.sleep(0.1)  # let the server actually enter its spin loop first
+    time.sleep(0.1)
 
     client.close(timeout=0.3)
 
