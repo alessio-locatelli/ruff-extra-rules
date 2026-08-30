@@ -67,6 +67,8 @@ def test_conservative_accepts_an_exact_match(hover_text: str, constructor: str) 
     [
         ("str | None", "str"),
         ("LiteralString", "str"),
+        ("bool", "int"),
+        ("Iterable[str]", "list"),
     ],
     ids=["union", "str-subtype", "bool-not-int", "protocol-match"],
 )
@@ -93,7 +95,9 @@ def test_conservative_accepts_a_flow_narrowed_literal_of_the_same_scalar(hover_t
 @pytest.mark.parametrize(
     ("hover_text", "constructor"),
     [
+        ("Literal[True]", "int"),
         ("Literal[False]", "int"),
+        ("Literal[1]", "bool"),
         ('Literal["hi"]', "bytes"),
         ('Literal[b"hi"]', "str"),
         ("Literal[1]", "float"),
