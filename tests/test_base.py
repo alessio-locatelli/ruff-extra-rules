@@ -142,11 +142,6 @@ def test_classify_comment_lines(source: str, comment_only: set[int], trailing: s
 
 
 def test_classify_comment_lines_multiline_string_closing_line_is_code() -> None:
-    # tokenize reports a multiline STRING token's line as only
-    # its *start* line, not every line it spans — so a comment trailing the
-    # closing `"""` (on a later line) must not be misclassified as
-    # comment-only instead of trailing, even though that later line is
-    # never recorded as containing code at all.
     source = 'x = """\nmulti\nline\n"""  # trailing comment\ny = 5\n'
     comment_only, trailing = classify_comment_lines(source)
     assert trailing == {4}
