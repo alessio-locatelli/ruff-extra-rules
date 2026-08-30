@@ -735,15 +735,6 @@ def test_autofix_follows_closure_reference_into_comprehension() -> None:
 
 
 def test_walrus_rebinding_suppresses_suggestion() -> None:
-    # PEP 572 binds a `:=` target inside a comprehension to the
-    # nearest *enclosing* non-comprehension scope, not the comprehension
-    # itself — so a walrus target sharing the outer variable's name is the
-    # *same* binding, not a shadow of it, and must be renamed along with
-    # every other reference. Renaming only the later reference (mistaking
-    # the walrus for a comprehension-local shadow) would leave the walrus
-    # writing to a stale, now-unrelated "data" while the renamed reference
-    # kept the pre-walrus value — a silent change to what's actually
-    # returned.
     source = """def outer(response, items):
     data: Payload = response.json()
     return [(data := item) for item in items], data
