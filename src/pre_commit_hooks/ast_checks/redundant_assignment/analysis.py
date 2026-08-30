@@ -286,8 +286,6 @@ class VariableTracker(ast.NodeVisitor):
         self.stmt_index_stack.pop()
 
     def _increment_stmt_index(self) -> None:
-        # stmt_index_stack is initialized with [0] and only ever grows/shrinks
-        # in balanced pairs via _enter_scope/_exit_scope, so it's never empty.
         self.stmt_index_stack[-1] += 1
 
     def _get_current_scope_id(self) -> int:
