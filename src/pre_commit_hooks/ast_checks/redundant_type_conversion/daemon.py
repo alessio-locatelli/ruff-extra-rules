@@ -1,4 +1,3 @@
-# See ADR-0041.
 from __future__ import annotations
 
 import contextlib
