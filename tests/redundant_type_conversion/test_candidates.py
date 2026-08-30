@@ -146,15 +146,6 @@ def test_shadowing_one_constructor_does_not_affect_an_unrelated_one() -> None:
     ids=["before-the-candidate", "after-the-candidate", "nested-in-an-unrelated-function"],
 )
 def test_ignores_every_candidate_when_a_wildcard_import_is_present(source: str) -> None:
-    # `from module import *` can bind any name at all,
-    # including a builtin constructor's own name (e.g. a compatibility
-    # shim exporting its own `str`), without _scan()'s shadowed-name
-    # tracking ever seeing that specific binding -- a wildcard import
-    # records only the literal string "*", not the names it actually
-    # introduces. Treating the whole module as unsafe once any wildcard
-    # import is present, regardless of where it sits relative to a
-    # candidate, is the same conservative trade-off applied to every
-    # other shadowing shape.
     assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
 
 
