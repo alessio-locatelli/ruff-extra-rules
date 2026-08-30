@@ -1070,15 +1070,6 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        # `def data(): ...` rebinds the *same* local slot as the
-        # earlier `data: Payload = response.json()` — Python resolves a closure (or
-        # any same-scope reference) to whichever binding is current at call
-        # time, not definition time. Confirmed against CPython: calling
-        # `reader()` after `def data()` has executed returns the *function*,
-        # not the json() result, both before and after any rename — so
-        # renaming only the assignment (and the closure reference that
-        # predates the def in the source) would silently repoint both at an
-        # unrelated value instead.
         """def outer(response):
     data: Payload = response.json()
 
@@ -1090,8 +1081,6 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader, data
 """,
-        # same failure class via `class data: ...` instead of
-        # `def` — ast.ClassDef.name is also a plain string.
         """def outer(response):
     data: Payload = response.json()
 
@@ -1103,12 +1092,6 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader, data
 """,
-        # an `except ... as data:` in the *same* scope as the
-        # assignment (not a nested one) also rebinds the same slot — its
-        # name is only bound for the duration of the handler, but Python
-        # still treats the whole scope as governed by it for compile-time
-        # binding classification purposes, and a reference between the two
-        # bindings has no way to know which one a rename should target.
         """def outer(response):
     data: Payload = response.json()
 
@@ -1122,8 +1105,6 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader
 """,
-        # a match `case data:` capture in the same scope, also
-        # a plain-string ast.MatchAs.name.
         """def outer(response, command):
     data: Payload = response.json()
 
@@ -1136,8 +1117,6 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader
 """,
-        # a match `case {**data}:` mapping-rest capture in the
-        # same scope, also a plain-string ast.MatchMapping.rest.
         """def outer(response, command):
     data: Payload = response.json()
 
@@ -1150,9 +1129,6 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader
 """,
-        # a dotted `import data.models` in the same scope binds
-        # the bare name "data" (ast.alias.name is the full dotted path,
-        # never equal to a bare name — this exercises the split-on-dot path).
         """def outer(response):
     data: Payload = response.json()
 
@@ -1163,8 +1139,6 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
 
     return reader
 """,
-        # a non-dotted `from x import data` in the same scope,
-        # distinct branch from the dotted import above.
         """def outer(response):
     data: Payload = response.json()
 
@@ -1202,7 +1176,7 @@ def test_autofix_never_offered_when_same_scope_rebinds_via_non_name_construct(so
         fixed_content = filepath.read_text()
 
     assert fixed_content == source
-    ast.parse(fixed_content)  # Left untouched, so it's still valid Python.
+    ast.parse(fixed_content)
 
 
 def test_autofix_never_offered_for_module_global_read_in_function() -> None:
