@@ -215,7 +215,6 @@ def _load(args: argparse.Namespace, cwd: Path) -> tuple[Mapping[str, Any], Path,
         return {}, cwd, CLI_SOURCE
 
     if args.config is not None:
-        # See ADR-0046.
         path = Path(os.path.abspath(args.config))  # noqa: PTH100
         if not path.is_file():
             message = f"Could not read `{path}`: no such file"
