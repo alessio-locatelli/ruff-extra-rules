@@ -340,11 +340,6 @@ def test_adds_verbosity_or_context(var_name: str, rhs_source: str, *, expected: 
     assert _adds_verbosity_or_context(var_name, rhs_source, rhs_node) is expected
 
 
-# ---------------------------------------------------------------------------
-# _would_require_parentheses
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("rhs_source", "expected"),
     [
@@ -360,20 +355,15 @@ def test_would_require_parentheses(rhs_source: str, *, expected: bool) -> None:
     assert _would_require_parentheses(rhs_node) is expected
 
 
-# ---------------------------------------------------------------------------
-# _is_named_constant_pattern
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("var_name", "rhs_source", "expected"),
     [
-        ("max_depth", "10", True),  # Multi-part name and number.
-        ("line_spacing", "1.2", True),  # Float.
-        ("threshold", "42", True),  # Single-part long name.
-        ("value", "10", False),  # Single-part short generic name.
+        ("max_depth", "10", True),
+        ("line_spacing", "1.2", True),
+        ("threshold", "42", True),
+        ("value", "10", False),
         ("num", "10", False),
-        ("msg", '"hello"', False),  # Non-numeric.
+        ("msg", '"hello"', False),
     ],
     ids=["multipart-int", "float", "single-part-long-name", "generic-value", "generic-num", "non-numeric"],
 )
@@ -382,20 +372,15 @@ def test_is_named_constant_pattern(var_name: str, rhs_source: str, *, expected: 
     assert _is_named_constant_pattern(var_name, node) is expected
 
 
-# ---------------------------------------------------------------------------
-# _is_named_string_constant_pattern
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("var_name", "rhs_source", "expected"),
     [
-        ("_GREY", '"rgb(201, 203, 207)"', True),  # Private SCREAMING_SNAKE_CASE.
-        ("MAX_RETRIES", '"3"', True),  # SCREAMING_SNAKE_CASE, no leading underscore.
-        ("_temp", '"foo"', False),  # Private but not all-uppercase.
-        ("_GREY", "10", False),  # Non-string constant RHS.
-        ("_GREY", "compute()", False),  # Non-constant RHS.
-        ("_", '"foo"', False),  # Nothing left after stripping underscores.
+        ("_GREY", '"rgb(201, 203, 207)"', True),
+        ("MAX_RETRIES", '"3"', True),
+        ("_temp", '"foo"', False),
+        ("_GREY", "10", False),
+        ("_GREY", "compute()", False),
+        ("_", '"foo"', False),
     ],
     ids=[
         "private-screaming-snake-case",
@@ -411,15 +396,6 @@ def test_is_named_string_constant_pattern(var_name: str, rhs_source: str, *, exp
     assert _is_named_string_constant_pattern(var_name, node) is expected
 
 
-# ---------------------------------------------------------------------------
-# _contains_nondeterministic_call
-# ---------------------------------------------------------------------------
-
-
 def test_contains_nondeterministic_call_with_subscript_func() -> None:
-    # Branch coverage: when the called function is accessed via subscript
-    # (e.g. ``funcs[0]()``), ``node.func`` is neither Name nor Attribute.
-    # The detector must continue visiting child nodes rather than crashing
-    # or silently skipping.
     rhs_node = ast.parse("funcs[0]()", mode="eval").body
     assert _contains_nondeterministic_call(rhs_node) is False
