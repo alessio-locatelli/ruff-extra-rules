@@ -243,8 +243,6 @@ class _SessionRaisingFromOpenOrUpdate(FakeSession):
 
 @pytest.mark.parametrize("raise_on_call", [1, 2], ids=["baseline-open-fails", "recheck-open-fails"])
 def test_decide_candidates_converts_a_lost_session_to_check_unavailable_error(raise_on_call: int) -> None:
-    # A dead ty session must fail loudly (CheckUnavailableError), not silently look "inconclusive" -- see
-    # analysis._open_or_raise()'s own contract.
     source = "y = str(x)\n"
     session = _SessionRaisingFromOpenOrUpdate(
         diagnostics_by_content={source: frozenset(), "y = x\n": frozenset()},
