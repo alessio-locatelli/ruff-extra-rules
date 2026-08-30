@@ -66,12 +66,6 @@ def test_fix_result_keeps_a_distinct_outcome_for_each_violation() -> None:
         "x = (\n    1 +\n    2\n)\n",
         "x = [1, 2, 3][0]\n",
         "x = 1",
-        # A raw form-feed byte is legal intra-line whitespace to Python's
-        # own tokenizer (end_lineno stays equal to lineno), but
-        # str.splitlines() treats it as a line boundary and would
-        # truncate the fast path's result if used directly — the reason
-        # fast_get_source_segment requires split_lines_like_ast's lines,
-        # not source.splitlines()'s.
         'x = requests.get("\x0curl", timeout=1)\n',
     ],
     ids=[
