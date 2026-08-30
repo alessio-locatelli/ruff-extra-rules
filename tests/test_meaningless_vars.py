@@ -1547,16 +1547,6 @@ def test_autofix_does_not_rename_type_parameter_bound_referencing_a_peer_type_pa
 
 
 def test_autofix_does_not_reuse_a_nested_functions_own_mapping_for_its_default() -> None:
-    # a parameter default is evaluated in the *enclosing* scope,
-    # not the function it belongs to — `_collect_scope_replacements()` (the
-    # entry point used when a violation's own enclosing scope is the nested
-    # function itself, here `inner`'s body-local `data`) walked every one of
-    # `inner`'s immediate children unfiltered, including its own default
-    # value, and renamed that default's reference using `inner`'s own
-    # mapping instead of leaving it to the enclosing scope's. Since the two
-    # scopes' suggested names differ in length, this corrupted the source
-    # outright (`x=data` became `x=payload_2oad`) rather than merely
-    # mis-renaming it.
     source = """def outer(response):
     data: Payload = response.json()
 
