@@ -13,8 +13,6 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.uses_project_config
 
-# A name meaningless-vars reports only at the permissive level, so a file's
-# own violation is observable from the exit code alone.
 _FLAGGED = "data = 1\n"
 _ARGV = ["--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]
 
