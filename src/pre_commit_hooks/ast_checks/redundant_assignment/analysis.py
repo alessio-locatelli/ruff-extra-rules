@@ -463,10 +463,6 @@ class VariableTracker(ast.NodeVisitor):
         self._visit_comprehension(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """We skip class-level assignments as they're attributes, not local
-        variables. Decorators are evaluated in the outer scope before the
-        class body.
-        """
         for decorator in node.decorator_list:
             self.visit(decorator)
 
