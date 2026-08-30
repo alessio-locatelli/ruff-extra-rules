@@ -76,7 +76,6 @@ class SuperInitChecker(ast.NodeVisitor):
 
 
 def _is_super_init_call(node: ast.Call) -> bool:
-    """True for `super().__init__(...)`."""
     if not isinstance(node.func, ast.Attribute):
         return False
 
