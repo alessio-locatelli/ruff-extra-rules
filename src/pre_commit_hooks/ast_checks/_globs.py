@@ -43,16 +43,6 @@ def glob_matches(pattern: str, candidate: str) -> bool:
 
 @functools.cache
 def anchored_pattern(pattern: str, anchor: Path) -> str:
-    """`pattern` resolved against `anchor` into an absolute glob, to be matched
-    against a file's own absolute path. Resolution is textual, exactly as in
-    `ruff`, which is what lets an alternation survive into the match instead of
-    being expanded into one pattern per branch. See
-    `docs/adr/0046-exclude-glob-semantics.md`.
-
-    The anchor is escaped on the way in: it is a real directory path, not a
-    pattern, so a `[` or `*` someone's checkout happens to contain must not
-    start matching things.
-    """
     joined = pattern if pattern.startswith("/") else f"{_escaped(str(anchor))}/{pattern}"
     return "/" + "/".join(_resolved_parts(joined))
 
