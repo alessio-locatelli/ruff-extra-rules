@@ -70,35 +70,6 @@ class _Scan:
 
 
 def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
-    """One walk over `tree` computing every whole-module signal `find_candidates()` needs.
-
-    `shadowed`: every name bound anywhere in `tree` -- def/class, import
-    (`as`-aware; a bare `import a.b.c` binds only its own top-level `a`),
-    assignment target (also covers for/with/augmented-assign/
-    comprehension/walrus), function/lambda parameter, `except ... as
-    name`, match-case capture. Deliberately whole-module and scope-blind,
-    not just the enclosing scope of a given call: false negatives
-    (missing a real violation) are preferred over false positives
-    (treating a user-defined `str`/`list`/etc. as the builtin, and
-    reporting removing a call as safe when it actually changes behavior).
-    A wildcard import (`from module import *`) can bind any name at all,
-    including a constructor's own, without ever appearing in `shadowed`
-    itself -- `has_wildcard_import` catches that instead.
-
-    `len_wrapped`/`equality_compared`: see ADR-0035's `len()` sink
-    exclusion and Path-vs-str comparison exclusion, respectively. The
-    latter is cleared entirely (not just for the specific name involved)
-    if a `pathlib` path class name is bound to anything other than an
-    ordinary `from pathlib import <Name>` anywhere in `tree`, the same
-    scope-blind bias as `shadowed` itself.
-
-    `raw_candidates`: pre-filtered by `node.func.id in eligible` (the raw
-    set, before subtracting `shadowed`) -- cheap, and safe to do this
-    early: `eligible - shadowed` can only ever shrink `eligible`, so
-    nothing this filters out here could have passed the final filter
-    either, and it skips the pricier remaining checks (span, hover anchor)
-    for a call whose name was never eligible to begin with.
-    """
     has_wildcard_import = False
     shadowed: set[str] = set()
     purepath_shadowed: set[str] = set()
