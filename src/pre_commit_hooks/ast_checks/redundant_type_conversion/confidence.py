@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from enum import Enum, auto
 
-# Eligible at the conservative (default) level -- see ADR-0035.
 IMMUTABLE_CONSTRUCTORS = frozenset({"str", "int", "float", "bool", "bytes", "frozenset", "tuple"})
 
-# Eligible only at the permissive level -- see ADR-0035.
 MUTABLE_CONSTRUCTORS = frozenset({"list", "dict", "set", "bytearray"})
 
 ALL_CONSTRUCTORS = IMMUTABLE_CONSTRUCTORS | MUTABLE_CONSTRUCTORS
