@@ -168,11 +168,9 @@ def test_close_is_idempotent(tmp_path: Path) -> None:
 
 
 def test_close_still_cleans_up_after_the_server_already_exited_on_its_own(tmp_path: Path) -> None:
-    # close() must still close stdin/wait/kill even when the server already exited and _connection_lost is set.
     client = _spawn_fake_server(tmp_path)
     client.notify("exit", {})
     client._process.wait(timeout=5)
-    # Let the background reader thread observe the EOF and set _connection_lost before close() runs.
     time.sleep(0.2)
 
     client.close()
