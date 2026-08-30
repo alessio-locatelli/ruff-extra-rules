@@ -50,7 +50,6 @@ def _is_excluded(absolute: PurePosixPath, patterns_by_anchor: dict[Path, list[st
 
 
 def _matches(absolute: PurePosixPath, relative: PurePosixPath, pattern: str, anchor: Path) -> bool:
-    """See `docs/adr/0046-exclude-glob-semantics.md`."""
     if "/" not in pattern:
         return any(glob_matches(pattern, part) for part in relative.parts)
     anchored = anchored_pattern(pattern, anchor)
