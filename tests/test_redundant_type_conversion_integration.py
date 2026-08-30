@@ -54,10 +54,6 @@ def test_same_scope_scalar_conversion_is_flagged() -> None:
 
 
 def test_cross_file_call_site_conversion_is_flagged_at_permissive() -> None:
-    # The headline gap issue #108 exists to close: a redundant conversion
-    # passed as a call argument, where the parameter's own type lives in a
-    # different file -- pyrefly's own `unnecessary-type-conversion` rule
-    # (and every other existing tool) misses this shape entirely.
     violations = _check(BAD_ROOT / "cross_file_call_site.py", level=ConfidenceLevel.PERMISSIVE)
 
     assert {v.line for v in violations} == {5, 6}
