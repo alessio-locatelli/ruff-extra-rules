@@ -393,7 +393,6 @@ def test_apply_fix_does_not_rename_nested_shadowing_function(tmp_path: Path) -> 
 
 
 def test_apply_fix_does_not_rename_parameter_shadowed_call(tmp_path: Path) -> None:
-    # A parameter with the same name shadows the outer function for its scope.
     test_file = tmp_path / "module.py"
     test_file.write_text(
         "def get_data():\n"
