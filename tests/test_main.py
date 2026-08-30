@@ -140,15 +140,6 @@ def test_real_invocation_does_not_leak_a_traceback_onto_stderr(tmp_path: Path) -
 
 
 def test_verbose_flag_surfaces_the_underlying_exception_on_stderr(tmp_path: Path) -> None:
-    """The clean diagnostic line above ("could not be read or parsed") never
-    says *why* -- that detail only exists in a `logger.debug(...,
-    exc_info=True)` call that's silent by default (see
-    test_real_invocation_does_not_leak_a_traceback_onto_stderr, above, and
-    _orchestrator.py's _read_source docstring). Ch. 27: "MUST provide a
-    debug or verbose mode when normal output is insufficient for
-    troubleshooting" -- --verbose is that mode, raising the root logger to
-    DEBUG so the same failure additionally prints its real traceback.
-    """
     filepath = tmp_path / "unreadable.py"
     filepath.write_text("data = requests.get(url)\n")
 
