@@ -114,9 +114,6 @@ def test_request_times_out_when_server_never_responds(tmp_path: Path) -> None:
 
 
 def test_pending_request_is_cleaned_up_after_timeout(tmp_path: Path) -> None:
-    # A request that already timed out must not leave a stale entry in the
-    # pending-request table -- a later, unrelated request reusing that
-    # table must not be able to collide with it.
     with _spawn_fake_server(tmp_path) as client:
         with pytest.raises(LSPTimeoutError):
             client.request("never_respond", {}, timeout=0.2)
