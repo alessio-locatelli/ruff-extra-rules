@@ -508,8 +508,6 @@ def test_apply_fix_does_not_rename_call_shadowed_by_local_import(
 def test_apply_fix_does_not_rename_call_shadowed_by_nested_async_function(
     tmp_path: Path,
 ) -> None:
-    # A nested async function with the same name shadows the outer
-    # function for the rest of that scope, same as a sync nested def.
     test_file = tmp_path / "module.py"
     test_file.write_text(
         "def get_data():\n"
