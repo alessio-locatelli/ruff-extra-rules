@@ -174,9 +174,6 @@ def _class_end(pattern: str, index: int) -> int:
 
 
 def _translate_class(pattern: str, index: int) -> tuple[str, int]:
-    """A backslash is an ordinary member here rather than an escape, so `[a-\\z]`
-    is the range `a` to `\\` — invalid, and rejected, exactly as in `ruff`.
-    """
     end = _class_end(pattern, index)
     if end > len(pattern):
         message = f"`{pattern}` leaves a `[` unclosed"
