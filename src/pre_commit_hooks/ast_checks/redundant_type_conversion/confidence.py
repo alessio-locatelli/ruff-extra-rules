@@ -40,7 +40,6 @@ def _exact_match(hover_text: str, constructor: str) -> bool:
 
 
 def _is_unreliable(hover_text: str) -> bool:
-    # See ADR-0035's "Confidence tiering" -- "Unknown" is as uninformative as "Any" here.
     head = hover_text.split(" & ", 1)[0]
     return head in {"Any", "Unknown"}
 
