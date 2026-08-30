@@ -512,37 +512,12 @@ _FSTRING_SPLICE_UNSAFE_CHARS = frozenset({"'", '"', "\\", "{", "}", "\n", "\r", 
 
 
 def is_safe_to_splice_into_fstring(value: str, encoding: str = "utf-8") -> bool:
-    """`encoding` defaults to "utf-8" — this codebase's overwhelmingly
-    common case, and the only option available at check() time, which
-    (unlike fix()) never learns a file's real PEP 263 declared encoding.
-    `autofix.apply_fixes` calls this again at fix time with the real
-    encoding, so a file declaring something narrower (e.g. `# -*- coding:
-    ascii -*-`) still gets this validated correctly before anything is
-    written — see exceeds_line_length_when_inlined's docstring for why
-    this module's checks are routinely re-validated a second time, against
-    real values, right before a fix is actually applied.
-    """
     if any(char in _FSTRING_SPLICE_UNSAFE_CHARS for char in value):
         return False
 
-    # A control character (e.g. "\x1b", the ANSI escape used in terminal
-    # color codes) is syntactically fine to splice as raw text — none of
-    # them are in the unsafe set above — but writing it as a literal,
-    # unescaped byte turns a readable `\x1b` into an invisible one: the
-    # resulting source line looks like the value vanished (a diff shows
-    # nothing where the field used to be) even though the byte is really
-    # there. str.isprintable() rejects every control character (plus
-    # unassigned/surrogate/other non-printable categories), matching the
-    # newline/NUL exclusions above but generalized instead of enumerated.
     if not value.isprintable():
         return False
 
-    # A str object can legally hold an unpaired surrogate (e.g. from a
-    # "\ud800" escape) even though no real text encoding can represent one
-    # — splicing it as raw source text would make atomic_write_text's
-    # compile()/write() crash with an uncaught UnicodeEncodeError instead
-    # of writing a fixed file, exactly like a NUL byte above but for a
-    # different underlying reason (unencodable rather than unparsable).
     try:
         value.encode(encoding)
     except UnicodeEncodeError:
