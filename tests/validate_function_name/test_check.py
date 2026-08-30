@@ -296,12 +296,6 @@ def test_fix_returns_a_failure_outcome_when_apply_fix_fails_without_raising(
 def test_fix_marks_violation_errored_and_continues_when_apply_fix_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    # A rename that raises something other than FixValidationError is a bug
-    # in apply_fix() itself. It must be reported distinctly
-    # so main() reports [FIX ERRORED] with a "this is a bug" hint rather
-    # than the ordinary [FIXABLE]/"Run with --fix" — CheckOrchestrator's own
-    # equivalent handling in _apply_fixes never even sees this, since it
-    # never escapes this method's own try/except.
     filepath = tmp_path / "mod.py"
     source = "def get_data() -> bool:\n    return True\n"
     filepath.write_text(source)
