@@ -370,13 +370,6 @@ class VariableTracker(ast.NodeVisitor):
         self.control_flow_depth -= 1
 
     def visit_If(self, node: ast.If) -> None:
-        """`node.test` always evaluates unconditionally when the `If`
-        statement itself is reached — only `body`/`orelse` run
-        conditionally. Visiting it outside the incremented
-        `control_flow_depth` keeps a later use in the condition itself
-        (e.g. a with-block assignment whose only use is `if that_var:`)
-        from being wrongly treated as "inside control flow" (issue #73).
-        """
         self.parent_stack.append(node)
         self.visit(node.test)
         self.control_flow_depth += 1
