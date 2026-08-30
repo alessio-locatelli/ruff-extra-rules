@@ -78,8 +78,6 @@ def write_framed_message(stream: IO[bytes], payload: dict[str, Any]) -> None:
 
 
 def _message(*, method: str, params: dict[str, Any] | None, msg_id: int | None = None) -> dict[str, Any]:
-    # Omits "params" entirely when None: ty server rejects an empty object
-    # for a no-argument method like "shutdown" with a JSON-RPC parse error.
     message: dict[str, Any] = {"jsonrpc": "2.0", "method": method}
     if msg_id is not None:
         message["id"] = msg_id
