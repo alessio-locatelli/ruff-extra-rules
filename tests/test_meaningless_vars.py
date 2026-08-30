@@ -1416,11 +1416,6 @@ def outer(response):
 
 
 def test_autofix_still_follows_annotation_closure_without_deferred_annotations() -> None:
-    # Without `from __future__ import annotations`, a parameter annotation
-    # *is* evaluated eagerly in the enclosing scope (like a default value),
-    # so it must still be renamed to follow the closure it actually reads —
-    # this is the pre-existing, still-correct behavior the deferred-
-    # annotations exclusion above must not disturb.
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1443,13 +1438,6 @@ def test_autofix_still_follows_annotation_closure_without_deferred_annotations()
     assert "data" not in fixed_content
     assert "def inner(x: payload):" in fixed_content
     module_namespace: dict[str, Any] = {}
-    # dont_inherit=True: this test file's own `from __future__ import
-    # annotations` (line 1) would otherwise leak into the compiled fixture
-    # regardless of what fixed_content itself contains (compile() inherits
-    # __future__ flags from the calling frame by default) — defeating the
-    # point of this specific test, which is to exercise the *eager*
-    # (non-deferred) annotation path the deferred-annotations exclusion
-    # above must leave alone.
     exec(  # noqa: S102
         compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec", dont_inherit=True), module_namespace
     )
