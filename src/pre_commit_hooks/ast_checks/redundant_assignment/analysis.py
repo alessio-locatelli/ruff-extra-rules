@@ -103,14 +103,6 @@ def _has_await_expression(node: ast.expr) -> bool:
     return detector.has_await
 
 
-# Node types treated as "may run arbitrary user code, or suspend execution"
-# for evaluation-order purposes: an explicit call; attribute/subscript
-# access (`@property` getters and `__getitem__`/descriptors can execute
-# arbitrary code just as a call can); await/yield (suspension points where
-# other code can run and change state before control resumes); operators,
-# which can invoke arbitrary user code via dunder overloads (`__add__`,
-# `__eq__`, `__bool__`, etc.); and IfExp, whose `test` truthiness check
-# invokes `__bool__` the same way BoolOp's short-circuit check does.
 _POTENTIALLY_EFFECTFUL_NODE_TYPES = (
     ast.Call,
     ast.Attribute,
