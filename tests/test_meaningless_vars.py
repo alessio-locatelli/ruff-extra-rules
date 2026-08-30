@@ -594,7 +594,6 @@ def fetch_users():
 
 
 def test_autofix_refuses_when_a_reference_line_is_format_suppressed(tmp_path: Path) -> None:
-    # See docs/adr/0050-format-suppression-pragmas.md.
     source = """import requests
 
 def fetch_users():
