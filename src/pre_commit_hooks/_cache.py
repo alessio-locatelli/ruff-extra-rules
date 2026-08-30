@@ -1,10 +1,3 @@
-"""File content hash caching for pre-commit hooks.
-
-This module implements a content-hash-based cache similar to mypy's approach,
-with mtime optimization for performance. Caches are stored in .cache/pre_commit_hooks/
-and invalidated when file content changes.
-"""
-
 from __future__ import annotations
 
 import contextlib
