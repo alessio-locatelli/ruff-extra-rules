@@ -24,9 +24,6 @@ if TYPE_CHECKING:
 @pytest.mark.parametrize(
     "source",
     [
-        # Class attributes, NamedTuple fields, and dataclass fields are
-        # excluded from analysis because the class name already provides
-        # context.
         """
 from typing import NamedTuple
 
@@ -49,9 +46,6 @@ class Config:
     data = {}  # Class attribute - should NOT be flagged
     result = None  # Class attribute - should NOT be flagged
 """,
-        # Pydantic's @model_validator(mode="before") requires the
-        # parameter to be named 'data'; flagging it would be a false
-        # positive.
         """
 from pydantic import BaseModel, model_validator
 from typing import Any
@@ -94,37 +88,24 @@ def process():
         """def process():
     data = 1  # pytriage: TR1
 """,
-        # A comma-separated suppression list also suppresses this check's
-        # own code, wherever it falls in the list.
         """
 def process():
     data = {}  # pytriage: TR5,TR1
     return data
 """,
-        # An annotated assignment whose target is an attribute (e.g.
-        # ``self.data: int = 5``), not a plain name, is skipped entirely —
-        # only simple-name annotated assignments are analyzed.
         """class Foo:
     def __init__(self):
         self.data: int = 5
 """,
-        # Same exemption as the sync @model_validator case, but for an
-        # async function definition.
         """class Model:
     @model_validator
     async def bare(data):
         return data
 """,
-        # Multiple assignment targets aren't supported, so the assignment
-        # itself isn't flagged (though get_values() itself might be, if
-        # it existed as a meaningless-named call).
         """def process():
     data, result = get_values()  # Multiple targets - not supported
     return data, result
 """,
-        # The enclosing function's own name already describes the
-        # parameter ("feed" + "data", "parse..." + "result"), the same way
-        # a class name already provides context for its own attributes.
         """from typing import Any, List, Optional, Tuple
 
 def feed_data(
