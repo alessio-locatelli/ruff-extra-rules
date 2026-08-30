@@ -1,5 +1,3 @@
-"""Semantic value analysis for variable names in TR5."""
-
 from __future__ import annotations
 
 import ast
