@@ -326,9 +326,6 @@ class VariableTracker(ast.NodeVisitor):
                 self.visit(default)
 
     def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        """Decorators are evaluated in the outer (enclosing) scope before the
-        function body, so they must be visited before entering the new scope.
-        """
         for decorator in node.decorator_list:
             self.visit(decorator)
         self._visit_defaults(node.args)
