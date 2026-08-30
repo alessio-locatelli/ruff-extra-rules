@@ -241,12 +241,11 @@ def test_a_candidate_whose_argument_ends_on_its_own_last_token_is_still_found(so
         "a = tuple(x for x in y)\n",
         "a = tuple(x for x in y if x > 0)\n",
         "a = tuple(idx for idx, _ in sorted(y)[:3])\n",
-        "a = tuple((x for x in y))\n",  # explicitly parenthesized -- still never already a tuple/list/etc.
+        "a = tuple((x for x in y))\n",
     ],
     ids=["plain", "with-a-filter-clause", "nested-subscript-in-the-iterable", "explicitly-parenthesized"],
 )
 def test_ignores_a_candidate_whose_argument_is_a_generator_expression(source: str) -> None:
-    # See ADR-0035's "Detection method".
     assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
 
 
