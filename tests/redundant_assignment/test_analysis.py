@@ -633,8 +633,6 @@ def test_is_positional_argument_echo(source: str, var_name: str, *, expected: bo
 
 
 def test_for_iterator_use_is_not_in_loop() -> None:
-    # `node.iter` evaluates exactly once, before any iteration — unlike a
-    # use inside the loop body, it must not be marked in_loop.
     source = """
 def func():
     value = compute()
