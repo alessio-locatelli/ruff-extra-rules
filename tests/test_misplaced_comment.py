@@ -228,10 +228,6 @@ def test_fix_moves_trailing_comment(source: str, fixed_source: str, tmp_path: Pa
     "source",
     [
         "result = func(arg)\n",
-        # No violations reported, so the orchestrator would never call fix()
-        # with anything to do here — but fix() must independently honor the
-        # ignore comment too, since it re-scans the source rather than
-        # trusting its input.
         "result = func(\n    arg\n)  # Comment  # pytriage: TR7\n",
         "# fmt: off\nresult = func(\n    arg\n)  # Comment here\n# fmt: on\n",
     ],
