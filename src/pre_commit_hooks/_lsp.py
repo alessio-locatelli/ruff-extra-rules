@@ -205,7 +205,6 @@ class LSPClient:
             raise LSPError(msg) from error
 
     def close(self, *, timeout: float = 2.0) -> None:
-        """Best-effort shutdown handshake, then stdin close, then wait/kill."""
         if self._close_called:
             return
         self._close_called = True
@@ -216,7 +215,7 @@ class LSPClient:
             logger.debug("LSP shutdown handshake failed; killing the process instead", exc_info=True)
 
         stdin = self._process.stdin
-        assert stdin is not None  # constructed with stdin=PIPE above
+        assert stdin is not None
         try:
             stdin.close()
         except OSError:
