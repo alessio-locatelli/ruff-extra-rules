@@ -1803,9 +1803,6 @@ def outer(response):
 
 
 def test_scope_names_ignore_unnamed_except_and_match_captures() -> None:
-    # Branch coverage: a bare `except:` or wildcard `case _:` produces an
-    # ExceptHandler/MatchAs node with `name=None` — `_get_scope_names()`
-    # must not treat that as introducing a bound name.
     source = """def outer(response):
     data: Payload = response.json()
     try:
