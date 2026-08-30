@@ -1,8 +1,3 @@
-"""Ties AST candidate detection (`candidates.py`), confidence tiering
-(`confidence.py`), and `ty`'s own redundancy decision (`session.py`)
-together for TR6.
-"""
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
@@ -27,26 +22,13 @@ _SESSION_LOST_HINT = (
 
 
 class RedundancySession(Protocol):
-    """The subset of `TySession` `decide_candidates()` depends on -- lets a fake stand in without inheriting it."""
-
     def open_or_update(self, filepath: Path, content: str) -> frozenset[tuple[object, ...]]: ...
 
     def hover(self, filepath: Path, line0: int, char_utf16: int) -> str | None: ...
 
     def analysis_transaction(self) -> contextlib.AbstractContextManager[None]: ...
 
-    def finalize(self, filepath: Path, source: str) -> None:
-        """Ends this candidate-analysis pass over `filepath`.
-
-        A short-lived, per-invocation session discards it outright. A
-        persistent session (see ADR-0041) instead re-syncs it back to
-        `source` -- its real, on-disk content, since the per-candidate
-        rewrite-and-diff loop above may have left a synthetic variant open
-        -- and keeps it tracked, so `ty`'s own cross-file dependency
-        tracking keeps seeing it as a dependent of whatever it imports
-        across future, separate invocations sharing that same session.
-        """
-        ...
+    def finalize(self, filepath: Path, source: str) -> None: ...
 
 
 def _open_or_raise(session: RedundancySession, filepath: Path, content: str) -> frozenset[tuple[object, ...]]:
@@ -57,8 +39,6 @@ def _open_or_raise(session: RedundancySession, filepath: Path, content: str) -> 
 
 
 class RedundantConversion:
-    """One candidate `ty` confirmed is redundant, plus everything `__init__.py` needs to build a `Violation`."""
-
     __slots__ = ("argument_type", "candidate", "col", "line")
 
     def __init__(self, candidate: Candidate, *, line: int, col: int, argument_type: str) -> None:
@@ -77,17 +57,6 @@ def decide_candidates(
     level: ConfidenceLevel,
     ignored_lines: set[int],
 ) -> list[RedundantConversion]:
-    """Every one of `all_candidates` (already found by `find_candidates()` --
-    see that function's own docstring for what qualifies) that `ty` confirms
-    is actually redundant.
-
-    Takes the already-found candidate list rather than re-deriving it from
-    `tree` itself: `find_candidates()` re-walks the whole tree, and the only
-    caller (`RedundantTypeConversionCheck.check()`) already has to run it
-    once anyway (to know whether tokenizing `source` for `ignored_lines` is
-    even worth doing) -- running it a second time here just to filter by
-    `ignored_lines` would repeat that whole-tree walk for nothing new.
-    """
     candidates = [candidate for candidate in all_candidates if candidate.line not in ignored_lines]
     if not candidates:
         return []
@@ -109,11 +78,9 @@ def decide_candidates(
                 assert hover_text is not None  # hover_passes_gate() already rejected None/empty above
 
                 if candidate.wrapped_in_len and not is_exact_match(hover_text, candidate.constructor):
-                    # See ADR-0035's `len()` sink exclusion.
                     continue
 
                 if candidate.in_equality_comparison and is_purepath_hover(hover_text):
-                    # See ADR-0035's Path-vs-str comparison exclusion.
                     continue
 
                 candidates_with_hovers.append((candidate, hover_text))
@@ -123,7 +90,6 @@ def decide_candidates(
                 modified_text = _build_modified_text(source_lines, candidate)
                 after = _open_or_raise(session, filepath, modified_text)
                 if after - baseline:
-                    # Removing the conversion introduced a diagnostic that wasn't there before.
                     continue
 
                 redundant.append(
@@ -135,21 +101,12 @@ def decide_candidates(
                     )
                 )
         finally:
-            # Runs even on an unexpected raise, or a persistent session leaks
-            # this file open (and possibly still mid-rewrite) for the rest of
-            # its own lifetime.
             session.finalize(filepath, source)
 
     return redundant
 
 
 def _build_modified_text(source_lines: list[str], candidate: Candidate) -> str:
-    """`source_lines` with `candidate`'s own wrapping call spliced out (`list(bar)` becomes `bar`).
-
-    Operates in UTF-8 byte space, matching `ast.col_offset`. Only touches
-    `candidate.line` -- see ADR-0035's "Detection method" for why every
-    other line's numbering must stay intact.
-    """
     line = source_lines[candidate.line - 1]
     line_bytes = line.encode("utf-8")
     new_line_bytes = (
