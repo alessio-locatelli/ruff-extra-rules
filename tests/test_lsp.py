@@ -15,12 +15,6 @@ if TYPE_CHECKING:
     from pathlib import Path
     from typing import Any
 
-# A minimal, dependency-free JSON-RPC/LSP-framed server used to exercise
-# LSPClient's real subprocess/pipe path without depending on `ty` at all —
-# recorded/replayed `ty` responses (see tests/test_redundant_type_conversion.py)
-# cover this check's own detection logic; this file only ever needs to prove
-# the transport itself (framing, request/response routing, timeouts, clean
-# shutdown) is correct.
 _FAKE_SERVER_SCRIPT = textwrap.dedent(
     r"""
     import json
