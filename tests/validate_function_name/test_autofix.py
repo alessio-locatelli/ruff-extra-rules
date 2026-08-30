@@ -197,7 +197,6 @@ def test_apply_fix_does_not_corrupt_unrelated_string_literal(tmp_path: Path) -> 
 
 
 def test_apply_fix_does_not_rename_unrelated_class_method(tmp_path: Path) -> None:
-    # Renaming Reader.get_data must not touch OtherReader.get_data.
     test_file = tmp_path / "readers.py"
     test_file.write_text(
         "class Reader:\n"
