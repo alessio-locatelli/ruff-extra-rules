@@ -124,24 +124,11 @@ class CacheManager:
                     with cache_file.open(encoding="utf-8") as f:
                         cache_data = json.load(f)
                     if cache_data.get("version") != self.cache_version:
-                        # Stale format/logic version: results under it may
-                        # no longer be valid, so start fresh rather than
-                        # silently keeping the old version tag on disk —
-                        # that would pin this file to a permanent cache
-                        # miss on every future run until .cache is
-                        # manually cleared.
                         cache_data = None
 
                 if cache_data is None:
                     cache_data = {"version": self.cache_version, "hook_results": {}}
                 elif cache_data.get("file_hash") != file_hash:
-                    # This file's content changed since some other hook_name
-                    # in this blob was last written (ADR-0044 lets several
-                    # hook_names share one file's blob) -- every sibling
-                    # entry was computed against that old content, so it
-                    # must not survive being silently served for the new
-                    # content once this write updates the blob's own shared
-                    # file_hash/mtime/size below.
                     cache_data["hook_results"] = {}
 
                 cache_data["file_hash"] = file_hash
@@ -153,7 +140,6 @@ class CacheManager:
                 self._write_cache(cache_file, cache_data)
 
         except (OSError, json.JSONDecodeError) as error:
-            # Don't crash on cache write failure - just skip caching
             logger.warning("File: %s, hook name: %s, error: %s", filepath, hook_name, repr(error))
 
     def _get_cache_path(self, filepath: Path) -> Path:
