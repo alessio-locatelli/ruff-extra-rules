@@ -28,10 +28,6 @@ def test_check_id_and_error_code() -> None:
 
 
 def test_is_not_cacheable() -> None:
-    # See ADR-0034: this check's result for one file can depend on another
-    # file's current content (a cross-file import's parameter type), so it
-    # must always re-run fresh rather than ever reading/writing the shared
-    # per-file cache.
     assert RedundantTypeConversionCheck().cacheable is False
 
 
