@@ -587,7 +587,7 @@ class VariableTracker(ast.NodeVisitor):
         stmt_index = self._get_current_stmt_index()
 
         if self._is_simple_name_target(node.target) and node.value is not None:
-            assert isinstance(node.target, ast.Name)  # Type narrowing
+            assert isinstance(node.target, ast.Name)
             var_name = node.target.id
 
             if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
