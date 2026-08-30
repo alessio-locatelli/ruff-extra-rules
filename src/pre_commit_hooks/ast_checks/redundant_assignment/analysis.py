@@ -37,7 +37,6 @@ class AssignmentInfo:
     has_comment_above: bool = False
     has_inline_comment: bool = False
     rhs_has_await: bool = False
-    # See _record_compound_target_rebindings.
     is_rebinding_marker: bool = False
 
 
