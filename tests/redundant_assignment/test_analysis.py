@@ -1271,9 +1271,6 @@ def test_is_preceded_by_call(source: str, var_name: str, *, expected: bool) -> N
 
 
 def test_is_preceded_by_call_defaults_to_true_for_unknown_container() -> None:
-    # When the enclosing statement (or node) can't be determined,
-    # is_preceded_by_call must default to the conservative "unsafe" answer
-    # rather than guessing.
     use = UsageInfo(var_name="x", line=1, col=0, stmt_index=0, context="unknown", scope_id=1)
     assert is_preceded_by_call(use) is True
 
