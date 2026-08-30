@@ -478,21 +478,15 @@ class VariableTracker(ast.NodeVisitor):
         scope_id = self._get_current_scope_id()
         stmt_index = self._get_current_stmt_index()
 
-        # Skip multiple assignments on a single line (e.g., a = b = c = value)
-        # as reportable candidates — these patterns often intentionally
-        # assign intermediate variables and avoid re-reading class
-        # attributes — but each target's Name(s) still rebind, so they're
-        # recorded via _record_compound_target_rebindings below.
         if len(node.targets) > 1:
             for target in node.targets:
                 self._record_compound_target_rebindings(target, stmt_index)
             self.visit(node.value)
             return
 
-        # Only track simple name assignments (not tuple unpacking, attributes, etc.)
         for target in node.targets:
             if self._is_simple_name_target(target):
-                assert isinstance(target, ast.Name)  # Type narrowing
+                assert isinstance(target, ast.Name)
                 var_name = target.id
 
                 if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
@@ -524,9 +518,6 @@ class VariableTracker(ast.NodeVisitor):
                     self.assignments[key] = []
                 self.assignments[key].append(assignment)
             else:
-                # Attribute/Subscript, or a compound target (tuple/list
-                # unpacking, possibly with a Starred element) —
-                # _record_compound_target_rebindings dispatches each shape.
                 self._record_compound_target_rebindings(target, stmt_index)
 
         self.visit(node.value)
