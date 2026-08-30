@@ -348,8 +348,6 @@ def test_a_glob_metacharacter_in_the_anchor_path_still_matches(tmp_path: Path) -
 def test_a_negated_pattern_reaches_matching_from_either_source(
     project: Path, source: str, relative: str, exit_code: int
 ) -> None:
-    # The `!` is stripped where the pattern is read, so it has to survive both
-    # readers rather than only the one a unit test constructs by hand.
     flagged = _flagged_file(project, relative)
     if source == "config":
         _write_config(project, '"!src/**" = ["meaningless-vars"]')
