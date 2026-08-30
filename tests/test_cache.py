@@ -76,11 +76,11 @@ def test_mtime_changed_but_content_same(cache_manager: CacheManager, sample_file
 
     cache_manager.set_cached_result(sample_file, "test-hook", {"violations": []})
 
-    time.sleep(0.01)  # ensure mtime changes
+    time.sleep(0.01)
     sample_file.write_text(original_content)
 
     cached = cache_manager.get_cached_result(sample_file, "test-hook")
-    assert cached is not None  # content hash still matches despite mtime change
+    assert cached is not None
 
 
 def test_multiple_hooks_same_file(cache_manager: CacheManager, sample_file: Path) -> None:
