@@ -57,15 +57,6 @@ def test_diagnostic_key_tolerates_a_missing_range() -> None:
 
 
 def test_diagnostic_key_ignores_a_character_column_shift() -> None:
-    # A same-line synthetic rewrite shifts every *other*
-    # diagnostic's own column positions on that line without changing the
-    # diagnostic itself -- confirmed empirically against real ty (an
-    # untouched invalid-argument-type diagnostic's range shifted left by
-    # exactly the removed conversion's own character count). Two
-    # otherwise-identical diagnostics differing only in column must
-    # compare equal, or the shift alone would make an unrelated diagnostic
-    # look "new" and wrongly block flagging a genuinely redundant
-    # conversion on the same line.
     before = {
         "code": "invalid-argument-type",
         "message": "boom",
