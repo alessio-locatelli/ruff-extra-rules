@@ -35,11 +35,6 @@ def _lifecycle_count(source: str, var_name: str) -> int:
     return len([lc for lc in tracker.build_lifecycles() if lc.assignment.var_name == var_name])
 
 
-# ---------------------------------------------------------------------------
-# VariableTracker / lifecycle building
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("source", "var_name", "count"),
     [
