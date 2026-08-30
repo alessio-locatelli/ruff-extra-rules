@@ -137,9 +137,6 @@ def test_close_performs_clean_shutdown_handshake(tmp_path: Path) -> None:
 
 def test_close_kills_the_process_when_shutdown_handshake_hangs(tmp_path: Path) -> None:
     client = _spawn_fake_server(tmp_path)
-    # Bypass the normal shutdown/exit handshake this fake server would
-    # otherwise answer cleanly, forcing close() down its "the server didn't
-    # answer shutdown in time" fallback path.
     client._next_id += 1
     msg_id = client._next_id
     client._write({"jsonrpc": "2.0", "id": msg_id, "method": "hanging_shutdown", "params": {}})
