@@ -171,7 +171,6 @@ class LSPClient:
     def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
         self._write(_message(method=method, params=params))
 
-    # ANN401: a JSON-RPC "result" shape genuinely varies by method (hover vs. diagnostic pull, ...).
     def request(
         self, method: str, params: dict[str, Any] | None = None, *, timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS
     ) -> Any:  # noqa: ANN401
