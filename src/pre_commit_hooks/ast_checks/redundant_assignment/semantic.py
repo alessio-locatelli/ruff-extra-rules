@@ -7,8 +7,6 @@ from .analysis import PatternType, UsageInfo, VariableLifecycle, is_preceded_by_
 
 
 class AggressivenessLevel(Enum):
-    """See `should_report_violation`."""
-
     CONSERVATIVE = auto()
     PERMISSIVE = auto()
 
