@@ -72,12 +72,6 @@ type FunctionIndex = dict[tuple[str, int], _FuncNode]
 
 
 def index_function_nodes(tree: ast.Module) -> FunctionIndex:
-    """Maps each function/method's (name, lineno) to its own node, in one pass over `tree`.
-
-    Built once per tree and reused across every suggestion found in that
-    tree (see `is_autofix_safe`), instead of `_find_function_node` re-
-    walking the whole module once per suggestion.
-    """
     return {
         (node.name, node.lineno): node
         for node in ast.walk(tree)
