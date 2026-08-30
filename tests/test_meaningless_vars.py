@@ -1725,12 +1725,6 @@ def test_autofix_follows_closure_into_generic_functions_own_annotation_despite_b
 
 
 def test_autofix_does_not_rename_generic_functions_own_annotation_referencing_a_peer_type_parameter() -> None:
-    # Companion to the test above: an annotation referencing a *peer* type
-    # parameter (rather than an enclosing-scope name) must still be left
-    # alone, exactly like a type parameter's own bound/default already is —
-    # confirmed against CPython that `def inner[data]() -> data:` binds the
-    # return annotation to the peer `TypeVar`, not an outer local of the
-    # same name.
     source = """def outer(response):
     data: Payload = response.json()
 
@@ -1752,7 +1746,6 @@ def test_autofix_does_not_rename_generic_functions_own_annotation_referencing_a_
 
     assert "def inner[data](value: data) -> data:" in fixed_content
     module_namespace: dict[str, Any] = {}
-    # dont_inherit=True: see test_autofix_still_follows_annotation_closure_without_deferred_annotations.
     exec(  # noqa: S102
         compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec", dont_inherit=True), module_namespace
     )
