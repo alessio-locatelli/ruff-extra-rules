@@ -672,9 +672,6 @@ def func(cond):
 
 
 def test_for_else_use_after_possible_break_is_not_reported() -> None:
-    # `x = make(); for ...: break ...; else: return x` — inlining would
-    # skip make() entirely on a break, or run it after the loop instead of
-    # before, since the else clause only runs when the loop doesn't break.
     source = """
 def func(items):
     x = make()
