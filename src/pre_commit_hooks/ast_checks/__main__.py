@@ -15,14 +15,6 @@ logger = logging.getLogger("ast_checks")
 
 
 def _raise_keyboard_interrupt(_signum: int, _frame: FrameType | None) -> None:
-    """SIGTERM handler that reuses Python's own SIGINT->KeyboardInterrupt
-    translation path, so a SIGTERM-based cancellation (e.g. `prek`'s own
-    timeout, or a CI job killing this process) unwinds through the same
-    already-`try`/`finally`-guarded cleanup as Ctrl-C (`atomic_write_text()`,
-    `CacheManager._write_cache()`, `CacheManager._locked()`) instead of the
-    OS's default action for SIGTERM, which terminates the process
-    immediately and runs no Python cleanup at all.
-    """
     raise KeyboardInterrupt
 
 
