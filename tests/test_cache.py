@@ -342,12 +342,6 @@ def test_cache_disabled_entirely_without_file_locking(
 
 
 def test_concurrent_writers_do_not_lose_updates(cache_manager: CacheManager, sample_file: Path) -> None:
-    # Concurrent set_cached_result calls for different hook names on the
-    # same file must not clobber each other's entries.
-    #
-    # The read-modify-write of the shared per-file cache blob must be
-    # synchronized, or under prek's parallel hook execution one writer's
-    # update could silently overwrite another's (lost update).
     hook_names = [f"hook-{i}" for i in range(20)]
 
     with ThreadPoolExecutor(max_workers=len(hook_names)) as executor:
