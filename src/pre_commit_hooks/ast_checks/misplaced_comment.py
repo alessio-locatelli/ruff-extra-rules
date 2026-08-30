@@ -195,14 +195,8 @@ class MisplacedCommentCheck(BaseCheck):
 
             bracket_line_idx = item.bracket_line - 1
             prev_line_idx = bracket_line_idx - 1
-            # A bracket-only line can only exist if its opening bracket
-            # precedes it on an earlier line, so prev_line_idx is never < 0.
             assert prev_line_idx >= 0
 
-            # Reuse each touched line's own terminator instead of a bare
-            # "\n": a CRLF file must not end up with mixed line endings on
-            # exactly the lines this fix rewrites (ch. 3/21: preserve the
-            # newline convention and avoid unrelated formatting changes).
             prev_terminator = line_terminator(lines[prev_line_idx])
             prev_line = lines[prev_line_idx].rstrip()
             indent = len(lines[prev_line_idx]) - len(lines[prev_line_idx].lstrip())
