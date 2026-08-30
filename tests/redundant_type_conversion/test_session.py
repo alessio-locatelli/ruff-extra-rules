@@ -30,12 +30,6 @@ if TYPE_CHECKING:
 
 @pytest.fixture(autouse=True)
 def _isolated_session_singleton() -> Iterator[None]:
-    """`get_session()`'s module-global singleton must never leak state
-    between tests: a test exercising a *failure* path here (mocking `ty`
-    away entirely) must not leave a broken or fake session behind for a
-    later, unrelated test -- including the real-`ty` integration suite,
-    which relies on getting a genuine session from a clean process state.
-    """
     original = session_module._session
     original_probe_failed = session_module._daemon_probe_failed
     original_probe_next_retry_at = session_module._daemon_probe_next_retry_at
