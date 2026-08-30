@@ -183,14 +183,10 @@ def test_decide_candidates_still_flags_a_len_wrapped_candidate_that_is_an_exact_
 
 
 def test_decide_candidates_skips_a_path_conversion_used_in_an_equality_comparison() -> None:
-    # See ADR-0035's Path-vs-str comparison exclusion: pathlib.PurePath's
-    # own __eq__ returns NotImplemented for a plain str, so this str(...)
-    # conversion is load-bearing, not redundant, despite ty seeing no
-    # difference with or without it.
     source = "y = matches == [str(ignored)]\n"
     redundant, session = _decide(
         source,
-        diagnostics_by_content={source: frozenset()},  # "y = matches == [ignored]\n" deliberately not recorded
+        diagnostics_by_content={source: frozenset()},
         hover_by_position={(0, 26): "Path"},
         level=ConfidenceLevel.PERMISSIVE,
     )
