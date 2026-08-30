@@ -246,24 +246,12 @@ def calculate_semantic_value(
 def _would_exceed_line_length(
     lifecycle: VariableLifecycle,
     *,
-    # RHS length (chars) above which inlining is considered risky regardless
-    # of the variable name's length.
     absolute_threshold: int = 25,
 ) -> bool:
-    """A conservative estimate based on RHS length and variable name, used
-    only when the actual usage line isn't available to the caller (see
-    `exceeds_line_length_when_inlined` for the exact check used when it is).
-    Two call sites use different thresholds: reporting a violation is
-    lenient (25 chars), while deciding whether to *auto-fix* is stricter (40
-    chars) since a wrong autofix is more costly than a missed report.
-    """
     assignment = lifecycle.assignment
     var_name = assignment.var_name
     rhs_source = assignment.rhs_source.strip()
 
-    # A long RHS (e.g. a tuple/list literal, a moderately complex
-    # expression) risks exceeding the line length even if the variable name
-    # is also long.
     if len(rhs_source) >= absolute_threshold:
         return True
 
