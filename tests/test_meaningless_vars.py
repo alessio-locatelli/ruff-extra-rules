@@ -1604,14 +1604,6 @@ def test_autofix_does_not_rename_a_nested_functions_own_type_parameter_bound_via
 
 
 def test_autofix_does_not_rename_type_alias_bound_referencing_a_peer_type_parameter() -> None:
-    # a PEP 695 `type` alias statement (`ast.TypeAlias`) has its
-    # own implicit type-parameter scope, exactly like a generic function —
-    # confirmed against CPython that a later type parameter's own bound can
-    # reference an earlier peer by name, resolving to that peer object, not
-    # to the enclosing scope. `ast.TypeAlias` isn't in `_CROSSABLE_SCOPE_NODES`
-    # at all, so it must not fall through to the generic recursive case in
-    # `_collect_replacements`, which would walk into the alias's
-    # `type_params`/`value` with no peer-name filtering whatsoever.
     source = """def outer(response):
     data: Payload = response.json()
 
