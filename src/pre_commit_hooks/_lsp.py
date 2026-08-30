@@ -131,11 +131,8 @@ class LSPClient:
         self.close()
 
     def _drain_stderr(self) -> None:
-        # An unread stderr PIPE fills once the server writes enough to it,
-        # then blocks the server's own next write, stalling its whole
-        # request/response loop.
         stderr = self._process.stderr
-        assert stderr is not None  # constructed with stderr=PIPE above
+        assert stderr is not None
         for line in iter(stderr.readline, b""):
             logger.debug("ty server stderr: %s", line.decode("utf-8", errors="replace").rstrip())
 
