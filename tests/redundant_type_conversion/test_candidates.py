@@ -326,9 +326,9 @@ def test_a_candidate_used_as_an_equality_operand_is_marked(source: str) -> None:
 @pytest.mark.parametrize(
     "source",
     [
-        "y = str(x)\n",  # no comparison at all
-        "y = a < str(x)\n",  # not an Eq/NotEq/In/NotIn operator
-        "y = [str(x), other]\n",  # list literal, but not itself a comparison operand
+        "y = str(x)\n",
+        "y = a < str(x)\n",
+        "y = [str(x), other]\n",
     ],
     ids=["no-comparison", "ordering-operator", "list-not-compared"],
 )
