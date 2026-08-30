@@ -102,9 +102,6 @@ def example():
 
 
 def test_repeated_augmented_assignment_reuses_existing_uses_key() -> None:
-    # Branch coverage: a second augmented assignment to the same variable
-    # in the same scope appends to the existing self.uses[key] list
-    # rather than recreating it.
     source = """
 def example():
     x = 0
@@ -112,7 +109,6 @@ def example():
     x += 2
 """
     lifecycle = _lifecycle_for(source, "x")
-    # Each `x += n` counts as one use (the implicit read).
     assert len(lifecycle.uses) == 2
 
 
