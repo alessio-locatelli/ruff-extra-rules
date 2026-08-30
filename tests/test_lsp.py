@@ -274,15 +274,8 @@ def test_read_message_ignores_unrelated_headers() -> None:
     [
         ("abc", 0, 0),
         ("abc", 3, 3),
-        # 'é' is 2 bytes in UTF-8 but a single UTF-16 code unit (within the
-        # Basic Multilingual Plane) -- byte offset and UTF-16 offset diverge
-        # here, unlike the pure-ASCII case above.
         ("café", len(b"caf"), 3),
         ("café !", len("café".encode()), 4),
-        # An astral-plane character (outside the BMP, e.g. this emoji) is
-        # one Python `str` character but a UTF-16 *surrogate pair* -- two
-        # code units -- which byte_col_to_char_col (character count) would
-        # not reflect.
         ("\U0001f600x", len("\U0001f600".encode()), 2),
     ],
     ids=["ascii-start", "ascii-end", "bmp-accent-before", "bmp-accent-mid", "astral-surrogate-pair"],
