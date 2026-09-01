@@ -332,7 +332,7 @@ class RedundantEnumValueCheck(BaseCheck):
         return ERROR_CODE
 
     def get_prefilter_pattern(self) -> list[str] | None:
-        return ["StrEnum", "IntEnum", ".value"]
+        return [".value"]
 
     def check(self, _filepath: Path, tree: ast.Module, source: str) -> CheckResult:
         scope_classes = _local_enum_classes(tree)
