@@ -50,6 +50,10 @@ def _check(source: str) -> CheckResult:
             ["State.OPEN.value"],
         ),
         (
+            ("from enum import StrEnum\n\nclass State(StrEnum):\n    OPEN = 'open'\n\nvalue: str = State.OPEN.value\n"),
+            ["State.OPEN.value"],
+        ),
+        (
             (
                 "from enum import StrEnum\n\n"
                 "class State(StrEnum):\n"
@@ -67,6 +71,7 @@ def _check(source: str) -> CheckResult:
         "aliased-int-enum",
         "qualified-str-enum",
         "function-local-enum",
+        "annotated-runtime-value",
         "method-skips-class-binding",
     ],
 )
@@ -157,6 +162,37 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
             "value = Status.READY.value\n"
         ),
         (
+            "from enum import StrEnum\n"
+            "from typing import Literal\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n\n"
+            "value: Literal[State.OPEN.value]\n\n"
+            "def read(*, value: Literal[State.OPEN.value]) -> Literal[State.OPEN.value]:\n"
+            "    return value\n\n"
+            "type StateValue = Literal[State.OPEN.value]\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State:\n"
+            "    class OPEN:\n"
+            "        value = 'module'\n\n"
+            "class Outer:\n"
+            "    class State(StrEnum):\n"
+            "        OPEN = 'outer'\n\n"
+            "    class Inner:\n"
+            "        value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    def __new__(cls, value):\n"
+            "        member = str.__new__(cls, value.upper())\n"
+            "        member._value_ = value\n"
+            "        return member\n\n"
+            "    OPEN = 'open'\n\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
             "from enum import StrEnum\n\n"
             "class State(StrEnum):\n"
             "    OPEN = 'open'\n\n"
@@ -186,6 +222,9 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
         "qualified-nonmember-attribute",
         "decorated-enum-class",
         "value-override",
+        "type-annotation-and-alias",
+        "nested-class-namespace",
+        "custom-new",
         "local-shadowing",
         "type-parameter-shadowing",
     ],
