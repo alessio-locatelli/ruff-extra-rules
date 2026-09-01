@@ -64,6 +64,7 @@ _Note that ignore comments that suppress false-positives (e.g., `# noqa`, `# typ
 - **No historical/postmortem framing.** Phrases like "the old default", "before this flag existed", "used to qualify for X" are meaningless to a reader who only has the current codebase — they imply a diff against a history the reader can't see and doesn't care about. Describe what the feature does today, full stop.
 - Non-recoverable persistent failures (such as missing files, missing dependencies, permission or access errors, etc.) must not go unreported. At minimum, produce a visible error message so users can either take corrective action or report the issue.
 - **Do not compete with official documentation:** Do not teach users how to install third-party tools, how to debug or configure their environment, etc. Use a short hint and a reference to the official resource.
+- In the "unreleased" section, a changelog entry should describe the final behavior once, not accumulate review history.
 
 ## Commands
 
