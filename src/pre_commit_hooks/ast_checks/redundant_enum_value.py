@@ -193,6 +193,7 @@ def _local_enum_classes(
                 case ast.ClassDef():
                     if (
                         "value" not in class_scope_binding_names(statement)
+                        and "__new__" not in class_scope_binding_names(statement)
                         and not statement.decorator_list
                         and any(_direct_enum_base(base, enum_type_names, enum_module_names) for base in statement.bases)
                     ):
@@ -222,11 +223,14 @@ class _ValueVisitor(ast.NodeVisitor):
 
     def _enum_class(self, class_name: str) -> _EnumClass | None:
         inside_function = False
+        inside_class = False
         for scope, bindings, enum_classes in reversed(self._scope_stack):
             if isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
                 inside_function = True
-            if inside_function and isinstance(scope, ast.ClassDef):
-                continue
+            if isinstance(scope, ast.ClassDef):
+                if inside_function or inside_class:
+                    continue
+                inside_class = True
             if class_name in bindings:
                 return None
             if enum_class := enum_classes.get(class_name):
@@ -237,7 +241,7 @@ class _ValueVisitor(ast.NodeVisitor):
         self._visit_scope(node, set(), node.body)
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        for child in [*node.decorator_list, *node.args.defaults, *node.args.kw_defaults, node.returns]:
+        for child in [*node.decorator_list, *node.args.defaults, *node.args.kw_defaults]:
             if child is not None:
                 self.visit(child)
         self._visit_scope(node, _function_bindings(node), node.body)
@@ -253,6 +257,13 @@ class _ValueVisitor(ast.NodeVisitor):
             if child is not None:
                 self.visit(child)
         self._visit_scope(node, _function_bindings(node), [node.body])
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None:
+            self.visit(node.value)
+
+    def visit_TypeAlias(self, _node: ast.TypeAlias) -> None:
+        return
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         for child in [*node.decorator_list, *node.bases, *(keyword.value for keyword in node.keywords)]:

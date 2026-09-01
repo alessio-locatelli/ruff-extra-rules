@@ -23,9 +23,9 @@ Write the member directly instead:
 send_status(Status.READY)
 ```
 
-TR10 only reports direct local declarations and members whose class does not override `.value`. It leaves imported
-enum bases, indirect inheritance, aliases, rebindings, unknown members, overridden `.value` properties, and other
-`.value` attributes unchanged.
+TR10 only reports direct local declarations and members whose class does not override `.value` or define `__new__`.
+It leaves imported enum bases, indirect inheritance, aliases, rebindings, unknown members, type annotations,
+overridden `.value` properties, custom enum construction, and other `.value` attributes unchanged.
 
 ## Suppression
 
