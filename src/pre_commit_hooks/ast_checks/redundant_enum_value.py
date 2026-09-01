@@ -15,7 +15,12 @@ from ._base import (
     ignore_pattern_for,
     record_suppression_usage_if_ignored,
 )
-from ._scope import class_scope_binding_names, iter_binding_names, iter_within_scope
+from ._scope import (
+    class_scope_binding_names,
+    class_scope_global_or_nonlocal_names,
+    iter_binding_names,
+    iter_within_scope,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -41,6 +46,8 @@ def _names_bound_by(statements: list[ast.stmt]) -> set[str]:
     names: set[str] = set()
     for statement in statements:
         names.update(iter_binding_names(statement))
+        if isinstance(statement, ast.ClassDef):
+            names.update(class_scope_global_or_nonlocal_names(statement))
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             continue
         for node in iter_within_scope(statement):
@@ -159,7 +166,10 @@ def _function_bindings(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda
         for type_param in node.type_params
         if isinstance(type_param, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple)
     )
-    return names | _names_bound_by(node.body)
+    global_names = {
+        name for statement in iter_within_scope(node) if isinstance(statement, ast.Global) for name in statement.names
+    }
+    return names | global_names | _names_bound_by(node.body)
 
 
 def _comprehension_bindings(node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp) -> set[str]:
@@ -252,6 +262,7 @@ def _local_enum_classes(
                         and "value" not in class_bindings
                         and "__new__" not in class_bindings
                         and "__init__" not in class_bindings
+                        and "__getattribute__" not in class_bindings
                         and not statement.decorator_list
                         and not any(keyword.arg in (None, "metaclass") for keyword in statement.keywords)
                         and any(_direct_enum_base(base, enum_type_names, enum_module_names) for base in statement.bases)

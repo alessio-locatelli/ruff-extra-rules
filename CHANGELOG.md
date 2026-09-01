@@ -9,8 +9,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 ### Added
 
 - Add TR10, `redundant-enum-value`, which reports direct runtime `.value` accesses on directly declared members of
-  local `StrEnum` and `IntEnum` classes without mixins, custom construction, later `.value` or member `_value_`
-  rebindings, or unproven member values.
+  local `StrEnum` and `IntEnum` classes without mixins, custom `__getattribute__` behavior or construction, later `.value` or
+  member `_value_` rebindings, ambiguous name resolution, or unproven member values.
 
 ## [0.3.0] - 2026-09-01
 
