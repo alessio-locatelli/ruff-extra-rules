@@ -8,6 +8,7 @@ Checks live under `src/pre_commit_hooks/ast_checks/` and plug into the grouped `
 - Check id: kebab-case (e.g. `no-bare-except`).
 - Error code: `TR<N>` (next unused number). `test_all_checks_have_unique_check_ids_and_error_codes` (`tests/test_orchestrator.py`) fails loudly if a new check's id or code collides with an existing one — see `docs/adr/0021-behavioral-contract-audit-rule-isolation-python-compat.md`.
 - Violation message format and whether the check needs an autofix mode.
+- False-positive analysis: before implementation, identify valid binding, scope, runtime-customization, and type-expression boundaries that could make a candidate nonredundant. A default-enabled check must cover those boundaries with regressions and report only when local syntax proves the condition. Leave unknown or dynamic cases unreported, or make an explicitly heuristic rule opt-in.
 
 For the general prefilter-then-parse pipeline shape, see AGENTS.md's "Suggested Check Architecture". Concretely for this repo: almost nothing qualifies for a grep-only check, because every existing check needs to distinguish syntax context that only an AST gives you — e.g. `meaningless-vars` must tell `data = 1` (violation) apart from `obj.data = 1` (attribute, fine) and `"data = 1"` (inside a string, fine), and must catch `def foo(data):` (a parameter, not an assignment) that grep would miss entirely. Use `get_prefilter_pattern()` for a cheap `git grep` pass to skip files that can't possibly match, then do the real detection with `ast`.
 
