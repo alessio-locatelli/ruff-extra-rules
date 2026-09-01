@@ -6,6 +6,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Added
+
+- Add TR10, `redundant-enum-value`, which reports `.value` accesses on directly declared members of local `StrEnum` and `IntEnum` classes.
+
 ## [0.3.0] - 2026-09-01
 
 ### Added
