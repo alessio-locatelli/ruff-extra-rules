@@ -40,6 +40,10 @@ def _check(source: str) -> CheckResult:
             ["State.OPEN.value"],
         ),
         (
+            "import enum\n\nclass State(enum.StrEnum):\n    OPEN = enum.auto()\n\nvalue = State.OPEN.value\n",
+            ["State.OPEN.value"],
+        ),
+        (
             (
                 "def build():\n"
                 "    from enum import StrEnum as TextEnum\n\n"
@@ -70,6 +74,7 @@ def _check(source: str) -> CheckResult:
         "str-enum-multiple-members",
         "aliased-int-enum",
         "qualified-str-enum",
+        "qualified-auto",
         "function-local-enum",
         "annotated-runtime-value",
         "method-skips-class-binding",
@@ -162,6 +167,48 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
             "value = Status.READY.value\n"
         ),
         (
+            "from enum import StrEnum\n\n"
+            "class Override:\n"
+            "    @property\n"
+            "    def value(self):\n"
+            "        return self.upper()\n\n"
+            "class State(Override, StrEnum):\n"
+            "    OPEN = 'open'\n\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class Metadata:\n"
+            "    value = 'metadata'\n\n"
+            "class Descriptor:\n"
+            "    def __get__(self, instance, owner):\n"
+            "        return Metadata()\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n"
+            "    METADATA = Descriptor()\n\n"
+            "value = State.METADATA.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class Factory:\n"
+            "    @staticmethod\n"
+            "    def auto():\n"
+            "        return 'metadata'\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n"
+            "    METADATA = Factory.auto()\n\n"
+            "value = State.METADATA.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class Factory:\n"
+            "    metadata = 'metadata'\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n"
+            "    METADATA = Factory.metadata\n\n"
+            "value = State.METADATA.value\n"
+        ),
+        (
             "from enum import StrEnum\n"
             "from typing import Literal\n\n"
             "class State(StrEnum):\n"
@@ -222,6 +269,10 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
         "qualified-nonmember-attribute",
         "decorated-enum-class",
         "value-override",
+        "inherited-value-override",
+        "descriptor-attribute",
+        "unproven-qualified-member-value",
+        "unproven-member-attribute",
         "type-annotation-and-alias",
         "nested-class-namespace",
         "custom-new",

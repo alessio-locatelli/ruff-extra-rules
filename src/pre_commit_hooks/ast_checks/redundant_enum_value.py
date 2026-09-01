@@ -27,6 +27,7 @@ ERROR_CODE = "TR10"
 IGNORE_PATTERN = ignore_pattern_for(ERROR_CODE)
 _ENUM_TYPE_NAMES = frozenset({"StrEnum", "IntEnum"})
 _NONMEMBER_NAME = "nonmember"
+_AUTO_NAME = "auto"
 
 
 class _EnumClass:
@@ -67,7 +68,25 @@ def _is_nonmember_call(value: ast.expr, nonmember_names: set[str], enum_module_n
     return False
 
 
-def _member_names(class_node: ast.ClassDef, nonmember_names: set[str], enum_module_names: set[str]) -> frozenset[str]:
+def _is_auto_call(value: ast.expr, auto_names: set[str], enum_module_names: set[str]) -> bool:
+    match value:
+        case ast.Call(func=ast.Name(id=name)):
+            return name in auto_names
+        case ast.Call(func=ast.Attribute(value=ast.Name(id=name), attr=attr)) if attr == _AUTO_NAME:
+            return name in enum_module_names
+    return False
+
+
+def _is_proven_member_value(value: ast.expr, auto_names: set[str], enum_module_names: set[str]) -> bool:
+    return isinstance(value, ast.Constant) or _is_auto_call(value, auto_names, enum_module_names)
+
+
+def _member_names(
+    class_node: ast.ClassDef,
+    nonmember_names: set[str],
+    auto_names: set[str],
+    enum_module_names: set[str],
+) -> frozenset[str]:
     members: set[str] = set()
     aliases: set[str] = set()
     for statement in class_node.body:
@@ -90,6 +109,9 @@ def _member_names(class_node: ast.ClassDef, nonmember_names: set[str], enum_modu
             if isinstance(value, ast.Name) and value.id in members:
                 members.discard(name)
                 aliases.add(name)
+            elif not _is_proven_member_value(value, auto_names, enum_module_names):
+                members.discard(name)
+                aliases.discard(name)
             else:
                 aliases.discard(name)
                 members.add(name)
@@ -165,17 +187,20 @@ def _local_enum_classes(
         inherited_enum_type_names: set[str],
         inherited_enum_module_names: set[str],
         inherited_nonmember_names: set[str],
+        inherited_auto_names: set[str],
     ) -> None:
         bound_names = _scope_bindings(scope)
         enum_type_names = inherited_enum_type_names - bound_names
         enum_module_names = inherited_enum_module_names - bound_names
         nonmember_names = inherited_nonmember_names - bound_names
+        auto_names = inherited_auto_names - bound_names
         enum_classes: dict[str, _EnumClass] = {}
         for statement in scope.body:
             bindings = _names_bound_by([statement])
             enum_type_names.difference_update(bindings)
             enum_module_names.difference_update(bindings)
             nonmember_names.difference_update(bindings)
+            auto_names.difference_update(bindings)
             for name in bindings:
                 enum_classes.pop(name, None)
             match statement:
@@ -190,21 +215,25 @@ def _local_enum_classes(
                             enum_type_names.add(imported_name)
                         elif alias.name == _NONMEMBER_NAME:
                             nonmember_names.add(imported_name)
+                        elif alias.name == _AUTO_NAME:
+                            auto_names.add(imported_name)
                 case ast.ClassDef():
+                    class_bindings = class_scope_binding_names(statement)
                     if (
-                        "value" not in class_scope_binding_names(statement)
-                        and "__new__" not in class_scope_binding_names(statement)
+                        len(statement.bases) == 1
+                        and "value" not in class_bindings
+                        and "__new__" not in class_bindings
                         and not statement.decorator_list
                         and any(_direct_enum_base(base, enum_type_names, enum_module_names) for base in statement.bases)
                     ):
                         enum_classes[statement.name] = _EnumClass(
-                            _member_names(statement, nonmember_names, enum_module_names)
+                            _member_names(statement, nonmember_names, auto_names, enum_module_names)
                         )
             for nested_scope in _nested_scopes([statement]):
-                collect(nested_scope, enum_type_names, enum_module_names, nonmember_names)
+                collect(nested_scope, enum_type_names, enum_module_names, nonmember_names, auto_names)
         scope_classes[id(scope)] = enum_classes
 
-    collect(tree, set(), set(), set())
+    collect(tree, set(), set(), set(), set())
     return scope_classes
 
 
