@@ -59,6 +59,18 @@ def _value_rebinding_names(statement: ast.stmt) -> set[str]:
     }
 
 
+def _member_value_rebindings(statement: ast.stmt) -> set[tuple[str, str]]:
+    return {
+        (node.value.value.id, node.value.attr)
+        for node in iter_within_scope(statement)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, ast.Store | ast.Del)
+        and node.attr == "_value_"
+        and isinstance(node.value, ast.Attribute)
+        and isinstance(node.value.value, ast.Name)
+    }
+
+
 def _direct_enum_base(base: ast.expr, enum_type_names: set[str], enum_module_names: set[str]) -> bool:
     if isinstance(base, ast.Name):
         return base.id in enum_type_names
@@ -216,6 +228,9 @@ def _local_enum_classes(
                 enum_classes.pop(name, None)
             for name in _value_rebinding_names(statement):
                 enum_classes.pop(name, None)
+            for class_name, member_name in _member_value_rebindings(statement):
+                if enum_class := enum_classes.get(class_name):
+                    enum_classes[class_name] = _EnumClass(enum_class.members - {member_name})
             match statement:
                 case ast.Import():
                     for alias in statement.names:
@@ -236,6 +251,7 @@ def _local_enum_classes(
                         len(statement.bases) == 1
                         and "value" not in class_bindings
                         and "__new__" not in class_bindings
+                        and "__init__" not in class_bindings
                         and not statement.decorator_list
                         and not any(keyword.arg in (None, "metaclass") for keyword in statement.keywords)
                         and any(_direct_enum_base(base, enum_type_names, enum_module_names) for base in statement.bases)

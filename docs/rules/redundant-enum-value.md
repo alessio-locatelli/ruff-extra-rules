@@ -24,9 +24,9 @@ send_status(Status.READY)
 ```
 
 TR10 only reports direct local declarations with one `StrEnum` or `IntEnum` base, whose members use literals or
-`enum.auto()` and whose class does not override `.value` or define `__new__`. It leaves mixins, imported enum bases,
+`enum.auto()` and whose class does not override `.value` or define `__new__`/`__init__`. It leaves mixins, imported enum bases,
 indirect inheritance, aliases, rebindings, unknown or descriptor-backed members, type annotations, custom enum
-construction or metaclasses, later `.value` rebindings, and other `.value` attributes unchanged.
+construction or metaclasses, later `.value` or member `_value_` rebindings, and other `.value` attributes unchanged.
 
 ## Suppression
 
