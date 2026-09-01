@@ -31,6 +31,7 @@ Individual checks are toggled with `--select`/`--ignore` (or the matching `pypro
 | [misplaced-comment](docs/rules/misplaced-comment.md)                 | TR7  | Moves a trailing comment off a closing bracket onto the expression line.                                                                                                          |
 | [unused-pytriage](docs/rules/unused-pytriage.md)                     | TR8  | Reports known `# pytriage` codes that no longer suppress an active violation; add it with `--extend-select=unused-pytriage`.                                                      |
 | [redundant-dict-get](docs/rules/redundant-dict-get.md)               | TR9  | Reports `dict.get()` calls where local control flow, containers, or required TypedDict fields prove the key exists.                                                               |
+| [redundant-enum-value](docs/rules/redundant-enum-value.md)           | TR10 | Reports direct `.value` access on members of local `StrEnum` and `IntEnum` declarations.                                                                                          |
 
 ## Installation
 
