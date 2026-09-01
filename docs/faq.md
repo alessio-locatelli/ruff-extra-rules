@@ -25,6 +25,11 @@ Given that this project exists for rules that are missing in Ruff, the preferred
 1. If it does not exist yet, open a discussion in Ruff with your proposal. The rationale is that if Ruff implements it soon, duplicating the rule here is a waste of effort.
 2. Open an issue here with the rule proposal.
 
+### I got a false positive
+
+- Default settings favor low-risk reports, but rules can still have documented false positives. For example, `redundant-type-conversion` can report `int(value)` when `value` is annotated as `int` but holds `True` or `False` at runtime; that conversion changes the result to `1` or `0`. Check the [rule documentation](rules/redundant-type-conversion.md#reporting-level) for known limitations. If a report is not documented, please open an issue.
+- If you are using the aggressive detection level, it typically provides better detection at the cost of rare false positives. If this false positive is not already documented in `docs/rules/` as a known limitation of the aggressive level, please open an issue.
+
 ## Configuration and technical questions
 
 ### Cache Location
