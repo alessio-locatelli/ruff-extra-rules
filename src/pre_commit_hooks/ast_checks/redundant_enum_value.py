@@ -48,6 +48,17 @@ def _names_bound_by(statements: list[ast.stmt]) -> set[str]:
     return names
 
 
+def _value_rebinding_names(statement: ast.stmt) -> set[str]:
+    return {
+        node.value.id
+        for node in iter_within_scope(statement)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, ast.Store | ast.Del)
+        and isinstance(node.value, ast.Name)
+        and node.attr == "value"
+    }
+
+
 def _direct_enum_base(base: ast.expr, enum_type_names: set[str], enum_module_names: set[str]) -> bool:
     if isinstance(base, ast.Name):
         return base.id in enum_type_names
@@ -203,6 +214,8 @@ def _local_enum_classes(
             auto_names.difference_update(bindings)
             for name in bindings:
                 enum_classes.pop(name, None)
+            for name in _value_rebinding_names(statement):
+                enum_classes.pop(name, None)
             match statement:
                 case ast.Import():
                     for alias in statement.names:
@@ -224,6 +237,7 @@ def _local_enum_classes(
                         and "value" not in class_bindings
                         and "__new__" not in class_bindings
                         and not statement.decorator_list
+                        and not any(keyword.arg in (None, "metaclass") for keyword in statement.keywords)
                         and any(_direct_enum_base(base, enum_type_names, enum_module_names) for base in statement.bases)
                     ):
                         enum_classes[statement.name] = _EnumClass(
