@@ -24,7 +24,7 @@ send_status(Status.READY)
 ```
 
 TR10 only reports direct local declarations with one `StrEnum` or `IntEnum` base, whose members use literals or
-`enum.auto()` and whose class does not customize `.value` access or `__getattribute__`, `__new__`, or `__init__`. It leaves
+`enum.auto()` and whose class does not customize `.value` access, `__getattribute__`, `__str__`, `__new__`, or `__init__`. It leaves
 mixins, imported enum bases, indirect inheritance, aliases, rebindings, unknown or descriptor-backed members, type
 annotations, custom enum construction or metaclasses, later `.value` or member `_value_` rebindings, ambiguous name
 resolution, and other `.value` attributes unchanged.

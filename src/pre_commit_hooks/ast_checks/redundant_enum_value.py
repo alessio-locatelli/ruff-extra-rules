@@ -55,19 +55,19 @@ def _names_bound_by(statements: list[ast.stmt]) -> set[str]:
     return names
 
 
-def _value_rebinding_names(statement: ast.stmt) -> set[str]:
+def _enum_attribute_rebinding_names(statement: ast.stmt) -> set[str]:
     return {
         node.value.id
         for node in iter_within_scope(statement)
         if isinstance(node, ast.Attribute)
         and isinstance(node.ctx, ast.Store | ast.Del)
         and isinstance(node.value, ast.Name)
-        and node.attr == "value"
+        and node.attr in {"value", "__getattribute__"}
     }
 
 
-def _member_value_rebindings(statement: ast.stmt) -> set[tuple[str, str]]:
-    return {
+def _member_value_rebindings(statement: ast.stmt, member_aliases: dict[str, tuple[str, str]]) -> set[tuple[str, str]]:
+    rebindings = {
         (node.value.value.id, node.value.attr)
         for node in iter_within_scope(statement)
         if isinstance(node, ast.Attribute)
@@ -76,6 +76,52 @@ def _member_value_rebindings(statement: ast.stmt) -> set[tuple[str, str]]:
         and isinstance(node.value, ast.Attribute)
         and isinstance(node.value.value, ast.Name)
     }
+    rebindings.update(
+        member_aliases[node.value.id]
+        for node in iter_within_scope(statement)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.ctx, ast.Store | ast.Del)
+        and node.attr == "_value_"
+        and isinstance(node.value, ast.Name)
+        and node.value.id in member_aliases
+    )
+    return rebindings
+
+
+def _member_alias_binding(
+    statement: ast.stmt,
+    enum_classes: dict[str, _EnumClass],
+) -> tuple[str, tuple[str, str]] | None:
+    match statement:
+        case ast.Assign(
+            targets=[ast.Name(id=alias_name)], value=ast.Attribute(value=ast.Name(id=class_name), attr=member_name)
+        ):
+            enum_class = enum_classes.get(class_name)
+            if enum_class is not None and member_name in enum_class.members:
+                return alias_name, (class_name, member_name)
+    return None
+
+
+def _ignored_member_names(class_node: ast.ClassDef) -> frozenset[str] | None:
+    for statement in class_node.body:
+        if isinstance(statement, ast.Assign):
+            if not any(isinstance(target, ast.Name) and target.id == "_ignore_" for target in statement.targets):
+                continue
+            value = statement.value
+        else:
+            continue
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            return frozenset(value.value.split())
+        if isinstance(value, ast.List | ast.Tuple) and all(
+            isinstance(element, ast.Constant) and isinstance(element.value, str) for element in value.elts
+        ):
+            return frozenset(
+                element.value
+                for element in value.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            )
+        return None
+    return frozenset()
 
 
 def _direct_enum_base(base: ast.expr, enum_type_names: set[str], enum_module_names: set[str]) -> bool:
@@ -145,7 +191,10 @@ def _member_names(
             else:
                 aliases.discard(name)
                 members.add(name)
-    return frozenset(members - aliases)
+    ignored_names = _ignored_member_names(class_node)
+    if ignored_names is None:
+        return frozenset()
+    return frozenset(members - aliases - ignored_names)
 
 
 def _function_bindings(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) -> set[str]:
@@ -228,6 +277,7 @@ def _local_enum_classes(
         nonmember_names = inherited_nonmember_names - bound_names
         auto_names = inherited_auto_names - bound_names
         enum_classes: dict[str, _EnumClass] = {}
+        member_aliases: dict[str, tuple[str, str]] = {}
         for statement in scope.body:
             bindings = _names_bound_by([statement])
             enum_type_names.difference_update(bindings)
@@ -236,11 +286,19 @@ def _local_enum_classes(
             auto_names.difference_update(bindings)
             for name in bindings:
                 enum_classes.pop(name, None)
-            for name in _value_rebinding_names(statement):
+                member_aliases.pop(name, None)
+            for name in _enum_attribute_rebinding_names(statement):
                 enum_classes.pop(name, None)
-            for class_name, member_name in _member_value_rebindings(statement):
+            for class_name, member_name in _member_value_rebindings(statement, member_aliases):
                 if enum_class := enum_classes.get(class_name):
                     enum_classes[class_name] = _EnumClass(enum_class.members - {member_name})
+            if isinstance(statement, ast.ImportFrom) and any(alias.name == "*" for alias in statement.names):
+                enum_type_names.clear()
+                enum_module_names.clear()
+                nonmember_names.clear()
+                auto_names.clear()
+                enum_classes.clear()
+                member_aliases.clear()
             match statement:
                 case ast.Import():
                     for alias in statement.names:
@@ -263,6 +321,7 @@ def _local_enum_classes(
                         and "__new__" not in class_bindings
                         and "__init__" not in class_bindings
                         and "__getattribute__" not in class_bindings
+                        and "__str__" not in class_bindings
                         and not statement.decorator_list
                         and not any(keyword.arg in (None, "metaclass") for keyword in statement.keywords)
                         and any(_direct_enum_base(base, enum_type_names, enum_module_names) for base in statement.bases)
@@ -270,6 +329,9 @@ def _local_enum_classes(
                         enum_classes[statement.name] = _EnumClass(
                             _member_names(statement, nonmember_names, auto_names, enum_module_names)
                         )
+            if alias_binding := _member_alias_binding(statement, enum_classes):
+                alias_name, member_reference = alias_binding
+                member_aliases[alias_name] = member_reference
             for nested_scope in _nested_scopes([statement]):
                 collect(nested_scope, enum_type_names, enum_module_names, nonmember_names, auto_names)
         scope_classes[id(scope)] = enum_classes

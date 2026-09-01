@@ -341,6 +341,65 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
             "def read[State]():\n"
             "    return State.OPEN.value\n"
         ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    _ignore_ = ['OPEN']\n"
+            "    OPEN = 'open'\n\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n\n"
+            "member = State.OPEN\n"
+            "member._value_ = 'changed'\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n\n"
+            "from other_module import *\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n\n"
+            "State.__getattribute__ = lambda self, name: 'changed'\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n\n"
+            "    def __str__(self):\n"
+            "        return 'custom'\n\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    _ignore_ = 'OPEN'\n"
+            "    OPEN = 'open'\n\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    _ignore_ = ('OPEN',)\n"
+            "    OPEN = 'open'\n\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "ignore_names = ['OPEN']\n"
+            "class State(StrEnum):\n"
+            "    _ignore_ = ignore_names\n"
+            "    OPEN = 'open'\n\n"
+            "value = State.OPEN.value\n"
+        ),
     ],
     ids=[
         "ordinary-enum",
@@ -372,6 +431,14 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
         "local-shadowing",
         "global-declaration-in-nested-function",
         "type-parameter-shadowing",
+        "ignore-member",
+        "member-alias-value-rebinding",
+        "wildcard-import",
+        "getattribute-rebinding",
+        "str-override",
+        "ignore-string",
+        "ignore-tuple",
+        "ignore-unknown",
     ],
 )
 def test_check_skips_unproven_enum_values(source: str) -> None:
