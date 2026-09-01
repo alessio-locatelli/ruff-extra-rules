@@ -125,6 +125,21 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
             "value = State.OPEN.value\n"
         ),
         (
+            "from enum import EnumType, StrEnum\n\n"
+            "class CustomEnumType(EnumType):\n"
+            "    pass\n\n"
+            "class State(StrEnum, metaclass=CustomEnumType):\n"
+            "    OPEN = 'open'\n\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n\n"
+            "State.value = property(lambda self: 'custom')\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
             "from enum import StrEnum\n\n"
             "class State(StrEnum):\n"
             "    OPEN = 'open'\n\n"
@@ -264,6 +279,8 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
         "member-alias",
         "class-alias",
         "class-rebinding",
+        "custom-metaclass",
+        "value-rebinding",
         "parameter-shadowing",
         "nonmember-attribute",
         "qualified-nonmember-attribute",
