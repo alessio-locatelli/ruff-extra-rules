@@ -149,6 +149,15 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
         ),
         (
             "from enum import StrEnum\n\n"
+            "class Status(StrEnum):\n"
+            "    READY = 'ready'\n\n"
+            "    @property\n"
+            "    def value(self):\n"
+            "        return self.upper()\n\n"
+            "value = Status.READY.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
             "class State(StrEnum):\n"
             "    OPEN = 'open'\n\n"
             "def read():\n"
@@ -176,6 +185,7 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
         "nonmember-attribute",
         "qualified-nonmember-attribute",
         "decorated-enum-class",
+        "value-override",
         "local-shadowing",
         "type-parameter-shadowing",
     ],

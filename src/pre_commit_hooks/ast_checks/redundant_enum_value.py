@@ -191,8 +191,10 @@ def _local_enum_classes(
                         elif alias.name == _NONMEMBER_NAME:
                             nonmember_names.add(imported_name)
                 case ast.ClassDef():
-                    if not statement.decorator_list and any(
-                        _direct_enum_base(base, enum_type_names, enum_module_names) for base in statement.bases
+                    if (
+                        "value" not in class_scope_binding_names(statement)
+                        and not statement.decorator_list
+                        and any(_direct_enum_base(base, enum_type_names, enum_module_names) for base in statement.bases)
                     ):
                         enum_classes[statement.name] = _EnumClass(
                             _member_names(statement, nonmember_names, enum_module_names)
