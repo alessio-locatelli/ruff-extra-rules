@@ -8,7 +8,7 @@ from .analysis import PatternType, UsageInfo, VariableLifecycle, is_preceded_by_
 
 class AggressivenessLevel(Enum):
     CONSERVATIVE = auto()
-    PERMISSIVE = auto()
+    AGGRESSIVE = auto()
 
 
 TRANSFORMATIVE_VERBS = {
@@ -491,12 +491,12 @@ _CONSERVATIVE_REPORT_CEILING = {
     PatternType.LITERAL_IDENTITY: 10,
     PatternType.SINGLE_USE: 20,
 }
-_PERMISSIVE_REPORT_CEILING = 49
+_AGGRESSIVE_REPORT_CEILING = 49
 
 
 def _report_score_ceiling(level: AggressivenessLevel, pattern: PatternType) -> int:
-    if level is AggressivenessLevel.PERMISSIVE:
-        return _PERMISSIVE_REPORT_CEILING
+    if level is AggressivenessLevel.AGGRESSIVE:
+        return _AGGRESSIVE_REPORT_CEILING
     return _CONSERVATIVE_REPORT_CEILING[pattern]
 
 

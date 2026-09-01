@@ -518,7 +518,7 @@ def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: 
         filepath.write_text("data = 1\n")
         subprocess.run([git, "add", "module.py"], check=True, cwd=tmp_path)
 
-        exit_code = main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"])
+        exit_code = main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"])
 
         assert exit_code == 1
         assert "TR1" in capsys.readouterr().err
@@ -545,7 +545,7 @@ def test_main_fix_renames_enclosing_references_in_class_bodies_and_methods(tmp_p
         "    return CapturesOuter().method(), CapturesOuter.captured, OwnAttribute().method()\n"
     )
 
-    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
 
     assert filepath.read_text() == (
         "def outer(response):\n"
@@ -583,7 +583,7 @@ def test_main_fix_assigns_distinct_names_to_reverse_order_nested_closures(tmp_pa
         "    return inner()\n"
     )
 
-    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
 
     assert filepath.read_text() == (
         "def outer(response, response2):\n"
@@ -683,7 +683,7 @@ def test_main_fix_preserves_class_bindings(
     filepath = tmp_path / "module.py"
     filepath.write_text(source)
 
-    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
 
     assert filepath.read_text() == expected
 
@@ -718,7 +718,7 @@ def test_main_fix_preserves_class_bindings_in_nested_class_headers_and_comprehen
         "    return Container.Nested.__bases__[0], Container.Nested.value, Container.thunk(), Container.values\n"
     )
 
-    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
 
     assert filepath.read_text() == (
         "def outer(response):\n"
@@ -755,10 +755,10 @@ def test_main_directory_argument_matches_explicit_file_argument_for_untracked_fi
         untracked = tmp_path / "untracked.py"
         untracked.write_text("result = 2\n")
 
-        assert main([str(untracked), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+        assert main([str(untracked), "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
         assert "TR1" in capsys.readouterr().err
 
-        assert main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+        assert main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
         assert "TR1" in capsys.readouterr().err
 
 
@@ -774,7 +774,7 @@ def test_main_directory_scan_does_not_crash_on_a_file_with_a_non_utf8_name(tmp_p
         with Path(os.fsdecode(bad_path_bytes)).open("wb") as f:
             f.write(b"result = 1\n")
 
-        assert main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+        assert main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
 
 
 def test_process_files_handles_utf8_bom(tmp_path: Path) -> None:
@@ -782,7 +782,7 @@ def test_process_files_handles_utf8_bom(tmp_path: Path) -> None:
     filepath = tmp_path / "with_bom.py"
     filepath.write_bytes(b"\xef\xbb\xbfdata = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
     violations = orchestrator.process_files([str(filepath)])
 
     assert len(violations[str(filepath)]) == 1
@@ -1154,7 +1154,7 @@ def test_process_files_applies_each_checks_prefilter_independently(
     monkeypatch.setattr(RedundantSuperInitCheck, "check", spy_check)
 
     orchestrator = CheckOrchestrator(
-        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), redundant_super_init]
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE), redundant_super_init]
     )
     violations = orchestrator.process_files([str(filepath)])
 
@@ -1202,7 +1202,7 @@ def test_process_files_second_call_uses_cache(tmp_path: Path, monkeypatch: pytes
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
     first = orchestrator.process_files([str(filepath)])
     assert first[str(filepath)][0].error_code == "TR1"
 
@@ -1217,7 +1217,7 @@ def test_cache_hit_and_cache_miss_report_equivalent_violations(tmp_path: Path, m
 
     filepath = tmp_path / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
-    checks: list[ASTCheck] = [MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), ExcessiveBlankLinesCheck()]
+    checks: list[ASTCheck] = [MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE), ExcessiveBlankLinesCheck()]
 
     cache_miss_orchestrator = CheckOrchestrator(checks=checks)
     cache_miss = cache_miss_orchestrator.process_files([str(filepath)])[str(filepath)]
@@ -1240,11 +1240,11 @@ def test_process_files_different_check_set_forces_recheck(tmp_path: Path) -> Non
     filepath = tmp_path / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
 
-    meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
+    meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
     meaningless_vars_only.process_files([str(filepath)])
 
     both_checks = CheckOrchestrator(
-        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), ExcessiveBlankLinesCheck()]
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE), ExcessiveBlankLinesCheck()]
     )
     violations = both_checks.process_files([str(filepath)])
 
@@ -1287,10 +1287,10 @@ def test_generate_cache_version_changes_when_python_version_changes(monkeypatch:
 def test_the_hook_name_changes_when_cacheable_check_config_changes() -> None:
 
     default = CheckOrchestrator(checks=[MeaninglessVarsCheck()])
-    permissive = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
+    aggressive = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
 
-    assert default.cache.hook_name != permissive.cache.hook_name
-    assert default._generate_cache_version() == permissive._generate_cache_version()
+    assert default.cache.hook_name != aggressive.cache.hook_name
+    assert default._generate_cache_version() == aggressive._generate_cache_version()
 
 
 def test_get_cached_violations_ignores_corrupted_cache_entry(
@@ -1310,7 +1310,7 @@ def test_cache_violations_serialization_error_is_caught(tmp_path: Path, monkeypa
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
+    orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
 
     monkeypatch.setattr(CacheManager, "set_cached_result", raises(TypeError, "simulated cache backend failure"))
 
@@ -1351,7 +1351,7 @@ def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: p
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    meaningless_vars = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+    meaningless_vars = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
     original_check = meaningless_vars.check
     calls = {"n": 0}
 
@@ -1377,7 +1377,7 @@ def test_process_files_unavailable_checks_result_is_not_cached(tmp_path: Path, m
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    meaningless_vars = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+    meaningless_vars = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
     original_check = meaningless_vars.check
     calls = {"n": 0}
 
@@ -2109,7 +2109,7 @@ def test_process_files_a_non_cacheable_checks_own_crash_does_not_block_caching_a
     filepath.write_text("data = 1\n")
 
     orchestrator = CheckOrchestrator(
-        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), _CrashingAlwaysRerunCheck()]
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE), _CrashingAlwaysRerunCheck()]
     )
     first = orchestrator.process_files([str(filepath)])
     assert {v.error_code for v in first[str(filepath)]} == {"TR1"}
@@ -2122,7 +2122,7 @@ def test_process_files_a_non_cacheable_checks_own_crash_does_not_block_caching_a
     )
 
     second_orchestrator = CheckOrchestrator(
-        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), _CrashingAlwaysRerunCheck()]
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE), _CrashingAlwaysRerunCheck()]
     )
     second = second_orchestrator.process_files([str(filepath)])
     assert {v.error_code for v in second[str(filepath)]} == {"TR1"}
@@ -2163,7 +2163,7 @@ def test_process_files_non_cacheable_check_does_not_disturb_a_cacheable_checks_o
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
+    meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
     meaningless_vars_only.process_files([str(filepath)])
 
     monkeypatch.setattr(
@@ -2173,7 +2173,7 @@ def test_process_files_non_cacheable_check_does_not_disturb_a_cacheable_checks_o
     )
 
     probe = _AlwaysRerunProbeCheck()
-    combined = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), probe])
+    combined = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE), probe])
     violations = combined.process_files([str(filepath)])
 
     error_codes = {v.error_code for v in violations[str(filepath)]}
@@ -2188,11 +2188,11 @@ def test_process_single_file_reports_unprocessable_when_always_rerun_group_fails
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)])
+    meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
     meaningless_vars_only.process_files([str(filepath)])
 
     combined = CheckOrchestrator(
-        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), _AlwaysRerunProbeCheck()]
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE), _AlwaysRerunProbeCheck()]
     )
 
     def unreadable_always_rerun_group(
@@ -2347,11 +2347,11 @@ def test_fix_mode_two_configs_do_not_collide_on_the_same_files_cache_entry(tmp_p
     default = CheckOrchestrator(checks=[MeaninglessVarsCheck()], fix_mode=True)
     default.process_files([str(filepath)])
 
-    permissive = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)], fix_mode=True)
-    permissive.process_files([str(filepath)])
+    aggressive = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)], fix_mode=True)
+    aggressive.process_files([str(filepath)])
 
     assert default.cache.get_cached_result(filepath, default.cache.hook_name) is not None
-    assert permissive.cache.get_cached_result(filepath, permissive.cache.hook_name) is not None
+    assert aggressive.cache.get_cached_result(filepath, aggressive.cache.hook_name) is not None
 
 
 def test_check_unavailable_error_is_recorded_once_and_disables_that_check(tmp_path: Path) -> None:
@@ -2391,7 +2391,7 @@ def test_check_unavailable_error_does_not_discard_other_checks_results(tmp_path:
     filepath.write_text("data = 1\n")
 
     orchestrator = CheckOrchestrator(
-        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE), _UnavailableCheck()]
+        checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE), _UnavailableCheck()]
     )
     all_violations = orchestrator.process_files([str(filepath)])
 
@@ -3175,8 +3175,8 @@ def _run_shipped_fix_pair(tmp_path: Path, source: str) -> dict[str, list[Violati
     filepath.write_text(source)
 
     checks: list[ASTCheck] = [
-        MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE),
-        RedundantAssignmentCheck(level=AggressivenessLevel.PERMISSIVE),
+        MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE),
+        RedundantAssignmentCheck(level=AggressivenessLevel.AGGRESSIVE),
     ]
     orchestrator = CheckOrchestrator(checks=checks, fix_mode=True, cache_dir=tmp_path / "cache")
 
@@ -3378,7 +3378,7 @@ def test_fixed_hook_entrypoint_runs_a_selected_check_it_does_own(tmp_path: Path)
     filepath.write_text("data = 1\n")
 
     exit_code = ruff_extra_rules.main(
-        ["--isolated", "--select", "meaningless-vars", "--meaningless-vars-level", "permissive", str(filepath)]
+        ["--isolated", "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive", str(filepath)]
     )
 
     assert exit_code == 1
@@ -3489,7 +3489,7 @@ def test_main_reports_column_alongside_line(tmp_path: Path, capsys: pytest.Captu
     filepath = tmp_path / "module.py"
     filepath.write_text("def process():\n    data = requests.get(url)\n    return data\n")
 
-    exit_code = main([str(filepath), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"])
+    exit_code = main([str(filepath), "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"])
     assert exit_code == 1
 
     assert f"{filepath}:2:5: TR1:" in capsys.readouterr().err
@@ -3895,14 +3895,14 @@ class _LevelFlagCase(NamedTuple):
             "redundant-assignment",
             "--redundant-assignment-level",
             'def example():\n    x: str = "foo"\n    func(x)\n',
-            "permissive",
+            "aggressive",
             "'x'",
         ),
         _LevelFlagCase(
             "meaningless-vars",
             "--meaningless-vars-level",
             "def other():\n    result = 42\n    return result\n",
-            "permissive",
+            "aggressive",
             "'result'",
         ),
         _LevelFlagCase(
@@ -3991,7 +3991,7 @@ def test_main_trailing_comma_does_not_report_blank_unknown_check(
     filepath = tmp_path / "module.py"
     filepath.write_text("data = 1\n")
 
-    exit_code = main([str(filepath), flag, "meaningless-vars,", "--meaningless-vars-level", "permissive"])
+    exit_code = main([str(filepath), flag, "meaningless-vars,", "--meaningless-vars-level", "aggressive"])
     err = capsys.readouterr().err
 
     assert "Unknown checks" not in err
@@ -4060,7 +4060,7 @@ def test_main_accumulates_repeated_check_selection_arguments(
             "meaningless-vars",
             flag,
             "redundant-super-init",
-            "--meaningless-vars-level=permissive",
+            "--meaningless-vars-level=aggressive",
         ]
     )
 
@@ -4288,7 +4288,7 @@ def test_an_ignored_check_leaves_the_remaining_ones_their_own_cache_identity(tmp
 
     def orchestrate(per_file_ignores: PerFileIgnoreList) -> dict[str, list[Violation]]:
         return CheckOrchestrator(
-            checks=[_MarkerFixableCheck(check_id="probe-a"), MeaninglessVarsCheck(MeaninglessVarsLevel.PERMISSIVE)],
+            checks=[_MarkerFixableCheck(check_id="probe-a"), MeaninglessVarsCheck(MeaninglessVarsLevel.AGGRESSIVE)],
             cache_dir=cache_dir,
             per_file_ignores=per_file_ignores,
         ).process_files([str(filepath)])

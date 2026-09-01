@@ -118,8 +118,8 @@ def test_an_unreadable_config_file_is_reported_rather_than_skipped(
         ('[tool.ruff-extra-rules]\nselect = ["nope"]\n', "Unknown check `nope`"),
         ('[tool.ruff-extra-rules]\nextend-select = ["nope"]\n', "Unknown check `nope`"),
         ("[tool.ruff-extra-rules]\nmeaningless-vars = 1\n", "must be a table"),
-        ('[tool.ruff-extra-rules.meaningless-vars]\nlvl = "permissive"\n', "Unknown field `lvl`"),
-        ('[tool.ruff-extra-rules.meaningless-vars]\nlevel = "loud"\n', "expected one of: `conservative`"),
+        ('[tool.ruff-extra-rules.meaningless-vars]\nlvl = "aggressive"\n', "Unknown field `lvl`"),
+        ('[tool.ruff-extra-rules.meaningless-vars]\nlevel = "permissive"\n', "expected one of: `conservative`"),
         ("[tool]\nruff-extra-rules = 1\n", "must be a table"),
     ],
     ids=[
@@ -213,9 +213,9 @@ def test_unknown_field_error_lists_the_valid_ones(project: Path, capsys: pytest.
 @pytest.mark.parametrize(
     ("check_id", "option_value", "expected"),
     [
-        ("meaningless-vars", "permissive", MeaninglessVarsLevel.PERMISSIVE),
-        ("redundant-assignment", "permissive", AggressivenessLevel.PERMISSIVE),
-        ("redundant-type-conversion", "permissive", ConfidenceLevel.PERMISSIVE),
+        ("meaningless-vars", "aggressive", MeaninglessVarsLevel.AGGRESSIVE),
+        ("redundant-assignment", "aggressive", AggressivenessLevel.AGGRESSIVE),
+        ("redundant-type-conversion", "aggressive", ConfidenceLevel.AGGRESSIVE),
         ("redundant-dict-get", "aggressive", ProofLevel.AGGRESSIVE),
         ("meaningless-vars", "conservative", MeaninglessVarsLevel.CONSERVATIVE),
     ],
@@ -257,13 +257,13 @@ def test_command_line_option_overrides_the_config_file(project: Path, capsys: py
     filepath.write_text(_UNSUGGESTABLE)
 
     assert main([str(filepath), "--select", "meaningless-vars"]) == 0
-    assert main([str(filepath), "--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]) == 1
+    assert main([str(filepath), "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
 
     assert "TR1" in capsys.readouterr().err
 
 
 def test_config_file_option_applies_when_no_flag_is_given(project: Path) -> None:
-    _write_config(project, '[tool.ruff-extra-rules.meaningless-vars]\nlevel = "permissive"\n')
+    _write_config(project, '[tool.ruff-extra-rules.meaningless-vars]\nlevel = "aggressive"\n')
     filepath = project / "module.py"
     filepath.write_text(_UNSUGGESTABLE)
 
@@ -342,7 +342,7 @@ def test_no_fix_overrides_fix_from_the_config_file(project: Path) -> None:
 
 
 def test_isolated_ignores_the_config_file(project: Path) -> None:
-    _write_config(project, '[tool.ruff-extra-rules.meaningless-vars]\nlevel = "permissive"\n')
+    _write_config(project, '[tool.ruff-extra-rules.meaningless-vars]\nlevel = "aggressive"\n')
     filepath = project / "module.py"
     filepath.write_text(_UNSUGGESTABLE)
 
@@ -360,7 +360,7 @@ def test_config_flag_uses_the_named_file_without_searching(project: Path) -> Non
     _write_config(project, '[tool.ruff-extra-rules.meaningless-vars]\nlevel = "conservative"\n')
     elsewhere = project / "other"
     elsewhere.mkdir()
-    override = _write_config(elsewhere, '[tool.ruff-extra-rules.meaningless-vars]\nlevel = "permissive"\n')
+    override = _write_config(elsewhere, '[tool.ruff-extra-rules.meaningless-vars]\nlevel = "aggressive"\n')
     filepath = project / "module.py"
     filepath.write_text(_UNSUGGESTABLE)
 
@@ -415,7 +415,7 @@ def test_exclude_from_the_config_file_is_anchored_at_the_project_root(project: P
     checked = kept / "vendor_lookalike.py"
     checked.write_text(_UNSUGGESTABLE)
 
-    argv = ["--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]
+    argv = ["--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]
 
     assert main([str(excluded), *argv]) == 0
     assert main([str(checked), *argv]) == 1
@@ -432,20 +432,20 @@ def test_exclude_from_the_config_file_is_anchored_at_the_project_root(project: P
 def test_a_sibling_hooks_option_is_accepted_on_the_command_line(
     entrypoint: Callable[[list[str] | None], int], flag: str
 ) -> None:
-    assert entrypoint(["--isolated", flag, "permissive"]) == 0
+    assert entrypoint(["--isolated", flag, "aggressive"]) == 0
 
 
 def test_a_sibling_hooks_option_does_not_change_this_hooks_own_behaviour(project: Path) -> None:
     filepath = project / "module.py"
     filepath.write_text(_UNSUGGESTABLE)
 
-    exit_code = ruff_extra_rules.main(["--isolated", "--redundant-type-conversion-level", "permissive", str(filepath)])
+    exit_code = ruff_extra_rules.main(["--isolated", "--redundant-type-conversion-level", "aggressive", str(filepath)])
 
     assert exit_code == 0
 
 
 def test_a_sibling_hooks_check_section_is_accepted_but_not_applied(project: Path) -> None:
-    _write_config(project, '[tool.ruff-extra-rules.redundant-type-conversion]\nlevel = "permissive"\n')
+    _write_config(project, '[tool.ruff-extra-rules.redundant-type-conversion]\nlevel = "aggressive"\n')
     filepath = project / "module.py"
     filepath.write_text("x = 1\n")
 

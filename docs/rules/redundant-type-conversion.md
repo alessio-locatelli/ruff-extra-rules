@@ -44,10 +44,10 @@ def echo(value: str) -> str:
 
 ## Reporting level
 
-`--redundant-type-conversion-level={conservative,permissive}` (default `conservative`) controls how broadly a conversion is flagged:
+`--redundant-type-conversion-level={conservative,aggressive}` (default `conservative`) controls how broadly a conversion is flagged:
 
 - **`conservative`** (default): flags only the lowest-risk conversions — `str`, `int`, `float`, `bool`, `bytes`, `frozenset`, and `tuple` — and only when the wrapped value is already exactly that type. These seven avoid mutable-copy semantics: none of them produce a mutable result, so removing the call can't turn a distinct copy into a shared, mutable reference. (`tuple` and `frozenset` do return the same object as their argument when it's already exactly that type, but since both are immutable, that shared identity is harmless.) "already exactly that type" is a static/declared type, not a runtime guarantee — a value declared `int` that's actually holding a `bool` (or another subclass) at runtime is a case this level can't distinguish, and removing the conversion there would change the runtime value.
-- **`permissive`**: also flags `list`, `dict`, `set`, and `bytearray` conversions, and a broader class of matches where the wrapped value merely satisfies what the surrounding code expects rather than matching it exactly (e.g. passing an already-`list[str]` value somewhere only an `Iterable[str]` is required). These four constructors normally produce an independent copy of their argument — flagging them by default risks reporting a conversion that's redundant to a type checker but not to code that relies on that copy being distinct from the original (e.g. mutating one without affecting the other, or relying on it to deduplicate). `permissive` also broadens matching enough that it can occasionally flag a conversion whose wrapped value isn't really compatible with the constructor at all, when the surrounding code accepts a very wide range of types (e.g. assigning to something typed `object`) and so doesn't distinguish one from the other either way — review a `permissive`-only report before removing the call.
+- **`aggressive`**: also flags `list`, `dict`, `set`, and `bytearray` conversions, and a broader class of matches where the wrapped value merely satisfies what the surrounding code expects rather than matching it exactly (e.g. passing an already-`list[str]` value somewhere only an `Iterable[str]` is required). These four constructors normally produce an independent copy of their argument — flagging them by default risks reporting a conversion that's redundant to a type checker but not to code that relies on that copy being distinct from the original (e.g. mutating one without affecting the other, or relying on it to deduplicate). `aggressive` also broadens matching enough that it can occasionally flag a conversion whose wrapped value isn't really compatible with the constructor at all, when the surrounding code accepts a very wide range of types (e.g. assigning to something typed `object`) and so doesn't distinguish one from the other either way — review a `aggressive`-only report before removing the call.
 
 This check has its own dedicated `ruff-extra-rules-ty` hook (see the main [README](../../README.md#installation)) rather than running through `ruff-extra-rules` itself: it shares one persistent `ty` session across files (see "Cross-file coverage" below), so it runs as a single serial process instead of alongside pre-commit/prek's own parallel-batched workers.
 
@@ -58,7 +58,7 @@ This check has its own dedicated `ruff-extra-rules-ty` hook (see the main [READM
 ```yaml
 # Also catch copy-producing and structural-match conversions:
 - id: ruff-extra-rules-ty
-  args: [--redundant-type-conversion-level=permissive]
+  args: [--redundant-type-conversion-level=aggressive]
 ```
 
 This check does not support `--fix` — it only reports.

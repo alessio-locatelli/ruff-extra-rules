@@ -8,7 +8,7 @@
 
 The hook checks the files `prek`/`pre-commit` gives it. Cross-file awareness comes from the persistent `ty` daemon accumulating knowledge of files as commits pass them through it, not from re-examining the whole project each run.
 
-The cost of the alternative is what decides it. A whole-project run pays for every file on every commit, and at the permissive level TR6 is roughly an order of magnitude more expensive than at conservative, because each additional candidate conversion needs its own `ty` query. That is a per-commit cost proportional to repository size rather than to the diff — the opposite of what the rest of this pipeline is built around, where prefiltering and caching exist specifically to keep per-commit work proportional to what changed.
+The cost of the alternative is what decides it. A whole-project run pays for every file on every commit, and at the aggressive level TR6 is roughly an order of magnitude more expensive than at conservative, because each additional candidate conversion needs its own `ty` query. That is a per-commit cost proportional to repository size rather than to the diff — the opposite of what the rest of this pipeline is built around, where prefiltering and caching exist specifically to keep per-commit work proportional to what changed.
 
 ## Consequences
 

@@ -63,7 +63,7 @@ ignore = ["misplaced-comment"]      # or select = [...] to run only certain chec
 extend-select = ["unused-pytriage"]
 
 [tool.ruff-extra-rules.meaningless-vars]
-level = "permissive"                # each check's own settings live in its own table
+level = "aggressive"                # each check's own settings live in its own table
 
 [tool.ruff-extra-rules.per-file-ignores]
 "tests/**" = ["meaningless-vars"]   # switch a check off in the files it matches

@@ -65,10 +65,10 @@ print(msg)
 
 ## Aggressiveness level
 
-`--redundant-assignment-level={conservative,permissive}` (default `conservative`) controls how eagerly a violation is flagged:
+`--redundant-assignment-level={conservative,aggressive}` (default `conservative`) controls how eagerly a violation is flagged:
 
 - **`conservative`** (default): flags only the clearest cases, and leaves alone a variable name that looks like it's documenting a non-obvious value rather than just restating it — e.g. `warning = conn.recv()` is not flagged, since `warning` adds real information `recv()` alone doesn't convey.
-- **`permissive`**: flags a broader range of low-value assignments, at the cost of more false positives on descriptively-named variables.
+- **`aggressive`**: flags a broader range of low-value assignments, at the cost of more false positives on descriptively-named variables.
 
 Defaulting to `conservative` is deliberate: someone confronted with a flood of suggestions on unfamiliar code is more likely to disable the check outright than to go discover a stricter flag, so the out-of-the-box experience undersells rather than oversells what gets flagged.
 
@@ -80,12 +80,12 @@ Defaulting to `conservative` is deliberate: someone confronted with a flood of s
 ```
 
 ```yaml
-# Report (and fix) the broader, permissive set of violations:
+# Report (and fix) the broader, aggressive set of violations:
 - id: ruff-extra-rules
   args:
     [
       --select=redundant-assignment,
-      --redundant-assignment-level=permissive,
+      --redundant-assignment-level=aggressive,
       --fix,
     ]
 ```

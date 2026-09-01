@@ -71,7 +71,7 @@ def load_config():
     ],
 )
 def test_check_does_not_report_assignments_protected_by_try_handlers(source: str) -> None:
-    assert _check(source, level=AggressivenessLevel.PERMISSIVE) == []
+    assert _check(source, level=AggressivenessLevel.AGGRESSIVE) == []
 
 
 @pytest.mark.parametrize(
@@ -98,7 +98,7 @@ async def example():
     return value
 """
 
-    check_result = RedundantAssignmentCheck(level=AggressivenessLevel.PERMISSIVE).check(
+    check_result = RedundantAssignmentCheck(level=AggressivenessLevel.AGGRESSIVE).check(
         Path("test.py"), ast.parse(source), source
     )
 
@@ -1043,16 +1043,16 @@ def test_conservative_level_calibration_cases_not_flagged(source: str, excluded:
     assert all(excluded not in v.message for v in _check(source))
 
 
-def test_screaming_snake_case_string_constant_is_not_flagged_at_permissive_level() -> None:
+def test_screaming_snake_case_string_constant_is_not_flagged_at_aggressive_level() -> None:
     source = """
 _GREY = "rgb(201, 203, 207)"
 config = {"colors": [_GREY]}
 """
-    violations = _check(source, level=AggressivenessLevel.PERMISSIVE)
+    violations = _check(source, level=AggressivenessLevel.AGGRESSIVE)
     assert all("'_GREY'" not in v.message for v in violations)
 
 
-@pytest.mark.parametrize("level", [AggressivenessLevel.CONSERVATIVE, AggressivenessLevel.PERMISSIVE])
+@pytest.mark.parametrize("level", [AggressivenessLevel.CONSERVATIVE, AggressivenessLevel.AGGRESSIVE])
 def test_dunder_assignment_never_flagged(level: AggressivenessLevel) -> None:
     source = """
 __author__ = "Hynek Schlawack"
@@ -1155,7 +1155,7 @@ def func(ctx_factory):
     ],
 )
 def test_untracked_rebinding_not_flagged_as_redundant(source: str, excluded_names: tuple[str, ...]) -> None:
-    violations = _check(source, level=AggressivenessLevel.PERMISSIVE)
+    violations = _check(source, level=AggressivenessLevel.AGGRESSIVE)
     assert all(f"'{name}'" not in v.message for v in violations for name in excluded_names)
 
 
@@ -1177,7 +1177,7 @@ def call_it():
         "__tests__/processor.py",
     ],
 )
-@pytest.mark.parametrize("level", [AggressivenessLevel.CONSERVATIVE, AggressivenessLevel.PERMISSIVE])
+@pytest.mark.parametrize("level", [AggressivenessLevel.CONSERVATIVE, AggressivenessLevel.AGGRESSIVE])
 def test_reporting_does_not_depend_on_the_file_path(path: str, level: AggressivenessLevel) -> None:
     source = """
 def test_landmark_equal_to_none():
@@ -1469,7 +1469,7 @@ def example():
     func(x)
 """
     assert _check(source) == []
-    assert len(_check(source, level=AggressivenessLevel.PERMISSIVE)) >= 1
+    assert len(_check(source, level=AggressivenessLevel.AGGRESSIVE)) >= 1
 
 
 def test_fixable_marked_correctly() -> None:

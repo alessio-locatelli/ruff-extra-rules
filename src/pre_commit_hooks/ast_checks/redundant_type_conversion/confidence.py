@@ -11,11 +11,11 @@ ALL_CONSTRUCTORS = IMMUTABLE_CONSTRUCTORS | MUTABLE_CONSTRUCTORS
 
 class ConfidenceLevel(Enum):
     CONSERVATIVE = auto()
-    PERMISSIVE = auto()
+    AGGRESSIVE = auto()
 
 
 def eligible_constructors(level: ConfidenceLevel) -> frozenset[str]:
-    return ALL_CONSTRUCTORS if level is ConfidenceLevel.PERMISSIVE else IMMUTABLE_CONSTRUCTORS
+    return ALL_CONSTRUCTORS if level is ConfidenceLevel.AGGRESSIVE else IMMUTABLE_CONSTRUCTORS
 
 
 def _literal_matches_constructor(hover_text: str, constructor: str) -> bool:
@@ -85,7 +85,7 @@ def hover_passes_gate(hover_text: str | None, level: ConfidenceLevel, constructo
         return False
     if _exact_match(hover_text, constructor):
         return True
-    if level is not ConfidenceLevel.PERMISSIVE:
+    if level is not ConfidenceLevel.AGGRESSIVE:
         return False
     members = _split_top_level_union(hover_text)
     if len(members) > 1:

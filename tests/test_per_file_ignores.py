@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.uses_project_config
 
 _FLAGGED = "data = 1\n"
-_ARGV = ["--select", "meaningless-vars", "--meaningless-vars-level", "permissive"]
+_ARGV = ["--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]
 
 
 @pytest.fixture

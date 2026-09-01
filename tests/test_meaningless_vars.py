@@ -145,7 +145,7 @@ def feed_data(
 )
 def test_check_reports_no_violations(source: str) -> None:
     assert (
-        MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(Path("test.py"), ast.parse(source), source)
+        MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(Path("test.py"), ast.parse(source), source)
         == []
     )
 
@@ -353,7 +353,7 @@ def handle(self, data: Union[bytes, bytearray, memoryview]) -> Tuple[bool, bytes
     ],
 )
 def test_check_reports_single_violation(source: str, expected: dict[str, Any]) -> None:
-    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(
         Path("test.py"), ast.parse(source), source
     )
 
@@ -396,7 +396,7 @@ result = None  # Should be flagged
     ids=["module-level-variables", "nested-function-scope-flagged-separately"],
 )
 def test_check_reports_violation_count(source: str, count: int) -> None:
-    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(
         Path("test.py"), ast.parse(source), source
     )
     assert len(violations) == count
@@ -419,7 +419,7 @@ def process():
 {second_fragment}    return data, result
 """
 
-    check_result = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check_with_suppression_tracking(
+    check_result = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check_with_suppression_tracking(
         Path("test.py"), ast.parse(source), source
     )
 
@@ -436,7 +436,7 @@ def process():
     return data, result, results
 """
 
-    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(
         Path("test.py"), ast.parse(source), source
     )
 
@@ -452,7 +452,7 @@ def test_multiple_violations_same_scope() -> None:
     return result
 """
 
-    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(
         Path("test.py"), ast.parse(source), source
     )
 
@@ -469,7 +469,7 @@ def test_reassignment_suppresses_suggestions() -> None:
     return data
 """
 
-    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(
         Path("test.py"), ast.parse(source), source
     )
 
@@ -493,7 +493,7 @@ def test_model_validator_decorator_skips_arg_check() -> None:
         return data
 """
 
-    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(
         Path("test.py"), ast.parse(source), source
     )
 
@@ -514,7 +514,7 @@ def test_name_collision_suffixes_suggestion() -> None:
         filepath = Path(tmpdir) / "test.py"
         filepath.write_text(source)
 
-        violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+        violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(
             filepath, ast.parse(source), source
         )
 
@@ -527,7 +527,7 @@ def test_name_collision_suffixes_suggestion() -> None:
 def test_tokenize_error_handling() -> None:
     source = "def func():\n    data = 1  # missing closing quote"
 
-    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(
         Path("test.py"), ast.parse(source), source
     )
 
@@ -578,7 +578,7 @@ def fetch_users():
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
 
         assert len(violations) == 1
@@ -607,7 +607,7 @@ def fetch_users():
     filepath.write_text(source)
 
     tree = ast.parse(source)
-    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
     violations = check.check(filepath, tree, source)
 
     assert len(violations) == 1
@@ -628,7 +628,7 @@ def fetch_users():
     filepath = tmp_path / "test.py"
     filepath.write_text(source)
     tree = ast.parse(source)
-    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
     (candidate,) = check.check(filepath, tree, source)
     stale_violation = Violation(
         check_id=candidate.check_id,
@@ -655,7 +655,7 @@ def test_autofix_no_fixable_violations() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         non_fixable = [v for v in violations if not v.fixable]
 
@@ -677,7 +677,7 @@ def test_autofix_follows_closure_reference_into_nested_function() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -704,7 +704,7 @@ def test_autofix_follows_closure_reference_into_lambda() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -724,7 +724,7 @@ def test_autofix_follows_closure_reference_into_comprehension() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -744,7 +744,7 @@ def test_walrus_rebinding_suppresses_suggestion() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
@@ -846,7 +846,7 @@ def test_autofix_renames_reference_evaluated_in_enclosing_scope(source: str, exp
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1028,7 +1028,7 @@ def test_autofix_does_not_rename_shadowed_reference_in_nested_scope(source: str,
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1054,7 +1054,7 @@ def test_autofix_never_offered_for_name_referenced_via_nonlocal() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert violations
         assert all(not v.fixable for v in violations)
@@ -1166,7 +1166,7 @@ def test_autofix_never_offered_when_same_scope_rebinds_via_non_name_construct(so
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert violations
         assert all(not v.fixable for v in violations)
@@ -1197,7 +1197,7 @@ def reader():
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert violations
         assert all(not v.fixable for v in violations)
@@ -1215,7 +1215,7 @@ def autofix_meaningless_vars(tmp_path: Path) -> Callable[[str], str]:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         outcomes = check.fix(filepath, violations, source, tree).outcomes
 
@@ -1343,7 +1343,7 @@ def test_autofix_follows_closure_through_scope_that_itself_contains_a_shadowing_
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1396,7 +1396,7 @@ def outer(response):
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1429,7 +1429,7 @@ def test_autofix_still_follows_annotation_closure_without_deferred_annotations()
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1464,7 +1464,7 @@ result = response.json()
 def f(x: data) -> result:
     return x
 """
-    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(
         Path("test.py"), ast.parse(source), source
     )
 
@@ -1490,7 +1490,7 @@ def test_autofix_follows_closure_into_type_parameter_bound_and_default() -> None
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1527,7 +1527,7 @@ def test_autofix_does_not_rename_type_parameter_bound_referencing_a_peer_type_pa
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1561,7 +1561,7 @@ def test_autofix_does_not_reuse_a_nested_functions_own_mapping_for_its_default()
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1594,7 +1594,7 @@ def test_autofix_does_not_rename_a_nested_functions_own_type_parameter_bound_via
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1616,7 +1616,7 @@ def test_autofix_does_not_rename_type_alias_bound_referencing_a_peer_type_parame
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1666,7 +1666,7 @@ def test_autofix_follows_closure_into_type_alias_value() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1703,7 +1703,7 @@ def test_autofix_follows_closure_into_generic_functions_own_annotation_despite_b
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1738,7 +1738,7 @@ def test_autofix_does_not_rename_generic_functions_own_annotation_referencing_a_
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1793,7 +1793,7 @@ def outer(response):
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1819,7 +1819,7 @@ def test_scope_names_ignore_unnamed_except_and_match_captures() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
 
@@ -1844,7 +1844,7 @@ def fetch_users():
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         check.fix(filepath, violations, source, tree)
 
@@ -1869,7 +1869,7 @@ def test_autofix_avoids_walrus_target_collision_in_comprehension() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         check.fix(filepath, violations, source, tree)
 
@@ -1894,7 +1894,7 @@ def func2():
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert len(violations) == 2
 
@@ -2001,7 +2001,7 @@ def test_repeated_binding_leaves_the_file_unchanged() -> None:
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert len(violations) == 2
 
@@ -2025,7 +2025,7 @@ def process():
         filepath.write_text(source)
 
         tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
         violations = check.check(filepath, tree, source)
         assert len(violations) == 1
 
@@ -2040,7 +2040,7 @@ def process():
 
 def test_check_reports_character_offset_not_byte_offset_before_multibyte_text() -> None:
     source = "café; data = requests.get(url)\n"
-    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(
+    violations = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(
         Path("module.py"), ast.parse(source), source
     )
 
@@ -2063,7 +2063,7 @@ def other():
     filepath = tmp_path / "missing_dir" / "test.py"
 
     tree = ast.parse(source)
-    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE)
+    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
     violations = check.check(filepath, tree, source)
     assert {v.fixable for v in violations} == {True, False}
     candidate = next(violation for violation in violations if violation.fixable)
@@ -2124,7 +2124,7 @@ def test_conservative_level_gates_on_suggestion_presence(source: str, conservati
     tree = ast.parse(source)
 
     conservative = MeaninglessVarsCheck().check(Path("test.py"), tree, source)
-    permissive = MeaninglessVarsCheck(level=MeaninglessVarsLevel.PERMISSIVE).check(Path("test.py"), tree, source)
+    aggressive = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE).check(Path("test.py"), tree, source)
 
     assert len(conservative) == conservative_count
-    assert len(permissive) == 1
+    assert len(aggressive) == 1

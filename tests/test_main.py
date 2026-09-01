@@ -178,7 +178,7 @@ def test_verbose_flag_does_not_change_violations_or_exit_code(tmp_path: Path) ->
             "--select",
             "meaningless-vars",
             "--meaningless-vars-level",
-            "permissive",
+            "aggressive",
             *extra_args,
         ]
         return subprocess.run([*cmd, filepath], capture_output=True, text=True, check=False, timeout=30)  # noqa: S603

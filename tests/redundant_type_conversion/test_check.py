@@ -43,7 +43,7 @@ def test_tracks_direct_inputs() -> None:
             {"str(", "int(", "float(", "bool(", "bytes(", "frozenset(", "tuple("},
         ),
         (
-            ConfidenceLevel.PERMISSIVE,
+            ConfidenceLevel.AGGRESSIVE,
             {
                 "str(",
                 "int(",
@@ -59,7 +59,7 @@ def test_tracks_direct_inputs() -> None:
             },
         ),
     ],
-    ids=["conservative", "permissive"],
+    ids=["conservative", "aggressive"],
 )
 def test_prefilter_pattern_matches_the_configured_levels_eligible_constructors(
     level: ConfidenceLevel, expected: set[str], monkeypatch: pytest.MonkeyPatch
@@ -136,7 +136,7 @@ def test_check_reuses_a_cached_result_for_identical_source(monkeypatch: pytest.M
     assert session.opened_content == opened_after_first
 
 
-def test_check_hedges_the_message_for_a_non_exact_permissive_match(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_check_hedges_the_message_for_a_non_exact_aggressive_match(monkeypatch: pytest.MonkeyPatch) -> None:
     source = "y = str({'a': [1]}) == 1\n"
     session = FakeSession(
         diagnostics_by_content={source: frozenset(), "y = {'a': [1]} == 1\n": frozenset()},
@@ -144,7 +144,7 @@ def test_check_hedges_the_message_for_a_non_exact_permissive_match(monkeypatch: 
     )
     _patch_session(monkeypatch, session)
 
-    violations = RedundantTypeConversionCheck(level=ConfidenceLevel.PERMISSIVE).check(
+    violations = RedundantTypeConversionCheck(level=ConfidenceLevel.AGGRESSIVE).check(
         Path("test.py"), ast.parse(source), source
     )
 

@@ -1379,17 +1379,17 @@ class TestRealDaemonEndToEnd:
         callee.write_text("def takes(x: int) -> None:\n    print(x)\n")
         caller.write_text("from callee import takes\n\n\ndef use(y: str) -> None:\n    takes(int(y))\n")
 
-        first_check = RedundantTypeConversionCheck(level=ConfidenceLevel.PERMISSIVE)
+        first_check = RedundantTypeConversionCheck(level=ConfidenceLevel.AGGRESSIVE)
         caller_source = caller.read_text()
         assert first_check.check(caller, ast.parse(caller_source), caller_source) == []
 
         callee.write_text("def takes(x: int | str) -> None:\n    print(x)\n")
-        second_check = RedundantTypeConversionCheck(level=ConfidenceLevel.PERMISSIVE)
+        second_check = RedundantTypeConversionCheck(level=ConfidenceLevel.AGGRESSIVE)
         callee_source = callee.read_text()
         assert second_check.check(callee, ast.parse(callee_source), callee_source) == []
         second_check.record_direct_input(callee, callee_source)
 
-        third_check = RedundantTypeConversionCheck(level=ConfidenceLevel.PERMISSIVE)
+        third_check = RedundantTypeConversionCheck(level=ConfidenceLevel.AGGRESSIVE)
         extra_files = third_check.reconcile_direct_inputs([callee])
         assert caller.resolve() in extra_files
 
