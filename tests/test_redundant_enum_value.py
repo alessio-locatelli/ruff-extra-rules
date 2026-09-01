@@ -200,6 +200,14 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
         ),
         (
             "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n\n"
+            "    def __getattribute__(self, name):\n"
+            "        return 'custom'\n\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
             "class Status(StrEnum):\n"
             "    READY = 'ready'\n\n"
             "    @property\n"
@@ -299,9 +307,32 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
             "from enum import StrEnum\n\n"
             "class State(StrEnum):\n"
             "    OPEN = 'open'\n\n"
+            "class OtherState:\n"
+            "    OPEN = object()\n\n"
+            "class Other:\n"
+            "    global State\n"
+            "    State = OtherState\n\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n\n"
             "def read():\n"
             "    State = object\n"
             "    return State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State:\n"
+            "    OPEN = object()\n\n"
+            "def build():\n"
+            "    class State(StrEnum):\n"
+            "        OPEN = 'local'\n\n"
+            "    def read():\n"
+            "        global State\n"
+            "        return State.OPEN.value\n\n"
+            "    return read()\n"
         ),
         (
             "from enum import StrEnum\n\n"
@@ -326,6 +357,7 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
         "nonmember-attribute",
         "qualified-nonmember-attribute",
         "decorated-enum-class",
+        "getattribute-override",
         "value-override",
         "inherited-value-override",
         "descriptor-attribute",
@@ -336,7 +368,9 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
         "custom-new",
         "custom-init",
         "member-value-rebinding",
+        "class-global-rebinding",
         "local-shadowing",
+        "global-declaration-in-nested-function",
         "type-parameter-shadowing",
     ],
 )
