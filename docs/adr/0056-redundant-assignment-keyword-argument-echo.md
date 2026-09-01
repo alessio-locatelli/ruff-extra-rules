@@ -19,11 +19,11 @@ This is a MINOR change per [docs/releases.md](../releases.md): a run that was pr
 ## Considered Options
 
 - **Withhold only the two guards the issue's reproduction exercised (the named-constant pattern and the semantic-value scoring), leaving the `Call`-RHS and string-constant guards active** — rejected. Both of those guards are just as name-keyed as the two the issue names; leaving them active would still under-report a keyword echo whose RHS happens to be a call or a module-level string constant, contradicting "regardless of how descriptive."
-- **Report only at the permissive level** — rejected. The evidence a keyword echo supplies is exact, not a heuristic judgment call the way the rest of TR5's scoring is, so it doesn't belong behind the flag that exists specifically to gate heuristic-but-arguable reports.
+- **Report only at the aggressive level** — rejected. The evidence a keyword echo supplies is exact, not a heuristic judgment call the way the rest of TR5's scoring is, so it doesn't belong behind the flag that exists specifically to gate heuristic-but-arguable reports.
 - **Also resolve same-file positional arguments to their callee's parameter name** — rejected for this decision; tracked as a separate, larger feature (see Context).
 
 ## Consequences
 
-- An assignment whose only use is `func(name=name)` is now reported at the conservative (default) level regardless of `name`'s shape or RHS — where it previously wasn't reported at all (numeric-literal RHS), was reported only at `permissive` (other literal RHS), or depended on whether the name restated its callee (`Call` RHS).
+- An assignment whose only use is `func(name=name)` is now reported at the conservative (default) level regardless of `name`'s shape or RHS — where it previously wasn't reported at all (numeric-literal RHS), was reported only at `aggressive` (other literal RHS), or depended on whether the name restated its callee (`Call` RHS).
 - No autofix change was needed for a `Constant`/`Name` RHS: it was already always safe to inline per [ADR-0032](0032-redundant-assignment-autofix-safety-criteria.md), so `func(days_with_routes_in_a_row=42)` is fixable the same way any other constant-RHS single use already was. A `Call`/`Attribute` RHS keyword echo is reported the same as any other RHS shape, but ADR-0032's existing immediate-use and argument-count criteria still gate whether `--fix` touches it.
 - `func(name)` (positional) is unaffected by this decision.

@@ -68,8 +68,8 @@ repos:
         exclude: ^tests/fixtures/
         args:
           [
-            "--meaningless-vars-level=permissive",
-            "--redundant-assignment-level=permissive",
+            "--meaningless-vars-level=aggressive",
+            "--redundant-assignment-level=aggressive",
           ]
       - id: local-ruff-extra-rules-ty
         name: Extra Python rule checks (redundant-type-conversion, redundant-dict-get, serial)
@@ -88,8 +88,8 @@ repos:
       - id: local-ruff-extra-rules-ty-aggressive
         name: Extra Python rule checks (redundant-type-conversion, redundant-dict-get, serial, strictest config)
         description: >-
-          Same as local-ruff-extra-rules-ty, at permissive confidence -- kept as its own hook (like
-          local-ruff-extra-rules-aggressive) rather than folded into the one above: permissive considers
+          Same as local-ruff-extra-rules-ty, at aggressive confidence -- kept as its own hook (like
+          local-ruff-extra-rules-aggressive) rather than folded into the one above: aggressive considers
           far more candidate conversions, each needing its own ty query, making it roughly an order of
           magnitude slower than conservative on this repository -- too slow to be every commit's own default.
         entry: uv run python -m pre_commit_hooks.ruff_extra_rules_ty
@@ -100,7 +100,7 @@ repos:
         require_serial: true
         args:
           [
-            "--redundant-type-conversion-level=permissive",
+            "--redundant-type-conversion-level=aggressive",
             "--ignore=unused-pytriage",
           ]
 

@@ -63,7 +63,7 @@ class RedundantTypeConversionCheck(BaseCheck):
             help=(
                 "How eagerly redundant-type-conversion (TR6) reports a violation. 'conservative' (default) "
                 "flags str/int/float/bool/bytes/frozenset/tuple conversions, only when the wrapped value already "
-                "matches that type exactly. 'permissive' also flags copy-producing conversions "
+                "matches that type exactly. 'aggressive' also flags copy-producing conversions "
                 "(list/dict/set/bytearray) and a looser match, e.g. an already-list[str] value passed somewhere "
                 "only an Iterable[str] is required -- an explicit opt-in to the aliasing/mutation risk a "
                 "copy-producing constructor's result can carry."

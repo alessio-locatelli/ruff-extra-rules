@@ -53,8 +53,8 @@ def test_same_scope_scalar_conversion_is_flagged() -> None:
     assert violations[0].error_code == "TR6"
 
 
-def test_cross_file_call_site_conversion_is_flagged_at_permissive() -> None:
-    violations = _check(BAD_ROOT / "cross_file_call_site.py", level=ConfidenceLevel.PERMISSIVE)
+def test_cross_file_call_site_conversion_is_flagged_at_aggressive() -> None:
+    violations = _check(BAD_ROOT / "cross_file_call_site.py", level=ConfidenceLevel.AGGRESSIVE)
 
     assert {v.line for v in violations} == {5, 6}
     assert {v.error_code for v in violations} == {"TR6"}
@@ -74,7 +74,7 @@ def test_redundant_conversion_is_still_flagged_despite_an_unrelated_error_shifti
 
 
 def test_necessary_conversions_are_never_flagged() -> None:
-    violations = _check(FIXTURES_ROOT / "good" / "necessary_conversions.py", level=ConfidenceLevel.PERMISSIVE)
+    violations = _check(FIXTURES_ROOT / "good" / "necessary_conversions.py", level=ConfidenceLevel.AGGRESSIVE)
 
     assert violations == []
 

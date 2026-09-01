@@ -503,7 +503,7 @@ def test_cached_redundancies_require_matching_source_within_a_persistent_root(tm
     session.cache_redundancies(filepath, "value = str(name)\n", "strict", redundancies)
 
     assert session.cached_redundancies(filepath, "value = str(name)\n", "strict") == redundancies
-    assert session.cached_redundancies(filepath, "value = str(name)\n", "permissive") is None
+    assert session.cached_redundancies(filepath, "value = str(name)\n", "aggressive") is None
     assert session.cached_redundancies(filepath, "value = str(other)\n", "strict") is None
 
 

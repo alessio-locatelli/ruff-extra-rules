@@ -162,7 +162,7 @@ def test_decide_candidates_skips_a_len_wrapped_candidate_that_is_not_an_exact_ma
         source,
         diagnostics_by_content={source: frozenset()},
         hover_by_position={(0, 13): "list[int]"},
-        level=ConfidenceLevel.PERMISSIVE,
+        level=ConfidenceLevel.AGGRESSIVE,
     )
 
     assert redundant == []
@@ -175,7 +175,7 @@ def test_decide_candidates_still_flags_a_len_wrapped_candidate_that_is_an_exact_
         source,
         diagnostics_by_content={source: frozenset(), "len(op_ids)\n": frozenset()},
         hover_by_position={(0, 13): "set[int]"},
-        level=ConfidenceLevel.PERMISSIVE,
+        level=ConfidenceLevel.AGGRESSIVE,
     )
 
     assert len(redundant) == 1
@@ -188,7 +188,7 @@ def test_decide_candidates_skips_a_path_conversion_used_in_an_equality_compariso
         source,
         diagnostics_by_content={source: frozenset()},
         hover_by_position={(0, 26): "Path"},
-        level=ConfidenceLevel.PERMISSIVE,
+        level=ConfidenceLevel.AGGRESSIVE,
     )
 
     assert redundant == []
@@ -201,19 +201,19 @@ def test_decide_candidates_still_flags_an_ordinary_conversion_used_in_an_equalit
         source,
         diagnostics_by_content={source: frozenset(), "y = matches == [ignored]\n": frozenset()},
         hover_by_position={(0, 26): "int"},
-        level=ConfidenceLevel.PERMISSIVE,
+        level=ConfidenceLevel.AGGRESSIVE,
     )
 
     assert len(redundant) == 1
 
 
-def test_decide_candidates_permissive_includes_mutable_constructors() -> None:
+def test_decide_candidates_aggressive_includes_mutable_constructors() -> None:
     source = "takes_list(list(bar))\n"
     redundant, _session = _decide(
         source,
         diagnostics_by_content={source: frozenset(), "takes_list(bar)\n": frozenset()},
         hover_by_position={(0, 18): "list[int]"},
-        level=ConfidenceLevel.PERMISSIVE,
+        level=ConfidenceLevel.AGGRESSIVE,
     )
 
     assert len(redundant) == 1

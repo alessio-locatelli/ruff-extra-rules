@@ -20,10 +20,10 @@ Meaningless variable names reduce code clarity and maintainability. See [Peter H
 
 ## Reporting level
 
-`--meaningless-vars-level={conservative,permissive}` (default `conservative`) controls whether a meaningless name with no suggested replacement gets reported at all:
+`--meaningless-vars-level={conservative,aggressive}` (default `conservative`) controls whether a meaningless name with no suggested replacement gets reported at all:
 
 - **`conservative`** (default): reports a meaningless name only when a replacement can be suggested. On a codebase with a large, pre-existing backlog of `data`/`result` variables, this keeps the output focused on the cases you can actually act on.
-- **`permissive`**: reports every meaningless name, whether or not a replacement can be suggested.
+- **`aggressive`**: reports every meaningless name, whether or not a replacement can be suggested.
 
 `--fix` behaves identically at both levels: it only ever applies a high-confidence suggestion, never a weaker one and never a name with no suggestion at all. See [ADR-0031](../adr/0031-meaningless-vars-conservative-reporting-default.md) for why `conservative` is the default.
 
@@ -33,7 +33,7 @@ Meaningless variable names reduce code clarity and maintainability. See [Peter H
 src/process.py:2: TR1: 'data' is a meaningless variable name — 'user' is more descriptive. Or add '# pytriage: TR1' to suppress.
 ```
 
-**Permissive mode**, reporting a `result` binding the conservative default left out because no replacement could be suggested for it:
+**Aggressive mode**, reporting a `result` binding the conservative default left out because no replacement could be suggested for it:
 
 ```text
 src/process.py:3: TR1: Meaningless variable name 'result' found. Use a more descriptive name. Or add '# pytriage: TR1' to suppress.
@@ -49,7 +49,7 @@ src/process.py:3: TR1: Meaningless variable name 'result' found. Use a more desc
 ```yaml
 # Report (and fix) every meaningless name, not just the ones with a suggestion:
 - id: ruff-extra-rules
-  args: [--select=meaningless-vars, --meaningless-vars-level=permissive, --fix]
+  args: [--select=meaningless-vars, --meaningless-vars-level=aggressive, --fix]
 ```
 
 ## Suppression

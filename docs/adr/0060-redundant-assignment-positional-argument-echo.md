@@ -27,7 +27,7 @@ No new autofix logic is needed: this reuses [ADR-0032](0032-redundant-assignment
 ## Considered Options
 
 - **Full signature resolution — cross-file, through imports/aliases/reassignment, honoring decorators and overloads**: rejected. This is exactly the "materially larger feature" ADR-0056 deferred, and issue #174 names cross-file/aliased/reassigned callees as explicit non-goals. Nothing in this codebase resolves an import graph or evaluates a decorator's effect on a signature, and building that machinery for one check's edge case is a different, much larger project.
-- **Report only at the `permissive` level**: rejected, for the same reason ADR-0056 rejected it for the keyword case — once the bail-outs above are satisfied, the evidence is exact, not an arguable heuristic, so it doesn't belong behind the flag reserved for heuristic-but-arguable reports.
+- **Report only at the `aggressive` level**: rejected, for the same reason ADR-0056 rejected it for the keyword case — once the bail-outs above are satisfied, the evidence is exact, not an arguable heuristic, so it doesn't belong behind the flag reserved for heuristic-but-arguable reports.
 - **Resolve by nearest-enclosing-scope lookup instead of whole-module uniqueness** (so a nested `helper` shadowing an outer `helper` would still resolve to the correct one): rejected. It would require the same kind of scope-resolution machinery this check's analysis deliberately doesn't build (see [ADR-0002](0002-redundant-assignment-scope-tracker-not-unified.md)), for a case an author is unlikely to write deliberately. Requiring whole-module uniqueness is simpler and conservative: it silently declines to report rather than guessing wrong.
 
 ## Consequences

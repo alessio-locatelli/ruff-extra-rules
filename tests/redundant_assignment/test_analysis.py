@@ -129,7 +129,7 @@ def f():
 
     assert lifecycle.assignment.in_try is True
     assert lifecycle.assignment.in_control_flow is True
-    assert _check(source, level=AggressivenessLevel.PERMISSIVE) == []
+    assert _check(source, level=AggressivenessLevel.AGGRESSIVE) == []
 
 
 @pytest.mark.parametrize(
@@ -170,7 +170,7 @@ def test_try_depth_does_not_include_non_body_clauses(source: str) -> None:
 
     assert lifecycle.assignment.in_try is False
     assert lifecycle.assignment.in_control_flow is True
-    assert len(_check(source, level=AggressivenessLevel.PERMISSIVE)) == 1
+    assert len(_check(source, level=AggressivenessLevel.AGGRESSIVE)) == 1
 
 
 @pytest.mark.parametrize(
@@ -202,7 +202,7 @@ def test_try_depth_does_not_include_deferred_function_bodies(source: str) -> Non
 
     assert lifecycle.assignment.in_try is False
     assert lifecycle.assignment.in_control_flow is True
-    assert len(_check(source, level=AggressivenessLevel.PERMISSIVE)) == 1
+    assert len(_check(source, level=AggressivenessLevel.AGGRESSIVE)) == 1
 
 
 def test_function_defaults_are_visited_in_the_enclosing_try_context() -> None:
@@ -681,7 +681,7 @@ def func(items):
     else:
         return x
 """
-    assert _check(source, level=AggressivenessLevel.PERMISSIVE) == []
+    assert _check(source, level=AggressivenessLevel.AGGRESSIVE) == []
 
 
 def test_suspension_precedes_use_fallback_for_use_without_node() -> None:

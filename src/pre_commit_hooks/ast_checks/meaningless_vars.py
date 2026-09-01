@@ -52,7 +52,7 @@ DEFAULT_MEANINGLESS_NAMES = {"data", "result", "results"}
 
 class MeaninglessVarsLevel(Enum):
     CONSERVATIVE = auto()
-    PERMISSIVE = auto()
+    AGGRESSIVE = auto()
 
 
 def _function_name_describes_parameter(function_name: str, parameter_name: VariableName) -> bool:
@@ -526,7 +526,7 @@ class MeaninglessVarsCheck(BaseCheck):
                 "Whether meaningless-vars (TR1) reports a meaningless name "
                 "that has no suggested replacement. 'conservative' "
                 "(default) reports a name only when a rename can be "
-                "suggested; 'permissive' reports every meaningless name "
+                "suggested; 'aggressive' reports every meaningless name "
                 "regardless. --fix only ever applies a high-confidence "
                 "suggestion at either level."
             ),

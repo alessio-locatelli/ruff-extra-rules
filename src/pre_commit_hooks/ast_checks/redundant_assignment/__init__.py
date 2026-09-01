@@ -67,7 +67,7 @@ class RedundantAssignmentCheck(BaseCheck):
             help=(
                 "How eagerly redundant-assignment (TR5) reports a "
                 "violation. 'conservative' (default) flags only the "
-                "clearest, safest-to-inline cases; 'permissive' flags a "
+                "clearest, safest-to-inline cases; 'aggressive' flags a "
                 "broader range. Either way, --fix applies to whatever is "
                 "reported and mechanically safe to inline — the level "
                 "doesn't narrow autofix separately."

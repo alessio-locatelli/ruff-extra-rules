@@ -198,7 +198,7 @@ def test_unused_pytriage_keeps_a_used_suppression_clean(tmp_path: Path, capsys: 
     filepath.write_text("def example():\n    result = get_result()  # pytriage: TR1\n    return result\n")
 
     assert (
-        main([str(filepath), "--select", "meaningless-vars,unused-pytriage", "--meaningless-vars-level", "permissive"])
+        main([str(filepath), "--select", "meaningless-vars,unused-pytriage", "--meaningless-vars-level", "aggressive"])
         == 0
     )
     assert capsys.readouterr().err == ""
@@ -256,7 +256,7 @@ def test_unused_pytriage_uses_cached_suppression_usage(tmp_path: Path, monkeypat
     filepath = tmp_path / "module.py"
     filepath.write_text("def example():\n    result = get_result()  # pytriage: TR1\n    return result\n")
     cache_dir = tmp_path / "cache"
-    check_args = {"meaningless-vars": {"level": MeaninglessVarsLevel.PERMISSIVE}}
+    check_args = {"meaningless-vars": {"level": MeaninglessVarsLevel.AGGRESSIVE}}
     checks = load_checks(select={"meaningless-vars", "unused-pytriage"}, check_args=check_args)
 
     first = CheckOrchestrator(checks=checks, cache_dir=cache_dir)
