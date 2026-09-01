@@ -357,7 +357,7 @@ def test_check_identity_prefilter_and_fix_contract() -> None:
     assert check.error_code == "TR10"
     assert check.default_enabled is True
     assert check.cacheable is True
-    assert set(check.get_prefilter_pattern() or []) == {"StrEnum", "IntEnum", ".value"}
+    assert check.get_prefilter_pattern() == [".value"]
     assert check.fix(Path("test.py"), violations, source, tree).outcomes == (FixOutcome.DECLINED,)
 
 
