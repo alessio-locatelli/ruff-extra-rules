@@ -6,6 +6,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-01
+
 ### Added
 
 - `redundant-dict-get` (TR9) reports local `.get()` calls whose key presence is already proven. It is report-only.
