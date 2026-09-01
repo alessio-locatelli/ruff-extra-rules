@@ -105,15 +105,15 @@ repos:
           ]
 
   - repo: https://github.com/alessio-locatelli/ruff-extra-rules
-    rev: v0.2.2
+    rev: v0.3.0
     hooks:
       - id: ruff-extra-rules
         exclude: ^tests/fixtures/
         args:
           [
             --fix,
-            --meaningless-vars-level=permissive,
-            --redundant-assignment-level=permissive,
+            --meaningless-vars-level=aggressive,
+            --redundant-assignment-level=aggressive,
           ]
 
   - repo: https://github.com/Yelp/detect-secrets
