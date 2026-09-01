@@ -61,6 +61,30 @@ def _check(source: str) -> CheckResult:
             (
                 "from enum import StrEnum\n\n"
                 "class State(StrEnum):\n"
+                "    OPEN = 'open'\n"
+                "    CLOSED = 'closed'\n\n"
+                "State.OPEN._value_ = 'changed'\n"
+                "value = State.CLOSED.value\n"
+            ),
+            ["State.CLOSED.value"],
+        ),
+        (
+            (
+                "from enum import StrEnum\n\n"
+                "class Other:\n"
+                "    class OPEN:\n"
+                "        _value_ = 'other'\n\n"
+                "class State(StrEnum):\n"
+                "    OPEN = 'open'\n\n"
+                "Other.OPEN._value_ = 'changed'\n"
+                "value = State.OPEN.value\n"
+            ),
+            ["State.OPEN.value"],
+        ),
+        (
+            (
+                "from enum import StrEnum\n\n"
+                "class State(StrEnum):\n"
                 "    OPEN = 'open'\n\n"
                 "class Container:\n"
                 "    State = object\n\n"
@@ -77,6 +101,8 @@ def _check(source: str) -> CheckResult:
         "qualified-auto",
         "function-local-enum",
         "annotated-runtime-value",
+        "unmodified-member-after-value-rebinding",
+        "unrelated-member-value-rebinding",
         "method-skips-class-binding",
     ],
 )
@@ -258,6 +284,21 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
             "from enum import StrEnum\n\n"
             "class State(StrEnum):\n"
             "    OPEN = 'open'\n\n"
+            "    def __init__(self, value):\n"
+            "        self._value_ = 'changed'\n\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n\n"
+            "State.OPEN._value_ = 'changed'\n"
+            "value = State.OPEN.value\n"
+        ),
+        (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n\n"
             "def read():\n"
             "    State = object\n"
             "    return State.OPEN.value\n"
@@ -293,6 +334,8 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
         "type-annotation-and-alias",
         "nested-class-namespace",
         "custom-new",
+        "custom-init",
+        "member-value-rebinding",
         "local-shadowing",
         "type-parameter-shadowing",
     ],
