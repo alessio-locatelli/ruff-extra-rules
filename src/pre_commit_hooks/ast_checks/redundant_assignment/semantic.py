@@ -396,37 +396,19 @@ def report_reason(
     argument_echo_reason = _argument_echo_reason(lifecycle)
     is_argument_echo = argument_echo_reason is not None
 
-    if assignment.in_loop:
-        return None
-
-    if assignment.in_try:
-        return None
-
-    if assignment.has_comment_above:
-        return None
-
-    if assignment.has_inline_comment and not allow_inline_suppression:
-        return None
-
-    if assignment.in_global_scope and not assignment.var_name.startswith("_"):
-        return None
-
-    if assignment.var_name.startswith("__") and assignment.var_name.endswith("__"):
-        return None
-
-    if assignment.rhs_has_await:
-        return None
-
-    if _would_exceed_line_length(lifecycle):
-        return None
-
-    if isinstance(assignment.rhs_node, ast.IfExp):
-        return None
-
-    if _would_require_parentheses(assignment.rhs_node):
-        return None
-
-    if _contains_nondeterministic_call(assignment.rhs_node):
+    if (
+        assignment.in_loop
+        or assignment.in_try
+        or assignment.has_comment_above
+        or (assignment.has_inline_comment and not allow_inline_suppression)
+        or (assignment.in_global_scope and not assignment.var_name.startswith("_"))
+        or (assignment.var_name.startswith("__") and assignment.var_name.endswith("__"))
+        or assignment.rhs_has_await
+        or _would_exceed_line_length(lifecycle)
+        or isinstance(assignment.rhs_node, ast.IfExp)
+        or _would_require_parentheses(assignment.rhs_node)
+        or _contains_nondeterministic_call(assignment.rhs_node)
+    ):
         return None
 
     if not is_argument_echo and _is_named_constant_pattern(assignment.var_name, assignment.rhs_node):
