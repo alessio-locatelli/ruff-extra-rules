@@ -6,11 +6,17 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-06
+
 ### Added
 
 - Add TR10, `redundant-enum-value`, which reports direct runtime `.value` accesses on directly declared members of
   local `StrEnum` and `IntEnum` classes without mixins, custom `__getattribute__` or `__str__` behavior or construction, later `.value` or
   member `_value_` rebindings, ambiguous name resolution, or unproven member values.
+
+### Fixed
+
+- Git search output from pre-commit checks is now consistently uncolored, improving readability and compatibility in automated environments.
 
 ## [0.3.0] - 2026-09-01
 
