@@ -1462,6 +1462,44 @@ def test_argument_echo_reporting(source: str, var_name: str, *, reported: bool) 
         assert all(var_name not in v.message for v in violations)
 
 
+@pytest.mark.parametrize(
+    ("source", "expected_message"),
+    [
+        (
+            """
+def to_vcr_cassette_dicts_by_host(responses):
+    return responses
+
+
+def to_vcr_cassettes_by_host(cache):
+    responses = cache.responses.values()
+    return to_vcr_cassette_dicts_by_host(responses)
+""",
+            (
+                "Redundant assignment 'responses': its only use passes it to a parameter also named "
+                "'responses'. Consider inlining the value. Or add '# pytriage: TR5' to suppress."
+            ),
+        ),
+        (
+            """
+def to_vcr_cassettes_by_host(cache):
+    responses = cache.responses.values()
+    return write_cassette(responses=responses)
+""",
+            (
+                "Redundant assignment 'responses': its only use passes it as the keyword argument "
+                "'responses'. Consider inlining the value. Or add '# pytriage: TR5' to suppress."
+            ),
+        ),
+    ],
+    ids=["positional-same-named-parameter", "same-named-keyword"],
+)
+def test_argument_echo_message_explains_reason(source: str, expected_message: str) -> None:
+    violations = _check(source)
+
+    assert [violation.message for violation in violations] == [expected_message]
+
+
 def test_annotated_assignment_tracked() -> None:
     source = """
 def example():
