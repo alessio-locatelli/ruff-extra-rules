@@ -11,6 +11,14 @@ class AggressivenessLevel(Enum):
     AGGRESSIVE = auto()
 
 
+class ReportReason(Enum):
+    IMMEDIATE_SINGLE_USE = auto()
+    SINGLE_USE = auto()
+    LITERAL_IDENTITY = auto()
+    KEYWORD_ARGUMENT_ECHO = auto()
+    POSITIONAL_ARGUMENT_ECHO = auto()
+
+
 TRANSFORMATIVE_VERBS = {
     "formatted",
     "parsed",
@@ -365,79 +373,86 @@ def _is_named_string_constant_pattern(var_name: str, rhs_node: ast.expr) -> bool
     return var_name.lstrip("_").isupper()
 
 
-def _is_argument_echo(lifecycle: VariableLifecycle) -> bool:
-    return lifecycle.is_single_use and (
-        lifecycle.uses[0].is_keyword_argument_echo or lifecycle.uses[0].is_positional_argument_echo
-    )
+def _argument_echo_reason(lifecycle: VariableLifecycle) -> ReportReason | None:
+    if not lifecycle.is_single_use:
+        return None
+
+    use = lifecycle.uses[0]
+    if use.is_keyword_argument_echo:
+        return ReportReason.KEYWORD_ARGUMENT_ECHO
+    if use.is_positional_argument_echo:
+        return ReportReason.POSITIONAL_ARGUMENT_ECHO
+    return None
 
 
-def should_report_violation(
+def report_reason(
     lifecycle: VariableLifecycle,
     pattern: PatternType,
     level: AggressivenessLevel = AggressivenessLevel.CONSERVATIVE,
     *,
     allow_inline_suppression: bool = False,
-) -> bool:
+) -> ReportReason | None:
     assignment = lifecycle.assignment
-    is_argument_echo = _is_argument_echo(lifecycle)
+    argument_echo_reason = _argument_echo_reason(lifecycle)
+    is_argument_echo = argument_echo_reason is not None
 
     if assignment.in_loop:
-        return False
+        return None
 
     if assignment.in_try:
-        return False
+        return None
 
     if assignment.has_comment_above:
-        return False
+        return None
 
     if assignment.has_inline_comment and not allow_inline_suppression:
-        return False
+        return None
 
     if assignment.in_global_scope and not assignment.var_name.startswith("_"):
-        return False
+        return None
 
     if assignment.var_name.startswith("__") and assignment.var_name.endswith("__"):
-        return False
+        return None
 
     if assignment.rhs_has_await:
-        return False
+        return None
 
     if _would_exceed_line_length(lifecycle):
-        return False
+        return None
 
     if isinstance(assignment.rhs_node, ast.IfExp):
-        return False
+        return None
 
     if _would_require_parentheses(assignment.rhs_node):
-        return False
+        return None
 
     if _contains_nondeterministic_call(assignment.rhs_node):
-        return False
+        return None
 
     if not is_argument_echo and _is_named_constant_pattern(assignment.var_name, assignment.rhs_node):
-        return False
+        return None
 
     if not assignment.in_control_flow and lifecycle.uses and all(use.in_control_flow for use in lifecycle.uses):
-        return False
+        return None
 
     if assignment.in_control_flow and lifecycle.uses and all(not use.in_control_flow for use in lifecycle.uses):
-        return False
+        return None
 
     if lifecycle.uses and all(use.in_comprehension for use in lifecycle.uses):
-        return False
+        return None
 
-    if is_argument_echo:
-        return True
+    if argument_echo_reason is not None:
+        return argument_echo_reason
 
     if (
         level is AggressivenessLevel.CONSERVATIVE
         and isinstance(assignment.rhs_node, ast.Call)
         and not _is_generic_call_result_name(assignment.var_name, assignment.rhs_node)
     ):
-        return False
+        return None
 
     if assignment.in_global_scope and _is_named_string_constant_pattern(assignment.var_name, assignment.rhs_node):
-        return False
+        return None
 
     semantic_score = calculate_semantic_value(
         var_name=assignment.var_name,
@@ -446,7 +461,10 @@ def should_report_violation(
         has_type_annotation=assignment.has_type_annotation,
     )
 
-    return semantic_score <= _report_score_ceiling(level, pattern)
+    if semantic_score > _report_score_ceiling(level, pattern):
+        return None
+
+    return ReportReason[pattern.name]
 
 
 _GENERIC_CALL_RESULT_NAMES = frozenset(

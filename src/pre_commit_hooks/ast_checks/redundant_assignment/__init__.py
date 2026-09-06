@@ -19,7 +19,7 @@ from pre_commit_hooks.ast_checks._options import EnumOption
 
 from .analysis import VariableTracker, detect_redundancy
 from .autofix import RedundantAssignmentFixData, apply_fixes
-from .semantic import AggressivenessLevel, should_autofix, should_report_violation
+from .semantic import AggressivenessLevel, ReportReason, report_reason, should_autofix
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -32,28 +32,34 @@ ERROR_CODE = "TR5"
 CHECK_ID = "redundant-assignment"
 
 
-def format_message(var_name: str, pattern_type: str) -> str:
+def format_message(var_name: str, reason: ReportReason) -> str:
     messages = {
-        "IMMEDIATE_SINGLE_USE": (
+        ReportReason.IMMEDIATE_SINGLE_USE: (
             f"Redundant assignment '{var_name}' used only once immediately "
             f"after. Consider inlining the value. Or add "
             f"'# pytriage: {ERROR_CODE}' to suppress."
         ),
-        "SINGLE_USE": (
+        ReportReason.SINGLE_USE: (
             f"Variable '{var_name}' assigned and used only once. "
             f"Consider inlining the expression. Or add "
             f"'# pytriage: {ERROR_CODE}' to suppress."
         ),
-        "LITERAL_IDENTITY": (
+        ReportReason.LITERAL_IDENTITY: (
             f"Identity assignment '{var_name}' is redundant. "
             f"Consider using literal directly. Or add "
             f"'# pytriage: {ERROR_CODE}' to suppress."
         ),
+        ReportReason.KEYWORD_ARGUMENT_ECHO: (
+            f"Redundant assignment '{var_name}': its only use passes it as the keyword argument "
+            f"'{var_name}'. Consider inlining the value. Or add '# pytriage: {ERROR_CODE}' to suppress."
+        ),
+        ReportReason.POSITIONAL_ARGUMENT_ECHO: (
+            f"Redundant assignment '{var_name}': its only use passes it to a parameter "
+            f"also named '{var_name}'. Consider inlining the value. Or add "
+            f"'# pytriage: {ERROR_CODE}' to suppress."
+        ),
     }
-    return messages.get(
-        pattern_type,
-        f"Redundant assignment '{var_name}'. Or add '# pytriage: {ERROR_CODE}' to suppress.",
-    )
+    return messages[reason]
 
 
 class RedundantAssignmentCheck(BaseCheck):
@@ -146,12 +152,13 @@ class RedundantAssignmentCheck(BaseCheck):
                 self.error_code,
                 (lifecycle.assignment.line,),
             )
-            if not should_report_violation(
+            reason = report_reason(
                 lifecycle,
                 pattern,
                 level=self._level,
                 allow_inline_suppression=assignment_suppression is not None,
-            ):
+            )
+            if reason is None:
                 continue
 
             if record_suppression_usage_if_ignored(
@@ -167,7 +174,7 @@ class RedundantAssignmentCheck(BaseCheck):
 
             fixable = should_autofix(lifecycle, source_lines=tracker.source_lines)
 
-            message = format_message(lifecycle.assignment.var_name, pattern.name)
+            message = format_message(lifecycle.assignment.var_name, reason)
 
             assert len(lifecycle.uses) == 1
             single_use = lifecycle.uses[0]
