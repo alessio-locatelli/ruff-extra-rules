@@ -22,7 +22,7 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
     unreadable = [fp for fp in filepaths if not os.access(fp, os.R_OK)]
 
     try:
-        cmd = ["git", "grep", "--files-with-matches", "--null", "--untracked", "--no-exclude-standard"]
+        cmd = ["git", "grep", "--no-color", "--files-with-matches", "--null", "--untracked", "--no-exclude-standard"]
         if fixed_string:
             cmd.append("--fixed-strings")
         cmd.extend(["-e", pattern, "--"])
