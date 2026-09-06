@@ -11,6 +11,7 @@ from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
 )
 from pre_commit_hooks.ast_checks.redundant_assignment.semantic import (
     _adds_verbosity_or_context,
+    _argument_echo_reason,
     _contains_nondeterministic_call,
     _is_generic_call_result_name,
     _is_named_constant_pattern,
@@ -61,7 +62,7 @@ def _make_single_use_lifecycle(
     return VariableLifecycle(assignment=assignment, uses=[use])
 
 
-def _lifecycle_no_node(rhs_source: str, var_name: str = "x") -> VariableLifecycle:
+def _lifecycle_no_node(rhs_source: str, var_name: str = "x", *, has_use: bool = True) -> VariableLifecycle:
     rhs_node = ast.parse(rhs_source, mode="eval").body
     assignment = AssignmentInfo(
         var_name=var_name,
@@ -73,10 +74,8 @@ def _lifecycle_no_node(rhs_source: str, var_name: str = "x") -> VariableLifecycl
         scope_id=0,
         has_type_annotation=False,
     )
-    return VariableLifecycle(
-        assignment=assignment,
-        uses=[UsageInfo(var_name=var_name, line=2, col=0, stmt_index=1, context="unknown", scope_id=0)],
-    )
+    uses = [UsageInfo(var_name=var_name, line=2, col=0, stmt_index=1, context="unknown", scope_id=0)] if has_use else []
+    return VariableLifecycle(assignment=assignment, uses=uses)
 
 
 def _lifecycle_with_use_node(
@@ -115,6 +114,12 @@ def _lifecycle_with_use_node(
             )
         ],
     )
+
+
+def test_argument_echo_reason_requires_a_single_use() -> None:
+    lifecycle = _lifecycle_no_node("42", has_use=False)
+
+    assert _argument_echo_reason(lifecycle) is None
 
 
 @pytest.mark.parametrize(
