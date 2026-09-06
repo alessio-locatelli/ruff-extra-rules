@@ -6,6 +6,12 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-06
+
+### Fixed
+
+- `redundant-assignment` now explains why it reports a value passed to an argument with the same name, instead of presenting a generic immediate-use message.
+
 ## [0.4.0] - 2026-09-06
 
 ### Added
