@@ -52,7 +52,16 @@ _FAKE_SERVER_SCRIPT = textwrap.dedent(
         if method == "echo":
             write_message({"jsonrpc": "2.0", "id": message["id"], "result": message["params"]})
         elif method == "environment":
-            write_message({"jsonrpc": "2.0", "id": message["id"], "result": os.environ["TEST_LSP_ENV"]})
+            write_message(
+                {
+                    "jsonrpc": "2.0",
+                    "id": message["id"],
+                    "result": {
+                        "inherited": os.environ["TEST_LSP_INHERITED_ENV"],
+                        "overridden": os.environ["TEST_LSP_ENV"],
+                    },
+                }
+            )
         elif method == "boom":
             write_message(
                 {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32000, "message": "simulated failure"}}
@@ -112,8 +121,9 @@ def test_request_returns_result(tmp_path: Path) -> None:
 
 def test_explicit_environment_overrides_the_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TEST_LSP_ENV", "consumer")
+    monkeypatch.setenv("TEST_LSP_INHERITED_ENV", "inherited")
     with _spawn_fake_server(tmp_path, environment={"TEST_LSP_ENV": "isolated"}) as client:
-        assert client.request("environment", {}) == "isolated"
+        assert client.request("environment", {}) == {"inherited": "inherited", "overridden": "isolated"}
 
 
 def test_a_large_stderr_write_does_not_deadlock_the_server(tmp_path: Path) -> None:
