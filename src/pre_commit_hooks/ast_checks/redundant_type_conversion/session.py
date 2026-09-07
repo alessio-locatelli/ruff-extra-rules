@@ -367,16 +367,14 @@ def _run_self_test(session: RedundancySession, root: Path) -> None:
         raise CheckUnavailableError(_SELF_TEST_FAILED_HINT) from error
 
 
-def _run_self_test_in_temporary_directory(session: TySession, root: Path) -> None:
-    scratch_parent = root / ".cache" / "pre_commit_hooks" / "tri006-selftests"
-    scratch_parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=scratch_parent, prefix="tri006-selftest-") as scratch_dir:
+def _run_self_test_in_temporary_directory() -> None:
+    with tempfile.TemporaryDirectory(prefix="tri006-selftest-") as scratch_dir:
         scratch_root = Path(scratch_dir)
+        session = TySession(root=scratch_root)
         try:
             _run_self_test(session, scratch_root)
         finally:
-            session.close_file(scratch_root / "redundant_control.py")
-            session.close_file(scratch_root / "necessary_control.py")
+            session.close()
 
 
 _session: CandidateSession | None = None
@@ -408,7 +406,7 @@ def _acquire_session() -> CandidateSession:
 def _local_session() -> TySession:
     session = TySession(root=Path.cwd())
     try:
-        _run_self_test_in_temporary_directory(session, Path.cwd())
+        _run_self_test_in_temporary_directory()
     except BaseException:
         session.close()
         raise

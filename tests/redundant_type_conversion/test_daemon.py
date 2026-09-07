@@ -1251,10 +1251,19 @@ def test_spawn_daemon_raises_os_error_on_an_unexpected_startup_line(
         _spawn_daemon(tmp_path)
 
 
-def test_self_test_passes_with_the_real_installed_ty(tmp_path: Path) -> None:
-    session = session_module.TySession(root=tmp_path, keep_open=True)
+def test_self_test_passes_with_the_real_installed_ty() -> None:
+    daemon_module._self_test()
+
+
+def test_self_test_ignores_a_consumers_ty_source_scope(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.ty.src]\ninclude = ["src", "app"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    session = session_module._local_session()
     try:
-        daemon_module._self_test(session, tmp_path)
+        assert session._root == tmp_path
     finally:
         session.close()
 
