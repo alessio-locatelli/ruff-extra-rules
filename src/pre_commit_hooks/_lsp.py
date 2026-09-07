@@ -114,7 +114,7 @@ class LSPClient:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env={**os.environ, **environment} if environment else None,
+            env=os.environ | environment if environment else None,
         )
         self._next_id = 0
         self._pending: dict[int, queue.Queue[dict[str, Any]]] = {}
