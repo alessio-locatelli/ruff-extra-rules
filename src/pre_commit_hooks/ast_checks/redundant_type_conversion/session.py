@@ -162,7 +162,7 @@ class TySession:
         "_root",
     )
 
-    def __init__(self, *, root: Path, keep_open: bool = False) -> None:
+    def __init__(self, *, root: Path, keep_open: bool = False, configuration_file: Path | None = None) -> None:
         self._root = root.resolve()
         self._keep_open = keep_open
         self._cached_redundancies: dict[tuple[str, str], tuple[bytes, list[Redundancy]]] = {}
@@ -171,7 +171,11 @@ class TySession:
         self._dirty_uris: set[str] = set()
         self._dirty_uris_lock = threading.Lock()
         self._last_reconciled_digests: dict[str, bytes] = {}
-        self._client = _spawn(root, on_notification=self._on_notification if keep_open else None)
+        self._client = _spawn(
+            root,
+            configuration_file=configuration_file,
+            on_notification=self._on_notification if keep_open else None,
+        )
         self._open_versions: dict[str, int] = {}
 
     def _is_within_root(self, filepath: Path) -> bool:
@@ -329,9 +333,15 @@ class TySession:
         self._client.close()
 
 
-def _spawn(root: Path, *, on_notification: Callable[[str, dict[str, Any]], None] | None = None) -> LSPClient:
+def _spawn(
+    root: Path,
+    *,
+    configuration_file: Path | None = None,
+    on_notification: Callable[[str, dict[str, Any]], None] | None = None,
+) -> LSPClient:
     try:
-        client = LSPClient(_TY_COMMAND, cwd=root, on_notification=on_notification)
+        environment = {"TY_CONFIG_FILE": str(configuration_file)} if configuration_file is not None else None
+        client = LSPClient(_TY_COMMAND, cwd=root, environment=environment, on_notification=on_notification)
     except OSError as error:
         raise CheckUnavailableError(_INSTALL_HINT) from error
 
@@ -370,7 +380,9 @@ def _run_self_test(session: RedundancySession, root: Path) -> None:
 def _run_self_test_in_temporary_directory() -> None:
     with tempfile.TemporaryDirectory(prefix="tri006-selftest-") as scratch_dir:
         scratch_root = Path(scratch_dir)
-        session = TySession(root=scratch_root)
+        configuration_file = scratch_root / "ty.toml"
+        configuration_file.touch()
+        session = TySession(root=scratch_root, configuration_file=configuration_file)
         try:
             _run_self_test(session, scratch_root)
         finally:

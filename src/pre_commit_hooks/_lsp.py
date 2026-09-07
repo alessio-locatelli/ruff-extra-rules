@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import subprocess
 import threading
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
     from typing import IO, Self
 
@@ -104,6 +105,7 @@ class LSPClient:
         command: Sequence[str],
         *,
         cwd: Path,
+        environment: Mapping[str, str] | None = None,
         on_notification: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
         self._process = subprocess.Popen(  # noqa: S603
@@ -112,6 +114,7 @@ class LSPClient:
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            env={**os.environ, **environment} if environment else None,
         )
         self._next_id = 0
         self._pending: dict[int, queue.Queue[dict[str, Any]]] = {}
