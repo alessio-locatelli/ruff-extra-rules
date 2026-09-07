@@ -6,6 +6,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-07
+
 ### Fixed
 
 - `redundant-type-conversion` now runs its `ty` compatibility check in an isolated workspace, so a project's own
