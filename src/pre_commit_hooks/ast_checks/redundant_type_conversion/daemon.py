@@ -391,8 +391,8 @@ def _readline_with_timeout(stream: IO[bytes], timeout: float) -> bytes | None:
     return stream.readline()
 
 
-def _self_test(session: TySession, _root: Path) -> None:
-    _run_self_test_in_temporary_directory(session, _root)
+def _self_test() -> None:
+    _run_self_test_in_temporary_directory()
 
 
 def _detach_stdio() -> None:
@@ -553,7 +553,7 @@ def _serve(root: Path) -> None:
         return
 
     try:
-        _self_test(session, root)
+        _self_test()
     except (OSError, CheckUnavailableError) as error:
         session.close()
         print(f"FAILED: self-test failed: {error}", flush=True)

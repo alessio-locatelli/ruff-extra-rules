@@ -167,15 +167,12 @@ def test_get_session_returns_the_same_instance_across_calls(monkeypatch: pytest.
         def close(self) -> None:
             return
 
-        def close_file(self, _filepath: Path) -> None:
-            return
-
     def _raise_os_error(_root: Path) -> None:
         msg = "simulated: no daemon reachable"
         raise OSError(msg)
 
     monkeypatch.setattr(daemon_module, "connect", _raise_os_error)
-    monkeypatch.setattr(session_module, "_run_self_test", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(session_module, "_run_self_test_in_temporary_directory", lambda: None)
     monkeypatch.setattr(session_module, "TySession", _FakeTySession)
 
     session = get_session()
@@ -194,20 +191,17 @@ def test_local_session_closes_when_its_self_test_fails(tmp_path: Path, monkeypat
         def close(self) -> None:
             calls.append("close")
 
-        def close_file(self, _filepath: Path) -> None:
-            calls.append("close_file")
-
     def fail_self_test(*_args: object, **_kwargs: object) -> None:
         raise CheckUnavailableError("simulated: self-test failure")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(session_module, "TySession", _FakeTySession)
-    monkeypatch.setattr(session_module, "_run_self_test", fail_self_test)
+    monkeypatch.setattr(session_module, "_run_self_test_in_temporary_directory", fail_self_test)
 
     with pytest.raises(CheckUnavailableError, match="self-test failure"):
         session_module._local_session()
 
-    assert calls == ["close_file", "close_file", "close"]
+    assert calls == ["close"]
 
 
 class _FakeNotifiableSession:

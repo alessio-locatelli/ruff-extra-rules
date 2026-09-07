@@ -6,6 +6,11 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Fixed
+
+- `redundant-type-conversion` now runs its `ty` compatibility check in an isolated workspace, so a project's own
+  `ty` source-scope configuration cannot make the hook report a false compatibility failure.
+
 ## [0.4.1] - 2026-09-06
 
 ### Fixed
