@@ -11,13 +11,14 @@ import pytest
 from pre_commit_hooks._lsp import LSPClient, LSPError, LSPTimeoutError, byte_col_to_utf16_col, read_framed_message
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from pathlib import Path
     from typing import Any
 
 _FAKE_SERVER_SCRIPT = textwrap.dedent(
     r"""
     import json
+    import os
     import sys
     import time
 
@@ -50,6 +51,8 @@ _FAKE_SERVER_SCRIPT = textwrap.dedent(
         method = message.get("method")
         if method == "echo":
             write_message({"jsonrpc": "2.0", "id": message["id"], "result": message["params"]})
+        elif method == "environment":
+            write_message({"jsonrpc": "2.0", "id": message["id"], "result": os.environ["TEST_LSP_ENV"]})
         elif method == "boom":
             write_message(
                 {"jsonrpc": "2.0", "id": message["id"], "error": {"code": -32000, "message": "simulated failure"}}
@@ -87,14 +90,30 @@ _FAKE_SERVER_SCRIPT = textwrap.dedent(
 )
 
 
-def _spawn_fake_server(cwd: Path, *, on_notification: Callable[[str, dict[str, Any]], None] | None = None) -> LSPClient:
-    return LSPClient([sys.executable, "-c", _FAKE_SERVER_SCRIPT], cwd=cwd, on_notification=on_notification)
+def _spawn_fake_server(
+    cwd: Path,
+    *,
+    environment: Mapping[str, str] | None = None,
+    on_notification: Callable[[str, dict[str, Any]], None] | None = None,
+) -> LSPClient:
+    return LSPClient(
+        [sys.executable, "-c", _FAKE_SERVER_SCRIPT],
+        cwd=cwd,
+        environment=environment,
+        on_notification=on_notification,
+    )
 
 
 def test_request_returns_result(tmp_path: Path) -> None:
     with _spawn_fake_server(tmp_path) as client:
         response = client.request("echo", {"hello": "world"})
         assert response == {"hello": "world"}
+
+
+def test_explicit_environment_overrides_the_parent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TEST_LSP_ENV", "consumer")
+    with _spawn_fake_server(tmp_path, environment={"TEST_LSP_ENV": "isolated"}) as client:
+        assert client.request("environment", {}) == "isolated"
 
 
 def test_a_large_stderr_write_does_not_deadlock_the_server(tmp_path: Path) -> None:

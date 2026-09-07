@@ -6,6 +6,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -1260,6 +1261,8 @@ def test_self_test_ignores_a_consumers_ty_source_scope(tmp_path: Path, monkeypat
         '[tool.ty.src]\ninclude = ["src", "app"]\n',
         encoding="utf-8",
     )
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.setattr(tempfile, "tempdir", None)
     monkeypatch.chdir(tmp_path)
     session = session_module._local_session()
     try:
