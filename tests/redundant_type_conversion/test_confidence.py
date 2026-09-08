@@ -132,6 +132,8 @@ def test_conservative_rejects_a_literal_of_a_different_scalar(hover_text: str, c
         ("bytes", "list"),
         ("memoryview", "tuple"),
         ("str & ~AlwaysFalsy", "list"),
+        ("bytes", "bytearray"),
+        ("memoryview", "bytearray"),
     ],
     ids=[
         "iterable-protocol",
@@ -144,6 +146,8 @@ def test_conservative_rejects_a_literal_of_a_different_scalar(hover_text: str, c
         "bytes-is-iterable",
         "memoryview-is-iterable",
         "narrowed-intersection-type",
+        "bytes-to-bytearray",
+        "memoryview-to-bytearray",
     ],
 )
 def test_aggressive_accepts_a_structurally_related_non_union_type(hover_text: str, constructor: str) -> None:
@@ -158,6 +162,7 @@ def test_aggressive_accepts_a_structurally_related_non_union_type(hover_text: st
         ("ExtendedClientResponseError", "str"),
         ("SomeCustomClass", "dict"),
         ("int", "list"),
+        ("str", "bytearray"),
     ],
     ids=[
         "unrelated-class",
@@ -165,6 +170,7 @@ def test_aggressive_accepts_a_structurally_related_non_union_type(hover_text: st
         "unrelated-class-as-str",
         "unrelated-as-dict",
         "scalar-as-list",
+        "str-needs-an-encoding-for-bytearray",
     ],
 )
 def test_aggressive_rejects_a_structurally_unrelated_non_union_type(hover_text: str, constructor: str) -> None:

@@ -129,6 +129,8 @@ _SCALAR_LOOSE_HEADS: dict[str, frozenset[str]] = {
 def _loose_match(hover_text: str, constructor: str) -> bool:
     head = hover_text.split(" & ", 1)[0].split("[", 1)[0]
     if constructor in _ITERABLE_CONSTRUCTORS:
+        if constructor == "bytearray" and head == "str":
+            return False  # bytearray(a_str) needs an explicit encoding; a bare str isn't a valid single argument
         return head in _ITERABLE_PROTOCOL_HEADS
     if constructor == "dict":
         return head in _MAPPING_PROTOCOL_HEADS

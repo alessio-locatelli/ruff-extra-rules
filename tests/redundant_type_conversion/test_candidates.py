@@ -432,6 +432,7 @@ def test_a_candidate_reachable_from_a_string_interpolation_is_marked(source: str
         "y = tuple(x)\nother = 5\nz = f'{other}'\n",
         "obj.attr = tuple(x)\nz = f'{obj.attr}'\n",
         "y = tuple(x)\na = y\nb = y\nc = a\nc = b\nprint(c)\n",
+        "y = tuple(x)\nRenderer().format(y)\n",
     ],
     ids=[
         "no-interpolation-at-all",
@@ -441,6 +442,7 @@ def test_a_candidate_reachable_from_a_string_interpolation_is_marked(source: str
         "an-unrelated-name-is-interpolated-instead",
         "assigned-to-a-non-name-target",
         "diamond-shaped-alias-graph-with-no-interpolation",
+        "format-method-on-a-non-string-receiver",
     ],
 )
 def test_a_candidate_is_not_marked_reachable_from_a_string_interpolation_otherwise(source: str) -> None:
