@@ -120,11 +120,55 @@ def test_conservative_rejects_a_literal_of_a_different_scalar(hover_text: str, c
 
 
 @pytest.mark.parametrize(
-    "hover_text",
-    ["Iterable[str]", "list[int]", "dict[str, int]", 'Literal["hi"]', "SomeCustomClass"],
+    ("hover_text", "constructor"),
+    [
+        ("Iterable[str]", "list"),
+        ("list[int]", "list"),
+        ("dict[str, int]", "list"),
+        ("frozenset[int]", "set"),
+        ("Mapping[str, int]", "dict"),
+        ("KeysView[str]", "set"),
+        ("str", "list"),
+        ("bytes", "list"),
+        ("memoryview", "tuple"),
+        ("str & ~AlwaysFalsy", "list"),
+    ],
+    ids=[
+        "iterable-protocol",
+        "exact-generic",
+        "dict-is-iterable",
+        "frozenset-to-set",
+        "mapping-protocol",
+        "keysview",
+        "str-is-iterable",
+        "bytes-is-iterable",
+        "memoryview-is-iterable",
+        "narrowed-intersection-type",
+    ],
 )
-def test_aggressive_accepts_any_resolved_non_union_type(hover_text: str) -> None:
-    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, "list") is True
+def test_aggressive_accepts_a_structurally_related_non_union_type(hover_text: str, constructor: str) -> None:
+    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, constructor) is True
+
+
+@pytest.mark.parametrize(
+    ("hover_text", "constructor"),
+    [
+        ("SomeCustomClass", "list"),
+        ('Literal["hi"]', "list"),
+        ("ExtendedClientResponseError", "str"),
+        ("SomeCustomClass", "dict"),
+        ("int", "list"),
+    ],
+    ids=[
+        "unrelated-class",
+        "literal-has-no-iterable-relationship",
+        "unrelated-class-as-str",
+        "unrelated-as-dict",
+        "scalar-as-list",
+    ],
+)
+def test_aggressive_rejects_a_structurally_unrelated_non_union_type(hover_text: str, constructor: str) -> None:
+    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, constructor) is False
 
 
 @pytest.mark.parametrize(
@@ -141,12 +185,12 @@ def test_aggressive_rejects_a_union_with_a_non_matching_member(hover_text: str, 
 
 
 @pytest.mark.parametrize(
-    "hover_text",
-    ["Iterable[str | int]", "Mapping[str, int | float]", "Callable[[int | str], None]"],
-    ids=["union-in-generic-arg", "union-in-mapping-value", "union-in-callable-arg"],
+    ("hover_text", "constructor"),
+    [("Iterable[str | int]", "list"), ("Sequence[int | str]", "list"), ("Mapping[str, int | float]", "dict")],
+    ids=["union-in-generic-arg", "union-in-sequence-arg", "union-in-mapping-value"],
 )
-def test_aggressive_does_not_split_a_union_nested_inside_brackets(hover_text: str) -> None:
-    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, "list") is True
+def test_aggressive_does_not_split_a_union_nested_inside_brackets(hover_text: str, constructor: str) -> None:
+    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, constructor) is True
 
 
 @pytest.mark.parametrize(

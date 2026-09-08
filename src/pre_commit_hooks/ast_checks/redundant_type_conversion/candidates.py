@@ -18,6 +18,7 @@ class Candidate:
     arg_end_col: int
     wrapped_in_len: bool
     in_equality_comparison: bool
+    used_in_string_interpolation: bool
 
 
 def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidate]:
@@ -37,6 +38,7 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
             arg_end_col=raw.arg_end_col,
             wrapped_in_len=id(raw.call) in scan.len_wrapped,
             in_equality_comparison=id(raw.call) in scan.equality_compared,
+            used_in_string_interpolation=id(raw.call) in scan.interpolated,
         )
         for raw in scan.raw_candidates
         if raw.constructor in final_eligible
@@ -66,7 +68,81 @@ class _Scan:
     shadowed: frozenset[str]
     len_wrapped: frozenset[int]
     equality_compared: frozenset[int]
+    interpolated: frozenset[int]
     raw_candidates: list[_RawCandidate]
+
+
+def _is_string_literal(value: ast.expr) -> bool:
+    return (isinstance(value, ast.Constant) and isinstance(value.value, str)) or isinstance(value, ast.JoinedStr)
+
+
+def _simple_bindings(node: ast.AST) -> list[tuple[ast.Name, ast.expr]]:
+    if isinstance(node, ast.Assign):
+        return [(target, node.value) for target in node.targets if isinstance(target, ast.Name)]
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
+        return [(node.target, node.value)]
+    if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+        return [(node.target, node.value)]
+    return []
+
+
+def _alias_closure(start_names: set[str], alias_edges: dict[str, set[str]]) -> set[str]:
+    seen: set[str] = set()
+    pending = list(start_names)
+    while pending:
+        name = pending.pop()
+        if name in seen:
+            continue
+        seen.add(name)
+        pending.extend(alias_edges.get(name, ()))
+    return seen
+
+
+def _collect_bindings(tree: ast.Module) -> tuple[dict[int, set[str]], dict[str, set[str]], frozenset[str]]:
+    call_target_names: dict[int, set[str]] = {}
+    alias_edges: dict[str, set[str]] = {}
+    string_literal_names: set[str] = set()
+    for node in ast.walk(tree):
+        for target, value in _simple_bindings(node):
+            for sub in ast.walk(value):
+                if isinstance(sub, ast.Call):
+                    call_target_names.setdefault(id(sub), set()).add(target.id)
+            if isinstance(value, ast.Name):
+                alias_edges.setdefault(value.id, set()).add(target.id)
+            if _is_string_literal(value):
+                string_literal_names.add(target.id)
+    return call_target_names, alias_edges, frozenset(_alias_closure(string_literal_names, alias_edges))
+
+
+def _looks_like_a_format_string(left: ast.expr, string_literal_names: frozenset[str]) -> bool:
+    if _is_string_literal(left):
+        return True
+    return isinstance(left, ast.Name) and left.id in string_literal_names
+
+
+def _interpolated_exprs(node: ast.AST, string_literal_names: frozenset[str]) -> list[ast.expr]:
+    if isinstance(node, ast.JoinedStr):
+        return [value.value for value in node.values if isinstance(value, ast.FormattedValue)]
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "format":
+        return [*node.args, *(keyword.value for keyword in node.keywords)]
+    if (
+        isinstance(node, ast.BinOp)
+        and isinstance(node.op, ast.Mod)
+        and _looks_like_a_format_string(node.left, string_literal_names)
+    ):
+        right = node.right
+        if isinstance(right, ast.Tuple):
+            return right.elts
+        if isinstance(right, ast.Dict):
+            return [item for item in (*right.keys, *right.values) if item is not None]
+        return [right]
+    return []
+
+
+def _an_alias_is_interpolated(
+    target_names: set[str], alias_edges: dict[str, set[str]], interpolated_names: set[str]
+) -> bool:
+    return bool(_alias_closure(target_names, alias_edges) & interpolated_names)
 
 
 def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
@@ -75,9 +151,19 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
     purepath_shadowed: set[str] = set()
     len_wrapped: set[int] = set()
     equality_compared: set[int] = set()
+    interpolated_names: set[str] = set()
+    interpolated_call_ids: set[int] = set()
     raw_candidates: list[_RawCandidate] = []
+    assign_target_names_for_value, alias_edges, string_literal_names = _collect_bindings(tree)
 
     for node in ast.walk(tree):
+        for interpolated_expr in _interpolated_exprs(node, string_literal_names):
+            for sub in ast.walk(interpolated_expr):
+                if isinstance(sub, ast.Name):
+                    interpolated_names.add(sub.id)
+                elif isinstance(sub, ast.Call):
+                    interpolated_call_ids.add(id(sub))
+
         if isinstance(node, ast.ImportFrom):
             if any(alias.name == "*" for alias in node.names):
                 has_wildcard_import = True
@@ -136,11 +222,17 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
                     _mark_call_ids(operands[index], equality_compared)
                     _mark_call_ids(operands[index + 1], equality_compared)
 
+    interpolated = interpolated_call_ids | {
+        call_id
+        for call_id, target_names in assign_target_names_for_value.items()
+        if _an_alias_is_interpolated(target_names, alias_edges, interpolated_names)
+    }
     return _Scan(
         has_wildcard_import=has_wildcard_import,
         shadowed=frozenset(shadowed),
         len_wrapped=frozenset() if "len" in shadowed else frozenset(len_wrapped),
         equality_compared=(frozenset() if purepath_shadowed & PUREPATH_HOVER_NAMES else frozenset(equality_compared)),
+        interpolated=frozenset(interpolated),
         raw_candidates=raw_candidates,
     )
 

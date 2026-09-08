@@ -137,10 +137,10 @@ def test_check_reuses_a_cached_result_for_identical_source(monkeypatch: pytest.M
 
 
 def test_check_hedges_the_message_for_a_non_exact_aggressive_match(monkeypatch: pytest.MonkeyPatch) -> None:
-    source = "y = str({'a': [1]}) == 1\n"
+    source = "y = str(x)\n"
     session = FakeSession(
-        diagnostics_by_content={source: frozenset(), "y = {'a': [1]} == 1\n": frozenset()},
-        hover_by_position={(0, 17): "dict[str, list[int]]"},
+        diagnostics_by_content={source: frozenset(), "y = x\n": frozenset()},
+        hover_by_position={(0, 8): "LiteralString"},
     )
     _patch_session(monkeypatch, session)
 
@@ -151,7 +151,7 @@ def test_check_hedges_the_message_for_a_non_exact_aggressive_match(monkeypatch: 
     assert len(violations) == 1
     message = violations[0].message
     assert "already `str`" not in message
-    assert "dict[str, list[int]]" in message
+    assert "LiteralString" in message
     assert "not `str`" in message
     assert "pytriage: TR6" in message
 

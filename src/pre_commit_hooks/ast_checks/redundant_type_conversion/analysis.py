@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Protocol
 
 from pre_commit_hooks._lsp import LSPError
@@ -14,14 +15,25 @@ if TYPE_CHECKING:
     from .candidates import Candidate
     from .confidence import ConfidenceLevel
 
+logger = logging.getLogger("ast_checks")
+
 _SESSION_LOST_HINT = (
     "redundant-type-conversion (TR6) lost its connection to `ty` mid-run (the `ty server` process likely "
     "crashed or exited). Re-run to start a fresh session; if this keeps happening, try a different installed "
     "`ty` version. See docs/rules/redundant-type-conversion.md."
 )
 
+_OUT_OF_ROOT_HINT = (
+    "redundant-type-conversion (TR6) is skipping %s: it lies outside the `ty` session's own project root, so "
+    "`ty` cannot reliably report diagnostics for it -- treating every conversion in it as verified-redundant "
+    "would be unsound. Run this check from inside the project that owns the file. "
+    "See docs/rules/redundant-type-conversion.md."
+)
+
 
 class RedundancySession(Protocol):
+    def is_within_root(self, filepath: Path, /) -> bool: ...
+
     def open_or_update(self, filepath: Path, content: str, /) -> frozenset[tuple[object, ...]]: ...
 
     def hover(self, filepath: Path, line0: int, char_utf16: int, /) -> str | None: ...
@@ -34,6 +46,13 @@ class RedundancySession(Protocol):
 def _open_or_raise(session: RedundancySession, filepath: Path, content: str) -> frozenset[tuple[object, ...]]:
     try:
         return session.open_or_update(filepath, content)
+    except LSPError as error:
+        raise CheckUnavailableError(_SESSION_LOST_HINT) from error
+
+
+def _is_within_root_or_raise(session: RedundancySession, filepath: Path) -> bool:
+    try:
+        return session.is_within_root(filepath)
     except LSPError as error:
         raise CheckUnavailableError(_SESSION_LOST_HINT) from error
 
@@ -61,6 +80,10 @@ def decide_candidates(
     if not candidates:
         return []
 
+    if not _is_within_root_or_raise(session, filepath):
+        logger.warning(_OUT_OF_ROOT_HINT, filepath)
+        return []
+
     source_lines = split_lines_like_ast(source)
 
     redundant: list[RedundantConversion] = []
@@ -81,6 +104,9 @@ def decide_candidates(
                     continue
 
                 if candidate.in_equality_comparison and is_purepath_hover(hover_text):
+                    continue
+
+                if candidate.used_in_string_interpolation and not is_exact_match(hover_text, candidate.constructor):
                     continue
 
                 candidates_with_hovers.append((candidate, hover_text))

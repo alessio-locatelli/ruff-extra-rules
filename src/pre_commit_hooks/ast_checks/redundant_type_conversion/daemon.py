@@ -41,7 +41,7 @@ _CONNECT_TIMEOUT_SECONDS = 5.0
 _IDLE_TIMEOUT_SECONDS = 15 * 60
 _CLIENT_REQUEST_TIMEOUT_SECONDS = 60.0
 _STEADY_STATE_CALL_TIMEOUT_SECONDS = 60.0
-_PROTOCOL_VERSION = "4"
+_PROTOCOL_VERSION = "5"
 
 type RPCParameter = str | int | list[str] | list[Redundancy]
 
@@ -129,7 +129,7 @@ class RemoteTySession:
         self._rfile = sock.makefile("rb")
         self._wfile = sock.makefile("wb")
 
-    def _call(self, op: str, **params: RPCParameter) -> list[Any] | str | None:
+    def _call(self, op: str, **params: RPCParameter) -> list[Any] | str | bool | None:
         try:
             write_framed_message(self._wfile, {"op": op, **params})
             response = read_framed_message(self._rfile)
@@ -144,6 +144,11 @@ class RemoteTySession:
             raise LSPError(msg)
         return response.get("result")
 
+    def is_within_root(self, filepath: Path) -> bool:
+        is_within_root = self._call("is_within_root", filepath=_canonical_rpc_path(filepath))
+        assert isinstance(is_within_root, bool)
+        return is_within_root
+
     def open_or_update(self, filepath: Path, content: str) -> frozenset[tuple[Any, ...]]:
         raw_diagnostics = self._call("open_or_update", filepath=_canonical_rpc_path(filepath), content=content)
         assert isinstance(raw_diagnostics, list)
@@ -151,7 +156,7 @@ class RemoteTySession:
 
     def hover(self, filepath: Path, line0: int, char_utf16: int) -> str | None:
         hover_text = self._call("hover", filepath=_canonical_rpc_path(filepath), line0=line0, char_utf16=char_utf16)
-        assert not isinstance(hover_text, list)
+        assert not isinstance(hover_text, (list, bool))
         return hover_text
 
     @contextlib.contextmanager
@@ -410,6 +415,8 @@ def _detach_stdio() -> None:
 def _dispatch(message: dict[str, Any], session: PersistentSession) -> dict[str, Any]:
     op = message.get("op")
     try:
+        if op == "is_within_root":
+            return {"result": session.is_within_root(Path(message["filepath"]))}
         if op == "open_or_update":
             diagnostics = session.open_or_update(Path(message["filepath"]), message["content"])
             return {"result": list(diagnostics)}  # pytriage: TR6 -- frozenset isn't JSON-serializable

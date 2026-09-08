@@ -94,6 +94,20 @@ def test_decide_candidates_skips_the_recheck_entirely_when_hover_gate_fails() ->
     assert session.opened_content == [source]
 
 
+def test_decide_candidates_skips_a_file_outside_the_sessions_root(caplog: pytest.LogCaptureFixture) -> None:
+    source = "y = str(x)\n"
+    session = FakeSession(diagnostics_by_content={}, hover_by_position={}, within_root=False)
+    candidates = find_candidates(ast.parse(source), eligible_constructors(ConfidenceLevel.CONSERVATIVE))
+
+    redundant = decide_candidates(
+        session, Path("test.py"), candidates, source, level=ConfidenceLevel.CONSERVATIVE, ignored_lines=set()
+    )
+
+    assert redundant == []
+    assert session.opened_content == []
+    assert "outside the `ty` session's own project root" in caplog.text
+
+
 def test_decide_candidates_honors_ignored_lines_without_ever_opening_a_session() -> None:
     redundant, session = _decide(
         "y = str(x)\n",
@@ -200,7 +214,32 @@ def test_decide_candidates_still_flags_an_ordinary_conversion_used_in_an_equalit
     redundant, _session = _decide(
         source,
         diagnostics_by_content={source: frozenset(), "y = matches == [ignored]\n": frozenset()},
-        hover_by_position={(0, 26): "int"},
+        hover_by_position={(0, 26): "LiteralString"},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert len(redundant) == 1
+
+
+def test_decide_candidates_skips_a_non_exact_conversion_reachable_from_a_string_interpolation() -> None:
+    source = "y = tuple(x)\nsql = f'{y}'\n"
+    redundant, session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset()},
+        hover_by_position={(0, 10): "frozenset[int]"},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert redundant == []
+    assert session.opened_content == [source]
+
+
+def test_decide_candidates_still_flags_an_exact_match_reachable_from_a_string_interpolation() -> None:
+    source = "y = tuple(x)\nsql = f'{y}'\n"
+    redundant, _session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset(), "y = x\nsql = f'{y}'\n": frozenset()},
+        hover_by_position={(0, 10): "tuple[int]"},
         level=ConfidenceLevel.AGGRESSIVE,
     )
 
@@ -218,6 +257,24 @@ def test_decide_candidates_aggressive_includes_mutable_constructors() -> None:
 
     assert len(redundant) == 1
     assert redundant[0].candidate.constructor == "list"
+
+
+class _SessionRaisingFromIsWithinRoot(FakeSession):
+    __slots__ = ()
+
+    def is_within_root(self, _filepath: Path, /) -> bool:
+        raise LSPError("simulated ty crash")
+
+
+def test_decide_candidates_converts_a_lost_daemon_to_check_unavailable_error_during_the_root_check() -> None:
+    source = "y = str(x)\n"
+    session = _SessionRaisingFromIsWithinRoot(diagnostics_by_content={}, hover_by_position={})
+    candidates = find_candidates(ast.parse(source), eligible_constructors(ConfidenceLevel.CONSERVATIVE))
+
+    with pytest.raises(CheckUnavailableError, match="lost its connection to `ty`"):
+        decide_candidates(
+            session, Path("test.py"), candidates, source, level=ConfidenceLevel.CONSERVATIVE, ignored_lines=set()
+        )
 
 
 class _SessionRaisingFromOpenOrUpdate(FakeSession):

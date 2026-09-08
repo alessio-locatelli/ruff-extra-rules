@@ -478,6 +478,18 @@ def test_close_file_forgets_the_file_even_when_the_didclose_notification_fails(t
     assert uri not in session._open_versions
 
 
+def test_is_within_root_accepts_a_file_under_the_root(tmp_path: Path) -> None:
+    session = _session_with_stub_client(_StubLSPClient(), root=tmp_path)
+
+    assert session.is_within_root(tmp_path / "module.py") is True
+
+
+def test_is_within_root_rejects_a_file_outside_the_root(tmp_path: Path) -> None:
+    session = _session_with_stub_client(_StubLSPClient(), root=tmp_path / "repo")
+
+    assert session.is_within_root(tmp_path / "elsewhere.py") is False
+
+
 def test_record_direct_input_ignores_a_file_outside_root(tmp_path: Path) -> None:
     client = _StubLSPClient()
     session = _session_with_stub_client(client, keep_open=True, root=tmp_path / "repo")

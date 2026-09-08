@@ -80,6 +80,61 @@ def is_purepath_hover(hover_text: str) -> bool:
     return any(member in PUREPATH_HOVER_NAMES for member in _split_top_level_union(hover_text))
 
 
+_ITERABLE_CONSTRUCTORS = frozenset({"list", "tuple", "set", "frozenset", "bytearray"})
+
+# Names drawn from `collections.abc`/`typing` (plus the concrete builtins that satisfy them) that a
+# list/tuple/set/frozenset/bytearray conversion could plausibly be materializing or re-materializing.
+_ITERABLE_PROTOCOL_HEADS = frozenset(
+    {
+        "Iterable",
+        "Iterator",
+        "Collection",
+        "Reversible",
+        "Sequence",
+        "MutableSequence",
+        "AbstractSet",
+        "MutableSet",
+        "Set",
+        "FrozenSet",
+        "KeysView",
+        "ValuesView",
+        "ItemsView",
+        "list",
+        "tuple",
+        "set",
+        "frozenset",
+        "bytearray",
+        "range",
+        "deque",
+        "dict",
+        "Mapping",
+        "MutableMapping",
+        "str",
+        "bytes",
+        "memoryview",
+    }
+)
+
+_MAPPING_PROTOCOL_HEADS = frozenset({"Mapping", "MutableMapping", "dict", "ChainMap", "OrderedDict", "defaultdict"})
+
+_SCALAR_LOOSE_HEADS: dict[str, frozenset[str]] = {
+    "str": frozenset({"str", "LiteralString"}) | PUREPATH_HOVER_NAMES,
+    "bytes": frozenset({"bytes", "bytearray", "memoryview"}),
+    "int": frozenset({"int", "bool"}),
+    "float": frozenset({"float", "int"}),
+    "bool": frozenset({"bool"}),
+}
+
+
+def _loose_match(hover_text: str, constructor: str) -> bool:
+    head = hover_text.split(" & ", 1)[0].split("[", 1)[0]
+    if constructor in _ITERABLE_CONSTRUCTORS:
+        return head in _ITERABLE_PROTOCOL_HEADS
+    if constructor == "dict":
+        return head in _MAPPING_PROTOCOL_HEADS
+    return head in _SCALAR_LOOSE_HEADS.get(constructor, frozenset())
+
+
 def hover_passes_gate(hover_text: str | None, level: ConfidenceLevel, constructor: str) -> bool:
     if not hover_text or _is_unreliable(hover_text):
         return False
@@ -90,4 +145,4 @@ def hover_passes_gate(hover_text: str | None, level: ConfidenceLevel, constructo
     members = _split_top_level_union(hover_text)
     if len(members) > 1:
         return all(_exact_match(member, constructor) for member in members)
-    return True
+    return _loose_match(hover_text, constructor)
