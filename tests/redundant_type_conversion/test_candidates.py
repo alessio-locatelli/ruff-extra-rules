@@ -393,6 +393,9 @@ def test_importing_path_from_pathlib_itself_does_not_disable_the_equality_marker
         "y = [tuple(x)]\nz = f'{y}'\n",
         "y = {'k': tuple(x)}\nz = f'{y}'\n",
         "fmt = '%s'\nalias = fmt\ny = tuple(x)\nalias % y\n",
+        "obj.attr = tuple(x)\nz = f'{obj.attr}'\n",
+        "items[0] = tuple(x)\nz = f'{items}'\n",
+        "obj.attr = get_obj().other = tuple(x)\nz = f'{obj.attr}'\n",
     ],
     ids=[
         "direct-fstring-interpolation",
@@ -415,6 +418,9 @@ def test_importing_path_from_pathlib_itself_does_not_disable_the_equality_marker
         "conversion-nested-inside-an-assigned-list-literal",
         "conversion-nested-inside-an-assigned-dict-literal",
         "percent-formatting-through-an-aliased-named-format-string",
+        "assigned-to-an-attribute-then-fstring-interpolated",
+        "assigned-to-a-subscript-then-the-base-name-interpolated",
+        "chained-target-mixes-a-qualifying-and-a-non-qualifying-base",
     ],
 )
 def test_a_candidate_reachable_from_a_string_interpolation_is_marked(source: str) -> None:
@@ -430,7 +436,6 @@ def test_a_candidate_reachable_from_a_string_interpolation_is_marked(source: str
         "y = tuple(x)\nprint(y)\n",
         "y = tuple(x)\ncount % y\n",
         "y = tuple(x)\nother = 5\nz = f'{other}'\n",
-        "obj.attr = tuple(x)\nz = f'{obj.attr}'\n",
         "y = tuple(x)\na = y\nb = y\nc = a\nc = b\nprint(c)\n",
         "y = tuple(x)\nRenderer().format(y)\n",
     ],
@@ -440,7 +445,6 @@ def test_a_candidate_reachable_from_a_string_interpolation_is_marked(source: str
         "used-as-a-plain-call-argument",
         "percent-op-with-a-non-string-left-operand",
         "an-unrelated-name-is-interpolated-instead",
-        "assigned-to-a-non-name-target",
         "diamond-shaped-alias-graph-with-no-interpolation",
         "format-method-on-a-non-string-receiver",
     ],
