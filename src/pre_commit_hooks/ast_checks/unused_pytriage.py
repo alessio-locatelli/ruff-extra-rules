@@ -50,6 +50,7 @@ class UnusedPytriageCheck(BaseCheck):
         source: str,
         usages: tuple[SuppressionUsage, ...],
         active_error_codes: frozenset[str],
+        /,
     ) -> CheckResult:
         _ignored_lines, format_suppressed, comments = find_ignored_lines_and_pytriage_comments(source)
         used = {(usage.error_code, usage.line) for usage in usages if usage.error_code in active_error_codes}

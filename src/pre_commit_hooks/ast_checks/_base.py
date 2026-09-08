@@ -91,15 +91,15 @@ class ASTCheck(Protocol):
     @property
     def tracks_direct_inputs(self) -> bool: ...
 
-    def record_direct_input(self, filepath: Path, source: str) -> None: ...
+    def record_direct_input(self, filepath: Path, source: str, /) -> None: ...
 
-    def reconcile_direct_inputs(self, direct_inputs: list[Path]) -> list[Path]: ...
+    def reconcile_direct_inputs(self, direct_inputs: list[Path], /) -> list[Path]: ...
 
     def get_prefilter_pattern(self) -> list[str] | None: ...
 
-    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]: ...
+    def check(self, filepath: Path, tree: ast.Module, source: str, /) -> list[Violation]: ...
 
-    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str) -> CheckResult: ...
+    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str, /) -> CheckResult: ...
 
     def fix(
         self,
@@ -108,6 +108,7 @@ class ASTCheck(Protocol):
         source: str,
         tree: ast.Module,
         encoding: str = "utf-8",
+        /,
     ) -> FixResult: ...
 
     OPTIONS: ClassVar[tuple[CheckOption, ...]]
@@ -130,16 +131,16 @@ class BaseCheck:
     def tracks_direct_inputs(self) -> bool:
         return False
 
-    def record_direct_input(self, _filepath: Path, _source: str) -> None:
+    def record_direct_input(self, _filepath: Path, _source: str, /) -> None:
         return
 
-    def reconcile_direct_inputs(self, _direct_inputs: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, _direct_inputs: list[Path], /) -> list[Path]:
         return []
 
-    def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
         raise NotImplementedError
 
-    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str) -> CheckResult:
+    def check_with_suppression_tracking(self, filepath: Path, tree: ast.Module, source: str, /) -> CheckResult:
         check_result = self.check(filepath, tree, source)
         return check_result if isinstance(check_result, CheckResult) else CheckResult(check_result)
 
