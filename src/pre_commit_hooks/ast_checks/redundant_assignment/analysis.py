@@ -11,7 +11,7 @@ from pre_commit_hooks.ast_checks._base import fast_get_source_segment, split_lin
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
-type UsageContext = Literal["attribute_or_subscript_assignment", "augmented_assignment", "unknown"]
+type UsageContext = Literal["attribute_or_subscript_assignment", "augmented_assignment", "deletion", "unknown"]
 
 
 class PatternType(Enum):
@@ -641,6 +641,40 @@ class VariableTracker(ast.NodeVisitor):
 
         self.visit(node.value)
 
+    def visit_Delete(self, node: ast.Delete) -> None:
+        stmt_index = self._get_current_stmt_index()
+        for target in node.targets:
+            self._record_deletion_targets(target, stmt_index)
+        self.generic_visit(node)
+
+    def _record_deletion_targets(self, target: ast.expr, stmt_index: int) -> None:
+        if isinstance(target, ast.Name):
+            self._track_deletion_use(target, stmt_index)
+        elif isinstance(target, ast.Tuple | ast.List):
+            for elt in target.elts:
+                self._record_deletion_targets(elt, stmt_index)
+
+    def _track_deletion_use(self, target: ast.Name, stmt_index: int) -> None:
+        scope_id = self._get_current_scope_id()
+        var_name = target.id
+
+        if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
+            return
+
+        usage = UsageInfo(
+            var_name=var_name,
+            line=target.lineno,
+            col=target.col_offset,
+            stmt_index=stmt_index,
+            context="deletion",
+            scope_id=scope_id,
+            in_control_flow=self.control_flow_depth > 0,
+        )
+        key = (scope_id, var_name)
+        if key not in self.uses:
+            self.uses[key] = []
+        self.uses[key].append(usage)
+
     def visit_NamedExpr(self, node: ast.NamedExpr) -> None:
         self.parent_stack.append(node)
         self.visit(node.value)
@@ -961,6 +995,10 @@ def detect_redundancy(lifecycle: VariableLifecycle) -> PatternType | None:
 
     for use in lifecycle.uses:
         if use.context == "attribute_or_subscript_assignment":
+            return None
+
+    for use in lifecycle.uses:
+        if use.context == "deletion":
             return None
 
     if lifecycle.rhs_reference_reassigned_before_use:

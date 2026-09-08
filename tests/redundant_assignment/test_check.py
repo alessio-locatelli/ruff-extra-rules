@@ -390,6 +390,11 @@ def func():
     x += 1
 """,
         """
+def func():
+    global x
+    del x
+""",
+        """
 def outer():
     x = 1
     def inner():
@@ -417,6 +422,22 @@ def func(depot_data, depots):
     depot_iso_country = depot_data.iso_country  # pytriage: TR5
     return [x for x in depots if x.country == depot_iso_country]
 """,
+        """
+def func():
+    def inner(v): ...
+
+    foo = "spam"
+    inner(foo)
+    del foo
+""",
+        """
+def func():
+    def inner(v): ...
+
+    foo = "spam"
+    inner(foo)
+    del [foo]
+""",
     ],
     ids=[
         "multiple-uses",
@@ -427,6 +448,7 @@ def func(depot_data, depots):
         "fmt-off-wrapping-use-line-only",
         "inline-suppression-on-use-line-only",
         "global-variable",
+        "global-variable-deletion",
         "class-attributes",
         "tuple-unpacking",
         "no-uses",
@@ -461,6 +483,8 @@ def func(depot_data, depots):
         "long-variable-name",
         "long-chained-expression",
         "comprehension-false-positive-with-ignore-comment",
+        "deletion-after-single-use",
+        "deletion-after-single-use-list-target",
     ],
 )
 def test_check_reports_no_violations(source: str) -> None:
