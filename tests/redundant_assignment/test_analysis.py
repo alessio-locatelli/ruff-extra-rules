@@ -101,6 +101,61 @@ def example():
     assert len(lifecycle.uses) == 2
 
 
+@pytest.mark.parametrize(
+    ("source", "var_name", "expected_contexts"),
+    [
+        (
+            """
+def example():
+    foo = "spam"
+    consume(foo)
+    del foo
+""",
+            "foo",
+            ["unknown", "deletion"],
+        ),
+        (
+            """
+def example():
+    obj = make()
+    del obj.attr
+""",
+            "obj",
+            ["unknown"],
+        ),
+        (
+            """
+def example():
+    foo = "spam"
+    consume(foo)
+    del [foo]
+""",
+            "foo",
+            ["unknown", "deletion"],
+        ),
+        (
+            """
+def example():
+    foo = "spam"
+    consume(foo)
+    del (foo,)
+""",
+            "foo",
+            ["unknown", "deletion"],
+        ),
+    ],
+    ids=[
+        "bare-name-deletion-after-a-load-use",
+        "attribute-deletion-tracks-base-as-ordinary-usage",
+        "list-target-deletion-after-a-load-use",
+        "tuple-target-deletion-after-a-load-use",
+    ],
+)
+def test_deletion_tracked_as_usage(source: str, var_name: str, expected_contexts: list[str]) -> None:
+    lifecycle = _lifecycle_for(source, var_name)
+    assert [use.context for use in lifecycle.uses] == expected_contexts
+
+
 def test_repeated_augmented_assignment_reuses_existing_uses_key() -> None:
     source = """
 def example():
@@ -750,6 +805,36 @@ def func():
         ),
         (
             """
+def func():
+    foo = "spam"
+    consume(foo)
+    del foo
+""",
+            "foo",
+            None,
+        ),
+        (
+            """
+def func():
+    foo = "spam"
+    consume(foo)
+    other = 1
+    del other
+""",
+            "foo",
+            PatternType.IMMEDIATE_SINGLE_USE,
+        ),
+        (
+            """
+def func():
+    foo = "spam"
+    del foo
+""",
+            "foo",
+            None,
+        ),
+        (
+            """
 def func(me):
     state = me.state(State)
     state.value = 5
@@ -1029,6 +1114,9 @@ async def func(obj):
         "immediate-use",
         "single-use-with-intervening-statements",
         "augmented-assignment-is-not-redundant",
+        "deletion-after-single-use-is-not-redundant",
+        "deletion-of-a-different-variable-does-not-block-reporting",
+        "deletion-as-the-only-use-is-not-redundant",
         "mutation-only-single-use-is-not-redundant",
         "snapshot-before-name-reassignment-is-not-redundant",
         "snapshot-before-name-augmented-reassignment-is-not-redundant",
