@@ -123,7 +123,12 @@ def _looks_like_a_format_string(left: ast.expr, string_literal_names: frozenset[
 def _interpolated_exprs(node: ast.AST, string_literal_names: frozenset[str]) -> list[ast.expr]:
     if isinstance(node, ast.JoinedStr):
         return [value.value for value in node.values if isinstance(value, ast.FormattedValue)]
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "format":
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "format"
+        and _looks_like_a_format_string(node.func.value, string_literal_names)
+    ):
         return [*node.args, *(keyword.value for keyword in node.keywords)]
     if (
         isinstance(node, ast.BinOp)
