@@ -86,28 +86,28 @@ class _FakeSession:
         self.raises = raises
         self.hover_delay_seconds = hover_delay_seconds
 
-    def open_or_update(self, _filepath: Path, _content: str) -> frozenset[tuple[Any, ...]]:
+    def open_or_update(self, _filepath: Path, _content: str, /) -> frozenset[tuple[Any, ...]]:
         if self.raises:
             raise LSPError("simulated ty crash")
         return frozenset({("code", "msg", 1, 1)})
 
-    def hover(self, _filepath: Path, _line0: int, _char_utf16: int) -> str | None:
+    def hover(self, _filepath: Path, _line0: int, _char_utf16: int, /) -> str | None:
         if self.hover_delay_seconds:
             time.sleep(self.hover_delay_seconds)
         return self.hover_result
 
-    def finalize(self, _filepath: Path, _source: str) -> None:
+    def finalize(self, _filepath: Path, _source: str, /) -> None:
         return
 
-    def cached_redundancies(self, _filepath: Path, _source: str, _cache_key: str) -> list[Redundancy] | None:
+    def cached_redundancies(self, _filepath: Path, _source: str, _cache_key: str, /) -> list[Redundancy] | None:
         return self.cached
 
     def cache_redundancies(
-        self, _filepath: Path, _source: str, _cache_key: str, redundancies: list[Redundancy]
+        self, _filepath: Path, _source: str, _cache_key: str, redundancies: list[Redundancy], /
     ) -> None:
         self.cached = redundancies
 
-    def record_direct_input(self, filepath: Path, _source: str) -> None:
+    def record_direct_input(self, filepath: Path, _source: str, /) -> None:
         self.direct_inputs.append(filepath)
 
     def reconcile_direct_inputs(self) -> list[Path]:

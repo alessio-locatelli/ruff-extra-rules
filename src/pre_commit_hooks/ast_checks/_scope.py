@@ -75,86 +75,86 @@ def class_scope_binding_names(node: ast.ClassDef) -> set[str]:
     }
 
     class Visitor(ast.NodeVisitor):
-        def visit_FunctionDef(self, child: ast.FunctionDef) -> None:
-            names.add(child.name)
-            self._visit_function_header(child)
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+            names.add(node.name)
+            self._visit_function_header(node)
 
-        def visit_AsyncFunctionDef(self, child: ast.AsyncFunctionDef) -> None:
-            names.add(child.name)
-            self._visit_function_header(child)
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+            names.add(node.name)
+            self._visit_function_header(node)
 
-        def visit_ClassDef(self, child: ast.ClassDef) -> None:
-            names.add(child.name)
-            for decorator in child.decorator_list:
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:
+            names.add(node.name)
+            for decorator in node.decorator_list:
                 self.visit(decorator)
-            for base in child.bases:
+            for base in node.bases:
                 self.visit(base)
-            for keyword in child.keywords:
+            for keyword in node.keywords:
                 self.visit(keyword.value)
-            for type_param in child.type_params:
+            for type_param in node.type_params:
                 self.visit(type_param)
 
-        def _visit_function_header(self, child: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-            for decorator in child.decorator_list:
+        def _visit_function_header(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+            for decorator in node.decorator_list:
                 self.visit(decorator)
-            for default in [*child.args.defaults, *child.args.kw_defaults]:
+            for default in [*node.args.defaults, *node.args.kw_defaults]:
                 if default is not None:
                     self.visit(default)
             for argument in [
-                *child.args.posonlyargs,
-                *child.args.args,
-                *child.args.kwonlyargs,
-                *([child.args.vararg] if child.args.vararg else []),
-                *([child.args.kwarg] if child.args.kwarg else []),
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+                *([node.args.vararg] if node.args.vararg else []),
+                *([node.args.kwarg] if node.args.kwarg else []),
             ]:
                 if argument.annotation is not None:
                     self.visit(argument.annotation)
-            if child.returns is not None:
-                self.visit(child.returns)
-            for type_param in child.type_params:
+            if node.returns is not None:
+                self.visit(node.returns)
+            for type_param in node.type_params:
                 self.visit(type_param)
 
-        def visit_Lambda(self, child: ast.Lambda) -> None:
-            for default in [*child.args.defaults, *child.args.kw_defaults]:
+        def visit_Lambda(self, node: ast.Lambda) -> None:
+            for default in [*node.args.defaults, *node.args.kw_defaults]:
                 if default is not None:
                     self.visit(default)
 
-        def visit_ListComp(self, _child: ast.ListComp) -> None:
+        def visit_ListComp(self, node: ast.ListComp) -> None:  # noqa: ARG002
             return
 
-        def visit_SetComp(self, _child: ast.SetComp) -> None:
+        def visit_SetComp(self, node: ast.SetComp) -> None:  # noqa: ARG002
             return
 
-        def visit_DictComp(self, _child: ast.DictComp) -> None:
+        def visit_DictComp(self, node: ast.DictComp) -> None:  # noqa: ARG002
             return
 
-        def visit_GeneratorExp(self, _child: ast.GeneratorExp) -> None:
+        def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:  # noqa: ARG002
             return
 
-        def visit_Name(self, child: ast.Name) -> None:
-            names.update(iter_binding_names(child))
+        def visit_Name(self, node: ast.Name) -> None:
+            names.update(iter_binding_names(node))
 
-        def visit_Import(self, child: ast.Import) -> None:
-            names.update(iter_binding_names(child))
+        def visit_Import(self, node: ast.Import) -> None:
+            names.update(iter_binding_names(node))
 
-        def visit_ImportFrom(self, child: ast.ImportFrom) -> None:
-            names.update(iter_binding_names(child))
+        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+            names.update(iter_binding_names(node))
 
-        def visit_ExceptHandler(self, child: ast.ExceptHandler) -> None:
-            names.update(iter_binding_names(child))
-            self.generic_visit(child)
+        def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+            names.update(iter_binding_names(node))
+            self.generic_visit(node)
 
-        def visit_MatchAs(self, child: ast.MatchAs) -> None:
-            names.update(iter_binding_names(child))
-            self.generic_visit(child)
+        def visit_MatchAs(self, node: ast.MatchAs) -> None:
+            names.update(iter_binding_names(node))
+            self.generic_visit(node)
 
-        def visit_MatchStar(self, child: ast.MatchStar) -> None:
-            names.update(iter_binding_names(child))
-            self.generic_visit(child)
+        def visit_MatchStar(self, node: ast.MatchStar) -> None:
+            names.update(iter_binding_names(node))
+            self.generic_visit(node)
 
-        def visit_MatchMapping(self, child: ast.MatchMapping) -> None:
-            names.update(iter_binding_names(child))
-            self.generic_visit(child)
+        def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
+            names.update(iter_binding_names(node))
+            self.generic_visit(node)
 
     visitor = Visitor()
     for statement in node.body:
@@ -166,20 +166,20 @@ def class_scope_global_or_nonlocal_names(node: ast.ClassDef) -> set[str]:
     names: set[str] = set()
 
     class Visitor(ast.NodeVisitor):
-        def visit_FunctionDef(self, _child: ast.FunctionDef) -> None:
+        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: ARG002
             return
 
-        def visit_AsyncFunctionDef(self, _child: ast.AsyncFunctionDef) -> None:
+        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: ARG002
             return
 
-        def visit_ClassDef(self, _child: ast.ClassDef) -> None:
+        def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: ARG002
             return
 
-        def visit_Global(self, child: ast.Global) -> None:
-            names.update(child.names)
+        def visit_Global(self, node: ast.Global) -> None:
+            names.update(node.names)
 
-        def visit_Nonlocal(self, child: ast.Nonlocal) -> None:
-            names.update(child.names)
+        def visit_Nonlocal(self, node: ast.Nonlocal) -> None:
+            names.update(node.names)
 
     visitor = Visitor()
     for statement in node.body:

@@ -144,7 +144,7 @@ class _ScopeVisitor(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self.index.add_class(node, self.scope)
 
-    def visit_Lambda(self, _node: ast.Lambda) -> None:
+    def visit_Lambda(self, node: ast.Lambda) -> None:  # noqa: ARG002
         return
 
     def visit_ListComp(self, node: ast.ListComp) -> None:

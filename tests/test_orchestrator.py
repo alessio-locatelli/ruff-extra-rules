@@ -1445,7 +1445,7 @@ class _AlwaysRerunProbeCheck(BaseCheck):
     def get_prefilter_pattern(self) -> list[str] | None:
         return None
 
-    def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
         self.call_count += 1
         return [
             Violation(
@@ -1459,14 +1459,20 @@ class _AlwaysRerunProbeCheck(BaseCheck):
         ]
 
     def fix(
-        self, _filepath: Path, _violations: list[Violation], _source: str, _tree: ast.Module, _encoding: str = "utf-8"
+        self,
+        _filepath: Path,
+        _violations: list[Violation],
+        _source: str,
+        _tree: ast.Module,
+        _encoding: str = "utf-8",
+        /,
     ) -> FixResult:
         return FixResult.for_violations(_violations, FixOutcome.DECLINED)
 
-    def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, _already_processed: list[Path], /) -> list[Path]:
         return []
 
-    def record_direct_input(self, _filepath: Path, _source: str) -> None:
+    def record_direct_input(self, _filepath: Path, _source: str, /) -> None:
         return
 
 
@@ -1480,7 +1486,7 @@ class _MarkerFixableCheck(_AlwaysRerunProbeCheck):
         super().__init__()
         self.check_id = check_id
 
-    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, source: str, /) -> list[Violation]:
         if _CLEAN_MARKER in source:
             return []
         return [
@@ -1490,7 +1496,7 @@ class _MarkerFixableCheck(_AlwaysRerunProbeCheck):
         ]
 
     def fix(
-        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8", /
     ) -> FixResult:
         atomic_write_text(filepath, source + _CLEAN_MARKER, encoding, source)
         return FixResult.for_violations(_violations, FixOutcome.APPLIED)
@@ -1501,7 +1507,7 @@ class _MarkerRemovingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
 
     check_id = "marker-remover"
 
-    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, source: str, /) -> list[Violation]:
         if _CLEAN_MARKER not in source:
             return []
         return [
@@ -1516,7 +1522,7 @@ class _MarkerRemovingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
         ]
 
     def fix(
-        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8", /
     ) -> FixResult:
         atomic_write_text(filepath, source.replace(_CLEAN_MARKER, ""), encoding, source)
         return FixResult.for_violations(_violations, FixOutcome.APPLIED)
@@ -1558,10 +1564,10 @@ class _DrainingProbeCheck(_AlwaysRerunProbeCheck):
         self.direct_inputs: list[Path] = []
         self.extra_files = extra_files or []
 
-    def record_direct_input(self, filepath: Path, _source: str) -> None:
+    def record_direct_input(self, filepath: Path, _source: str, /) -> None:
         self.direct_inputs.append(filepath.resolve())
 
-    def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, _already_processed: list[Path], /) -> list[Path]:
         return self.extra_files
 
 
@@ -1570,7 +1576,7 @@ class _UnavailableDrainingCheck(_DrainingProbeCheck):
 
     check_id = "unavailable-draining-probe"
 
-    def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
         raise CheckUnavailableError("simulated: prerequisite missing")
 
 
@@ -1610,7 +1616,7 @@ class _UnavailableCrossFileProbeCheck(_CrossFileProbeCheck):
 
     check_id = "unavailable-cross-file-probe"
 
-    def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
         raise CheckUnavailableError("simulated: prerequisite missing")
 
 
@@ -1619,7 +1625,7 @@ class _DrainUnavailableCheck(_AlwaysRerunProbeCheck):
 
     check_id = "drain-unavailable-probe"
 
-    def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, _already_processed: list[Path], /) -> list[Path]:
         raise CheckUnavailableError("simulated: daemon unavailable")
 
 
@@ -1628,7 +1634,7 @@ class _RaisingDrainingCheck(_AlwaysRerunProbeCheck):
 
     check_id = "raising-draining-probe"
 
-    def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, _already_processed: list[Path], /) -> list[Path]:
         raise LSPError("simulated daemon disconnect")
 
 
@@ -1637,7 +1643,7 @@ class _DirectInputUnavailableCheck(_AlwaysRerunProbeCheck):
 
     check_id = "direct-input-unavailable-probe"
 
-    def record_direct_input(self, _filepath: Path, _source: str) -> None:
+    def record_direct_input(self, _filepath: Path, _source: str, /) -> None:
         raise CheckUnavailableError("simulated: daemon unavailable")
 
 
@@ -1650,7 +1656,7 @@ class _NeverConvergingDrainingCheck(_AlwaysRerunProbeCheck):
         super().__init__(message)
         self.drain_call_count = 0
 
-    def reconcile_direct_inputs(self, _already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, _already_processed: list[Path], /) -> list[Path]:
 
         self.drain_call_count += 1
         return [Path(f"/nonexistent/never_converges_{self.drain_call_count}.py")]
@@ -1666,7 +1672,7 @@ class _OrderDependentDrainingCheck(_AlwaysRerunProbeCheck):
         self.trigger_file = trigger_file.resolve()
         self.reported_file = reported_file.resolve()
 
-    def reconcile_direct_inputs(self, already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, already_processed: list[Path], /) -> list[Path]:
         if self.trigger_file in already_processed:
             return [self.reported_file]
         return []
@@ -1683,7 +1689,7 @@ class _StaleThenCleanDrainingCheck(_AlwaysRerunProbeCheck):
         self.flagged_file = flagged_file.resolve()
         self.seen: set[Path] = set()
 
-    def check(self, filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+    def check(self, filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
         self.call_count += 1
         resolved = filepath.resolve()
         already_seen = resolved in self.seen
@@ -1696,7 +1702,7 @@ class _StaleThenCleanDrainingCheck(_AlwaysRerunProbeCheck):
             )
         ]
 
-    def reconcile_direct_inputs(self, already_processed: list[Path]) -> list[Path]:
+    def reconcile_direct_inputs(self, already_processed: list[Path], /) -> list[Path]:
         if self.trigger_file in already_processed:
             return [self.flagged_file]
         return []
@@ -1717,7 +1723,7 @@ class _SelectivelyViolatingDrainingCheck(_DrainingProbeCheck):
 
     check_id = "selective-draining-probe"
 
-    def check(self, filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+    def check(self, filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
         if filepath.name != "flagged.py":
             return []
         return [
@@ -1821,7 +1827,7 @@ def test_process_files_records_an_unavailable_direct_input_check(tmp_path: Path)
 def test_drain_cross_file_candidates_skips_an_unresolvable_extra_path(tmp_path: Path) -> None:
 
     class _UnresolvablePath(Path):
-        def resolve(self, _strict: bool = False) -> NoReturn:  # noqa: FBT002 -- matches Path.resolve()'s own signature
+        def resolve(self, strict: bool = False) -> NoReturn:  # noqa: ARG002, FBT002 -- matches Path.resolve()'s own signature
             msg = "simulated resolve failure"
             raise OSError(msg)
 
@@ -1947,7 +1953,7 @@ class _AppendingFixCheck(_AlwaysRerunProbeCheck):
         self.marker = marker
         self.write_delay_seconds = write_delay_seconds
 
-    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, source: str, /) -> list[Violation]:
         if f"# {self.marker}" in source:
             return []
         return [
@@ -1955,7 +1961,7 @@ class _AppendingFixCheck(_AlwaysRerunProbeCheck):
         ]
 
     def fix(
-        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8", /
     ) -> FixResult:
         if self.write_delay_seconds:
             time.sleep(self.write_delay_seconds)
@@ -1998,7 +2004,7 @@ class _ExternallyModifiedFixCheck(_AlwaysRerunProbeCheck):
         super().__init__()
         self.simulate_external_edit = simulate_external_edit
 
-    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, source: str, /) -> list[Violation]:
         if "# my fix" in source:
             return []
         return [
@@ -2006,7 +2012,7 @@ class _ExternallyModifiedFixCheck(_AlwaysRerunProbeCheck):
         ]
 
     def fix(
-        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8", /
     ) -> FixResult:
         if self.simulate_external_edit:
             filepath.write_text(f"{source}# external edit\n", encoding=encoding)
@@ -2097,7 +2103,7 @@ class _CrashingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
 
     check_id = "crashing-always-rerun-probe"
 
-    def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
         raise ValueError("simulated always-rerun check failure")
 
 
@@ -2362,7 +2368,7 @@ def test_check_unavailable_error_is_recorded_once_and_disables_that_check(tmp_pa
             super().__init__()
             self.attempts = 0
 
-        def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        def check(self, _filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
             self.attempts += 1
             raise CheckUnavailableError("some prerequisite is missing")
 
@@ -2384,7 +2390,7 @@ def test_check_unavailable_error_is_recorded_once_and_disables_that_check(tmp_pa
 
 def test_check_unavailable_error_does_not_discard_other_checks_results(tmp_path: Path) -> None:
     class _UnavailableCheck(_AlwaysRerunProbeCheck):
-        def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        def check(self, _filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
             raise CheckUnavailableError("some prerequisite is missing")
 
     filepath = tmp_path / "module.py"
@@ -2408,7 +2414,7 @@ def test_refresh_stale_positions_skips_a_check_already_known_unavailable(tmp_pat
             super().__init__()
             self.attempts = 0
 
-        def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        def check(self, _filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
             self.attempts += 1
             raise CheckUnavailableError("some prerequisite is missing")
 
@@ -2435,7 +2441,7 @@ def test_main_reports_check_unavailable_error_once_and_exits_nonzero(
         check_id = "unavailable-probe"
         error_code = "ZZZ002"
 
-        def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        def check(self, _filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
             raise CheckUnavailableError("some prerequisite is missing; install it and retry")
 
     monkeypatch.setattr(_cli, "ALL_CHECKS", [*ALL_CHECKS, _UnavailableCheck])
@@ -2962,7 +2968,7 @@ class _LineRemovingFixCheck(_AlwaysRerunProbeCheck):
         super().__init__()
         self.target = target
 
-    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, source: str, /) -> list[Violation]:
         if self.target not in source:
             return []
         return [
@@ -2977,7 +2983,7 @@ class _LineRemovingFixCheck(_AlwaysRerunProbeCheck):
         ]
 
     def fix(
-        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8", /
     ) -> FixResult:
         atomic_write_text(filepath, source.replace(self.target, ""), encoding, source)
         return FixResult.for_violations(_violations, FixOutcome.APPLIED)
@@ -2990,7 +2996,7 @@ class _LineFlaggingCheck(_AlwaysRerunProbeCheck):
     error_code = "ZZZ006"
     cacheable = True
 
-    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, source: str, /) -> list[Violation]:
         return [
             Violation(
                 check_id=self.check_id,
@@ -3005,7 +3011,13 @@ class _LineFlaggingCheck(_AlwaysRerunProbeCheck):
         ]
 
     def fix(
-        self, _filepath: Path, _violations: list[Violation], _source: str, _tree: ast.Module, _encoding: str = "utf-8"
+        self,
+        _filepath: Path,
+        _violations: list[Violation],
+        _source: str,
+        _tree: ast.Module,
+        _encoding: str = "utf-8",
+        /,
     ) -> FixResult:
         return FixResult.for_violations(_violations, FixOutcome.DECLINED)
 
@@ -3015,7 +3027,7 @@ class _UnfixableLineFlaggingCheck(_LineFlaggingCheck):
 
     check_id = "unfixable-line-flagger"
 
-    def check(self, filepath: Path, tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, filepath: Path, tree: ast.Module, source: str, /) -> list[Violation]:
         violations = super().check(filepath, tree, source)
         for violation in violations:
             violation.fixable = False
@@ -3029,7 +3041,7 @@ class _PairFlaggingFixCheck(_AlwaysRerunProbeCheck):
     error_code = "ZZZ007"
     cacheable = True
 
-    def check(self, _filepath: Path, _tree: ast.Module, source: str) -> list[Violation]:
+    def check(self, _filepath: Path, _tree: ast.Module, source: str, /) -> list[Violation]:
         if _FLAGGED_LINE not in source:
             return []
         return [
@@ -3045,7 +3057,7 @@ class _PairFlaggingFixCheck(_AlwaysRerunProbeCheck):
         ]
 
     def fix(
-        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8"
+        self, filepath: Path, _violations: list[Violation], source: str, _tree: ast.Module, encoding: str = "utf-8", /
     ) -> FixResult:
         atomic_write_text(filepath, source.replace(_FLAGGED_LINE, ""), encoding, source)
         return FixResult.for_violations(_violations, FixOutcome.APPLIED)
@@ -3847,7 +3859,7 @@ def test_main_check_specific_cli_arg_round_trip(
         def get_prefilter_pattern(self) -> list[str] | None:
             return None
 
-        def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> list[Violation]:
+        def check(self, _filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
             return [
                 Violation(
                     check_id=self.check_id,

@@ -32,22 +32,24 @@ class FakeSession:
         self.hover_calls: list[tuple[int, int]] = []
         self.closed_files: list[Path] = []
 
-    def open_or_update(self, _filepath: Path, content: str) -> frozenset[tuple[object, ...]]:
+    def open_or_update(self, _filepath: Path, content: str, /) -> frozenset[tuple[object, ...]]:
         self.opened_content.append(content)
         return self._diagnostics_by_content.get(content, frozenset())
 
-    def hover(self, _filepath: Path, line0: int, char_utf16: int) -> str | None:
+    def hover(self, _filepath: Path, line0: int, char_utf16: int, /) -> str | None:
         self.hover_calls.append((line0, char_utf16))
         return self._hover_by_position.get((line0, char_utf16))
 
     def analysis_transaction(self) -> contextlib.AbstractContextManager[None]:
         return contextlib.nullcontext()
 
-    def finalize(self, filepath: Path, _source: str) -> None:
+    def finalize(self, filepath: Path, _source: str, /) -> None:
         self.closed_files.append(filepath)
 
-    def cached_redundancies(self, _filepath: Path, source: str, cache_key: str) -> list[Redundancy] | None:
+    def cached_redundancies(self, _filepath: Path, source: str, cache_key: str, /) -> list[Redundancy] | None:
         return self._redundancies_by_content.get((source, cache_key))
 
-    def cache_redundancies(self, _filepath: Path, source: str, cache_key: str, redundancies: list[Redundancy]) -> None:
+    def cache_redundancies(
+        self, _filepath: Path, source: str, cache_key: str, redundancies: list[Redundancy], /
+    ) -> None:
         self._redundancies_by_content[(source, cache_key)] = redundancies
