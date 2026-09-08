@@ -17,6 +17,7 @@ class FakeSession:
         "closed_files",
         "hover_calls",
         "opened_content",
+        "within_root",
     )
 
     def __init__(
@@ -24,6 +25,7 @@ class FakeSession:
         *,
         diagnostics_by_content: dict[str, frozenset[tuple[object, ...]]],
         hover_by_position: dict[tuple[int, int], str | None],
+        within_root: bool = True,
     ) -> None:
         self._diagnostics_by_content = diagnostics_by_content
         self._hover_by_position = hover_by_position
@@ -31,6 +33,10 @@ class FakeSession:
         self.opened_content: list[str] = []
         self.hover_calls: list[tuple[int, int]] = []
         self.closed_files: list[Path] = []
+        self.within_root = within_root
+
+    def is_within_root(self, _filepath: Path, /) -> bool:
+        return self.within_root
 
     def open_or_update(self, _filepath: Path, content: str, /) -> frozenset[tuple[object, ...]]:
         self.opened_content.append(content)

@@ -368,3 +368,81 @@ def test_importing_path_from_pathlib_itself_does_not_disable_the_equality_marker
     source = f"{import_statement}y = matches == [str(x)]\n"
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
     assert candidate.in_equality_comparison is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "y = f'{tuple(x)}'\n",
+        "y = tuple(x)\nz = f'{y}'\n",
+        "y: tuple = tuple(x)\nz = f'{y}'\n",
+        "y = tuple(x)\n'{}'.format(y)\n",
+        "y = tuple(x)\n'{v}'.format(v=y)\n",
+        "y = tuple(x)\n'%s' % y\n",
+        "y = tuple(x)\n'%s %s' % (y, other)\n",
+        "y = tuple(x)\n'%(v)s' % {'v': y}\n",
+        "y = tuple(x)\nz = f'{[y]}'\n",
+        "y = alias = tuple(x)\nz = f'{alias}'\n",
+        "y = tuple(x)\na = y\nb = a\nz = f'{b}'\n",
+        "y = tuple(x)\nz: object = y\nresult = f'{z}'\n",
+        "y = tuple(x)\nf'{prefix}%s' % y\n",
+        "y = tuple(x)\nfmt = '%s'\nfmt % y\n",
+        "y = tuple(x)\nfmt: str = '%s'\nfmt % y\n",
+        "if (y := tuple(x)):\n    pass\nz = f'{y}'\n",
+        "'%(path)s' % {str(path): value}\n",
+        "y = [tuple(x)]\nz = f'{y}'\n",
+        "y = {'k': tuple(x)}\nz = f'{y}'\n",
+        "fmt = '%s'\nalias = fmt\ny = tuple(x)\nalias % y\n",
+    ],
+    ids=[
+        "direct-fstring-interpolation",
+        "assigned-then-fstring-interpolated",
+        "annotated-assign-then-fstring-interpolated",
+        "format-positional-arg",
+        "format-keyword-arg",
+        "percent-formatting-bare-name",
+        "percent-formatting-tuple",
+        "percent-formatting-dict",
+        "name-nested-inside-the-interpolated-expression",
+        "chained-assignment-second-target-interpolated",
+        "transitive-alias-chain-through-plain-names",
+        "transitive-alias-through-an-annotated-assign",
+        "percent-formatting-with-an-fstring-left-operand",
+        "percent-formatting-through-a-named-format-string",
+        "percent-formatting-through-an-annotated-named-format-string",
+        "walrus-bound-then-fstring-interpolated",
+        "percent-formatting-dict-key-directly-converted",
+        "conversion-nested-inside-an-assigned-list-literal",
+        "conversion-nested-inside-an-assigned-dict-literal",
+        "percent-formatting-through-an-aliased-named-format-string",
+    ],
+)
+def test_a_candidate_reachable_from_a_string_interpolation_is_marked(source: str) -> None:
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.used_in_string_interpolation is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "y = tuple(x)\n",
+        "y = tuple(x)\nz = y\n",
+        "y = tuple(x)\nprint(y)\n",
+        "y = tuple(x)\ncount % y\n",
+        "y = tuple(x)\nother = 5\nz = f'{other}'\n",
+        "obj.attr = tuple(x)\nz = f'{obj.attr}'\n",
+        "y = tuple(x)\na = y\nb = y\nc = a\nc = b\nprint(c)\n",
+    ],
+    ids=[
+        "no-interpolation-at-all",
+        "plain-reassignment",
+        "used-as-a-plain-call-argument",
+        "percent-op-with-a-non-string-left-operand",
+        "an-unrelated-name-is-interpolated-instead",
+        "assigned-to-a-non-name-target",
+        "diamond-shaped-alias-graph-with-no-interpolation",
+    ],
+)
+def test_a_candidate_is_not_marked_reachable_from_a_string_interpolation_otherwise(source: str) -> None:
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.used_in_string_interpolation is False

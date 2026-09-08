@@ -40,6 +40,8 @@ def _cache_context(root: Path) -> bytes:
 
 
 class PersistentSession(Protocol):
+    def is_within_root(self, filepath: Path, /) -> bool: ...
+
     def open_or_update(self, filepath: Path, content: str, /) -> frozenset[tuple[Any, ...]]: ...
 
     def hover(self, filepath: Path, line0: int, char_utf16: int, /) -> str | None: ...
@@ -178,7 +180,7 @@ class TySession:
         )
         self._open_versions: dict[str, int] = {}
 
-    def _is_within_root(self, filepath: Path) -> bool:
+    def is_within_root(self, filepath: Path) -> bool:
         return filepath.resolve().is_relative_to(self._root)
 
     def _on_notification(self, method: str, params: dict[str, Any]) -> None:
@@ -249,14 +251,14 @@ class TySession:
 
     def record_direct_input(self, filepath: Path, source: str) -> None:
         resolved = filepath.resolve()
-        if not self._keep_open or not self._is_within_root(resolved):
+        if not self._keep_open or not self.is_within_root(resolved):
             return
         uri = resolved.as_uri()
         self._direct_input_digests[uri] = hashlib.sha256(source.encode()).digest()
 
     def cached_redundancies(self, filepath: Path, source: str, cache_key: str) -> list[Redundancy] | None:
         resolved = filepath.resolve()
-        if not self._keep_open or not self._is_within_root(resolved):
+        if not self._keep_open or not self.is_within_root(resolved):
             return None
         context = _cache_context(self._root)
         if context != self._cache_identity:
@@ -272,7 +274,7 @@ class TySession:
 
     def cache_redundancies(self, filepath: Path, source: str, cache_key: str, redundancies: list[Redundancy]) -> None:
         resolved = filepath.resolve()
-        if self._keep_open and self._is_within_root(resolved):
+        if self._keep_open and self.is_within_root(resolved):
             self._cached_redundancies[(resolved.as_uri(), cache_key)] = (
                 hashlib.sha256(source.encode()).digest(),
                 redundancies,
@@ -321,7 +323,7 @@ class TySession:
             logger.debug("TR6 barrier pull failed for %s", barrier_uri, exc_info=True)
 
     def finalize(self, filepath: Path, source: str) -> None:
-        if self._keep_open and self._is_within_root(filepath):
+        if self._keep_open and self.is_within_root(filepath):
             try:
                 self.open_or_update(filepath, source)
             except LSPError:

@@ -86,6 +86,9 @@ class _FakeSession:
         self.raises = raises
         self.hover_delay_seconds = hover_delay_seconds
 
+    def is_within_root(self, _filepath: Path, /) -> bool:
+        return True
+
     def open_or_update(self, _filepath: Path, _content: str, /) -> frozenset[tuple[Any, ...]]:
         if self.raises:
             raise LSPError("simulated ty crash")
@@ -143,6 +146,7 @@ def test_ty_version_normalizes_any_failure_to_os_error(monkeypatch: pytest.Monke
 @pytest.mark.parametrize(
     ("message", "expected"),
     [
+        ({"op": "is_within_root", "filepath": "f.py"}, {"result": True}),
         (
             {"op": "open_or_update", "filepath": "f.py", "content": "x"},
             {"result": [("code", "msg", 1, 1)]},
@@ -159,6 +163,7 @@ def test_ty_version_normalizes_any_failure_to_os_error(monkeypatch: pytest.Monke
         ({"op": "bogus"}, {"error": "unknown op: 'bogus'"}),
     ],
     ids=[
+        "is_within_root",
         "open_or_update",
         "hover",
         "finalize",
@@ -1388,14 +1393,20 @@ class TestRealDaemonEndToEnd:
     def test_daemon_flags_a_caller_after_a_later_run_only_touches_the_callee(self, tmp_path: Path) -> None:
         callee = tmp_path / "callee.py"
         caller = tmp_path / "caller.py"
-        callee.write_text("def takes(x: int) -> None:\n    print(x)\n")
-        caller.write_text("from callee import takes\n\n\ndef use(y: str) -> None:\n    takes(int(y))\n")
+        callee.write_text("def takes(x: list[str]) -> None:\n    print(x)\n")
+        caller.write_text(
+            "from collections.abc import Iterable\n\n"
+            "from callee import takes\n\n\n"
+            "def use(y: Iterable[str]) -> None:\n    takes(list(y))\n"
+        )
 
         first_check = RedundantTypeConversionCheck(level=ConfidenceLevel.AGGRESSIVE)
         caller_source = caller.read_text()
         assert first_check.check(caller, ast.parse(caller_source), caller_source) == []
 
-        callee.write_text("def takes(x: int | str) -> None:\n    print(x)\n")
+        callee.write_text(
+            "from collections.abc import Iterable\n\n\ndef takes(x: list[str] | Iterable[str]) -> None:\n    print(x)\n"
+        )
         second_check = RedundantTypeConversionCheck(level=ConfidenceLevel.AGGRESSIVE)
         callee_source = callee.read_text()
         assert second_check.check(callee, ast.parse(callee_source), callee_source) == []
@@ -1407,7 +1418,7 @@ class TestRealDaemonEndToEnd:
 
         redundant_now = third_check.check(caller, ast.parse(caller_source), caller_source)
         assert len(redundant_now) == 1
-        assert redundant_now[0].line == 5
+        assert redundant_now[0].line == 7
 
     def test_shutdown_if_running_actually_ends_the_daemon_process(self, tmp_path: Path) -> None:
         connect(tmp_path).close()
