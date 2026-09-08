@@ -300,6 +300,7 @@ class VariableTracker(ast.NodeVisitor):
         self.current_stmt: ast.stmt | None = None
 
         self.scope_parents: dict[int, int] = {}
+        self.scope_children: dict[int, list[int]] = {}
         self.class_scope_ids: set[int] = set()
 
     def _enter_scope(self) -> None:
@@ -308,6 +309,7 @@ class VariableTracker(ast.NodeVisitor):
         child_scope_id = self.current_scope_id
 
         self.scope_parents[child_scope_id] = parent_scope_id
+        self.scope_children.setdefault(parent_scope_id, []).append(child_scope_id)
 
         self.scope_stack.append(child_scope_id)
         self.stmt_index_stack.append(0)
@@ -337,7 +339,7 @@ class VariableTracker(ast.NodeVisitor):
 
     def _get_closure_reachable_scopes(self, scope_id: int, var_name: str) -> list[int]:
         reachable: list[int] = []
-        frontier = [child_id for child_id, parent_id in self.scope_parents.items() if parent_id == scope_id]
+        frontier = list(self.scope_children.get(scope_id, ()))
         while frontier:
             next_frontier: list[int] = []
             for child_id in frontier:
@@ -347,9 +349,7 @@ class VariableTracker(ast.NodeVisitor):
                 if not is_class_scope and self._scope_has_local_binding(child_id, var_name):
                     continue
                 reachable.append(child_id)
-                next_frontier.extend(
-                    grandchild_id for grandchild_id, parent_id in self.scope_parents.items() if parent_id == child_id
-                )
+                next_frontier.extend(self.scope_children.get(child_id, ()))
             frontier = next_frontier
         return reachable
 
