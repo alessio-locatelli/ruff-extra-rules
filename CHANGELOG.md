@@ -6,6 +6,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-09-08
+
 ### Fixed
 
 - `redundant-assignment` no longer reports (or auto-fixes) a value that is later deleted with `del`, since inlining it would leave the `del` statement with nothing to delete.
