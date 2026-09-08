@@ -565,10 +565,14 @@ def should_autofix(
     if not lifecycle.is_immediate_use:
         return False
 
-    if isinstance(rhs_node, ast.Attribute):
-        return _effectful_rhs_use_is_safe_to_inline(lifecycle.uses[0])
+    use = lifecycle.uses[0]
+    if use.is_call_argument_with_rebindable_callee:
+        return False
 
-    if isinstance(rhs_node, ast.Call) and _effectful_rhs_use_is_safe_to_inline(lifecycle.uses[0]):
+    if isinstance(rhs_node, ast.Attribute):
+        return _effectful_rhs_use_is_safe_to_inline(use)
+
+    if isinstance(rhs_node, ast.Call) and _effectful_rhs_use_is_safe_to_inline(use):
         if len(rhs_node.args) <= 2 and not rhs_node.keywords:
             return True
         if len(rhs_node.args) == 0 and len(rhs_node.keywords) <= 2:

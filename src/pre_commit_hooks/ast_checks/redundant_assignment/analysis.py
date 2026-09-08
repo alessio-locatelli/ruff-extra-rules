@@ -59,6 +59,7 @@ class UsageInfo:
     fstring_field_span: tuple[int, int] | None = None
     is_keyword_argument_echo: bool = False
     is_positional_argument_echo: bool = False
+    is_call_argument_with_rebindable_callee: bool = False
 
 
 @dataclass(slots=True)
@@ -83,9 +84,25 @@ class VariableLifecycle:
         return first_use.stmt_index <= self.assignment.stmt_index + 1
 
 
+def _parameter_names(arguments: ast.arguments) -> set[str]:
+    names = {arg.arg for arg in (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)}
+    if arguments.vararg is not None:
+        names.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        names.add(arguments.kwarg.arg)
+    return names
+
+
 def _unwind_to_base_name(node: ast.expr) -> ast.Name | None:
     base = node
     while isinstance(base, ast.Attribute | ast.Subscript):
+        base = base.value
+    return base if isinstance(base, ast.Name) else None
+
+
+def _unwind_attribute_chain_to_base_name(node: ast.expr) -> ast.Name | None:
+    base = node
+    while isinstance(base, ast.Attribute):
         base = base.value
     return base if isinstance(base, ast.Name) else None
 
@@ -211,8 +228,11 @@ def _collect_module_binding_facts(tree: ast.Module) -> tuple[bool, dict[str, int
 
 def _index_unique_undecorated_functions(
     tree: ast.Module,
+    *,
+    has_wildcard_import: bool,
+    all_function_name_counts: dict[str, int],
+    shadowed: set[str],
 ) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
-    has_wildcard_import, all_function_name_counts, shadowed = _collect_module_binding_facts(tree)
     if has_wildcard_import:
         return {}
 
@@ -241,7 +261,16 @@ class VariableTracker(ast.NodeVisitor):
         self._comment_only_lines = comment_only_lines
         self._trailing_comment_lines = trailing_comment_lines
 
-        self.functions = _index_unique_undecorated_functions(tree)
+        has_wildcard_import, function_name_counts, shadowed_names = _collect_module_binding_facts(tree)
+        self.functions = _index_unique_undecorated_functions(
+            tree,
+            has_wildcard_import=has_wildcard_import,
+            all_function_name_counts=function_name_counts,
+            shadowed=shadowed_names,
+        )
+        self.shadowed_names = shadowed_names
+        self.has_wildcard_import = has_wildcard_import
+        self.function_name_counts = function_name_counts
         self._call_positional_info: dict[int, tuple[bool, dict[int, int]]] = {}
 
         self.current_scope_id = 0
@@ -252,6 +281,7 @@ class VariableTracker(ast.NodeVisitor):
         self.suspension_points: dict[int, list[tuple[int, int, int, ast.stmt | None]]] = {}
         self.global_vars: set[tuple[int, str]] = set()
         self.nonlocal_vars: set[tuple[int, str]] = set()
+        self.scope_locals: dict[int, set[str]] = {}
 
         self.currently_assigning: set[str] = set()
 
@@ -270,6 +300,7 @@ class VariableTracker(ast.NodeVisitor):
         self.current_stmt: ast.stmt | None = None
 
         self.scope_parents: dict[int, int] = {}
+        self.class_scope_ids: set[int] = set()
 
     def _enter_scope(self) -> None:
         parent_scope_id = self._get_current_scope_id()
@@ -294,13 +325,33 @@ class VariableTracker(ast.NodeVisitor):
     def _get_current_stmt_index(self) -> int:
         return self.stmt_index_stack[-1] if self.stmt_index_stack else 0
 
-    def _get_child_scopes(self, scope_id: int) -> list[int]:
-        children = []
-        for child_id, parent_id in self.scope_parents.items():
-            if parent_id == scope_id:
-                children.append(child_id)
-                children.extend(self._get_child_scopes(child_id))
-        return children
+    def _register_local_binding(self, scope_id: int, var_name: str) -> None:
+        if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
+            return
+        self.scope_locals.setdefault(scope_id, set()).add(var_name)
+
+    def _scope_has_local_binding(self, scope_id: int, var_name: str) -> bool:
+        if self.assignments.get((scope_id, var_name)):
+            return True
+        return var_name in self.scope_locals.get(scope_id, ())
+
+    def _get_closure_reachable_scopes(self, scope_id: int, var_name: str) -> list[int]:
+        reachable: list[int] = []
+        frontier = [child_id for child_id, parent_id in self.scope_parents.items() if parent_id == scope_id]
+        while frontier:
+            next_frontier: list[int] = []
+            for child_id in frontier:
+                # A class body's own bindings (methods included) never shadow names for the
+                # methods nested inside it -- Python's LEGB lookup skips class scopes entirely.
+                is_class_scope = child_id in self.class_scope_ids
+                if not is_class_scope and self._scope_has_local_binding(child_id, var_name):
+                    continue
+                reachable.append(child_id)
+                next_frontier.extend(
+                    grandchild_id for grandchild_id, parent_id in self.scope_parents.items() if parent_id == child_id
+                )
+            frontier = next_frontier
+        return reachable
 
     def _get_source_segment(self, node: ast.expr) -> str:
         return fast_get_source_segment(self.source, self._ast_lines, node) or ""
@@ -320,17 +371,27 @@ class VariableTracker(ast.NodeVisitor):
             self.nonlocal_vars.add((scope_id, name))
         self.generic_visit(node)
 
+    def visit_TypeAlias(self, node: ast.TypeAlias) -> None:
+        self._register_local_binding(self._get_current_scope_id(), node.name.id)
+        self.generic_visit(node)
+
     def _visit_defaults(self, arguments: ast.arguments) -> None:
         for default in (*arguments.defaults, *arguments.kw_defaults):
             if default is not None:
                 self.visit(default)
 
     def visit_FunctionDef(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+        self._register_local_binding(self._get_current_scope_id(), node.name)
         for decorator in node.decorator_list:
             self.visit(decorator)
         self._visit_defaults(node.args)
 
         self._enter_scope()
+        self.scope_locals[self._get_current_scope_id()] = _parameter_names(node.args) | {
+            type_param.name
+            for type_param in node.type_params
+            if isinstance(type_param, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple)
+        }
         try_depth = self.try_depth
         self.try_depth = 0
 
@@ -400,6 +461,19 @@ class VariableTracker(ast.NodeVisitor):
 
     visit_TryStar = visit_Try  # noqa: N815
 
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.name is not None:
+            self._register_local_binding(self._get_current_scope_id(), node.name)
+        self.generic_visit(node)
+
+    def visit_Import(self, node: ast.Import | ast.ImportFrom) -> None:
+        scope_id = self._get_current_scope_id()
+        for alias in node.names:
+            self._register_local_binding(scope_id, (alias.asname or alias.name).split(".")[0])
+        self.generic_visit(node)
+
+    visit_ImportFrom = visit_Import  # noqa: N815
+
     def visit_With(self, node: ast.With | ast.AsyncWith) -> None:
         self.control_flow_depth += 1
         stmt_index = self._get_current_stmt_index()
@@ -419,6 +493,21 @@ class VariableTracker(ast.NodeVisitor):
             self.visit(case)
         self.control_flow_depth -= 1
         self.parent_stack.pop()
+
+    def visit_MatchAs(self, node: ast.MatchAs) -> None:
+        if node.name is not None:
+            self._register_local_binding(self._get_current_scope_id(), node.name)
+        self.generic_visit(node)
+
+    def visit_MatchStar(self, node: ast.MatchStar) -> None:
+        if node.name is not None:
+            self._register_local_binding(self._get_current_scope_id(), node.name)
+        self.generic_visit(node)
+
+    def visit_MatchMapping(self, node: ast.MatchMapping) -> None:
+        if node.rest is not None:
+            self._register_local_binding(self._get_current_scope_id(), node.rest)
+        self.generic_visit(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
         self.lambda_depth += 1
@@ -463,10 +552,12 @@ class VariableTracker(ast.NodeVisitor):
         self._visit_comprehension(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._register_local_binding(self._get_current_scope_id(), node.name)
         for decorator in node.decorator_list:
             self.visit(decorator)
 
         self._enter_scope()
+        self.class_scope_ids.add(self._get_current_scope_id())
 
         for stmt in node.body:
             if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -586,6 +677,11 @@ class VariableTracker(ast.NodeVisitor):
         scope_id = self._get_current_scope_id()
         stmt_index = self._get_current_stmt_index()
 
+        if self._is_simple_name_target(node.target) and node.value is None:
+            assert isinstance(node.target, ast.Name)
+            self._register_local_binding(scope_id, node.target.id)
+            return
+
         if self._is_simple_name_target(node.target) and node.value is not None:
             assert isinstance(node.target, ast.Name)
             var_name = node.target.id
@@ -593,6 +689,7 @@ class VariableTracker(ast.NodeVisitor):
             if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
                 return
 
+            self._register_local_binding(scope_id, var_name)
             self.currently_assigning.add(var_name)
             rhs_source = self._get_source_segment(node.value)
 
@@ -661,6 +758,8 @@ class VariableTracker(ast.NodeVisitor):
         if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
             return
 
+        self._register_local_binding(scope_id, var_name)
+
         usage = UsageInfo(
             var_name=var_name,
             line=target.lineno,
@@ -690,6 +789,11 @@ class VariableTracker(ast.NodeVisitor):
         self._track_rebinding_use(var_name, node.target.lineno, node.target.col_offset, scope_id, stmt_index)
 
     def _track_rebinding_use(self, var_name: str, line: int, col: int, scope_id: int, stmt_index: int) -> None:
+        if self.lambda_depth == 0:
+            # A walrus target inside a lambda binds to the lambda's own scope (PEP 572), which this
+            # tracker doesn't model separately -- registering it here would wrongly shadow the name
+            # for the enclosing function's other, unrelated uses.
+            self._register_local_binding(scope_id, var_name)
         usage = UsageInfo(
             var_name=var_name,
             line=line,
@@ -741,6 +845,10 @@ class VariableTracker(ast.NodeVisitor):
 
         is_keyword_argument_echo = isinstance(immediate_parent, ast.keyword) and immediate_parent.arg == node.id
         is_positional_argument_echo = self._is_positional_argument_echo(node, immediate_parent)
+        enclosing_call = self._enclosing_call_for_argument(node, immediate_parent)
+        is_call_argument_with_rebindable_callee = enclosing_call is not None and self._callee_is_rebindable(
+            enclosing_call
+        )
 
         usage = UsageInfo(
             var_name=node.id,
@@ -760,12 +868,35 @@ class VariableTracker(ast.NodeVisitor):
             fstring_field_span=fstring_field_span,
             is_keyword_argument_echo=is_keyword_argument_echo,
             is_positional_argument_echo=is_positional_argument_echo,
+            is_call_argument_with_rebindable_callee=is_call_argument_with_rebindable_callee,
         )
 
         key = (scope_id, node.id)
         if key not in self.uses:
             self.uses[key] = []
         self.uses[key].append(usage)
+
+    def _enclosing_call_for_argument(self, node: ast.Name, immediate_parent: ast.AST | None) -> ast.Call | None:
+        if isinstance(immediate_parent, ast.Call) and node is not immediate_parent.func:
+            return immediate_parent
+        if isinstance(immediate_parent, ast.keyword | ast.Starred) and immediate_parent.value is node:
+            grandparent = self.parent_stack[-2] if len(self.parent_stack) >= 2 else None
+            if isinstance(grandparent, ast.Call):
+                return grandparent
+        return None
+
+    def _callee_is_rebindable(self, call: ast.Call) -> bool:
+        if self.has_wildcard_import:
+            return True
+        base = _unwind_attribute_chain_to_base_name(call.func)
+        if base is None:
+            return True
+        if base.id in self.shadowed_names:
+            return True
+        if self.function_name_counts.get(base.id, 0) == 0:
+            return False
+        definition = self.functions.get(base.id)
+        return definition is None or definition.lineno >= call.lineno
 
     def _positional_info_for(self, call: ast.Call) -> tuple[bool, dict[int, int]]:
         cached = self._call_positional_info.get(id(call))
@@ -811,7 +942,7 @@ class VariableTracker(ast.NodeVisitor):
                 all_uses = self.uses.get(key, [])
                 relevant_uses = [use for use in all_uses if use.stmt_index >= assignment.stmt_index]
 
-                child_scopes = self._get_child_scopes(scope_id)
+                child_scopes = self._get_closure_reachable_scopes(scope_id, var_name)
 
                 is_captured_by_nonlocal = any(
                     (child_scope_id, var_name) in self.nonlocal_vars for child_scope_id in child_scopes
