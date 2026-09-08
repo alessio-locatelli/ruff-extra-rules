@@ -76,13 +76,28 @@ def _is_string_literal(value: ast.expr) -> bool:
     return (isinstance(value, ast.Constant) and isinstance(value.value, str)) or isinstance(value, ast.JoinedStr)
 
 
+def _binding_base_name(target: ast.expr) -> ast.Name | None:
+    if isinstance(target, ast.Name):
+        return target
+    if isinstance(target, (ast.Attribute, ast.Subscript)) and isinstance(target.value, ast.Name):
+        return target.value
+    return None
+
+
 def _simple_bindings(node: ast.AST) -> list[tuple[ast.Name, ast.expr]]:
     if isinstance(node, ast.Assign):
-        return [(target, node.value) for target in node.targets if isinstance(target, ast.Name)]
-    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
-        return [(node.target, node.value)]
-    if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
-        return [(node.target, node.value)]
+        bindings = []
+        for target in node.targets:
+            base = _binding_base_name(target)
+            if base is not None:
+                bindings.append((base, node.value))
+        return bindings
+    if isinstance(node, ast.AnnAssign) and node.value is not None:
+        base = _binding_base_name(node.target)
+        return [(base, node.value)] if base is not None else []
+    if isinstance(node, ast.NamedExpr):
+        base = _binding_base_name(node.target)
+        return [(base, node.value)] if base is not None else []
     return []
 
 
