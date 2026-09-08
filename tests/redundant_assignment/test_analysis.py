@@ -766,9 +766,513 @@ def outer():
     )
 
 
+@pytest.mark.parametrize(
+    ("source", "var_name", "expected_use_count"),
+    [
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner():
+        x = "inner-value"
+        consume(x)
+
+    inner()
+""",
+            "x",
+            1,
+        ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner(x):
+        consume(x)
+
+    inner(1)
+""",
+            "x",
+            1,
+        ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner():
+        x = 0
+        x += 1
+
+    inner()
+""",
+            "x",
+            1,
+        ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner():
+        x += 1
+
+    inner()
+""",
+            "x",
+            1,
+        ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner():
+        import x
+
+    inner()
+""",
+            "x",
+            1,
+        ),
+        (
+            """
+def outer():
+    helper = "outer-value"
+    consume(helper)
+
+    def inner():
+        def helper():
+            return 1
+        consume(helper)
+
+    inner()
+""",
+            "helper",
+            1,
+        ),
+        (
+            """
+def outer():
+    exc = "outer-value"
+    consume(exc)
+
+    def inner():
+        try:
+            pass
+        except Exception as exc:
+            consume(exc)
+
+    inner()
+""",
+            "exc",
+            1,
+        ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner():
+        del x
+
+    inner()
+""",
+            "x",
+            1,
+        ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner():
+        consume(x := 1)
+
+    inner()
+""",
+            "x",
+            1,
+        ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner():
+        x: str
+        consume(x)
+
+    inner()
+""",
+            "x",
+            1,
+        ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner(values):
+        match values:
+            case [*x]:
+                consume(x)
+
+    inner([1])
+""",
+            "x",
+            1,
+        ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner(value):
+        match value:
+            case {**x}:
+                consume(x)
+
+    inner({})
+""",
+            "x",
+            1,
+        ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner():
+        type x = int
+        consume(x)
+
+    inner()
+""",
+            "x",
+            1,
+        ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner[x]():
+        consume(x)
+
+    inner()
+""",
+            "x",
+            1,
+        ),
+    ],
+    ids=[
+        "nested-function-own-assignment",
+        "nested-function-parameter",
+        "nested-function-augmented-assignment-after-plain-assignment",
+        "nested-function-augmented-assignment-only",
+        "nested-function-import",
+        "nested-function-own-def",
+        "nested-function-except-as",
+        "nested-function-del",
+        "nested-function-walrus",
+        "nested-function-bare-annotation",
+        "nested-function-match-star",
+        "nested-function-match-mapping-rest",
+        "nested-function-type-alias",
+        "nested-function-type-parameter",
+    ],
+)
+def test_nested_scope_local_shadowing_does_not_extend_outer_lifecycle(
+    source: str, var_name: str, expected_use_count: int
+) -> None:
+    lifecycle = _lifecycle_for(source, var_name)
+    assert len(lifecycle.uses) == expected_use_count
+    assert all(use.scope_id == lifecycle.assignment.scope_id for use in lifecycle.uses)
+
+
+def test_nested_class_method_of_same_name_does_not_block_outer_closure() -> None:
+    source = """
+def outer():
+    x = "outer-value"
+
+    class Container:
+        def x(self):
+            return x
+
+    return Container
+"""
+    lifecycle = _lifecycle_for(source, "x")
+    assert len(lifecycle.uses) == 1
+    assert lifecycle.uses[0].scope_id != lifecycle.assignment.scope_id
+
+
+def test_match_wildcard_patterns_do_not_register_local_bindings() -> None:
+    source = """
+def outer():
+    x = "outer-value"
+
+    def inner(values):
+        match values:
+            case [*_]:
+                return x
+            case {"a": 1}:
+                return x
+
+    return inner
+"""
+    lifecycle = _lifecycle_for(source, "x")
+    assert len(lifecycle.uses) == 2
+    assert all(use.scope_id != lifecycle.assignment.scope_id for use in lifecycle.uses)
+
+
+def test_nested_scope_real_closure_still_extends_outer_lifecycle() -> None:
+    source = """
+def outer():
+    value = calculate()
+
+    def inner():
+        return value
+
+    return inner
+"""
+    lifecycle = _lifecycle_for(source, "value")
+    assert len(lifecycle.uses) == 1
+    assert lifecycle.uses[0].scope_id != lifecycle.assignment.scope_id
+
+
+def test_walrus_inside_lambda_does_not_shadow_enclosing_functions_own_closure() -> None:
+    source = """
+def outer():
+    x = replace()
+    consume(x)
+
+    def inner():
+        f = lambda: (x := 1)
+        return x
+
+    return inner
+"""
+    lifecycle = _lifecycle_for(source, "x")
+    assert len(lifecycle.uses) == 3
+    assert any(use.scope_id != lifecycle.assignment.scope_id for use in lifecycle.uses)
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        (
+            """
+def f():
+    x = replace()
+    return func(x)
+""",
+            False,
+        ),
+        (
+            """
+def f():
+    x = replace()
+    return func(x)
+
+
+def rebind():
+    global func
+    func = other
+""",
+            True,
+        ),
+        (
+            """
+def f():
+    x = replace()
+    return obj.method(x)
+
+
+def rebind():
+    global obj
+    obj = other
+""",
+            True,
+        ),
+        (
+            """
+def f():
+    x = replace()
+    return func(key=x)
+
+
+def rebind():
+    global func
+    func = other
+""",
+            True,
+        ),
+        (
+            """
+def f():
+    x = replace()
+    return x
+""",
+            False,
+        ),
+        (
+            """
+from somewhere import *
+
+
+def f():
+    x = replace()
+    return func(x)
+""",
+            True,
+        ),
+        (
+            """
+def f():
+    x = replace()
+    return func(*x)
+
+
+def rebind():
+    global func
+    func = other
+""",
+            True,
+        ),
+        (
+            """
+def f():
+    x = replace()
+    return func(*x)
+""",
+            False,
+        ),
+        (
+            """
+def f():
+    x = replace()
+    return [*x]
+""",
+            False,
+        ),
+        (
+            """
+def f():
+    x = replace()
+    return obj[index].method(x)
+
+
+def rebind():
+    global index
+    index = other_index
+""",
+            True,
+        ),
+        (
+            """
+def outer(cond):
+    if cond:
+        def func():
+            return 1
+
+    x = replace()
+    return func(x)
+""",
+            True,
+        ),
+        (
+            """
+def func():
+    return 1
+
+
+def f():
+    x = replace()
+    return func(x)
+""",
+            False,
+        ),
+        (
+            """
+@decorator
+def func():
+    return 1
+
+
+def f():
+    x = replace()
+    return func(x)
+""",
+            True,
+        ),
+        (
+            """
+x = replace()
+func(x)
+
+
+def func(value):
+    return value
+""",
+            True,
+        ),
+    ],
+    ids=[
+        "unshadowed-callee-safe",
+        "rebindable-bare-callee",
+        "rebindable-attribute-base",
+        "rebindable-callee-keyword-argument",
+        "not-a-call-argument",
+        "wildcard-import-makes-every-callee-rebindable",
+        "rebindable-callee-starred-argument",
+        "unshadowed-callee-starred-argument-safe",
+        "starred-in-non-call-context-not-flagged",
+        "subscripted-attribute-base-unresolvable",
+        "nested-function-definition-rebindable",
+        "unique-top-level-function-safe",
+        "decorated-top-level-function-rebindable",
+        "callee-defined-after-use-rebindable",
+    ],
+)
+def test_is_call_argument_with_rebindable_callee(source: str, *, expected: bool) -> None:
+    lifecycle = _lifecycle_for(source, "x")
+    assert lifecycle.uses[0].is_call_argument_with_rebindable_callee is expected
+
+
 def test_get_source_segment_returns_empty_string_without_end_position() -> None:
     node = ast.Constant(value=1, lineno=-1, col_offset=-1)
     assert _tracker("x = 1")._get_source_segment(node) == ""
+
+
+def test_register_local_binding_skips_global_and_nonlocal_names() -> None:
+    tracker = _tracker("x = 1")
+    tracker.global_vars.add((0, "x"))
+    tracker._register_local_binding(0, "x")
+    assert "x" not in tracker.scope_locals.get(0, set())
+
+
+def test_annotation_on_non_simple_target_is_not_tracked() -> None:
+    source = """
+def f(obj):
+    obj.attr: int = compute()
+"""
+    tracker = _tracker(source)
+    tracker.visit(ast.parse(source))
+    assert tracker.assignments == {}
 
 
 @pytest.mark.parametrize(

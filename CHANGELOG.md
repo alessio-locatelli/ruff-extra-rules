@@ -9,6 +9,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 ### Fixed
 
 - `redundant-assignment` no longer reports (or auto-fixes) a value that is later deleted with `del`, since inlining it would leave the `del` statement with nothing to delete.
+- `redundant-assignment` no longer lets a nested function's own local variable of the same name suppress detection of an unrelated, genuinely redundant assignment in the enclosing scope.
+- `redundant-assignment --fix` no longer inlines a value into a call whose callee (or, for `obj.method(...)`, the object) isn't provably stable — reassigned, redefined, or otherwise not resolvable to a single, unshadowed name anywhere in the file — since doing so could change the order in which the value's side effects and the callee lookup run.
 
 ## [0.4.2] - 2026-09-07
 

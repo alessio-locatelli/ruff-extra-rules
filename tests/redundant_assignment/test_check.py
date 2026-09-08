@@ -1281,6 +1281,20 @@ def example():
 """,
             "'x'",
         ),
+        (
+            """
+def outer():
+    x = "outer-value"
+    consume(x)
+
+    def inner():
+        x = "inner-value"
+        consume(x)
+
+    inner()
+""",
+            "'x'",
+        ),
     ],
     ids=[
         "single-use-return",
@@ -1291,6 +1305,7 @@ def example():
         "await-only-on-usage",
         "non-closure-detected",
         "annotated-assignment-without-value",
+        "outer-variable-not-suppressed-by-nested-shadowing",
     ],
 )
 def test_check_reports_flagged_violation(source: str, substring: str | None) -> None:
@@ -1590,8 +1605,40 @@ def f():
 """,
             "'tree'",
         ),
+        (
+            """
+def f():
+    x = replace()
+    return func(x)
+
+
+def rebind():
+    global func
+    func = other
+""",
+            "'x'",
+        ),
+        (
+            """
+def f():
+    x = replace()
+    return obj.method(x)
+
+
+def rebind():
+    global obj
+    obj = other
+""",
+            "'x'",
+        ),
     ],
-    ids=["multiline-rhs", "complex-call-args", "long-use-line"],
+    ids=[
+        "multiline-rhs",
+        "complex-call-args",
+        "long-use-line",
+        "call-argument-rebindable-callee",
+        "call-argument-rebindable-attribute-base",
+    ],
 )
 def test_check_does_not_mark_unfixable_violation_fixable(source: str, message_filter: str) -> None:
     matching = [v for v in _check(source) if message_filter in v.message]
