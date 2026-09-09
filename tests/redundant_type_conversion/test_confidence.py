@@ -235,7 +235,6 @@ def test_is_exact_match_rejects_a_structural_or_unrelated_type(hover_text: str, 
     [
         ("LiteralString", "str"),
         ("bool", "int"),
-        ("int", "float"),
         ("bool", "float"),
         ("bytearray", "bytes"),
         ("frozenset[int]", "set"),
@@ -246,7 +245,6 @@ def test_is_exact_match_rejects_a_structural_or_unrelated_type(hover_text: str, 
     ids=[
         "str-subtype",
         "bool-as-int",
-        "int-as-float",
         "bool-as-float",
         "bytearray-as-bytes",
         "frozenset-as-set",
@@ -275,6 +273,7 @@ def test_is_comparison_safe_hover_accepts_a_same_behavior_family(hover_text: str
         ("bytearray", "bytearray"),
         ("set[int] | dict[str, int]", "set"),
         ("memoryview", "bytes"),
+        ("int", "float"),
     ],
     ids=[
         "path-as-str",
@@ -290,6 +289,7 @@ def test_is_comparison_safe_hover_accepts_a_same_behavior_family(hover_text: str
         "bytearray-has-no-safe-family",
         "one-unsafe-union-member",
         "memoryview-does-not-support-ordering-against-bytes",
+        "int-can-lose-precision-as-float",
     ],
 )
 def test_is_comparison_safe_hover_rejects_a_different_runtime_family(hover_text: str, constructor: str) -> None:

@@ -306,6 +306,41 @@ def test_decide_candidates_still_flags_a_frozenset_conversion_used_in_a_subset_c
     assert len(redundant) == 1
 
 
+def test_decide_candidates_skips_a_non_exact_family_member_used_in_an_identity_comparison() -> None:
+    source = "y = bytes(data) is data\n"
+    redundant, _session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset()},
+        hover_by_position={(0, 13): "bytearray"},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert redundant == []
+
+
+def test_decide_candidates_still_flags_an_exact_match_used_in_an_identity_comparison() -> None:
+    source = "y = str(x) is matches\n"
+    redundant, _session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset(), "y = x is matches\n": frozenset()},
+        hover_by_position={(0, 8): "str"},
+    )
+
+    assert len(redundant) == 1
+
+
+def test_decide_candidates_skips_an_int_conversion_used_in_a_float_comparison() -> None:
+    source = "z = float(x) == other\n"
+    redundant, _session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset()},
+        hover_by_position={(0, 10): "int"},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert redundant == []
+
+
 def test_decide_candidates_skips_a_non_exact_conversion_reachable_from_a_string_interpolation() -> None:
     source = "y = tuple(x)\nsql = f'{y}'\n"
     redundant, session = _decide(

@@ -119,6 +119,9 @@ def decide_candidates(
                 if candidate.wrapped_in_len and not is_exact_match(hover_text, candidate.constructor):
                     continue
 
+                if candidate.in_identity_comparison and not is_exact_match(hover_text, candidate.constructor):
+                    continue
+
                 if candidate.in_comparison_operand and not (
                     is_exact_match(hover_text, candidate.constructor)
                     or is_comparison_safe_hover(hover_text, candidate.constructor)
