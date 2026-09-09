@@ -80,7 +80,6 @@ def is_purepath_hover(hover_text: str) -> bool:
     return any(member in PUREPATH_HOVER_NAMES for member in _split_top_level_union(hover_text))
 
 
-# See ADR-0035's comparison-operand paragraph.
 _COMPARISON_SAFE_HEADS: dict[str, frozenset[str]] = {
     "str": frozenset({"str", "LiteralString"}),
     "int": frozenset({"int", "bool"}),
@@ -101,7 +100,6 @@ def is_comparison_safe_hover(hover_text: str, constructor: str) -> bool:
 
 _ITERABLE_CONSTRUCTORS = frozenset({"list", "tuple", "set", "frozenset", "bytearray"})
 
-# See ADR-0035's confidence-tiering paragraph.
 _ITERABLE_PROTOCOL_HEADS = frozenset(
     {
         "Iterable",
@@ -148,7 +146,7 @@ def _loose_match(hover_text: str, constructor: str) -> bool:
     head = hover_text.split(" & ", 1)[0].split("[", 1)[0]
     if constructor in _ITERABLE_CONSTRUCTORS:
         if constructor == "bytearray" and head == "str":
-            return False  # bytearray(a_str) needs an explicit encoding; a bare str isn't a valid single argument
+            return False
         return head in _ITERABLE_PROTOCOL_HEADS
     if constructor == "dict":
         return head in _MAPPING_PROTOCOL_HEADS
