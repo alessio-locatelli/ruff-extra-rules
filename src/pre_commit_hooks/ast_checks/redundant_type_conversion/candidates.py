@@ -19,6 +19,7 @@ class Candidate:
     wrapped_in_len: bool
     in_comparison_operand: bool
     in_identity_comparison: bool
+    in_membership_test: bool
     purepath_ambiguous: bool
     used_in_string_interpolation: bool
 
@@ -41,6 +42,7 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
             wrapped_in_len=id(raw.call) in scan.len_wrapped,
             in_comparison_operand=id(raw.call) in scan.comparison_operands,
             in_identity_comparison=id(raw.call) in scan.identity_operands,
+            in_membership_test=id(raw.call) in scan.membership_operands,
             purepath_ambiguous=scan.purepath_ambiguous,
             used_in_string_interpolation=id(raw.call) in scan.interpolated,
         )
@@ -72,6 +74,7 @@ class _Scan:
     len_wrapped: frozenset[int]
     comparison_operands: frozenset[int]
     identity_operands: frozenset[int]
+    membership_operands: frozenset[int]
     purepath_ambiguous: bool
     interpolated: frozenset[int]
     raw_candidates: list[_RawCandidate]
@@ -177,6 +180,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
     len_wrapped: set[int] = set()
     comparison_operands: set[int] = set()
     identity_operands: set[int] = set()
+    membership_operands: set[int] = set()
     interpolated_names: set[str] = set()
     interpolated_call_ids: set[int] = set()
     raw_candidates: list[_RawCandidate] = []
@@ -249,6 +253,9 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
                 if isinstance(op, (ast.Is, ast.IsNot)):
                     _mark_call_ids(operands[index], identity_operands)
                     _mark_call_ids(operands[index + 1], identity_operands)
+                if isinstance(op, (ast.In, ast.NotIn)):
+                    _mark_call_ids(operands[index], membership_operands)
+                    _mark_call_ids(operands[index + 1], membership_operands)
 
     interpolated = interpolated_call_ids | {
         call_id
@@ -261,6 +268,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
         len_wrapped=frozenset() if "len" in shadowed else frozenset(len_wrapped),
         comparison_operands=frozenset(comparison_operands),
         identity_operands=frozenset(identity_operands),
+        membership_operands=frozenset(membership_operands),
         purepath_ambiguous=bool(purepath_shadowed & PUREPATH_HOVER_NAMES),
         interpolated=frozenset(interpolated),
         raw_candidates=raw_candidates,

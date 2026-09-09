@@ -367,6 +367,26 @@ def test_a_candidate_is_not_marked_as_an_identity_operand_otherwise(source: str)
 
 
 @pytest.mark.parametrize(
+    "source",
+    ["y = bytes(data) in container\n", "y = bytes(data) not in container\n", "y = container in bytes(data)\n"],
+    ids=["in", "not-in", "in-rhs"],
+)
+def test_a_candidate_used_as_a_membership_operand_is_marked(source: str) -> None:
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.in_membership_test is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["y = bytes(data) == container\n", "y = bytes(data) is container\n", "y = bytes(data)\n"],
+    ids=["eq", "is", "no-comparison"],
+)
+def test_a_candidate_is_not_marked_as_a_membership_operand_otherwise(source: str) -> None:
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.in_membership_test is False
+
+
+@pytest.mark.parametrize(
     "shadowing_statement",
     [
         "class Path:\n    pass\n\n\n",
