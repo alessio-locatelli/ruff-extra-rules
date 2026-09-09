@@ -125,7 +125,7 @@ def test_decide_candidates_skips_a_file_ty_reports_no_diagnostics_for_at_all(
     assert redundant == []
     assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
     assert session.hover_calls == []
-    assert "even for an obviously-invalid probe statement" in caplog.text
+    assert "even for two obviously-invalid probe statements of unrelated diagnostic rules" in caplog.text
 
 
 def test_decide_candidates_honors_ignored_lines_without_ever_opening_a_session() -> None:

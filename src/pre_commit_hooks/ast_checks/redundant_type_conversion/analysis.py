@@ -31,13 +31,17 @@ _OUT_OF_ROOT_HINT = (
 )
 
 _EXCLUDED_FROM_TY_HINT = (
-    "redundant-type-conversion (TR6) is skipping %s: `ty` reported no diagnostics for it, even for an "
-    "obviously-invalid probe statement, meaning `ty`'s own project configuration (e.g. `[tool.ty.src] "
-    "exclude`) has this file outside its checked scope -- treating every conversion in it as "
-    "verified-redundant would be unsound. See docs/rules/redundant-type-conversion.md."
+    "redundant-type-conversion (TR6) is skipping %s: `ty` reported no diagnostics for it, even for two "
+    "obviously-invalid probe statements of unrelated diagnostic rules, meaning `ty`'s own project "
+    "configuration (e.g. `[tool.ty.src] exclude`) has this file outside its checked scope -- treating "
+    "every conversion in it as verified-redundant would be unsound. See docs/rules/redundant-type-conversion.md."
 )
 
-_DIAGNOSTICS_PROBE = "\n_pre_commit_hooks_tr6_untrusted_diagnostics_probe: None = 5\n"
+_DIAGNOSTICS_PROBE = (
+    "\n_pre_commit_hooks_tr6_untrusted_diagnostics_probe: None = 5\n"
+    "\n\ndef _pre_commit_hooks_tr6_untrusted_diagnostics_probe_fn(x: None) -> None:\n    pass\n\n\n"
+    "_pre_commit_hooks_tr6_untrusted_diagnostics_probe_fn(5)\n"
+)
 
 
 class RedundancySession(Protocol):
