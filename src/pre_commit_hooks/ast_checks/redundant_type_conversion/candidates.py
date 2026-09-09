@@ -242,7 +242,6 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
                 )
 
         if isinstance(node, ast.Compare):
-            # See ADR-0035's comparison-operand paragraph.
             operands = [node.left, *node.comparators]
             for index, op in enumerate(node.ops):
                 _mark_call_ids(operands[index], comparison_operands)
