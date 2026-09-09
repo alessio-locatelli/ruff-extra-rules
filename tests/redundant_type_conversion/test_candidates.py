@@ -296,6 +296,11 @@ def test_len_shadowed_anywhere_in_the_module_disables_the_len_wrap_marker() -> N
         "y = matches == [[str(x)]]\n",
         "y = str(x) is matches\n",
         "y = str(x) is not matches\n",
+        "y = str(x) <= matches\n",
+        "y = matches <= str(x)\n",
+        "y = str(x) < matches\n",
+        "y = matches >= str(x)\n",
+        "y = matches > str(x)\n",
     ],
     ids=[
         "eq-rhs",
@@ -316,25 +321,29 @@ def test_len_shadowed_anywhere_in_the_module_disables_the_len_wrap_marker() -> N
         "list-nested-in-list",
         "is",
         "is-not",
+        "le-rhs",
+        "le-lhs",
+        "lt",
+        "ge",
+        "gt",
     ],
 )
-def test_a_candidate_used_as_an_equality_operand_is_marked(source: str) -> None:
+def test_a_candidate_used_as_a_comparison_operand_is_marked(source: str) -> None:
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_equality_comparison is True
+    assert candidate.in_comparison_operand is True
 
 
 @pytest.mark.parametrize(
     "source",
     [
         "y = str(x)\n",
-        "y = a < str(x)\n",
         "y = [str(x), other]\n",
     ],
-    ids=["no-comparison", "ordering-operator", "list-not-compared"],
+    ids=["no-comparison", "list-not-compared"],
 )
-def test_a_candidate_is_not_marked_as_an_equality_operand_otherwise(source: str) -> None:
+def test_a_candidate_is_not_marked_as_a_comparison_operand_otherwise(source: str) -> None:
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_equality_comparison is False
+    assert candidate.in_comparison_operand is False
 
 
 @pytest.mark.parametrize(
@@ -347,16 +356,18 @@ def test_a_candidate_is_not_marked_as_an_equality_operand_otherwise(source: str)
     ],
     ids=["class-def", "reassignment", "imported-from-elsewhere", "a-different-pathlib-class-aliased-to-the-name"],
 )
-def test_a_locally_shadowed_purepath_name_disables_the_equality_marker(shadowing_statement: str) -> None:
+def test_a_locally_shadowed_purepath_name_marks_purepath_ambiguous(shadowing_statement: str) -> None:
     source = f"{shadowing_statement}y = matches == [str(x)]\n"
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_equality_comparison is False
+    assert candidate.in_comparison_operand is True
+    assert candidate.purepath_ambiguous is True
 
 
-def test_shadowing_an_unrelated_name_does_not_disable_the_equality_marker() -> None:
+def test_shadowing_an_unrelated_name_does_not_mark_purepath_ambiguous() -> None:
     source = "some_other_name = 5\n\n\ny = matches == [str(x)]\n"
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_equality_comparison is True
+    assert candidate.in_comparison_operand is True
+    assert candidate.purepath_ambiguous is False
 
 
 @pytest.mark.parametrize(
@@ -364,10 +375,11 @@ def test_shadowing_an_unrelated_name_does_not_disable_the_equality_marker() -> N
     ["from pathlib import Path\n\n\n", "from pathlib import Path, PurePath\n\n\n"],
     ids=["single-import", "multiple-purepath-imports"],
 )
-def test_importing_path_from_pathlib_itself_does_not_disable_the_equality_marker(import_statement: str) -> None:
+def test_importing_path_from_pathlib_itself_does_not_mark_purepath_ambiguous(import_statement: str) -> None:
     source = f"{import_statement}y = matches == [str(x)]\n"
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_equality_comparison is True
+    assert candidate.in_comparison_operand is True
+    assert candidate.purepath_ambiguous is False
 
 
 @pytest.mark.parametrize(

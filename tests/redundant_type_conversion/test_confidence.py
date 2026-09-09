@@ -9,6 +9,7 @@ from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import (
     ConfidenceLevel,
     eligible_constructors,
     hover_passes_gate,
+    is_comparison_safe_hover,
     is_exact_match,
     is_purepath_hover,
 )
@@ -227,6 +228,72 @@ def test_is_exact_match_accepts_a_genuine_match(hover_text: str, constructor: st
 )
 def test_is_exact_match_rejects_a_structural_or_unrelated_type(hover_text: str, constructor: str) -> None:
     assert is_exact_match(hover_text, constructor) is False
+
+
+@pytest.mark.parametrize(
+    ("hover_text", "constructor"),
+    [
+        ("LiteralString", "str"),
+        ("bool", "int"),
+        ("int", "float"),
+        ("bool", "float"),
+        ("bytearray", "bytes"),
+        ("memoryview", "bytes"),
+        ("frozenset[int]", "set"),
+        ("AbstractSet[int]", "set"),
+        ("set[int]", "frozenset"),
+        ("frozenset[int] | set[str]", "set"),
+    ],
+    ids=[
+        "str-subtype",
+        "bool-as-int",
+        "int-as-float",
+        "bool-as-float",
+        "bytearray-as-bytes",
+        "memoryview-as-bytes",
+        "frozenset-as-set",
+        "abstractset-as-set",
+        "set-as-frozenset",
+        "union-of-set-family",
+    ],
+)
+def test_is_comparison_safe_hover_accepts_a_same_behavior_family(hover_text: str, constructor: str) -> None:
+    assert is_comparison_safe_hover(hover_text, constructor) is True
+
+
+@pytest.mark.parametrize(
+    ("hover_text", "constructor"),
+    [
+        ("Path", "str"),
+        ("PurePath", "str"),
+        ("dict[str, int]", "set"),
+        ("Mapping[str, int]", "set"),
+        ("tuple[int, ...]", "set"),
+        ("list[int]", "set"),
+        ("dict[str, int]", "frozenset"),
+        ("list[int]", "list"),
+        ("tuple[int, ...]", "tuple"),
+        ("Mapping[str, int]", "dict"),
+        ("bytearray", "bytearray"),
+        ("set[int] | dict[str, int]", "set"),
+    ],
+    ids=[
+        "path-as-str",
+        "purepath-as-str",
+        "dict-as-set",
+        "mapping-as-set",
+        "tuple-as-set",
+        "list-as-set",
+        "dict-as-frozenset",
+        "list-has-no-safe-family",
+        "tuple-has-no-safe-family",
+        "dict-has-no-safe-family",
+        "bytearray-has-no-safe-family",
+        "one-unsafe-union-member",
+    ],
+)
+def test_is_comparison_safe_hover_rejects_a_different_runtime_family(hover_text: str, constructor: str) -> None:
+    assert is_comparison_safe_hover(hover_text, constructor) is False
 
 
 @pytest.mark.parametrize(

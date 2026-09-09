@@ -3,10 +3,14 @@ from __future__ import annotations
 import contextlib
 from typing import TYPE_CHECKING
 
+from pre_commit_hooks.ast_checks.redundant_type_conversion.analysis import _DIAGNOSTICS_PROBE
+
 if TYPE_CHECKING:
     from pathlib import Path
 
     from pre_commit_hooks.ast_checks.redundant_type_conversion.session import Redundancy
+
+_DEFAULT_PROBE_DIAGNOSTICS = frozenset({("tr6-fake-probe", "fake session is trustworthy by default", 0, 0)})
 
 
 class FakeSession:
@@ -40,7 +44,11 @@ class FakeSession:
 
     def open_or_update(self, _filepath: Path, content: str, /) -> frozenset[tuple[object, ...]]:
         self.opened_content.append(content)
-        return self._diagnostics_by_content.get(content, frozenset())
+        if content in self._diagnostics_by_content:
+            return self._diagnostics_by_content[content]
+        if content.endswith(_DIAGNOSTICS_PROBE):
+            return _DEFAULT_PROBE_DIAGNOSTICS
+        return frozenset()
 
     def hover(self, _filepath: Path, line0: int, char_utf16: int, /) -> str | None:
         self.hover_calls.append((line0, char_utf16))

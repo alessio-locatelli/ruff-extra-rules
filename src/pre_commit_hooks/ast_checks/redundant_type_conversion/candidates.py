@@ -17,7 +17,8 @@ class Candidate:
     arg_start_col: int
     arg_end_col: int
     wrapped_in_len: bool
-    in_equality_comparison: bool
+    in_comparison_operand: bool
+    purepath_ambiguous: bool
     used_in_string_interpolation: bool
 
 
@@ -37,7 +38,8 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
             arg_start_col=raw.arg_start_col,
             arg_end_col=raw.arg_end_col,
             wrapped_in_len=id(raw.call) in scan.len_wrapped,
-            in_equality_comparison=id(raw.call) in scan.equality_compared,
+            in_comparison_operand=id(raw.call) in scan.comparison_operands,
+            purepath_ambiguous=scan.purepath_ambiguous,
             used_in_string_interpolation=id(raw.call) in scan.interpolated,
         )
         for raw in scan.raw_candidates
@@ -47,7 +49,6 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
 
 _BINDING_DEF_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _CAPTURE_PATTERN_TYPES = (ast.MatchAs, ast.MatchStar)
-_EQUALITY_OPS = (ast.Eq, ast.NotEq, ast.In, ast.NotIn, ast.Is, ast.IsNot)
 
 
 @dataclass(slots=True, frozen=True)
@@ -67,7 +68,8 @@ class _Scan:
     has_wildcard_import: bool
     shadowed: frozenset[str]
     len_wrapped: frozenset[int]
-    equality_compared: frozenset[int]
+    comparison_operands: frozenset[int]
+    purepath_ambiguous: bool
     interpolated: frozenset[int]
     raw_candidates: list[_RawCandidate]
 
@@ -170,7 +172,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
     shadowed: set[str] = set()
     purepath_shadowed: set[str] = set()
     len_wrapped: set[int] = set()
-    equality_compared: set[int] = set()
+    comparison_operands: set[int] = set()
     interpolated_names: set[str] = set()
     interpolated_call_ids: set[int] = set()
     raw_candidates: list[_RawCandidate] = []
@@ -236,11 +238,12 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
                 )
 
         if isinstance(node, ast.Compare):
+            # See ADR-0035's comparison-operand paragraph: every comparison operator is covered here, ordering
+            # included.
             operands = [node.left, *node.comparators]
-            for index, op in enumerate(node.ops):
-                if isinstance(op, _EQUALITY_OPS):
-                    _mark_call_ids(operands[index], equality_compared)
-                    _mark_call_ids(operands[index + 1], equality_compared)
+            for index in range(len(node.ops)):
+                _mark_call_ids(operands[index], comparison_operands)
+                _mark_call_ids(operands[index + 1], comparison_operands)
 
     interpolated = interpolated_call_ids | {
         call_id
@@ -251,7 +254,8 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
         has_wildcard_import=has_wildcard_import,
         shadowed=frozenset(shadowed),
         len_wrapped=frozenset() if "len" in shadowed else frozenset(len_wrapped),
-        equality_compared=(frozenset() if purepath_shadowed & PUREPATH_HOVER_NAMES else frozenset(equality_compared)),
+        comparison_operands=frozenset(comparison_operands),
+        purepath_ambiguous=bool(purepath_shadowed & PUREPATH_HOVER_NAMES),
         interpolated=frozenset(interpolated),
         raw_candidates=raw_candidates,
     )

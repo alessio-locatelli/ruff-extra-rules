@@ -8,7 +8,11 @@ import pytest
 
 from pre_commit_hooks._lsp import LSPError
 from pre_commit_hooks.ast_checks._base import CheckUnavailableError
-from pre_commit_hooks.ast_checks.redundant_type_conversion.analysis import _build_modified_text, decide_candidates
+from pre_commit_hooks.ast_checks.redundant_type_conversion.analysis import (
+    _DIAGNOSTICS_PROBE,
+    _build_modified_text,
+    decide_candidates,
+)
 from pre_commit_hooks.ast_checks.redundant_type_conversion.candidates import find_candidates
 from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import (
     ALL_CONSTRUCTORS,
@@ -60,7 +64,7 @@ def test_decide_candidates_flags_a_redundant_conservative_case() -> None:
     source = "y = str(x)\n"
     redundant, session = _decide(
         source,
-        diagnostics_by_content={source: frozenset(), "y = x\n": frozenset()},
+        diagnostics_by_content={source: frozenset()},
         hover_by_position={(0, 8): "str"},
     )
 
@@ -91,7 +95,7 @@ def test_decide_candidates_skips_the_recheck_entirely_when_hover_gate_fails() ->
     )
 
     assert redundant == []
-    assert session.opened_content == [source]
+    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
 
 
 def test_decide_candidates_skips_a_file_outside_the_sessions_root(caplog: pytest.LogCaptureFixture) -> None:
@@ -106,6 +110,22 @@ def test_decide_candidates_skips_a_file_outside_the_sessions_root(caplog: pytest
     assert redundant == []
     assert session.opened_content == []
     assert "outside the `ty` session's own project root" in caplog.text
+
+
+def test_decide_candidates_skips_a_file_ty_reports_no_diagnostics_for_at_all(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    source = "y = str(x)\n"
+    redundant, session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset(), source + _DIAGNOSTICS_PROBE: frozenset()},
+        hover_by_position={(0, 8): "str"},
+    )
+
+    assert redundant == []
+    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
+    assert session.hover_calls == []
+    assert "even for an obviously-invalid probe statement" in caplog.text
 
 
 def test_decide_candidates_honors_ignored_lines_without_ever_opening_a_session() -> None:
@@ -167,7 +187,7 @@ def test_decide_candidates_opens_one_baseline_before_all_hovers() -> None:
     )
 
     assert len(redundant) == 2
-    assert session.opened_content == [source, modified_1, modified_2]
+    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source, modified_1, modified_2]
 
 
 def test_decide_candidates_skips_a_len_wrapped_candidate_that_is_not_an_exact_match() -> None:
@@ -180,7 +200,7 @@ def test_decide_candidates_skips_a_len_wrapped_candidate_that_is_not_an_exact_ma
     )
 
     assert redundant == []
-    assert session.opened_content == [source]
+    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
 
 
 def test_decide_candidates_still_flags_a_len_wrapped_candidate_that_is_an_exact_match() -> None:
@@ -206,7 +226,7 @@ def test_decide_candidates_skips_a_path_conversion_used_in_an_equality_compariso
     )
 
     assert redundant == []
-    assert session.opened_content == [source]
+    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
 
 
 def test_decide_candidates_still_flags_an_ordinary_conversion_used_in_an_equality_comparison() -> None:
@@ -215,6 +235,71 @@ def test_decide_candidates_still_flags_an_ordinary_conversion_used_in_an_equalit
         source,
         diagnostics_by_content={source: frozenset(), "y = matches == [ignored]\n": frozenset()},
         hover_by_position={(0, 26): "LiteralString"},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert len(redundant) == 1
+
+
+def test_decide_candidates_still_flags_a_path_hover_when_purepath_is_locally_ambiguous() -> None:
+    source = "class Path:\n    pass\n\n\ny = matches == [str(ignored)]\n"
+    redundant, _session = _decide(
+        source,
+        diagnostics_by_content={
+            source: frozenset(),
+            "class Path:\n    pass\n\n\ny = matches == [ignored]\n": frozenset(),
+        },
+        hover_by_position={(4, 26): "Path"},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert len(redundant) == 1
+
+
+def test_decide_candidates_skips_a_tuple_conversion_used_in_a_subset_comparison() -> None:
+    source = "assert expected <= set(PERFORMANCE_INDEXES)\n"
+    redundant, session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset()},
+        hover_by_position={(0, 41): "tuple[tuple[str, tuple[str, ...]], ...]"},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert redundant == []
+    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
+
+
+def test_decide_candidates_skips_a_dict_conversion_used_in_an_equality_comparison() -> None:
+    source = "assert set(manager._executions) == {'race:0', 'race:1'}\n"
+    redundant, session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset()},
+        hover_by_position={(0, 29): "dict[str, Execution]"},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert redundant == []
+    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
+
+
+def test_decide_candidates_still_skips_a_dict_conversion_when_an_unrelated_path_name_is_shadowed() -> None:
+    source = "class Path:\n    pass\n\n\nassert set(manager._executions) == {'race:0', 'race:1'}\n"
+    redundant, _session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset()},
+        hover_by_position={(4, 29): "dict[str, Execution]"},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert redundant == []
+
+
+def test_decide_candidates_still_flags_a_frozenset_conversion_used_in_a_subset_comparison() -> None:
+    source = "assert expected <= set(a_frozenset)\n"
+    redundant, _session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset(), "assert expected <= a_frozenset\n": frozenset()},
+        hover_by_position={(0, 33): "frozenset[str]"},
         level=ConfidenceLevel.AGGRESSIVE,
     )
 
@@ -231,7 +316,7 @@ def test_decide_candidates_skips_a_non_exact_conversion_reachable_from_a_string_
     )
 
     assert redundant == []
-    assert session.opened_content == [source]
+    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
 
 
 def test_decide_candidates_still_flags_an_exact_match_reachable_from_a_string_interpolation() -> None:
