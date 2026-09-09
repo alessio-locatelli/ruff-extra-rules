@@ -6,6 +6,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-09-09
+
 ### Fixed
 
 - `redundant-type-conversion` no longer reports a non-exact-match conversion whose result feeds an ordering comparison (`<`/`<=`/`>`/`>=`), not just an equality one, when doing so could raise `TypeError` or silently compare unrelated values at runtime (e.g. `expected <= set(a_tuple)`, where `a_tuple`'s own type isn't a `set`).
