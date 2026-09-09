@@ -367,23 +367,20 @@ def test_a_candidate_is_not_marked_as_an_identity_operand_otherwise(source: str)
 
 
 @pytest.mark.parametrize(
-    "source",
-    ["y = bytes(data) in container\n", "y = bytes(data) not in container\n", "y = container in bytes(data)\n"],
-    ids=["in", "not-in", "in-rhs"],
+    ("source", "expected"),
+    [
+        ("y = bytes(data) in container\n", True),
+        ("y = bytes(data) not in container\n", True),
+        ("y = container in bytes(data)\n", True),
+        ("y = bytes(data) == container\n", False),
+        ("y = bytes(data) is container\n", False),
+        ("y = bytes(data)\n", False),
+    ],
+    ids=["in", "not-in", "in-rhs", "eq", "is", "no-comparison"],
 )
-def test_a_candidate_used_as_a_membership_operand_is_marked(source: str) -> None:
+def test_a_candidate_is_marked_as_a_membership_operand_only_for_in_comparisons(source: str, expected: bool) -> None:
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_membership_test is True
-
-
-@pytest.mark.parametrize(
-    "source",
-    ["y = bytes(data) == container\n", "y = bytes(data) is container\n", "y = bytes(data)\n"],
-    ids=["eq", "is", "no-comparison"],
-)
-def test_a_candidate_is_not_marked_as_a_membership_operand_otherwise(source: str) -> None:
-    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_membership_test is False
+    assert candidate.in_membership_test is expected
 
 
 @pytest.mark.parametrize(
