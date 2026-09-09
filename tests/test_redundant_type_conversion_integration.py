@@ -99,6 +99,30 @@ def test_a_conversion_in_a_file_tys_own_configuration_excludes_is_never_flagged(
     assert "outside its checked scope" in caplog.text
 
 
+def test_a_redundant_conversion_is_still_flagged_when_ty_suppresses_the_probes_own_rule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "ty.toml").write_text('[rules]\ninvalid-assignment = "ignore"\n')
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def takes_str(x: str) -> str:\n"
+        "    return x\n"
+        "\n\n"
+        "def use(value: str) -> str:\n"
+        "    return takes_str(str(value))\n"
+    )
+
+    session = TySession(root=tmp_path)
+    monkeypatch.setattr(tri006_module, "get_session", lambda: session)
+    try:
+        violations = _check(filepath)
+    finally:
+        session.close()
+
+    assert len(violations) == 1
+    assert "checked scope" not in caplog.text
+
+
 def test_suppressed_conversions_are_never_flagged() -> None:
     violations = _check(FIXTURES_ROOT / "ignore" / "suppressed.py")
 
