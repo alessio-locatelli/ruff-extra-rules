@@ -6,7 +6,13 @@ from typing import TYPE_CHECKING, Protocol
 from pre_commit_hooks._lsp import LSPError
 from pre_commit_hooks.ast_checks._base import CheckUnavailableError, byte_col_to_char_col, split_lines_like_ast
 
-from .confidence import hover_passes_gate, is_comparison_safe_hover, is_exact_match, is_purepath_hover
+from .confidence import (
+    MUTABLE_CONSTRUCTORS,
+    hover_passes_gate,
+    is_comparison_safe_hover,
+    is_exact_match,
+    is_purepath_hover,
+)
 
 if TYPE_CHECKING:
     import contextlib
@@ -123,12 +129,17 @@ def decide_candidates(
                 if candidate.wrapped_in_len and not is_exact_match(hover_text, candidate.constructor):
                     continue
 
-                if candidate.in_identity_comparison and not is_exact_match(hover_text, candidate.constructor):
+                if candidate.in_identity_comparison and (
+                    candidate.constructor in MUTABLE_CONSTRUCTORS
+                    or not is_exact_match(hover_text, candidate.constructor)
+                ):
                     continue
 
                 if candidate.in_comparison_operand and not (
                     is_exact_match(hover_text, candidate.constructor)
-                    or is_comparison_safe_hover(hover_text, candidate.constructor)
+                    or (
+                        is_comparison_safe_hover(hover_text, candidate.constructor) and not candidate.in_membership_test
+                    )
                     or (candidate.purepath_ambiguous and is_purepath_hover(hover_text))
                 ):
                     continue

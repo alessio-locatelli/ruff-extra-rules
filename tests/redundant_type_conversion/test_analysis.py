@@ -329,6 +329,30 @@ def test_decide_candidates_still_flags_an_exact_match_used_in_an_identity_compar
     assert len(redundant) == 1
 
 
+def test_decide_candidates_skips_a_mutable_constructor_used_in_an_identity_comparison() -> None:
+    source = "y = list(data) is data\n"
+    redundant, _session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset(), "y = data is data\n": frozenset()},
+        hover_by_position={(0, 14): "list[int]"},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert redundant == []
+
+
+def test_decide_candidates_skips_a_bytearray_conversion_used_in_a_membership_test() -> None:
+    source = "y = bytes(data) in container\n"
+    redundant, _session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset(), "y = data in container\n": frozenset()},
+        hover_by_position={(0, 15): "bytearray"},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert redundant == []
+
+
 def test_decide_candidates_skips_an_int_conversion_used_in_a_float_comparison() -> None:
     source = "z = float(x) == other\n"
     redundant, _session = _decide(

@@ -6,6 +6,11 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Fixed
+
+- `redundant-type-conversion` `aggressive` mode no longer reports an identity comparison (`is`/`is not`) as redundant for a mutable constructor (`list`, `dict`, `set`, `bytearray`), even when the wrapped value is already exactly the target type. Unlike the immutable constructors, these always allocate a new object, so `x is list(x)` is never true regardless of `x`'s own type, and removing the conversion would flip the comparison's result.
+- `redundant-type-conversion` `aggressive` mode no longer reports a same-family conversion (e.g. `bytes`/`bytearray`, `set`/`frozenset`) as redundant when it feeds a membership test (`in`/`not in`), since that family relationship is only safe for equality and ordering comparisons — a hash-based container (`set`, `frozenset`, or a `dict`'s keys) raises `TypeError` on an unhashable membership query such as a `bytearray` or a `set`.
+
 ## [0.4.4] - 2026-09-09
 
 ### Fixed
