@@ -6,11 +6,6 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
-### Fixed
-
-- `redundant-type-conversion` `aggressive` mode no longer reports an identity comparison (`is`/`is not`) as redundant for a mutable constructor (`list`, `dict`, `set`, `bytearray`), even when the wrapped value is already exactly the target type. Unlike the immutable constructors, these always allocate a new object, so `x is list(x)` is never true regardless of `x`'s own type, and removing the conversion would flip the comparison's result.
-- `redundant-type-conversion` `aggressive` mode no longer reports a same-family conversion (e.g. `bytes`/`bytearray`, `set`/`frozenset`) as redundant when it feeds a membership test (`in`/`not in`), since that family relationship is only safe for equality and ordering comparisons — a hash-based container (`set`, `frozenset`, or a `dict`'s keys) raises `TypeError` on an unhashable membership query such as a `bytearray` or a `set`.
-
 ## [0.4.4] - 2026-09-09
 
 ### Fixed
@@ -18,6 +13,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 - `redundant-type-conversion` no longer reports a non-exact-match conversion whose result feeds an ordering comparison (`<`/`<=`/`>`/`>=`), not just an equality one, when doing so could raise `TypeError` or silently compare unrelated values at runtime (e.g. `expected <= set(a_tuple)`, where `a_tuple`'s own type isn't a `set`).
 - `redundant-type-conversion` `aggressive` mode no longer reports a non-exact-match conversion feeding any comparison operand when the wrapped value's own type has no shared comparison behavior with the constructor (e.g. a `dict` compared as a `set`, a `tuple` compared as a `set`, or an `int` compared as a `float`, which can silently lose precision) — previously only `pathlib`'s own path classes were excluded this way. An identity comparison (`is`/`is not`) is held to a stricter standard than an equality or ordering one: only a conversion whose wrapped value is already exactly the target type is still reported there, since any other conversion produces a new object and changes the comparison's result outright.
 - `redundant-type-conversion` no longer reports every conversion in a file as redundant when `ty`'s own project configuration (e.g. `[tool.ty.src] exclude`, commonly used to exempt loosely-typed test code) puts that file outside `ty`'s own checked scope — a condition under which `ty`'s LSP diagnostics silently come back empty regardless of the file's real content. The check now probes for this and skips such a file with a warning instead.
+- `redundant-type-conversion` `aggressive` mode no longer reports an identity comparison (`is`/`is not`) as redundant for a mutable constructor (`list`, `dict`, `set`, `bytearray`), even when the wrapped value is already exactly the target type. Unlike the immutable constructors, these always allocate a new object, so `x is list(x)` is never true regardless of `x`'s own type, and removing the conversion would flip the comparison's result.
+- `redundant-type-conversion` `aggressive` mode no longer reports a same-family conversion (e.g. `bytes`/`bytearray`, `set`/`frozenset`) as redundant when it feeds a membership test (`in`/`not in`), since that family relationship is only safe for equality and ordering comparisons — a hash-based container (`set`, `frozenset`, or a `dict`'s keys) raises `TypeError` on an unhashable membership query such as a `bytearray` or a `set`.
 
 ## [0.4.3] - 2026-09-08
 
