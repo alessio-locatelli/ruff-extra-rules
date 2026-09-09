@@ -84,12 +84,8 @@ def is_purepath_hover(hover_text: str) -> bool:
 _COMPARISON_SAFE_HEADS: dict[str, frozenset[str]] = {
     "str": frozenset({"str", "LiteralString"}),
     "int": frozenset({"int", "bool"}),
-    "float": frozenset({"float", "int", "bool"}),
+    "float": frozenset({"float", "bool"}),
     "bool": frozenset({"bool"}),
-    # memoryview compares equal-by-content to bytes (`memoryview(b"a") == b"a"` is True), but unlike
-    # bytearray, it doesn't support ordering against bytes at all (`memoryview(b"a") < b"b"` raises
-    # TypeError) -- since this table doesn't distinguish which operator is in play, memoryview is left out
-    # rather than risk trusting an ordering comparison it can't actually satisfy.
     "bytes": frozenset({"bytes", "bytearray"}),
     "set": frozenset({"set", "frozenset", "AbstractSet", "MutableSet", "Set", "FrozenSet"}),
     "frozenset": frozenset({"set", "frozenset", "AbstractSet", "MutableSet", "Set", "FrozenSet"}),
@@ -105,8 +101,7 @@ def is_comparison_safe_hover(hover_text: str, constructor: str) -> bool:
 
 _ITERABLE_CONSTRUCTORS = frozenset({"list", "tuple", "set", "frozenset", "bytearray"})
 
-# Names drawn from `collections.abc`/`typing` (plus the concrete builtins that satisfy them) that a
-# list/tuple/set/frozenset/bytearray conversion could plausibly be materializing or re-materializing.
+# See ADR-0035's confidence-tiering paragraph.
 _ITERABLE_PROTOCOL_HEADS = frozenset(
     {
         "Iterable",

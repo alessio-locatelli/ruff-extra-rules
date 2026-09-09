@@ -347,6 +347,26 @@ def test_a_candidate_is_not_marked_as_a_comparison_operand_otherwise(source: str
 
 
 @pytest.mark.parametrize(
+    "source",
+    ["y = str(x) is matches\n", "y = str(x) is not matches\n", "y = matches is str(x)\n"],
+    ids=["is", "is-not", "is-rhs"],
+)
+def test_a_candidate_used_as_an_identity_operand_is_marked(source: str) -> None:
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.in_identity_comparison is True
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["y = str(x) == matches\n", "y = str(x) <= matches\n", "y = str(x)\n"],
+    ids=["eq", "le", "no-comparison"],
+)
+def test_a_candidate_is_not_marked_as_an_identity_operand_otherwise(source: str) -> None:
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.in_identity_comparison is False
+
+
+@pytest.mark.parametrize(
     "shadowing_statement",
     [
         "class Path:\n    pass\n\n\n",

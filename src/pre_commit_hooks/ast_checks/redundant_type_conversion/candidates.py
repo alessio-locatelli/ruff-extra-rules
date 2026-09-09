@@ -18,6 +18,7 @@ class Candidate:
     arg_end_col: int
     wrapped_in_len: bool
     in_comparison_operand: bool
+    in_identity_comparison: bool
     purepath_ambiguous: bool
     used_in_string_interpolation: bool
 
@@ -39,6 +40,7 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
             arg_end_col=raw.arg_end_col,
             wrapped_in_len=id(raw.call) in scan.len_wrapped,
             in_comparison_operand=id(raw.call) in scan.comparison_operands,
+            in_identity_comparison=id(raw.call) in scan.identity_operands,
             purepath_ambiguous=scan.purepath_ambiguous,
             used_in_string_interpolation=id(raw.call) in scan.interpolated,
         )
@@ -69,6 +71,7 @@ class _Scan:
     shadowed: frozenset[str]
     len_wrapped: frozenset[int]
     comparison_operands: frozenset[int]
+    identity_operands: frozenset[int]
     purepath_ambiguous: bool
     interpolated: frozenset[int]
     raw_candidates: list[_RawCandidate]
@@ -173,6 +176,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
     purepath_shadowed: set[str] = set()
     len_wrapped: set[int] = set()
     comparison_operands: set[int] = set()
+    identity_operands: set[int] = set()
     interpolated_names: set[str] = set()
     interpolated_call_ids: set[int] = set()
     raw_candidates: list[_RawCandidate] = []
@@ -238,12 +242,14 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
                 )
 
         if isinstance(node, ast.Compare):
-            # See ADR-0035's comparison-operand paragraph: every comparison operator is covered here, ordering
-            # included.
+            # See ADR-0035's comparison-operand paragraph.
             operands = [node.left, *node.comparators]
-            for index in range(len(node.ops)):
+            for index, op in enumerate(node.ops):
                 _mark_call_ids(operands[index], comparison_operands)
                 _mark_call_ids(operands[index + 1], comparison_operands)
+                if isinstance(op, (ast.Is, ast.IsNot)):
+                    _mark_call_ids(operands[index], identity_operands)
+                    _mark_call_ids(operands[index + 1], identity_operands)
 
     interpolated = interpolated_call_ids | {
         call_id
@@ -255,6 +261,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
         shadowed=frozenset(shadowed),
         len_wrapped=frozenset() if "len" in shadowed else frozenset(len_wrapped),
         comparison_operands=frozenset(comparison_operands),
+        identity_operands=frozenset(identity_operands),
         purepath_ambiguous=bool(purepath_shadowed & PUREPATH_HOVER_NAMES),
         interpolated=frozenset(interpolated),
         raw_candidates=raw_candidates,
