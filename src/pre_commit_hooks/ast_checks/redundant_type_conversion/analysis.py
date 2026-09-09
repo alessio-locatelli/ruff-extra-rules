@@ -37,7 +37,7 @@ _EXCLUDED_FROM_TY_HINT = (
     "verified-redundant would be unsound. See docs/rules/redundant-type-conversion.md."
 )
 
-_DIAGNOSTICS_PROBE = "\n_pre_commit_hooks_tr6_untrusted_diagnostics_probe: str = 5\n"
+_DIAGNOSTICS_PROBE = "\n_pre_commit_hooks_tr6_untrusted_diagnostics_probe: None = 5\n"
 
 
 class RedundancySession(Protocol):

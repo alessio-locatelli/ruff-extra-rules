@@ -86,7 +86,11 @@ _COMPARISON_SAFE_HEADS: dict[str, frozenset[str]] = {
     "int": frozenset({"int", "bool"}),
     "float": frozenset({"float", "int", "bool"}),
     "bool": frozenset({"bool"}),
-    "bytes": frozenset({"bytes", "bytearray", "memoryview"}),
+    # memoryview compares equal-by-content to bytes (`memoryview(b"a") == b"a"` is True), but unlike
+    # bytearray, it doesn't support ordering against bytes at all (`memoryview(b"a") < b"b"` raises
+    # TypeError) -- since this table doesn't distinguish which operator is in play, memoryview is left out
+    # rather than risk trusting an ordering comparison it can't actually satisfy.
+    "bytes": frozenset({"bytes", "bytearray"}),
     "set": frozenset({"set", "frozenset", "AbstractSet", "MutableSet", "Set", "FrozenSet"}),
     "frozenset": frozenset({"set", "frozenset", "AbstractSet", "MutableSet", "Set", "FrozenSet"}),
 }
