@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Protocol
 from pre_commit_hooks._lsp import LSPError
 from pre_commit_hooks.ast_checks._base import CheckUnavailableError, byte_col_to_char_col, split_lines_like_ast
 
-from .confidence import hover_passes_gate, is_exact_match, is_purepath_hover
+from .confidence import hover_passes_gate, is_comparison_safe_hover, is_exact_match, is_purepath_hover
 
 if TYPE_CHECKING:
     import contextlib
@@ -29,6 +29,15 @@ _OUT_OF_ROOT_HINT = (
     "would be unsound. Run this check from inside the project that owns the file. "
     "See docs/rules/redundant-type-conversion.md."
 )
+
+_EXCLUDED_FROM_TY_HINT = (
+    "redundant-type-conversion (TR6) is skipping %s: `ty` reported no diagnostics for it, even for an "
+    "obviously-invalid probe statement, meaning `ty`'s own project configuration (e.g. `[tool.ty.src] "
+    "exclude`) has this file outside its checked scope -- treating every conversion in it as "
+    "verified-redundant would be unsound. See docs/rules/redundant-type-conversion.md."
+)
+
+_DIAGNOSTICS_PROBE = "\n_pre_commit_hooks_tr6_untrusted_diagnostics_probe: str = 5\n"
 
 
 class RedundancySession(Protocol):
@@ -90,6 +99,13 @@ def decide_candidates(
     with session.analysis_transaction():
         try:
             baseline = _open_or_raise(session, filepath, source)
+            if not baseline:
+                probe = _open_or_raise(session, filepath, source + _DIAGNOSTICS_PROBE)
+                baseline = _open_or_raise(session, filepath, source)
+                if not probe:
+                    logger.warning(_EXCLUDED_FROM_TY_HINT, filepath)
+                    return []
+
             candidates_with_hovers: list[tuple[Candidate, str]] = []
             for candidate in candidates:
                 line_text = source_lines[candidate.line - 1]
@@ -103,7 +119,11 @@ def decide_candidates(
                 if candidate.wrapped_in_len and not is_exact_match(hover_text, candidate.constructor):
                     continue
 
-                if candidate.in_equality_comparison and is_purepath_hover(hover_text):
+                if candidate.in_comparison_operand and not (
+                    is_exact_match(hover_text, candidate.constructor)
+                    or is_comparison_safe_hover(hover_text, candidate.constructor)
+                    or (candidate.purepath_ambiguous and is_purepath_hover(hover_text))
+                ):
                     continue
 
                 if candidate.used_in_string_interpolation and not is_exact_match(hover_text, candidate.constructor):

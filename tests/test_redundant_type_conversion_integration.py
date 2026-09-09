@@ -79,6 +79,26 @@ def test_necessary_conversions_are_never_flagged() -> None:
     assert violations == []
 
 
+def test_a_conversion_in_a_file_tys_own_configuration_excludes_is_never_flagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    (tmp_path / "ty.toml").write_text('[src]\ninclude = ["included_dir"]\nexclude = ["excluded_dir"]\n')
+    excluded_dir = tmp_path / "excluded_dir"
+    excluded_dir.mkdir()
+    filepath = excluded_dir / "module.py"
+    filepath.write_text("y = str(x)\n")
+
+    session = TySession(root=tmp_path)
+    monkeypatch.setattr(tri006_module, "get_session", lambda: session)
+    try:
+        violations = _check(filepath, level=ConfidenceLevel.AGGRESSIVE)
+    finally:
+        session.close()
+
+    assert violations == []
+    assert "outside its checked scope" in caplog.text
+
+
 def test_suppressed_conversions_are_never_flagged() -> None:
     violations = _check(FIXTURES_ROOT / "ignore" / "suppressed.py")
 

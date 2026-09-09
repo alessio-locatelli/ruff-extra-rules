@@ -80,6 +80,25 @@ def is_purepath_hover(hover_text: str) -> bool:
     return any(member in PUREPATH_HOVER_NAMES for member in _split_top_level_union(hover_text))
 
 
+# See ADR-0035's comparison-operand paragraph.
+_COMPARISON_SAFE_HEADS: dict[str, frozenset[str]] = {
+    "str": frozenset({"str", "LiteralString"}),
+    "int": frozenset({"int", "bool"}),
+    "float": frozenset({"float", "int", "bool"}),
+    "bool": frozenset({"bool"}),
+    "bytes": frozenset({"bytes", "bytearray", "memoryview"}),
+    "set": frozenset({"set", "frozenset", "AbstractSet", "MutableSet", "Set", "FrozenSet"}),
+    "frozenset": frozenset({"set", "frozenset", "AbstractSet", "MutableSet", "Set", "FrozenSet"}),
+}
+
+
+def is_comparison_safe_hover(hover_text: str, constructor: str) -> bool:
+    safe_heads = _COMPARISON_SAFE_HEADS.get(constructor, frozenset())
+    return all(
+        member.split(" & ", 1)[0].split("[", 1)[0] in safe_heads for member in _split_top_level_union(hover_text)
+    )
+
+
 _ITERABLE_CONSTRUCTORS = frozenset({"list", "tuple", "set", "frozenset", "bytearray"})
 
 # Names drawn from `collections.abc`/`typing` (plus the concrete builtins that satisfy them) that a

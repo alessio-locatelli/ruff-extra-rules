@@ -6,6 +6,12 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Fixed
+
+- `redundant-type-conversion` no longer reports a non-exact-match conversion whose result feeds an ordering comparison (`<`/`<=`/`>`/`>=`), not just an equality one, when doing so could raise `TypeError` or silently compare unrelated values at runtime (e.g. `expected <= set(a_tuple)`, where `a_tuple`'s own type isn't a `set`).
+- `redundant-type-conversion` `aggressive` mode no longer reports a non-exact-match conversion feeding any comparison operand when the wrapped value's own type has no shared comparison behavior with the constructor (e.g. a `dict` compared as a `set`, or a `tuple` compared as a `set`) — previously only `pathlib`'s own path classes were excluded this way.
+- `redundant-type-conversion` no longer reports every conversion in a file as redundant when `ty`'s own project configuration (e.g. `[tool.ty.src] exclude`, commonly used to exempt loosely-typed test code) puts that file outside `ty`'s own checked scope — a condition under which `ty`'s LSP diagnostics silently come back empty regardless of the file's real content. The check now probes for this and skips such a file with a warning instead.
+
 ## [0.4.3] - 2026-09-08
 
 ### Fixed
