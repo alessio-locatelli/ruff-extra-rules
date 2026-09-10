@@ -81,7 +81,7 @@ def test_decide_candidates_flags_a_redundant_conservative_case() -> None:
             "y = str(x)\n",
             {
                 "y = str(x)\n": frozenset(),
-                "y = x\n": frozenset({("invalid-argument-type", "boom", 0, 0, 0, 5)}),  # pytriage: TR6
+                "y = x\n": {("invalid-argument-type", "boom", 0, 0, 0, 5)},
             },
             {(0, 8): "str"},
             ConfidenceLevel.CONSERVATIVE,
