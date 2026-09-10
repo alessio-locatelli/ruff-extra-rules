@@ -74,16 +74,207 @@ def test_decide_candidates_flags_a_redundant_conservative_case() -> None:
     assert session.closed_files == [Path("test.py")]
 
 
-def test_decide_candidates_does_not_flag_when_recheck_finds_a_new_diagnostic() -> None:
-    source = "y = str(x)\n"
-    new_diagnostic = frozenset({("invalid-argument-type", "boom", 0, 0, 0, 5)})
+@pytest.mark.parametrize(
+    ("source", "diagnostics_by_content", "hover_by_position", "level"),
+    [
+        (
+            "y = str(x)\n",
+            {
+                "y = str(x)\n": frozenset(),
+                "y = x\n": frozenset({("invalid-argument-type", "boom", 0, 0, 0, 5)}),  # pytriage: TR6
+            },
+            {(0, 8): "str"},
+            ConfidenceLevel.CONSERVATIVE,
+        ),
+        (
+            "len(set(op_ids))\n",
+            {"len(set(op_ids))\n": frozenset()},
+            {(0, 13): "list[int]"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+        (
+            "len(dict(m))\n",
+            {"len(dict(m))\n": frozenset()},
+            {(0, 9): "Mapping[str, int]"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+        (
+            "y = matches == [str(ignored)]\n",
+            {"y = matches == [str(ignored)]\n": frozenset()},
+            {(0, 26): "Path"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+        (
+            "assert expected <= set(PERFORMANCE_INDEXES)\n",
+            {"assert expected <= set(PERFORMANCE_INDEXES)\n": frozenset()},
+            {(0, 41): "tuple[tuple[str, tuple[str, ...]], ...]"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+        (
+            "assert set(manager._executions) == {'race:0', 'race:1'}\n",
+            {"assert set(manager._executions) == {'race:0', 'race:1'}\n": frozenset()},
+            {(0, 29): "dict[str, Execution]"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+        (
+            "class Path:\n    pass\n\n\nassert set(manager._executions) == {'race:0', 'race:1'}\n",
+            {"class Path:\n    pass\n\n\nassert set(manager._executions) == {'race:0', 'race:1'}\n": frozenset()},
+            {(4, 29): "dict[str, Execution]"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+        (
+            "y = bytes(data) is data\n",
+            {"y = bytes(data) is data\n": frozenset()},
+            {(0, 13): "bytearray"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+        (
+            "y = list(data) is data\n",
+            {"y = list(data) is data\n": frozenset(), "y = data is data\n": frozenset()},
+            {(0, 14): "list[int]"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+        (
+            "y = bytes(data) in container\n",
+            {"y = bytes(data) in container\n": frozenset(), "y = data in container\n": frozenset()},
+            {(0, 15): "bytearray"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+        (
+            "z = float(x) == other\n",
+            {"z = float(x) == other\n": frozenset()},
+            {(0, 10): "int"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+        (
+            "y = tuple(x)\nsql = f'{y}'\n",
+            {"y = tuple(x)\nsql = f'{y}'\n": frozenset()},
+            {(0, 10): "frozenset[int]"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+        (
+            "y = dict(x)\ny['k'] = 1\n",
+            {"y = dict(x)\ny['k'] = 1\n": frozenset(), "y = x\ny['k'] = 1\n": frozenset()},
+            {(0, 9): "dict[str, int]"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
+    ],
+    ids=[
+        "recheck-finds-a-new-diagnostic",
+        "len-wrapped-set-not-an-exact-match",
+        "len-wrapped-dict-not-an-exact-match",
+        "path-conversion-in-an-equality-comparison",
+        "tuple-conversion-in-a-subset-comparison",
+        "dict-conversion-in-an-equality-comparison",
+        "dict-conversion-with-an-unrelated-path-name-shadowed",
+        "non-exact-family-member-in-an-identity-comparison",
+        "mutable-constructor-in-an-identity-comparison",
+        "bytearray-conversion-in-a-membership-test",
+        "int-conversion-in-a-float-comparison",
+        "non-exact-conversion-reachable-from-a-string-interpolation",
+        "mutable-constructor-later-mutated",
+    ],
+)
+def test_decide_candidates_skips(
+    source: str,
+    diagnostics_by_content: dict[str, frozenset[tuple[object, ...]]],
+    hover_by_position: dict[tuple[int, int], str | None],
+    level: ConfidenceLevel,
+) -> None:
     redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset(), "y = x\n": new_diagnostic},
-        hover_by_position={(0, 8): "str"},
+        source, diagnostics_by_content=diagnostics_by_content, hover_by_position=hover_by_position, level=level
     )
 
     assert redundant == []
+
+
+@pytest.mark.parametrize(
+    ("source", "diagnostics_by_content", "hover_by_position", "level", "expected_constructor"),
+    [
+        (
+            "y = matches == [str(ignored)]\n",
+            {"y = matches == [str(ignored)]\n": frozenset(), "y = matches == [ignored]\n": frozenset()},
+            {(0, 26): "LiteralString"},
+            ConfidenceLevel.AGGRESSIVE,
+            "str",
+        ),
+        (
+            "class Path:\n    pass\n\n\ny = matches == [str(ignored)]\n",
+            {
+                "class Path:\n    pass\n\n\ny = matches == [str(ignored)]\n": frozenset(),
+                "class Path:\n    pass\n\n\ny = matches == [ignored]\n": frozenset(),
+            },
+            {(4, 26): "Path"},
+            ConfidenceLevel.AGGRESSIVE,
+            "str",
+        ),
+        (
+            "assert expected <= set(a_frozenset)\n",
+            {"assert expected <= set(a_frozenset)\n": frozenset(), "assert expected <= a_frozenset\n": frozenset()},
+            {(0, 33): "frozenset[str]"},
+            ConfidenceLevel.AGGRESSIVE,
+            "set",
+        ),
+        (
+            "y = str(x) is matches\n",
+            {"y = str(x) is matches\n": frozenset(), "y = x is matches\n": frozenset()},
+            {(0, 8): "str"},
+            ConfidenceLevel.CONSERVATIVE,
+            "str",
+        ),
+        (
+            "y = tuple(x)\nsql = f'{y}'\n",
+            {"y = tuple(x)\nsql = f'{y}'\n": frozenset(), "y = x\nsql = f'{y}'\n": frozenset()},
+            {(0, 10): "tuple[int]"},
+            ConfidenceLevel.AGGRESSIVE,
+            "tuple",
+        ),
+        (
+            "y = dict(x)\nprint(y)\n",
+            {"y = dict(x)\nprint(y)\n": frozenset(), "y = x\nprint(y)\n": frozenset()},
+            {(0, 9): "dict[str, int]"},
+            ConfidenceLevel.AGGRESSIVE,
+            "dict",
+        ),
+        (
+            "len(set(op_ids))\n",
+            {"len(set(op_ids))\n": frozenset(), "len(op_ids)\n": frozenset()},
+            {(0, 13): "set[int]"},
+            ConfidenceLevel.AGGRESSIVE,
+            "set",
+        ),
+        (
+            "takes_list(list(bar))\n",
+            {"takes_list(list(bar))\n": frozenset(), "takes_list(bar)\n": frozenset()},
+            {(0, 18): "list[int]"},
+            ConfidenceLevel.AGGRESSIVE,
+            "list",
+        ),
+    ],
+    ids=[
+        "ordinary-conversion-in-an-equality-comparison",
+        "path-hover-when-purepath-is-locally-ambiguous",
+        "frozenset-conversion-in-a-subset-comparison",
+        "exact-match-in-an-identity-comparison",
+        "exact-match-reachable-from-a-string-interpolation",
+        "mutable-constructor-never-mutated",
+        "len-wrapped-candidate-that-is-an-exact-match",
+        "aggressive-includes-mutable-constructors",
+    ],
+)
+def test_decide_candidates_still_flags(
+    source: str,
+    diagnostics_by_content: dict[str, frozenset[tuple[object, ...]]],
+    hover_by_position: dict[tuple[int, int], str | None],
+    level: ConfidenceLevel,
+    expected_constructor: str,
+) -> None:
+    redundant, _session = _decide(
+        source, diagnostics_by_content=diagnostics_by_content, hover_by_position=hover_by_position, level=level
+    )
+
+    assert len(redundant) == 1
+    assert redundant[0].candidate.constructor == expected_constructor
 
 
 def test_decide_candidates_skips_the_recheck_entirely_when_hover_gate_fails() -> None:
@@ -188,219 +379,6 @@ def test_decide_candidates_opens_one_baseline_before_all_hovers() -> None:
 
     assert len(redundant) == 2
     assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source, modified_1, modified_2]
-
-
-def test_decide_candidates_skips_a_len_wrapped_candidate_that_is_not_an_exact_match() -> None:
-    source = "len(set(op_ids))\n"
-    redundant, session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset()},
-        hover_by_position={(0, 13): "list[int]"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert redundant == []
-    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
-
-
-def test_decide_candidates_still_flags_a_len_wrapped_candidate_that_is_an_exact_match() -> None:
-    source = "len(set(op_ids))\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset(), "len(op_ids)\n": frozenset()},
-        hover_by_position={(0, 13): "set[int]"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert len(redundant) == 1
-    assert redundant[0].candidate.constructor == "set"
-
-
-def test_decide_candidates_skips_a_path_conversion_used_in_an_equality_comparison() -> None:
-    source = "y = matches == [str(ignored)]\n"
-    redundant, session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset()},
-        hover_by_position={(0, 26): "Path"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert redundant == []
-    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
-
-
-def test_decide_candidates_still_flags_an_ordinary_conversion_used_in_an_equality_comparison() -> None:
-    source = "y = matches == [str(ignored)]\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset(), "y = matches == [ignored]\n": frozenset()},
-        hover_by_position={(0, 26): "LiteralString"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert len(redundant) == 1
-
-
-def test_decide_candidates_still_flags_a_path_hover_when_purepath_is_locally_ambiguous() -> None:
-    source = "class Path:\n    pass\n\n\ny = matches == [str(ignored)]\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={
-            source: frozenset(),
-            "class Path:\n    pass\n\n\ny = matches == [ignored]\n": frozenset(),
-        },
-        hover_by_position={(4, 26): "Path"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert len(redundant) == 1
-
-
-def test_decide_candidates_skips_a_tuple_conversion_used_in_a_subset_comparison() -> None:
-    source = "assert expected <= set(PERFORMANCE_INDEXES)\n"
-    redundant, session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset()},
-        hover_by_position={(0, 41): "tuple[tuple[str, tuple[str, ...]], ...]"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert redundant == []
-    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
-
-
-def test_decide_candidates_skips_a_dict_conversion_used_in_an_equality_comparison() -> None:
-    source = "assert set(manager._executions) == {'race:0', 'race:1'}\n"
-    redundant, session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset()},
-        hover_by_position={(0, 29): "dict[str, Execution]"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert redundant == []
-    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
-
-
-def test_decide_candidates_still_skips_a_dict_conversion_when_an_unrelated_path_name_is_shadowed() -> None:
-    source = "class Path:\n    pass\n\n\nassert set(manager._executions) == {'race:0', 'race:1'}\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset()},
-        hover_by_position={(4, 29): "dict[str, Execution]"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert redundant == []
-
-
-def test_decide_candidates_still_flags_a_frozenset_conversion_used_in_a_subset_comparison() -> None:
-    source = "assert expected <= set(a_frozenset)\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset(), "assert expected <= a_frozenset\n": frozenset()},
-        hover_by_position={(0, 33): "frozenset[str]"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert len(redundant) == 1
-
-
-def test_decide_candidates_skips_a_non_exact_family_member_used_in_an_identity_comparison() -> None:
-    source = "y = bytes(data) is data\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset()},
-        hover_by_position={(0, 13): "bytearray"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert redundant == []
-
-
-def test_decide_candidates_still_flags_an_exact_match_used_in_an_identity_comparison() -> None:
-    source = "y = str(x) is matches\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset(), "y = x is matches\n": frozenset()},
-        hover_by_position={(0, 8): "str"},
-    )
-
-    assert len(redundant) == 1
-
-
-def test_decide_candidates_skips_a_mutable_constructor_used_in_an_identity_comparison() -> None:
-    source = "y = list(data) is data\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset(), "y = data is data\n": frozenset()},
-        hover_by_position={(0, 14): "list[int]"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert redundant == []
-
-
-def test_decide_candidates_skips_a_bytearray_conversion_used_in_a_membership_test() -> None:
-    source = "y = bytes(data) in container\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset(), "y = data in container\n": frozenset()},
-        hover_by_position={(0, 15): "bytearray"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert redundant == []
-
-
-def test_decide_candidates_skips_an_int_conversion_used_in_a_float_comparison() -> None:
-    source = "z = float(x) == other\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset()},
-        hover_by_position={(0, 10): "int"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert redundant == []
-
-
-def test_decide_candidates_skips_a_non_exact_conversion_reachable_from_a_string_interpolation() -> None:
-    source = "y = tuple(x)\nsql = f'{y}'\n"
-    redundant, session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset()},
-        hover_by_position={(0, 10): "frozenset[int]"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert redundant == []
-    assert session.opened_content == [source, source + _DIAGNOSTICS_PROBE, source]
-
-
-def test_decide_candidates_still_flags_an_exact_match_reachable_from_a_string_interpolation() -> None:
-    source = "y = tuple(x)\nsql = f'{y}'\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset(), "y = x\nsql = f'{y}'\n": frozenset()},
-        hover_by_position={(0, 10): "tuple[int]"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert len(redundant) == 1
-
-
-def test_decide_candidates_aggressive_includes_mutable_constructors() -> None:
-    source = "takes_list(list(bar))\n"
-    redundant, _session = _decide(
-        source,
-        diagnostics_by_content={source: frozenset(), "takes_list(bar)\n": frozenset()},
-        hover_by_position={(0, 18): "list[int]"},
-        level=ConfidenceLevel.AGGRESSIVE,
-    )
-
-    assert len(redundant) == 1
-    assert redundant[0].candidate.constructor == "list"
 
 
 class _SessionRaisingFromIsWithinRoot(FakeSession):

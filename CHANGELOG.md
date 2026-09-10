@@ -6,6 +6,11 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Fixed
+
+- `redundant-type-conversion` `aggressive` mode no longer reports a `list`/`dict`/`set`/`bytearray` conversion assigned to a name (directly, through a chain of plain reassignments, or through an attribute/subscript target's own base name) when that name is later mutated in place — a subscript assignment or deletion, an augmented assignment, or a call to a mutating method such as `.append()`, `.update()`, or `.add()` — since removing the conversion there would turn a distinct copy into a shared, mutable reference to the original value (e.g. `record = dict(record); record["_id"] = 42`).
+- `redundant-type-conversion` `aggressive` mode no longer reports `set(...)`/`frozenset(...)` as redundant when the wrapped value's own type permits duplicates (a `list`, `tuple`, or any other type without set semantics) unless it's already exactly a `set`/`frozenset`-family type — converting a duplicate-permitting value is deduplication, a real behavior change `ty`'s type-only view can't see.
+
 ## [0.4.4] - 2026-09-09
 
 ### Fixed

@@ -22,6 +22,7 @@ class Candidate:
     in_membership_test: bool
     purepath_ambiguous: bool
     used_in_string_interpolation: bool
+    mutated_after_copy: bool
 
 
 def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidate]:
@@ -45,6 +46,7 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
             in_membership_test=id(raw.call) in scan.membership_operands,
             purepath_ambiguous=scan.purepath_ambiguous,
             used_in_string_interpolation=id(raw.call) in scan.interpolated,
+            mutated_after_copy=id(raw.call) in scan.mutated,
         )
         for raw in scan.raw_candidates
         if raw.constructor in final_eligible
@@ -77,6 +79,7 @@ class _Scan:
     membership_operands: frozenset[int]
     purepath_ambiguous: bool
     interpolated: frozenset[int]
+    mutated: frozenset[int]
     raw_candidates: list[_RawCandidate]
 
 
@@ -92,20 +95,20 @@ def _binding_base_name(target: ast.expr) -> ast.Name | None:
     return None
 
 
-def _simple_bindings(node: ast.AST) -> list[tuple[ast.Name, ast.expr]]:
+def _simple_bindings(node: ast.AST) -> list[tuple[ast.expr, ast.Name, ast.expr]]:
     if isinstance(node, ast.Assign):
         bindings = []
         for target in node.targets:
             base = _binding_base_name(target)
             if base is not None:
-                bindings.append((base, node.value))
+                bindings.append((target, base, node.value))
         return bindings
     if isinstance(node, ast.AnnAssign) and node.value is not None:
         base = _binding_base_name(node.target)
-        return [(base, node.value)] if base is not None else []
+        return [(node.target, base, node.value)] if base is not None else []
     if isinstance(node, ast.NamedExpr):
         base = _binding_base_name(node.target)
-        return [(base, node.value)] if base is not None else []
+        return [(node.target, base, node.value)] if base is not None else []
     return []
 
 
@@ -121,20 +124,41 @@ def _alias_closure(start_names: set[str], alias_edges: dict[str, set[str]]) -> s
     return seen
 
 
-def _collect_bindings(tree: ast.Module) -> tuple[dict[int, set[str]], dict[str, set[str]], frozenset[str]]:
-    call_target_names: dict[int, set[str]] = {}
+@dataclass(slots=True, frozen=True)
+class _Bindings:
+    nested_call_target_names: dict[int, set[str]]
+    direct_call_target_names: dict[int, set[str]]
+    alias_edges: dict[str, set[str]]
+    string_literal_names: frozenset[str]
+    self_introduction: dict[int, int]
+
+
+def _collect_bindings(tree: ast.Module) -> _Bindings:
+    nested_call_target_names: dict[int, set[str]] = {}
+    direct_call_target_names: dict[int, set[str]] = {}
     alias_edges: dict[str, set[str]] = {}
     string_literal_names: set[str] = set()
+    self_introduction: dict[int, int] = {}
     for node in ast.walk(tree):
-        for target, value in _simple_bindings(node):
+        for target, base, value in _simple_bindings(node):
+            if isinstance(target, ast.Subscript) and isinstance(value, ast.Call):
+                self_introduction[id(target)] = id(value)
             for sub in ast.walk(value):
                 if isinstance(sub, ast.Call):
-                    call_target_names.setdefault(id(sub), set()).add(target.id)
+                    nested_call_target_names.setdefault(id(sub), set()).add(base.id)
+            if isinstance(value, ast.Call):
+                direct_call_target_names.setdefault(id(value), set()).add(base.id)
             if isinstance(value, ast.Name):
-                alias_edges.setdefault(value.id, set()).add(target.id)
+                alias_edges.setdefault(value.id, set()).add(base.id)
             if _is_string_literal(value):
-                string_literal_names.add(target.id)
-    return call_target_names, alias_edges, frozenset(_alias_closure(string_literal_names, alias_edges))
+                string_literal_names.add(base.id)
+    return _Bindings(
+        nested_call_target_names=nested_call_target_names,
+        direct_call_target_names=direct_call_target_names,
+        alias_edges=alias_edges,
+        string_literal_names=frozenset(_alias_closure(string_literal_names, alias_edges)),
+        self_introduction=self_introduction,
+    )
 
 
 def _looks_like_a_format_string(left: ast.expr, string_literal_names: frozenset[str]) -> bool:
@@ -167,10 +191,65 @@ def _interpolated_exprs(node: ast.AST, string_literal_names: frozenset[str]) -> 
     return []
 
 
-def _an_alias_is_interpolated(
-    target_names: set[str], alias_edges: dict[str, set[str]], interpolated_names: set[str]
+def _an_alias_is_in(target_names: set[str], alias_edges: dict[str, set[str]], names: set[str]) -> bool:
+    return bool(_alias_closure(target_names, alias_edges) & names)
+
+
+def _mutated_by_someone_other_than_self(
+    call_id: int,
+    target_names: set[str],
+    alias_edges: dict[str, set[str]],
+    mutating_node_ids_by_name: dict[str, set[int]],
+    self_introduction: dict[int, int],
 ) -> bool:
-    return bool(_alias_closure(target_names, alias_edges) & interpolated_names)
+    return any(
+        self_introduction.get(node_id) != call_id
+        for name in _alias_closure(target_names, alias_edges)
+        for node_id in mutating_node_ids_by_name.get(name, ())
+    )
+
+
+_MUTATING_METHOD_NAMES = frozenset(
+    {
+        "append",
+        "extend",
+        "insert",
+        "remove",
+        "pop",
+        "clear",
+        "sort",
+        "reverse",
+        "update",
+        "add",
+        "discard",
+        "setdefault",
+        "popitem",
+        "intersection_update",
+        "difference_update",
+        "symmetric_difference_update",
+        "__setitem__",
+        "__delitem__",
+        "__iadd__",
+        "__isub__",
+        "__imul__",
+        "__ior__",
+        "__iand__",
+        "__ixor__",
+    }
+)
+
+
+def _mutated_base_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        base = _binding_base_name(node)
+        return base.id if base is not None else None
+    if isinstance(node, ast.AugAssign):
+        base = _binding_base_name(node.target)
+        return base.id if base is not None else None
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _MUTATING_METHOD_NAMES:
+        base = _binding_base_name(node.func.value)
+        return base.id if base is not None else None
+    return None
 
 
 def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
@@ -183,11 +262,12 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
     membership_operands: set[int] = set()
     interpolated_names: set[str] = set()
     interpolated_call_ids: set[int] = set()
+    mutating_node_ids_by_name: dict[str, set[int]] = {}
     raw_candidates: list[_RawCandidate] = []
-    assign_target_names_for_value, alias_edges, string_literal_names = _collect_bindings(tree)
+    bindings = _collect_bindings(tree)
 
     for node in ast.walk(tree):
-        for interpolated_expr in _interpolated_exprs(node, string_literal_names):
+        for interpolated_expr in _interpolated_exprs(node, bindings.string_literal_names):
             for sub in ast.walk(interpolated_expr):
                 if isinstance(sub, ast.Name):
                     interpolated_names.add(sub.id)
@@ -216,6 +296,10 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
         if name is not None:
             shadowed.add(name)
             purepath_shadowed.add(name)
+
+        mutated_name = _mutated_base_name(node)
+        if mutated_name is not None:
+            mutating_node_ids_by_name.setdefault(mutated_name, set()).add(id(node))
 
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and not node.keywords and len(node.args) == 1:
             (only_arg,) = node.args
@@ -259,8 +343,15 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
 
     interpolated = interpolated_call_ids | {
         call_id
-        for call_id, target_names in assign_target_names_for_value.items()
-        if _an_alias_is_interpolated(target_names, alias_edges, interpolated_names)
+        for call_id, target_names in bindings.nested_call_target_names.items()
+        if _an_alias_is_in(target_names, bindings.alias_edges, interpolated_names)
+    }
+    mutated = {
+        call_id
+        for call_id, target_names in bindings.direct_call_target_names.items()
+        if _mutated_by_someone_other_than_self(
+            call_id, target_names, bindings.alias_edges, mutating_node_ids_by_name, bindings.self_introduction
+        )
     }
     return _Scan(
         has_wildcard_import=has_wildcard_import,
@@ -271,6 +362,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
         membership_operands=frozenset(membership_operands),
         purepath_ambiguous=bool(purepath_shadowed & PUREPATH_HOVER_NAMES),
         interpolated=frozenset(interpolated),
+        mutated=frozenset(mutated),
         raw_candidates=raw_candidates,
     )
 

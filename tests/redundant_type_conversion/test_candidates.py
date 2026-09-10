@@ -172,20 +172,29 @@ def test_finds_multiple_independent_candidates_on_different_lines() -> None:
 
 
 @pytest.mark.parametrize(
-    "source",
+    ("source", "expected_found"),
     [
-        "a = list(get_items())\n",
-        "a = list(get(1, 2))\n",
-        "a = str(a or get_default())\n",
-        "a = str(root / name)\n",
-        "a = str(prefix + suffix)\n",
-        "a = str(a if flag else b)\n",
-        "a = int(-count)\n",
-        "a = bool(not flag)\n",
-        "async def f():\n    a = str(await coro)\n",
-        "a = str(value := compute)\n",
-        "a = str(box.a / box.b)\n",
-        "a = str(items[0] + rest[1])\n",
+        ("a = list(get_items())\n", False),
+        ("a = list(get(1, 2))\n", False),
+        ("a = str(a or get_default())\n", False),
+        ("a = str(root / name)\n", False),
+        ("a = str(prefix + suffix)\n", False),
+        ("a = str(a if flag else b)\n", False),
+        ("a = int(-count)\n", False),
+        ("a = bool(not flag)\n", False),
+        ("async def f():\n    a = str(await coro)\n", False),
+        ("a = str(value := compute)\n", False),
+        ("a = str(box.a / box.b)\n", False),
+        ("a = str(items[0] + rest[1])\n", False),
+        ("a = list(box.value)\n", True),
+        ("a = list(items[0])\n", True),
+        ("a = list(rows[start:stop])\n", True),
+        ("a = list([1, 2])\n", True),
+        ("a = dict({'k': 1})\n", True),
+        ("a = tuple((first, second))\n", True),
+        ("a = str(f'{name}')\n", True),
+        ("a = str('a' 'b')\n", True),
+        ("a = list(get_rows().values[0])\n", True),
     ],
     ids=[
         "bare-call",
@@ -200,26 +209,6 @@ def test_finds_multiple_independent_candidates_on_different_lines() -> None:
         "walrus",
         "binary-operator-ending-in-an-attribute",
         "binary-operator-ending-in-a-subscript",
-    ],
-)
-def test_ignores_a_candidate_whose_argument_the_hover_cannot_describe(source: str) -> None:
-    assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "a = list(box.value)\n",
-        "a = list(items[0])\n",
-        "a = list(rows[start:stop])\n",
-        "a = list([1, 2])\n",
-        "a = dict({'k': 1})\n",
-        "a = tuple((first, second))\n",
-        "a = str(f'{name}')\n",
-        "a = str('a' 'b')\n",
-        "a = list(get_rows().values[0])\n",
-    ],
-    ids=[
         "attribute",
         "subscript",
         "slice",
@@ -231,8 +220,10 @@ def test_ignores_a_candidate_whose_argument_the_hover_cannot_describe(source: st
         "attribute-chain-off-a-call",
     ],
 )
-def test_a_candidate_whose_argument_ends_on_its_own_last_token_is_still_found(source: str) -> None:
-    assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) != []
+def test_a_candidate_is_found_only_when_its_argument_ends_on_its_own_last_token(
+    source: str, expected_found: bool
+) -> None:
+    assert bool(find_candidates(ast.parse(source), ALL_CONSTRUCTORS)) is expected_found
 
 
 @pytest.mark.parametrize(
@@ -249,58 +240,58 @@ def test_ignores_a_candidate_whose_argument_is_a_generator_expression(source: st
     assert find_candidates(ast.parse(source), ALL_CONSTRUCTORS) == []
 
 
-def test_a_candidate_that_is_lens_sole_argument_is_marked_wrapped_in_len() -> None:
-    (candidate,) = find_candidates(ast.parse("len(set(op_ids))\n"), ALL_CONSTRUCTORS)
-    assert candidate.wrapped_in_len is True
-
-
 @pytest.mark.parametrize(
-    "source",
+    ("source", "expected"),
     [
-        "set(op_ids)\n",
-        "len(set(op_ids), 1)\n",
-        "len(op_ids, base=set(x))\n",
-        "other_len(set(op_ids))\n",
+        ("len(set(op_ids))\n", True),
+        ("set(op_ids)\n", False),
+        ("len(set(op_ids), 1)\n", False),
+        ("len(op_ids, base=set(x))\n", False),
+        ("other_len(set(op_ids))\n", False),
+        ("def other():\n    len = 5\n\n\nlen(set(op_ids))\n", False),
     ],
-    ids=["no-len-wrap", "len-with-extra-args", "not-lens-positional-arg", "shadowing-lookalike-name"],
+    ids=[
+        "lens-sole-argument",
+        "no-len-wrap",
+        "len-with-extra-args",
+        "not-lens-positional-arg",
+        "shadowing-lookalike-name",
+        "len-shadowed-anywhere-in-the-module",
+    ],
 )
-def test_a_candidate_is_not_marked_wrapped_in_len_otherwise(source: str) -> None:
+def test_a_candidate_is_marked_wrapped_in_len_only_when_it_is_lens_sole_argument(source: str, expected: bool) -> None:
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.wrapped_in_len is False
-
-
-def test_len_shadowed_anywhere_in_the_module_disables_the_len_wrap_marker() -> None:
-    source = "def other():\n    len = 5\n\n\nlen(set(op_ids))\n"
-    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.wrapped_in_len is False
+    assert candidate.wrapped_in_len is expected
 
 
 @pytest.mark.parametrize(
-    "source",
+    ("source", "expected"),
     [
-        "y = matches == str(x)\n",
-        "y = str(x) == matches\n",
-        "y = matches != str(x)\n",
-        "y = str(x) in matches\n",
-        "y = str(x) not in matches\n",
-        "y = matches == [str(x)]\n",
-        "y = matches == (str(x),)\n",
-        "y = matches == {str(x)}\n",
-        "y = matches == [str(x), other]\n",
-        "y = a < matches == str(x)\n",
-        "y = {str(x): 1} == other\n",
-        "y = {1: str(x)} == other\n",
-        "y = {**other, str(x): 1} == thing\n",
-        "y = matches == [(str(x),)]\n",
-        "y = matches == {'paths': [str(x)]}\n",
-        "y = matches == [[str(x)]]\n",
-        "y = str(x) is matches\n",
-        "y = str(x) is not matches\n",
-        "y = str(x) <= matches\n",
-        "y = matches <= str(x)\n",
-        "y = str(x) < matches\n",
-        "y = matches >= str(x)\n",
-        "y = matches > str(x)\n",
+        ("y = matches == str(x)\n", True),
+        ("y = str(x) == matches\n", True),
+        ("y = matches != str(x)\n", True),
+        ("y = str(x) in matches\n", True),
+        ("y = str(x) not in matches\n", True),
+        ("y = matches == [str(x)]\n", True),
+        ("y = matches == (str(x),)\n", True),
+        ("y = matches == {str(x)}\n", True),
+        ("y = matches == [str(x), other]\n", True),
+        ("y = a < matches == str(x)\n", True),
+        ("y = {str(x): 1} == other\n", True),
+        ("y = {1: str(x)} == other\n", True),
+        ("y = {**other, str(x): 1} == thing\n", True),
+        ("y = matches == [(str(x),)]\n", True),
+        ("y = matches == {'paths': [str(x)]}\n", True),
+        ("y = matches == [[str(x)]]\n", True),
+        ("y = str(x) is matches\n", True),
+        ("y = str(x) is not matches\n", True),
+        ("y = str(x) <= matches\n", True),
+        ("y = matches <= str(x)\n", True),
+        ("y = str(x) < matches\n", True),
+        ("y = matches >= str(x)\n", True),
+        ("y = matches > str(x)\n", True),
+        ("y = str(x)\n", False),
+        ("y = [str(x), other]\n", False),
     ],
     ids=[
         "eq-rhs",
@@ -326,44 +317,30 @@ def test_len_shadowed_anywhere_in_the_module_disables_the_len_wrap_marker() -> N
         "lt",
         "ge",
         "gt",
+        "no-comparison",
+        "list-not-compared",
     ],
 )
-def test_a_candidate_used_as_a_comparison_operand_is_marked(source: str) -> None:
+def test_a_candidate_is_marked_as_a_comparison_operand_only_when_compared(source: str, expected: bool) -> None:
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_comparison_operand is True
+    assert candidate.in_comparison_operand is expected
 
 
 @pytest.mark.parametrize(
-    "source",
+    ("source", "expected"),
     [
-        "y = str(x)\n",
-        "y = [str(x), other]\n",
+        ("y = str(x) is matches\n", True),
+        ("y = str(x) is not matches\n", True),
+        ("y = matches is str(x)\n", True),
+        ("y = str(x) == matches\n", False),
+        ("y = str(x) <= matches\n", False),
+        ("y = str(x)\n", False),
     ],
-    ids=["no-comparison", "list-not-compared"],
+    ids=["is", "is-not", "is-rhs", "eq", "le", "no-comparison"],
 )
-def test_a_candidate_is_not_marked_as_a_comparison_operand_otherwise(source: str) -> None:
+def test_a_candidate_is_marked_as_an_identity_operand_only_for_is_comparisons(source: str, expected: bool) -> None:
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_comparison_operand is False
-
-
-@pytest.mark.parametrize(
-    "source",
-    ["y = str(x) is matches\n", "y = str(x) is not matches\n", "y = matches is str(x)\n"],
-    ids=["is", "is-not", "is-rhs"],
-)
-def test_a_candidate_used_as_an_identity_operand_is_marked(source: str) -> None:
-    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_identity_comparison is True
-
-
-@pytest.mark.parametrize(
-    "source",
-    ["y = str(x) == matches\n", "y = str(x) <= matches\n", "y = str(x)\n"],
-    ids=["eq", "le", "no-comparison"],
-)
-def test_a_candidate_is_not_marked_as_an_identity_operand_otherwise(source: str) -> None:
-    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_identity_comparison is False
+    assert candidate.in_identity_comparison is expected
 
 
 @pytest.mark.parametrize(
@@ -384,67 +361,66 @@ def test_a_candidate_is_marked_as_a_membership_operand_only_for_in_comparisons(s
 
 
 @pytest.mark.parametrize(
-    "shadowing_statement",
+    ("prefix", "expected"),
     [
-        "class Path:\n    pass\n\n\n",
-        "Path = get_some_unrelated_class()\n\n\n",
-        "from some_other_module import Path\n\n\n",
-        "from pathlib import PosixPath as Path\n\n\n",
+        ("class Path:\n    pass\n\n\n", True),
+        ("Path = get_some_unrelated_class()\n\n\n", True),
+        ("from some_other_module import Path\n\n\n", True),
+        ("from pathlib import PosixPath as Path\n\n\n", True),
+        ("some_other_name = 5\n\n\n", False),
+        ("from pathlib import Path\n\n\n", False),
+        ("from pathlib import Path, PurePath\n\n\n", False),
     ],
-    ids=["class-def", "reassignment", "imported-from-elsewhere", "a-different-pathlib-class-aliased-to-the-name"],
+    ids=[
+        "class-def",
+        "reassignment",
+        "imported-from-elsewhere",
+        "a-different-pathlib-class-aliased-to-the-name",
+        "an-unrelated-name-is-shadowed",
+        "single-import-from-pathlib-itself",
+        "multiple-purepath-imports-from-pathlib-itself",
+    ],
 )
-def test_a_locally_shadowed_purepath_name_marks_purepath_ambiguous(shadowing_statement: str) -> None:
-    source = f"{shadowing_statement}y = matches == [str(x)]\n"
+def test_purepath_ambiguous_is_marked_only_for_a_locally_shadowed_purepath_name(prefix: str, expected: bool) -> None:
+    source = f"{prefix}y = matches == [str(x)]\n"
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
     assert candidate.in_comparison_operand is True
-    assert candidate.purepath_ambiguous is True
-
-
-def test_shadowing_an_unrelated_name_does_not_mark_purepath_ambiguous() -> None:
-    source = "some_other_name = 5\n\n\ny = matches == [str(x)]\n"
-    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_comparison_operand is True
-    assert candidate.purepath_ambiguous is False
+    assert candidate.purepath_ambiguous is expected
 
 
 @pytest.mark.parametrize(
-    "import_statement",
-    ["from pathlib import Path\n\n\n", "from pathlib import Path, PurePath\n\n\n"],
-    ids=["single-import", "multiple-purepath-imports"],
-)
-def test_importing_path_from_pathlib_itself_does_not_mark_purepath_ambiguous(import_statement: str) -> None:
-    source = f"{import_statement}y = matches == [str(x)]\n"
-    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.in_comparison_operand is True
-    assert candidate.purepath_ambiguous is False
-
-
-@pytest.mark.parametrize(
-    "source",
+    ("source", "expected"),
     [
-        "y = f'{tuple(x)}'\n",
-        "y = tuple(x)\nz = f'{y}'\n",
-        "y: tuple = tuple(x)\nz = f'{y}'\n",
-        "y = tuple(x)\n'{}'.format(y)\n",
-        "y = tuple(x)\n'{v}'.format(v=y)\n",
-        "y = tuple(x)\n'%s' % y\n",
-        "y = tuple(x)\n'%s %s' % (y, other)\n",
-        "y = tuple(x)\n'%(v)s' % {'v': y}\n",
-        "y = tuple(x)\nz = f'{[y]}'\n",
-        "y = alias = tuple(x)\nz = f'{alias}'\n",
-        "y = tuple(x)\na = y\nb = a\nz = f'{b}'\n",
-        "y = tuple(x)\nz: object = y\nresult = f'{z}'\n",
-        "y = tuple(x)\nf'{prefix}%s' % y\n",
-        "y = tuple(x)\nfmt = '%s'\nfmt % y\n",
-        "y = tuple(x)\nfmt: str = '%s'\nfmt % y\n",
-        "if (y := tuple(x)):\n    pass\nz = f'{y}'\n",
-        "'%(path)s' % {str(path): value}\n",
-        "y = [tuple(x)]\nz = f'{y}'\n",
-        "y = {'k': tuple(x)}\nz = f'{y}'\n",
-        "fmt = '%s'\nalias = fmt\ny = tuple(x)\nalias % y\n",
-        "obj.attr = tuple(x)\nz = f'{obj.attr}'\n",
-        "items[0] = tuple(x)\nz = f'{items}'\n",
-        "obj.attr = get_obj().other = tuple(x)\nz = f'{obj.attr}'\n",
+        ("y = f'{tuple(x)}'\n", True),
+        ("y = tuple(x)\nz = f'{y}'\n", True),
+        ("y: tuple = tuple(x)\nz = f'{y}'\n", True),
+        ("y = tuple(x)\n'{}'.format(y)\n", True),
+        ("y = tuple(x)\n'{v}'.format(v=y)\n", True),
+        ("y = tuple(x)\n'%s' % y\n", True),
+        ("y = tuple(x)\n'%s %s' % (y, other)\n", True),
+        ("y = tuple(x)\n'%(v)s' % {'v': y}\n", True),
+        ("y = tuple(x)\nz = f'{[y]}'\n", True),
+        ("y = alias = tuple(x)\nz = f'{alias}'\n", True),
+        ("y = tuple(x)\na = y\nb = a\nz = f'{b}'\n", True),
+        ("y = tuple(x)\nz: object = y\nresult = f'{z}'\n", True),
+        ("y = tuple(x)\nf'{prefix}%s' % y\n", True),
+        ("y = tuple(x)\nfmt = '%s'\nfmt % y\n", True),
+        ("y = tuple(x)\nfmt: str = '%s'\nfmt % y\n", True),
+        ("if (y := tuple(x)):\n    pass\nz = f'{y}'\n", True),
+        ("'%(path)s' % {str(path): value}\n", True),
+        ("y = [tuple(x)]\nz = f'{y}'\n", True),
+        ("y = {'k': tuple(x)}\nz = f'{y}'\n", True),
+        ("fmt = '%s'\nalias = fmt\ny = tuple(x)\nalias % y\n", True),
+        ("obj.attr = tuple(x)\nz = f'{obj.attr}'\n", True),
+        ("items[0] = tuple(x)\nz = f'{items}'\n", True),
+        ("obj.attr = get_obj().other = tuple(x)\nz = f'{obj.attr}'\n", True),
+        ("y = tuple(x)\n", False),
+        ("y = tuple(x)\nz = y\n", False),
+        ("y = tuple(x)\nprint(y)\n", False),
+        ("y = tuple(x)\ncount % y\n", False),
+        ("y = tuple(x)\nother = 5\nz = f'{other}'\n", False),
+        ("y = tuple(x)\na = y\nb = y\nc = a\nc = b\nprint(c)\n", False),
+        ("y = tuple(x)\nRenderer().format(y)\n", False),
     ],
     ids=[
         "direct-fstring-interpolation",
@@ -470,25 +446,6 @@ def test_importing_path_from_pathlib_itself_does_not_mark_purepath_ambiguous(imp
         "assigned-to-an-attribute-then-fstring-interpolated",
         "assigned-to-a-subscript-then-the-base-name-interpolated",
         "chained-target-mixes-a-qualifying-and-a-non-qualifying-base",
-    ],
-)
-def test_a_candidate_reachable_from_a_string_interpolation_is_marked(source: str) -> None:
-    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.used_in_string_interpolation is True
-
-
-@pytest.mark.parametrize(
-    "source",
-    [
-        "y = tuple(x)\n",
-        "y = tuple(x)\nz = y\n",
-        "y = tuple(x)\nprint(y)\n",
-        "y = tuple(x)\ncount % y\n",
-        "y = tuple(x)\nother = 5\nz = f'{other}'\n",
-        "y = tuple(x)\na = y\nb = y\nc = a\nc = b\nprint(c)\n",
-        "y = tuple(x)\nRenderer().format(y)\n",
-    ],
-    ids=[
         "no-interpolation-at-all",
         "plain-reassignment",
         "used-as-a-plain-call-argument",
@@ -498,6 +455,70 @@ def test_a_candidate_reachable_from_a_string_interpolation_is_marked(source: str
         "format-method-on-a-non-string-receiver",
     ],
 )
-def test_a_candidate_is_not_marked_reachable_from_a_string_interpolation_otherwise(source: str) -> None:
+def test_a_candidate_is_marked_reachable_from_a_string_interpolation_only_when_it_is(
+    source: str, expected: bool
+) -> None:
     (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
-    assert candidate.used_in_string_interpolation is False
+    assert candidate.used_in_string_interpolation is expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("y = dict(x)\ny['k'] = 1\n", True),
+        ("y = list(x)\ndel y[0]\n", True),
+        ("y = list(x)\ny.append(1)\n", True),
+        ("y = set(x)\ny.add(1)\n", True),
+        ("y = dict(x)\ny.update({'k': 1})\n", True),
+        ("y = dict(x)\ny.setdefault('k', 1)\n", True),
+        ("y = list(x)\ny.sort()\n", True),
+        ("y = list(x)\ny += [1]\n", True),
+        ("y = dict(x)\ny.__setitem__('k', 1)\n", True),
+        ("y = list(x)\ny.__delitem__(0)\n", True),
+        ("y = dict(x)\nz = y\nz['k'] = 1\n", True),
+        ("y = dict(x)\nobj.attr = y\nobj.attr.update({'k': 1})\n", True),
+        ("y = list(x)\nitems[0] = y\nitems[0].append(1)\n", True),
+        ("y.append(1)\ny = list(x)\n", True),
+        ("y = list(x)\ny.__iadd__([1])\n", True),
+        ("record = dict(record)\nrecord['_id'] = compute(bare)\n", True),
+        ("y = dict(x)\n", False),
+        ("y = dict(x)\nprint(y)\n", False),
+        ("y = dict(x)\nz = y.get('k')\n", False),
+        ("y = dict(x)\nother = {}\nother['k'] = 1\n", False),
+        ("obj.attr = dict(x)\nprint(obj.attr)\n", False),
+        ("items[0] = list(x)\nprint(items)\n", False),
+        ("ys = [list(x)]\nys.append(1)\n", False),
+        ("obj.items = dict(source)\nobj.items['id'] = 1\n", False),
+        ("for value in [list(source)]:\n    value.append(1)\n", False),
+    ],
+    ids=[
+        "subscript-assignment",
+        "subscript-deletion",
+        "mutating-method-call",
+        "set-add",
+        "dict-update",
+        "dict-setdefault",
+        "in-place-sort",
+        "augmented-assignment",
+        "direct-dunder-setitem-call",
+        "direct-dunder-delitem-call",
+        "mutated-through-a-plain-alias",
+        "mutated-through-an-attribute-alias",
+        "mutated-through-a-subscript-alias",
+        "whole-module-scope-blind-prior-mutation-still-counts",
+        "direct-dunder-iadd-call",
+        "subscript-value-is-an-unrelated-call-not-the-tracked-one",
+        "no-further-use",
+        "used-as-a-plain-call-argument",
+        "non-mutating-method-call",
+        "an-unrelated-name-is-mutated-instead",
+        "the-attribute-binding-itself-is-not-a-mutation",
+        "the-subscript-binding-itself-is-not-a-mutation",
+        "mutating-the-outer-literal-does-not-mutate-a-nested-call",
+        "known-limitation-two-levels-deep-binding-not-traced",
+        "known-limitation-loop-target-binding-not-tracked",
+    ],
+)
+def test_a_candidate_is_marked_mutated_after_copy_only_when_it_is(source: str, expected: bool) -> None:
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.mutated_after_copy is expected

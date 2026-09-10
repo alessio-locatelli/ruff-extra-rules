@@ -126,6 +126,9 @@ def decide_candidates(
                     continue
                 assert hover_text is not None
 
+                if candidate.constructor in MUTABLE_CONSTRUCTORS and candidate.mutated_after_copy:
+                    continue
+
                 if candidate.wrapped_in_len and not is_exact_match(hover_text, candidate.constructor):
                     continue
 

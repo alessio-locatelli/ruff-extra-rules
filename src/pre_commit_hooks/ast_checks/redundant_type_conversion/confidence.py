@@ -133,6 +133,11 @@ _ITERABLE_PROTOCOL_HEADS = frozenset(
 
 _MAPPING_PROTOCOL_HEADS = frozenset({"Mapping", "MutableMapping", "dict", "ChainMap", "OrderedDict", "defaultdict"})
 
+_DEDUP_SAFE_HEADS: dict[str, frozenset[str]] = {
+    "set": _COMPARISON_SAFE_HEADS["set"] | {"KeysView"},
+    "frozenset": _COMPARISON_SAFE_HEADS["frozenset"] | {"KeysView"},
+}
+
 _SCALAR_LOOSE_HEADS: dict[str, frozenset[str]] = {
     "str": frozenset({"str", "LiteralString"}) | PUREPATH_HOVER_NAMES,
     "bytes": frozenset({"bytes", "bytearray", "memoryview"}),
@@ -144,6 +149,8 @@ _SCALAR_LOOSE_HEADS: dict[str, frozenset[str]] = {
 
 def _loose_match(hover_text: str, constructor: str) -> bool:
     head = hover_text.split(" & ", 1)[0].split("[", 1)[0]
+    if constructor in {"set", "frozenset"}:
+        return head in _DEDUP_SAFE_HEADS[constructor]
     if constructor in _ITERABLE_CONSTRUCTORS:
         if constructor == "bytearray" and head == "str":
             return False
