@@ -21,12 +21,13 @@ def test_immutable_and_mutable_constructors_partition_all_eleven() -> None:
     assert len(ALL_CONSTRUCTORS) == 11
 
 
-def test_conservative_is_immutable_only() -> None:
-    assert eligible_constructors(ConfidenceLevel.CONSERVATIVE) == IMMUTABLE_CONSTRUCTORS
-
-
-def test_aggressive_is_all_eleven() -> None:
-    assert eligible_constructors(ConfidenceLevel.AGGRESSIVE) == ALL_CONSTRUCTORS
+@pytest.mark.parametrize(
+    ("level", "expected"),
+    [(ConfidenceLevel.CONSERVATIVE, IMMUTABLE_CONSTRUCTORS), (ConfidenceLevel.AGGRESSIVE, ALL_CONSTRUCTORS)],
+    ids=["conservative-is-immutable-only", "aggressive-is-all-eleven"],
+)
+def test_eligible_constructors_by_level(level: ConfidenceLevel, expected: frozenset[str]) -> None:
+    assert eligible_constructors(level) == expected
 
 
 @pytest.mark.parametrize(
@@ -47,65 +48,52 @@ def test_gate_rejects_unusable_hover_at_both_levels(hover_text: str | None) -> N
 
 
 @pytest.mark.parametrize(
-    ("hover_text", "constructor"),
+    ("hover_text", "constructor", "expected"),
     [
-        ("str", "str"),
-        ("int", "int"),
-        ("float", "float"),
-        ("bool", "bool"),
-        ("bytes", "bytes"),
-        ("frozenset[int]", "frozenset"),
-        ("tuple[int, str]", "tuple"),
-    ],
-    ids=["str", "int", "float", "bool", "bytes", "frozenset-generic", "tuple-generic"],
-)
-def test_conservative_accepts_an_exact_match(hover_text: str, constructor: str) -> None:
-    assert hover_passes_gate(hover_text, ConfidenceLevel.CONSERVATIVE, constructor) is True
-
-
-@pytest.mark.parametrize(
-    ("hover_text", "constructor"),
-    [
-        ("str | None", "str"),
-        ("LiteralString", "str"),
-        ("bool", "int"),
-        ("Iterable[str]", "list"),
-    ],
-    ids=["union", "str-subtype", "bool-not-int", "protocol-match"],
-)
-def test_conservative_rejects_a_non_exact_match(hover_text: str, constructor: str) -> None:
-    assert hover_passes_gate(hover_text, ConfidenceLevel.CONSERVATIVE, constructor) is False
-
-
-@pytest.mark.parametrize(
-    ("hover_text", "constructor"),
-    [
-        ('Literal["hi"]', "str"),
-        ("Literal[5]", "int"),
-        ("Literal[-5]", "int"),
-        ("Literal[True]", "bool"),
-        ("Literal[False]", "bool"),
-        ('Literal[b"hi"]', "bytes"),
-    ],
-    ids=["str-literal", "int-literal", "negative-int-literal", "bool-true", "bool-false", "bytes-literal"],
-)
-def test_conservative_accepts_a_flow_narrowed_literal_of_the_same_scalar(hover_text: str, constructor: str) -> None:
-    assert hover_passes_gate(hover_text, ConfidenceLevel.CONSERVATIVE, constructor) is True
-
-
-@pytest.mark.parametrize(
-    ("hover_text", "constructor"),
-    [
-        ("Literal[True]", "int"),
-        ("Literal[False]", "int"),
-        ("Literal[1]", "bool"),
-        ('Literal["hi"]', "bytes"),
-        ('Literal[b"hi"]', "str"),
-        ("Literal[1]", "float"),
-        ("Literal[1]", "frozenset"),
-        ("Literal[1]", "tuple"),
+        ("str", "str", True),
+        ("int", "int", True),
+        ("float", "float", True),
+        ("bool", "bool", True),
+        ("bytes", "bytes", True),
+        ("frozenset[int]", "frozenset", True),
+        ("tuple[int, str]", "tuple", True),
+        ('Literal["hi"]', "str", True),
+        ("Literal[5]", "int", True),
+        ("Literal[-5]", "int", True),
+        ("Literal[True]", "bool", True),
+        ("Literal[False]", "bool", True),
+        ('Literal[b"hi"]', "bytes", True),
+        ("str | None", "str", False),
+        ("LiteralString", "str", False),
+        ("bool", "int", False),
+        ("Iterable[str]", "list", False),
+        ("Literal[True]", "int", False),
+        ("Literal[False]", "int", False),
+        ("Literal[1]", "bool", False),
+        ('Literal["hi"]', "bytes", False),
+        ('Literal[b"hi"]', "str", False),
+        ("Literal[1]", "float", False),
+        ("Literal[1]", "frozenset", False),
+        ("Literal[1]", "tuple", False),
     ],
     ids=[
+        "str",
+        "int",
+        "float",
+        "bool",
+        "bytes",
+        "frozenset-generic",
+        "tuple-generic",
+        "str-literal",
+        "int-literal",
+        "negative-int-literal",
+        "bool-true",
+        "bool-false",
+        "bytes-literal",
+        "union",
+        "str-subtype",
+        "bool-not-int",
+        "protocol-match",
         "bool-literal-as-int",
         "bool-false-as-int",
         "int-literal-as-bool",
@@ -116,25 +104,51 @@ def test_conservative_accepts_a_flow_narrowed_literal_of_the_same_scalar(hover_t
         "literal-as-tuple",
     ],
 )
-def test_conservative_rejects_a_literal_of_a_different_scalar(hover_text: str, constructor: str) -> None:
-    assert hover_passes_gate(hover_text, ConfidenceLevel.CONSERVATIVE, constructor) is False
+def test_conservative_hover_gate(hover_text: str, constructor: str, expected: bool) -> None:
+    assert hover_passes_gate(hover_text, ConfidenceLevel.CONSERVATIVE, constructor) is expected
 
 
 @pytest.mark.parametrize(
-    ("hover_text", "constructor"),
+    ("hover_text", "constructor", "expected"),
     [
-        ("Iterable[str]", "list"),
-        ("list[int]", "list"),
-        ("dict[str, int]", "list"),
-        ("frozenset[int]", "set"),
-        ("Mapping[str, int]", "dict"),
-        ("KeysView[str]", "set"),
-        ("str", "list"),
-        ("bytes", "list"),
-        ("memoryview", "tuple"),
-        ("str & ~AlwaysFalsy", "list"),
-        ("bytes", "bytearray"),
-        ("memoryview", "bytearray"),
+        ("Iterable[str]", "list", True),
+        ("list[int]", "list", True),
+        ("dict[str, int]", "list", True),
+        ("frozenset[int]", "set", True),
+        ("Mapping[str, int]", "dict", True),
+        ("KeysView[str]", "set", True),
+        ("AbstractSet[int]", "frozenset", True),
+        ("str", "list", True),
+        ("bytes", "list", True),
+        ("memoryview", "tuple", True),
+        ("str & ~AlwaysFalsy", "list", True),
+        ("bytes", "bytearray", True),
+        ("memoryview", "bytearray", True),
+        ("int | float", "int", False),
+        ("str | None", "list", False),
+        ("Literal[True] | int", "bool", False),
+        ("list[int] | list[str]", "list", True),
+        ("Literal[1] | Literal[2]", "int", True),
+        ("Iterable[str | int]", "list", True),
+        ("Sequence[int | str]", "list", True),
+        ("Mapping[str, int | float]", "dict", True),
+        ("SomeCustomClass", "list", False),
+        ('Literal["hi"]', "list", False),
+        ("ExtendedClientResponseError", "str", False),
+        ("SomeCustomClass", "dict", False),
+        ("int", "list", False),
+        ("str", "bytearray", False),
+        ("list[int]", "set", False),
+        ("tuple[int, ...]", "set", False),
+        ("list[int]", "frozenset", False),
+        ("tuple[int, ...]", "frozenset", False),
+        ("Sequence[int]", "set", False),
+        ("Iterable[int]", "frozenset", False),
+        ("ValuesView[int]", "set", False),
+        ("str", "set", False),
+        ("ItemsView[str, int]", "set", False),
+        ("ItemsView[str, list[int]]", "set", False),
+        ("ItemsView[str, int]", "frozenset", False),
     ],
     ids=[
         "iterable-protocol",
@@ -143,104 +157,86 @@ def test_conservative_rejects_a_literal_of_a_different_scalar(hover_text: str, c
         "frozenset-to-set",
         "mapping-protocol",
         "keysview",
+        "abstractset-to-frozenset",
         "str-is-iterable",
         "bytes-is-iterable",
         "memoryview-is-iterable",
         "narrowed-intersection-type",
         "bytes-to-bytearray",
         "memoryview-to-bytearray",
-    ],
-)
-def test_aggressive_accepts_a_structurally_related_non_union_type(hover_text: str, constructor: str) -> None:
-    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, constructor) is True
-
-
-@pytest.mark.parametrize(
-    ("hover_text", "constructor"),
-    [
-        ("SomeCustomClass", "list"),
-        ('Literal["hi"]', "list"),
-        ("ExtendedClientResponseError", "str"),
-        ("SomeCustomClass", "dict"),
-        ("int", "list"),
-        ("str", "bytearray"),
-    ],
-    ids=[
+        "union-int-or-float-as-int",
+        "union-str-or-none-as-list",
+        "union-bool-literal-or-int",
+        "union-list-generic-matches",
+        "union-int-literal-matches",
+        "union-in-generic-arg-not-split",
+        "union-in-sequence-arg-not-split",
+        "union-in-mapping-value-not-split",
         "unrelated-class",
         "literal-has-no-iterable-relationship",
         "unrelated-class-as-str",
         "unrelated-as-dict",
         "scalar-as-list",
         "str-needs-an-encoding-for-bytearray",
+        "list-to-set",
+        "tuple-to-set",
+        "list-to-frozenset",
+        "tuple-to-frozenset",
+        "sequence-to-set",
+        "iterable-to-frozenset",
+        "valuesview-to-set",
+        "str-to-set",
+        "itemsview-to-set",
+        "itemsview-with-unhashable-value-to-set",
+        "itemsview-to-frozenset",
     ],
 )
-def test_aggressive_rejects_a_structurally_unrelated_non_union_type(hover_text: str, constructor: str) -> None:
-    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, constructor) is False
+def test_aggressive_hover_gate(hover_text: str, constructor: str, expected: bool) -> None:
+    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, constructor) is expected
 
 
 @pytest.mark.parametrize(
-    ("hover_text", "constructor"),
+    ("hover_text", "constructor", "expected"),
     [
-        ("int | float", "int"),
-        ("str | None", "list"),
-        ("Literal[True] | int", "bool"),
+        ("str", "str", True),
+        ("frozenset[int]", "frozenset", True),
+        ('Literal["hi"]', "str", True),
+        ("list[int] | list[str]", "list", True),
+        ("dict[str, list[int]]", "str", False),
+        ("Path", "str", False),
+        ("int | float", "int", False),
     ],
-    ids=["int-or-float", "str-or-none-as-list", "bool-literal-or-int"],
+    ids=["exact", "generic", "literal", "union", "unrelated", "structural-only", "union-with-a-non-matching-member"],
 )
-def test_aggressive_rejects_a_union_with_a_non_matching_member(hover_text: str, constructor: str) -> None:
-    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, constructor) is False
+def test_is_exact_match(hover_text: str, constructor: str, expected: bool) -> None:
+    assert is_exact_match(hover_text, constructor) is expected
 
 
 @pytest.mark.parametrize(
-    ("hover_text", "constructor"),
-    [("Iterable[str | int]", "list"), ("Sequence[int | str]", "list"), ("Mapping[str, int | float]", "dict")],
-    ids=["union-in-generic-arg", "union-in-sequence-arg", "union-in-mapping-value"],
-)
-def test_aggressive_does_not_split_a_union_nested_inside_brackets(hover_text: str, constructor: str) -> None:
-    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, constructor) is True
-
-
-@pytest.mark.parametrize(
-    ("hover_text", "constructor"),
+    ("hover_text", "constructor", "expected"),
     [
-        ("list[int] | list[str]", "list"),
-        ("Literal[1] | Literal[2]", "int"),
-    ],
-    ids=["list-generic-union", "int-literal-union"],
-)
-def test_aggressive_accepts_a_union_whose_every_member_matches(hover_text: str, constructor: str) -> None:
-    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, constructor) is True
-
-
-@pytest.mark.parametrize(
-    ("hover_text", "constructor"),
-    [("str", "str"), ("frozenset[int]", "frozenset"), ('Literal["hi"]', "str"), ("list[int] | list[str]", "list")],
-    ids=["exact", "generic", "literal", "union"],
-)
-def test_is_exact_match_accepts_a_genuine_match(hover_text: str, constructor: str) -> None:
-    assert is_exact_match(hover_text, constructor) is True
-
-
-@pytest.mark.parametrize(
-    ("hover_text", "constructor"),
-    [("dict[str, list[int]]", "str"), ("Path", "str"), ("int | float", "int")],
-    ids=["unrelated", "structural-only", "union-with-a-non-matching-member"],
-)
-def test_is_exact_match_rejects_a_structural_or_unrelated_type(hover_text: str, constructor: str) -> None:
-    assert is_exact_match(hover_text, constructor) is False
-
-
-@pytest.mark.parametrize(
-    ("hover_text", "constructor"),
-    [
-        ("LiteralString", "str"),
-        ("bool", "int"),
-        ("bool", "float"),
-        ("bytearray", "bytes"),
-        ("frozenset[int]", "set"),
-        ("AbstractSet[int]", "set"),
-        ("set[int]", "frozenset"),
-        ("frozenset[int] | set[str]", "set"),
+        ("LiteralString", "str", True),
+        ("bool", "int", True),
+        ("bool", "float", True),
+        ("bytearray", "bytes", True),
+        ("frozenset[int]", "set", True),
+        ("AbstractSet[int]", "set", True),
+        ("set[int]", "frozenset", True),
+        ("frozenset[int] | set[str]", "set", True),
+        ("Path", "str", False),
+        ("PurePath", "str", False),
+        ("dict[str, int]", "set", False),
+        ("Mapping[str, int]", "set", False),
+        ("tuple[int, ...]", "set", False),
+        ("list[int]", "set", False),
+        ("dict[str, int]", "frozenset", False),
+        ("list[int]", "list", False),
+        ("tuple[int, ...]", "tuple", False),
+        ("Mapping[str, int]", "dict", False),
+        ("bytearray", "bytearray", False),
+        ("set[int] | dict[str, int]", "set", False),
+        ("memoryview", "bytes", False),
+        ("int", "float", False),
     ],
     ids=[
         "str-subtype",
@@ -251,31 +247,6 @@ def test_is_exact_match_rejects_a_structural_or_unrelated_type(hover_text: str, 
         "abstractset-as-set",
         "set-as-frozenset",
         "union-of-set-family",
-    ],
-)
-def test_is_comparison_safe_hover_accepts_a_same_behavior_family(hover_text: str, constructor: str) -> None:
-    assert is_comparison_safe_hover(hover_text, constructor) is True
-
-
-@pytest.mark.parametrize(
-    ("hover_text", "constructor"),
-    [
-        ("Path", "str"),
-        ("PurePath", "str"),
-        ("dict[str, int]", "set"),
-        ("Mapping[str, int]", "set"),
-        ("tuple[int, ...]", "set"),
-        ("list[int]", "set"),
-        ("dict[str, int]", "frozenset"),
-        ("list[int]", "list"),
-        ("tuple[int, ...]", "tuple"),
-        ("Mapping[str, int]", "dict"),
-        ("bytearray", "bytearray"),
-        ("set[int] | dict[str, int]", "set"),
-        ("memoryview", "bytes"),
-        ("int", "float"),
-    ],
-    ids=[
         "path-as-str",
         "purepath-as-str",
         "dict-as-set",
@@ -292,28 +263,38 @@ def test_is_comparison_safe_hover_accepts_a_same_behavior_family(hover_text: str
         "int-can-lose-precision-as-float",
     ],
 )
-def test_is_comparison_safe_hover_rejects_a_different_runtime_family(hover_text: str, constructor: str) -> None:
-    assert is_comparison_safe_hover(hover_text, constructor) is False
+def test_is_comparison_safe_hover(hover_text: str, constructor: str, expected: bool) -> None:
+    assert is_comparison_safe_hover(hover_text, constructor) is expected
 
 
 @pytest.mark.parametrize(
-    "hover_text",
-    ["Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath", "Path | None"],
-    ids=["path", "purepath", "posixpath", "windowspath", "pureposixpath", "purewindowspath", "union"],
-)
-def test_is_purepath_hover_accepts_every_pathlib_class(hover_text: str) -> None:
-    assert is_purepath_hover(hover_text) is True
-
-
-@pytest.mark.parametrize(
-    "hover_text",
-    ["str", "PathLike", "MyCustomPath", "list[Path]"],
+    ("hover_text", "expected"),
+    [
+        ("Path", True),
+        ("PurePath", True),
+        ("PosixPath", True),
+        ("WindowsPath", True),
+        ("PurePosixPath", True),
+        ("PureWindowsPath", True),
+        ("Path | None", True),
+        ("str", False),
+        ("PathLike", False),
+        ("MyCustomPath", False),
+        ("list[Path]", False),
+    ],
     ids=[
+        "path",
+        "purepath",
+        "posixpath",
+        "windowspath",
+        "pureposixpath",
+        "purewindowspath",
+        "union",
         "str",
         "unrelated-name-containing-path",
         "custom-subclass-not-recognized-by-name-alone",
         "path-nested-in-a-generic",
     ],
 )
-def test_is_purepath_hover_rejects_everything_else(hover_text: str) -> None:
-    assert is_purepath_hover(hover_text) is False
+def test_is_purepath_hover(hover_text: str, expected: bool) -> None:
+    assert is_purepath_hover(hover_text) is expected
