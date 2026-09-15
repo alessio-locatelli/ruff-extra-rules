@@ -34,3 +34,11 @@ class ApiZip:
 
 def assign_a_converted_path_to_a_str_attribute(api_zip: ApiZip, archive_path: Path) -> None:
     api_zip.archive_path = str(archive_path)
+
+
+class Logger:
+    def warning(self, msg: str, /, **kwargs: object) -> None: ...
+
+
+def log_a_path_argument(logger: Logger, a_path: Path) -> None:
+    logger.warning("processing", path=str(a_path))

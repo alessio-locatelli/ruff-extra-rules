@@ -150,6 +150,9 @@ def decide_candidates(
                 if candidate.used_in_string_interpolation and not is_exact_match(hover_text, candidate.constructor):
                     continue
 
+                if candidate.used_in_logging_call and not is_exact_match(hover_text, candidate.constructor):
+                    continue
+
                 candidates_with_hovers.append((candidate, hover_text))
 
             for candidate, hover_text in candidates_with_hovers:

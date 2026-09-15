@@ -22,6 +22,7 @@ class Candidate:
     in_membership_test: bool
     purepath_ambiguous: bool
     used_in_string_interpolation: bool
+    used_in_logging_call: bool
     mutated_after_copy: bool
 
 
@@ -46,6 +47,7 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
             in_membership_test=id(raw.call) in scan.membership_operands,
             purepath_ambiguous=scan.purepath_ambiguous,
             used_in_string_interpolation=id(raw.call) in scan.interpolated,
+            used_in_logging_call=id(raw.call) in scan.logging_call_arguments,
             mutated_after_copy=id(raw.call) in scan.mutated,
         )
         for raw in scan.raw_candidates
@@ -55,6 +57,7 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
 
 _BINDING_DEF_TYPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 _CAPTURE_PATTERN_TYPES = (ast.MatchAs, ast.MatchStar)
+_LOGGER_METHOD_NAMES = frozenset({"debug", "info", "warning", "warn", "error", "exception", "critical", "fatal"})
 
 
 @dataclass(slots=True, frozen=True)
@@ -79,6 +82,7 @@ class _Scan:
     membership_operands: frozenset[int]
     purepath_ambiguous: bool
     interpolated: frozenset[int]
+    logging_call_arguments: frozenset[int]
     mutated: frozenset[int]
     raw_candidates: list[_RawCandidate]
 
@@ -262,6 +266,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
     membership_operands: set[int] = set()
     interpolated_names: set[str] = set()
     interpolated_call_ids: set[int] = set()
+    logging_call_arguments: set[int] = set()
     mutating_node_ids_by_name: dict[str, set[int]] = {}
     raw_candidates: list[_RawCandidate] = []
     bindings = _collect_bindings(tree)
@@ -329,6 +334,18 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
                     )
                 )
 
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _LOGGER_METHOD_NAMES
+        ):
+            for arg in node.args:
+                if isinstance(arg, ast.Call):
+                    logging_call_arguments.add(id(arg))
+            for keyword in node.keywords:
+                if isinstance(keyword.value, ast.Call):
+                    logging_call_arguments.add(id(keyword.value))
+
         if isinstance(node, ast.Compare):
             operands = [node.left, *node.comparators]
             for index, op in enumerate(node.ops):
@@ -362,6 +379,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
         membership_operands=frozenset(membership_operands),
         purepath_ambiguous=bool(purepath_shadowed & PUREPATH_HOVER_NAMES),
         interpolated=frozenset(interpolated),
+        logging_call_arguments=frozenset(logging_call_arguments),
         mutated=frozenset(mutated),
         raw_candidates=raw_candidates,
     )
