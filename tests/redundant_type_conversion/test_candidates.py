@@ -465,6 +465,54 @@ def test_a_candidate_is_marked_reachable_from_a_string_interpolation_only_when_i
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
+        ("logger.info(str(x))\n", True),
+        ("logger.debug(str(x))\n", True),
+        ("logger.warning(str(x))\n", True),
+        ("logger.warn(str(x))\n", True),
+        ("logger.error(str(x))\n", True),
+        ("logger.exception(str(x))\n", True),
+        ("logger.critical(str(x))\n", True),
+        ("logger.fatal(str(x))\n", True),
+        ("logger.info('msg', path=str(x))\n", True),
+        ("self.logger.error(str(x))\n", True),
+        ("structlog.get_logger(__name__).warning('msg', path=str(x))\n", True),
+        ("y = str(x)\nlogger.info(y)\n", False),
+        ("logger.info(f'{str(x)}')\n", False),
+        ("logger.other_method(str(x))\n", False),
+        ("obj.info(str(x))\nprint('info is not necessarily a logger')\n", True),
+        ("print(str(x))\n", False),
+        ("warning(str(x))\n", False),
+        ("logger.info(extra={'path': str(x)})\n", False),
+    ],
+    ids=[
+        "positional-argument-to-info",
+        "positional-argument-to-debug",
+        "positional-argument-to-warning",
+        "positional-argument-to-warn",
+        "positional-argument-to-error",
+        "positional-argument-to-exception",
+        "positional-argument-to-critical",
+        "positional-argument-to-fatal",
+        "keyword-argument",
+        "attribute-chain-receiver",
+        "chained-call-receiver",
+        "reached-only-through-an-intermediate-variable",
+        "nested-inside-an-fstring-argument",
+        "attribute-call-with-an-unrelated-method-name",
+        "attribute-call-named-like-a-logger-method-on-an-arbitrary-receiver",
+        "plain-function-call-not-an-attribute-call",
+        "bare-name-matching-a-logger-method-name",
+        "nested-inside-a-dict-literal-keyword-argument",
+    ],
+)
+def test_a_candidate_is_marked_used_in_a_logging_call_only_when_it_is(source: str, expected: bool) -> None:
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.used_in_logging_call is expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
         ("y = dict(x)\ny['k'] = 1\n", True),
         ("y = list(x)\ndel y[0]\n", True),
         ("y = list(x)\ny.append(1)\n", True),

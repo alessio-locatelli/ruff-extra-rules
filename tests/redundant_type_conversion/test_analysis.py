@@ -158,6 +158,12 @@ def test_decide_candidates_flags_a_redundant_conservative_case() -> None:
             {(0, 9): "dict[str, int]"},
             ConfidenceLevel.AGGRESSIVE,
         ),
+        (
+            "logger.warning('msg', path=str(a_path))\n",
+            {"logger.warning('msg', path=str(a_path))\n": frozenset()},
+            {(0, 36): "Path"},
+            ConfidenceLevel.AGGRESSIVE,
+        ),
     ],
     ids=[
         "recheck-finds-a-new-diagnostic",
@@ -173,6 +179,7 @@ def test_decide_candidates_flags_a_redundant_conservative_case() -> None:
         "int-conversion-in-a-float-comparison",
         "non-exact-conversion-reachable-from-a-string-interpolation",
         "mutable-constructor-later-mutated",
+        "non-exact-conversion-reachable-from-a-logging-call",
     ],
 )
 def test_decide_candidates_skips(
@@ -250,6 +257,13 @@ def test_decide_candidates_skips(
             ConfidenceLevel.AGGRESSIVE,
             "list",
         ),
+        (
+            "logger.warning('msg', path=str(x))\n",
+            {"logger.warning('msg', path=str(x))\n": frozenset(), "logger.warning('msg', path=x)\n": frozenset()},
+            {(0, 31): "str"},
+            ConfidenceLevel.AGGRESSIVE,
+            "str",
+        ),
     ],
     ids=[
         "ordinary-conversion-in-an-equality-comparison",
@@ -260,6 +274,7 @@ def test_decide_candidates_skips(
         "mutable-constructor-never-mutated",
         "len-wrapped-candidate-that-is-an-exact-match",
         "aggressive-includes-mutable-constructors",
+        "exact-match-reachable-from-a-logging-call",
     ],
 )
 def test_decide_candidates_still_flags(
