@@ -421,6 +421,8 @@ def test_purepath_ambiguous_is_marked_only_for_a_locally_shadowed_purepath_name(
         ("y = tuple(x)\nother = 5\nz = f'{other}'\n", False),
         ("y = tuple(x)\na = y\nb = y\nc = a\nc = b\nprint(c)\n", False),
         ("y = tuple(x)\nRenderer().format(y)\n", False),
+        ("obj.a.b = tuple(x)\nz = f'{obj}'\n", True),
+        ("for value in [tuple(x)]:\n    pass\nz = f'{value}'\n", True),
     ],
     ids=[
         "direct-fstring-interpolation",
@@ -453,6 +455,8 @@ def test_purepath_ambiguous_is_marked_only_for_a_locally_shadowed_purepath_name(
         "an-unrelated-name-is-interpolated-instead",
         "diamond-shaped-alias-graph-with-no-interpolation",
         "format-method-on-a-non-string-receiver",
+        "assigned-through-a-deep-attribute-chain-then-interpolated",
+        "for-loop-target-over-a-literal-then-interpolated",
     ],
 )
 def test_a_candidate_is_marked_reachable_from_a_string_interpolation_only_when_it_is(
@@ -536,8 +540,13 @@ def test_a_candidate_is_marked_used_in_a_logging_call_only_when_it_is(source: st
         ("obj.attr = dict(x)\nprint(obj.attr)\n", False),
         ("items[0] = list(x)\nprint(items)\n", False),
         ("ys = [list(x)]\nys.append(1)\n", False),
-        ("obj.items = dict(source)\nobj.items['id'] = 1\n", False),
-        ("for value in [list(source)]:\n    value.append(1)\n", False),
+        ("obj.items = dict(source)\nobj.items['id'] = 1\n", True),
+        ("for value in [list(source)]:\n    value.append(1)\n", True),
+        ("obj.data['k'] = dict(source)\nobj.data['k']['id'] = 1\n", True),
+        ("result = [v.append(1) for v in [list(source)]]\n", True),
+        ("for (value,) in [(list(source),)]:\n    value.append(1)\n", True),
+        ("y = list(x)\nfor value in some_list:\n    value.append(1)\n", False),
+        ("y = list(x)\nfor a, *rest in [(y, 1, 2)]:\n    a.append(1)\n", False),
     ],
     ids=[
         "subscript-assignment",
@@ -563,8 +572,13 @@ def test_a_candidate_is_marked_used_in_a_logging_call_only_when_it_is(source: st
         "the-attribute-binding-itself-is-not-a-mutation",
         "the-subscript-binding-itself-is-not-a-mutation",
         "mutating-the-outer-literal-does-not-mutate-a-nested-call",
-        "known-limitation-two-levels-deep-binding-not-traced",
-        "known-limitation-loop-target-binding-not-tracked",
+        "deep-attribute-chain-binding-is-traced",
+        "for-loop-target-over-literal-elements-is-tracked",
+        "mixed-attribute-subscript-chain-is-traced",
+        "comprehension-target-over-literal-elements-is-tracked",
+        "destructured-loop-target-over-a-matching-literal-element-is-tracked",
+        "loop-target-over-non-literal-iterable-not-tracked",
+        "starred-target-arity-mismatch-falls-back-to-no-binding",
     ],
 )
 def test_a_candidate_is_marked_mutated_after_copy_only_when_it_is(source: str, expected: bool) -> None:
