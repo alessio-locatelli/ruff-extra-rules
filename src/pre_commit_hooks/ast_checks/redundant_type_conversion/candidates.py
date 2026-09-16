@@ -92,11 +92,34 @@ def _is_string_literal(value: ast.expr) -> bool:
 
 
 def _binding_base_name(target: ast.expr) -> ast.Name | None:
-    if isinstance(target, ast.Name):
-        return target
-    if isinstance(target, (ast.Attribute, ast.Subscript)) and isinstance(target.value, ast.Name):
-        return target.value
-    return None
+    while isinstance(target, (ast.Attribute, ast.Subscript)):
+        target = target.value
+    return target if isinstance(target, ast.Name) else None
+
+
+def _target_element_bindings(target: ast.expr, value: ast.expr) -> list[tuple[ast.expr, ast.Name, ast.expr]]:
+    base = _binding_base_name(target)
+    if base is not None:
+        return [(target, base, value)]
+    if (
+        isinstance(target, (ast.Tuple, ast.List))
+        and isinstance(value, (ast.Tuple, ast.List))
+        and len(target.elts) == len(value.elts)
+    ):
+        return [
+            binding
+            for sub_target, sub_value in zip(target.elts, value.elts, strict=True)
+            for binding in _target_element_bindings(sub_target, sub_value)
+        ]
+    return []
+
+
+def _for_or_comprehension_target_bindings(
+    node: ast.For | ast.AsyncFor | ast.comprehension,
+) -> list[tuple[ast.expr, ast.Name, ast.expr]]:
+    if not isinstance(node.iter, (ast.List, ast.Tuple, ast.Set)):
+        return []
+    return [binding for element in node.iter.elts for binding in _target_element_bindings(node.target, element)]
 
 
 def _simple_bindings(node: ast.AST) -> list[tuple[ast.expr, ast.Name, ast.expr]]:
@@ -113,6 +136,8 @@ def _simple_bindings(node: ast.AST) -> list[tuple[ast.expr, ast.Name, ast.expr]]
     if isinstance(node, ast.NamedExpr):
         base = _binding_base_name(node.target)
         return [(node.target, base, node.value)] if base is not None else []
+    if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+        return _for_or_comprehension_target_bindings(node)
     return []
 
 
