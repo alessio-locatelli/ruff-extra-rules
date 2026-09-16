@@ -68,7 +68,16 @@ def _scripted_try_connect(
 
 
 class _FakeSession:
-    __slots__ = ("cached", "close_calls", "direct_inputs", "drained", "hover_delay_seconds", "hover_result", "raises")
+    __slots__ = (
+        "cached",
+        "close_calls",
+        "direct_inputs",
+        "drained",
+        "forgotten",
+        "hover_delay_seconds",
+        "hover_result",
+        "raises",
+    )
 
     def __init__(
         self,
@@ -82,6 +91,7 @@ class _FakeSession:
         self.cached: list[Redundancy] | None = None
         self.drained = drained or []
         self.direct_inputs: list[Path] = []
+        self.forgotten: list[Path] = []
         self.close_calls = 0
         self.raises = raises
         self.hover_delay_seconds = hover_delay_seconds
@@ -112,6 +122,9 @@ class _FakeSession:
 
     def record_direct_input(self, filepath: Path, _source: str, /) -> None:
         self.direct_inputs.append(filepath)
+
+    def forget_direct_input(self, filepath: Path, /) -> None:
+        self.forgotten.append(filepath)
 
     def reconcile_direct_inputs(self) -> list[Path]:
         return self.drained
@@ -159,6 +172,7 @@ def test_ty_version_normalizes_any_failure_to_os_error(monkeypatch: pytest.Monke
             {"result": None},
         ),
         ({"op": "record_direct_input", "filepath": "f.py", "source": "x"}, {"result": None}),
+        ({"op": "forget_direct_input", "filepath": "f.py"}, {"result": None}),
         ({"op": "reconcile_direct_inputs"}, {"result": []}),
         ({"op": "bogus"}, {"error": "unknown op: 'bogus'"}),
     ],
@@ -170,6 +184,7 @@ def test_ty_version_normalizes_any_failure_to_os_error(monkeypatch: pytest.Monke
         "cached_redundancies",
         "cache_redundancies",
         "record_direct_input",
+        "forget_direct_input",
         "reconcile_direct_inputs",
         "unknown-op",
     ],
@@ -776,10 +791,11 @@ def test_remote_session_canonicalizes_file_paths_for_daemon_requests(
     assert session.cached_redundancies(relative_path, "x = 1\n", "strict") is None
     session.cache_redundancies(relative_path, "x = 1\n", "strict", [])
     session.record_direct_input(relative_path, "x = 1\n")
+    session.forget_direct_input(relative_path)
     assert session.reconcile_direct_inputs() == []
 
     canonical_path = str(filepath.resolve())
-    assert [params.get("filepath") for _op, params in calls[:-1]] == [canonical_path] * 6
+    assert [params.get("filepath") for _op, params in calls[:-1]] == [canonical_path] * 7
     assert calls[-1] == ("reconcile_direct_inputs", {})
 
 

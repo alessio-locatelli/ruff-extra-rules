@@ -160,6 +160,11 @@ class RedundantTypeConversionCheck(BaseCheck):
     def record_direct_input(self, filepath: Path, source: str) -> None:
         record_direct_input_if_session_active(filepath, source)
 
+    def forget_direct_input(self, filepath: Path) -> None:
+        session = peek_session()
+        if session is not None:
+            session.forget_direct_input(filepath)
+
     def fix(
         self,
         _filepath: Path,

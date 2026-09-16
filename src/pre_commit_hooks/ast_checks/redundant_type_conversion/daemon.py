@@ -41,7 +41,7 @@ _CONNECT_TIMEOUT_SECONDS = 5.0
 _IDLE_TIMEOUT_SECONDS = 15 * 60
 _CLIENT_REQUEST_TIMEOUT_SECONDS = 60.0
 _STEADY_STATE_CALL_TIMEOUT_SECONDS = 60.0
-_PROTOCOL_VERSION = "5"
+_PROTOCOL_VERSION = "6"
 
 type RPCParameter = str | int | list[str] | list[Redundancy]
 
@@ -194,6 +194,10 @@ class RemoteTySession:
     def record_direct_input(self, filepath: Path, source: str) -> None:
         with contextlib.suppress(LSPError):
             self._call("record_direct_input", filepath=_canonical_rpc_path(filepath), source=source)
+
+    def forget_direct_input(self, filepath: Path) -> None:
+        with contextlib.suppress(LSPError):
+            self._call("forget_direct_input", filepath=_canonical_rpc_path(filepath))
 
     def reconcile_direct_inputs(self) -> list[Path]:
         raw_paths = self._call("reconcile_direct_inputs")
@@ -436,6 +440,9 @@ def _dispatch(message: dict[str, Any], session: PersistentSession) -> dict[str, 
             return {"result": None}
         if op == "record_direct_input":
             session.record_direct_input(Path(message["filepath"]), message["source"])
+            return {"result": None}
+        if op == "forget_direct_input":
+            session.forget_direct_input(Path(message["filepath"]))
             return {"result": None}
         if op == "reconcile_direct_inputs":
             drained = session.reconcile_direct_inputs()

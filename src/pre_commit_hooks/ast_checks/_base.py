@@ -93,6 +93,8 @@ class ASTCheck(Protocol):
 
     def record_direct_input(self, filepath: Path, source: str, /) -> None: ...
 
+    def forget_direct_input(self, filepath: Path, /) -> None: ...
+
     def reconcile_direct_inputs(self, direct_inputs: list[Path], /) -> list[Path]: ...
 
     def get_prefilter_pattern(self) -> list[str] | None: ...
@@ -132,6 +134,9 @@ class BaseCheck:
         return False
 
     def record_direct_input(self, _filepath: Path, _source: str, /) -> None:
+        return
+
+    def forget_direct_input(self, _filepath: Path, /) -> None:
         return
 
     def reconcile_direct_inputs(self, _direct_inputs: list[Path], /) -> list[Path]:

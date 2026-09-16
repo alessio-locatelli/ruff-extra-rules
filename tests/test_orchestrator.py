@@ -1662,6 +1662,36 @@ class _NeverConvergingDrainingCheck(_AlwaysRerunProbeCheck):
         return [Path(f"/nonexistent/never_converges_{self.drain_call_count}.py")]
 
 
+class _ForgetTrackingDrainingCheck(_AlwaysRerunProbeCheck):
+    __slots__ = ("extra_files", "forgotten")
+
+    check_id = "forget-tracking-draining-probe"
+
+    def __init__(self, extra_files: list[Path] | None = None, message: str = "probe") -> None:
+        super().__init__(message)
+        self.extra_files = extra_files or [Path("/nonexistent/gone.py")]
+        self.forgotten: list[Path] = []
+
+    def reconcile_direct_inputs(self, _already_processed: list[Path], /) -> list[Path]:
+        return self.extra_files
+
+    def forget_direct_input(self, filepath: Path, /) -> None:
+        self.forgotten.append(filepath)
+
+
+class _RaisingForgetDrainingCheck(_AlwaysRerunProbeCheck):
+    __slots__ = ()
+
+    check_id = "raising-forget-draining-probe"
+
+    def reconcile_direct_inputs(self, _already_processed: list[Path], /) -> list[Path]:
+        return [Path("/nonexistent/gone.py")]
+
+    def forget_direct_input(self, _filepath: Path, /) -> None:
+        msg = "simulated forget failure"
+        raise RuntimeError(msg)
+
+
 class _OrderDependentDrainingCheck(_AlwaysRerunProbeCheck):
     __slots__ = ("reported_file", "trigger_file")
 
@@ -1875,6 +1905,65 @@ def test_drain_cross_file_candidates_reconciles_one_snapshot_without_recursion(t
 
     assert probe.drain_call_count == 1
     assert len(orchestrator.unprocessable_files) == 1
+
+
+def test_drain_cross_file_candidates_forgets_an_unreadable_extra_file(tmp_path: Path) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+
+    probe = _ForgetTrackingDrainingCheck()
+    orchestrator = CheckOrchestrator(checks=[probe])
+
+    orchestrator.process_files([str(main_file)])
+
+    assert probe.forgotten == [Path("/nonexistent/gone.py").resolve()]
+
+
+def test_drain_cross_file_candidates_does_not_forget_a_transiently_unavailable_extra_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+    extra_file = tmp_path / "extra.py"
+    extra_file.write_text("y = 2\n")
+
+    probe = _ForgetTrackingDrainingCheck(extra_files=[extra_file])
+    orchestrator = CheckOrchestrator(checks=[probe])
+    monkeypatch.setattr(CheckOrchestrator, "_check_derived_file", lambda *_args: None)
+
+    orchestrator.process_files([str(main_file)])
+
+    assert orchestrator.unprocessable_files == [str(extra_file.resolve())]
+    assert probe.forgotten == []
+
+
+def test_drain_cross_file_candidates_forgets_an_extra_file_that_becomes_syntactically_invalid(
+    tmp_path: Path,
+) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+    extra_file = tmp_path / "extra.py"
+    extra_file.write_text("def f(:\n")
+
+    probe = _ForgetTrackingDrainingCheck(extra_files=[extra_file])
+    orchestrator = CheckOrchestrator(checks=[probe])
+
+    orchestrator.process_files([str(main_file)])
+
+    assert orchestrator.unprocessable_files == [str(extra_file.resolve())]
+    assert probe.forgotten == [extra_file.resolve()]
+
+
+def test_drain_cross_file_candidates_tolerates_a_failing_forget_direct_input(tmp_path: Path) -> None:
+    main_file = tmp_path / "main.py"
+    main_file.write_text("x = 1\n")
+
+    orchestrator = CheckOrchestrator(checks=[_RaisingForgetDrainingCheck()])
+
+    violations = orchestrator.process_files([str(main_file)])
+
+    assert str(main_file) in violations
+    assert orchestrator.rule_failures == []
 
 
 def test_drain_cross_file_candidates_does_not_record_derived_rechecks_as_direct_inputs(tmp_path: Path) -> None:
