@@ -6,6 +6,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-09-16
+
 ### Fixed
 
 - `redundant-type-conversion` `aggressive` mode no longer reports a `list`/`dict`/`set`/`bytearray` conversion assigned to a name (directly, through a chain of plain reassignments, through any depth of attribute/subscript target, or through a `for`/comprehension target over a literal list/tuple/set) when that name is later mutated in place — a subscript assignment or deletion, an augmented assignment, or a call to a mutating method such as `.append()`, `.update()`, or `.add()` — since removing the conversion there would turn a distinct copy into a shared, mutable reference to the original value (e.g. `record = dict(record); record["_id"] = 42`, or `obj.items = dict(source); obj.items["id"] = 1`).
