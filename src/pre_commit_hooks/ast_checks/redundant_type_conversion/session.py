@@ -56,6 +56,8 @@ class PersistentSession(Protocol):
 
     def record_direct_input(self, filepath: Path, source: str, /) -> None: ...
 
+    def forget_direct_input(self, filepath: Path, /) -> None: ...
+
     def reconcile_direct_inputs(self) -> list[Path]: ...
 
     def close(self) -> None: ...
@@ -255,6 +257,15 @@ class TySession:
             return
         uri = resolved.as_uri()
         self._direct_input_digests[uri] = hashlib.sha256(source.encode()).digest()
+
+    def forget_direct_input(self, filepath: Path) -> None:
+        resolved = filepath.resolve()
+        uri = resolved.as_uri()
+        self.close_file(resolved)
+        self._direct_input_digests.pop(uri, None)
+        self._last_reconciled_digests.pop(uri, None)
+        for key in [key for key in self._cached_redundancies if key[0] == uri]:
+            del self._cached_redundancies[key]
 
     def cached_redundancies(self, filepath: Path, source: str, cache_key: str) -> list[Redundancy] | None:
         resolved = filepath.resolve()

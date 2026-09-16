@@ -478,6 +478,37 @@ def test_close_file_forgets_the_file_even_when_the_didclose_notification_fails(t
     assert uri not in session._open_versions
 
 
+def test_forget_direct_input_evicts_all_tracking_state_for_the_uri(tmp_path: Path) -> None:
+    client = _StubLSPClient()
+    session = _session_with_stub_client(client)
+    filepath = tmp_path / "opened.py"
+    uri = filepath.resolve().as_uri()
+    session._open_versions[uri] = 1
+    session._direct_input_digests[uri] = b"digest"
+    session._last_reconciled_digests[uri] = b"digest"
+    session._cached_redundancies[(uri, "strict")] = (b"digest", [("str", 1, 4, "str")])
+    other_uri = (tmp_path / "kept.py").resolve().as_uri()
+    session._cached_redundancies[(other_uri, "strict")] = (b"digest", [])
+
+    session.forget_direct_input(filepath)
+
+    assert client.notify_calls == [("textDocument/didClose", {"textDocument": {"uri": uri}})]
+    assert uri not in session._open_versions
+    assert uri not in session._direct_input_digests
+    assert uri not in session._last_reconciled_digests
+    assert all(key[0] != uri for key in session._cached_redundancies)
+    assert (other_uri, "strict") in session._cached_redundancies
+
+
+def test_forget_direct_input_is_a_no_op_for_a_uri_with_no_tracked_state(tmp_path: Path) -> None:
+    client = _StubLSPClient()
+    session = _session_with_stub_client(client)
+
+    session.forget_direct_input(tmp_path / "never_seen.py")
+
+    assert client.notify_calls == []
+
+
 def test_is_within_root_accepts_a_file_under_the_root(tmp_path: Path) -> None:
     session = _session_with_stub_client(_StubLSPClient(), root=tmp_path)
 

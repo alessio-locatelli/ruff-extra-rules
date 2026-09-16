@@ -282,6 +282,16 @@ class CheckOrchestrator:
                 if violations is None:
                     self.unprocessable_files.append(extra_file_str)
                     _replace_check_violations(all_violations, extra_file_str, check.check_id, [])
+                    if self._parsed_source(extra_resolved) is None:
+                        try:
+                            check.forget_direct_input(extra_resolved)
+                        except Exception:
+                            logger.debug(
+                                "Check %s failed to forget unreadable extra file %s",
+                                check.check_id,
+                                extra_resolved,
+                                exc_info=True,
+                            )
                 else:
                     _replace_check_violations(all_violations, extra_file_str, check.check_id, violations)
 

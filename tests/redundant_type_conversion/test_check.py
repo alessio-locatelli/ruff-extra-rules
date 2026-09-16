@@ -100,6 +100,23 @@ def _patch_session(monkeypatch: pytest.MonkeyPatch, session: FakeSession) -> Non
     monkeypatch.setattr(tri006_module, "get_session", lambda: session)
 
 
+def test_forget_direct_input_is_a_no_op_when_no_session_is_active(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(tri006_module, "peek_session", lambda: None)
+
+    RedundantTypeConversionCheck().forget_direct_input(Path("gone.py"))
+
+
+def test_forget_direct_input_forwards_to_the_active_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    forgotten: list[Path] = []
+    session = SimpleNamespace(forget_direct_input=forgotten.append)
+    monkeypatch.setattr(tri006_module, "peek_session", lambda: session)
+    filepath = Path("gone.py")
+
+    RedundantTypeConversionCheck().forget_direct_input(filepath)
+
+    assert forgotten == [filepath]
+
+
 def test_check_flags_a_redundant_conservative_case(monkeypatch: pytest.MonkeyPatch) -> None:
     source = "y = str(x)\n"
     session = FakeSession(
