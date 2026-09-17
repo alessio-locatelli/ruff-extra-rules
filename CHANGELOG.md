@@ -6,6 +6,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-09-17
+
 ### Fixed
 
 - `redundant-type-conversion`'s persistent `ty` daemon no longer keeps offering a file it can no longer read (e.g. deleted after a direct, non-`pre-commit`/`prek` invocation examined it) to a later, unrelated commit's reconciliation pass — which previously failed that unrelated commit outright with "could not be read or parsed; file skipped". The daemon now forgets a file the moment a re-read of it fails.
