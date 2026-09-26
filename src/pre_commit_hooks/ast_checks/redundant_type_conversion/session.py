@@ -71,7 +71,7 @@ _TY_COMMAND = ("ty", "server")
 
 _HOVER_DOC_SEPARATOR = re.compile(r"\n-{3,}\n")
 
-_MIN_TY_VERSION = "0.0.78"
+_MIN_TY_VERSION = "0.0.84"
 
 _INSTALL_HINT = (
     "redundant-type-conversion (TR6) requires Astral's `ty` type checker on PATH; this release was "
