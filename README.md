@@ -1,6 +1,10 @@
-# Ruff Extra Rules
+# Extra rules for Ruff
 
 Extra Python rule checks and fixups that run as a pre-commit/prek hook alongside ruff — not a replacement for it.
+
+**ℹ️ Ruff is a trademark of Astral Software Inc. This project is independent and is not affiliated with or endorsed by Astral Software Inc.**
+
+---
 
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
