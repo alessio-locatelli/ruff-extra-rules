@@ -893,8 +893,17 @@ def test_builtins_are_not_trusted_when_the_file_can_replace_them(prefix: str) ->
         ("    @register(vars())\n    def helper():\n        return 1\n\n", []),
         ("    class Helper(Base, meta=exec('')):\n        pass\n\n", []),
         ("    helper = [locals() for _ in range(1)]\n", []),
+        ("    def helper(x: locals()) -> vars():\n        return x\n\n", ["result"]),
     ],
-    ids=["nested-body", "lambda-body", "default", "decorator", "class-header", "comprehension"],
+    ids=[
+        "nested-body",
+        "lambda-body",
+        "default",
+        "decorator",
+        "class-header",
+        "comprehension",
+        "deferred-annotations",
+    ],
 )
 def test_dynamic_scope_access_is_scoped_to_the_analyzed_function(helper: str, expected: list[str]) -> None:
     source = f"def f():\n{helper}    result = 0\n    if ready():\n        return\n    use(result, helper)\n"
