@@ -328,6 +328,23 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
             use(first)
         """,
         """
+        def f(first, second):
+            fn = first
+            value = fn()
+            fn = second
+            if done():
+                return
+            use(value, fn)
+        """,
+        """
+        def f():
+            value = helper()
+            helper.cache_clear()
+            if done():
+                return
+            use(value)
+        """,
+        """
         async def f():
             value = await fetch()
             if done():
@@ -352,6 +369,8 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
         "mutating-method",
         "starred-argument",
         "keyword-argument",
+        "rebound-callee",
+        "mutated-callee",
         "await",
         "walrus",
     ],

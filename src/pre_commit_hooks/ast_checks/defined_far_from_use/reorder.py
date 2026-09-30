@@ -147,12 +147,7 @@ def _root_names(expressions: Iterable[ast.expr]) -> Iterator[str]:
 
 
 def _state_read_by(value: ast.expr) -> frozenset[str]:
-    callees = {id(node.func) for node in ast.walk(value) if isinstance(node, ast.Call)}
-    loaded = {
-        node.id
-        for node in ast.walk(value)
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and id(node) not in callees
-    }
+    loaded = {node.id for node in ast.walk(value) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
     local = {node.id for node in ast.walk(value) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}
     return frozenset(loaded - local)
 
