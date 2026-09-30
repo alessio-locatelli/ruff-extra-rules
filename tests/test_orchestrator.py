@@ -401,10 +401,7 @@ def test_expand_directories_skips_gitignore_warning_when_git_status_probe_is_unr
             "nonzero": "import sys; sys.exit(1)",
             "stderr": "import sys; sys.stderr.write('failed')",
             "stderr-with-paths": "import os; os.write(2, b'failed'); os.write(1, b'!! ignored.py\\0' * 20)",
-            "timeout": (
-                "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
-                "os.write(1, b'?\\0'); time.sleep(30)"
-            ),
+            "timeout": "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)",
             "continuous": "import os\nwhile True:\n os.write(1, b'??\\0')",
             "unterminated": "import os; os.write(1, b'!' * 70_000)",
         }
