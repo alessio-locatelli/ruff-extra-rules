@@ -58,7 +58,9 @@ class _Block:
             for node in ast.walk(statement):
                 if isinstance(node, ast.Name):
                     self.name_positions.setdefault(node.id, []).append(position)
-        self.exits = [position for position, statement in enumerate(statements) if _contains_exit(statement)]
+        self.exits = [
+            position for position, statement in enumerate(statements) if _contains_exit(statement, builtin_names)
+        ]
         self.terminals = [
             position for position, statement in enumerate(statements) if isinstance(statement, _TERMINAL_NODES)
         ]
@@ -326,28 +328,63 @@ def _may_reorder(
     )
 
 
-def _contains_exit(node: ast.AST, *, in_loop: bool = False, in_guarded_try: bool = False) -> bool:
+def _contains_exit(
+    node: ast.AST,
+    builtin_names: frozenset[str],
+    *,
+    in_loop: bool = False,
+    guards: tuple[list[ast.ExceptHandler], ...] = (),
+) -> bool:
     if isinstance(node, ast.Return):
         return True
     if isinstance(node, ast.Raise):
-        return not in_guarded_try
+        return _escapes(node, guards, builtin_names)
     if isinstance(node, ast.Continue | ast.Break):
         return not in_loop
     if isinstance(node, (*_NESTED_SCOPE_NODES, ast.expr)):
         return False
     if isinstance(node, _LOOP_NODES):
-        return any(_contains_exit(child, in_loop=True, in_guarded_try=in_guarded_try) for child in node.body) or any(
-            _contains_exit(child, in_loop=in_loop, in_guarded_try=in_guarded_try) for child in node.orelse
+        return any(_contains_exit(child, builtin_names, in_loop=True, guards=guards) for child in node.body) or any(
+            _contains_exit(child, builtin_names, in_loop=in_loop, guards=guards) for child in node.orelse
         )
     if isinstance(node, _TRY_NODES):
-        guarded = in_guarded_try or bool(node.handlers)
-        return any(_contains_exit(child, in_loop=in_loop, in_guarded_try=guarded) for child in node.body) or any(
-            _contains_exit(child, in_loop=in_loop, in_guarded_try=in_guarded_try)
+        body_guards = (*guards, node.handlers) if node.handlers else guards
+        return any(
+            _contains_exit(child, builtin_names, in_loop=in_loop, guards=body_guards) for child in node.body
+        ) or any(
+            _contains_exit(child, builtin_names, in_loop=in_loop, guards=guards)
             for child in (*node.handlers, *node.orelse, *node.finalbody)
         )
     return any(
-        _contains_exit(child, in_loop=in_loop, in_guarded_try=in_guarded_try) for child in ast.iter_child_nodes(node)
+        _contains_exit(child, builtin_names, in_loop=in_loop, guards=guards) for child in ast.iter_child_nodes(node)
     )
+
+
+def _escapes(node: ast.Raise, guards: tuple[list[ast.ExceptHandler], ...], builtin_names: frozenset[str]) -> bool:
+    if not guards:
+        return True
+    raised = _builtin_exception(node.exc.func if isinstance(node.exc, ast.Call) else node.exc, builtin_names)
+    return raised is not None and not any(
+        _may_catch(handler, raised, builtin_names) for handlers in guards for handler in handlers
+    )
+
+
+def _may_catch(handler: ast.ExceptHandler, raised: type[BaseException], builtin_names: frozenset[str]) -> bool:
+    if handler.type is None:
+        return True
+    caught_types = handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+    for caught_type in caught_types:
+        caught = _builtin_exception(caught_type, builtin_names)
+        if caught is None or issubclass(raised, caught):
+            return True
+    return False
+
+
+def _builtin_exception(node: ast.expr | None, builtin_names: frozenset[str]) -> type[BaseException] | None:
+    if not isinstance(node, ast.Name) or node.id not in builtin_names:
+        return None
+    candidate = getattr(builtins, node.id, None)
+    return candidate if isinstance(candidate, type) and issubclass(candidate, BaseException) else None
 
 
 def _unrelated_statement_count(window: list[tuple[StatementEffects, int]], use: ast.stmt, name: str) -> int:
