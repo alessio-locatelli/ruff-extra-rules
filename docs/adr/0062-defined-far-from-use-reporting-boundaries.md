@@ -18,13 +18,13 @@ TR11 (`defined-far-from-use`) is one default-enabled, report-only check with two
 - **Triggers.**
   - _Early exit_: a `return` or `raise`, or a `continue` or `break` that targets a loop enclosing the assignment, sits between the assignment and its first use. The suggested position is directly after the last such exit, not directly before the use. That keeps statements between the last exit and the use, which is where snapshot-then-mutate code usually lives, out of the reorder.
   - _Distance_: the gap is larger than `max-distance` (default 5). The gap is measured in statements, not lines, so formatting doesn't change it. A statement that binds or mutates a name the use statement also reads prepares the same consumer and is not counted.
-- **Binding guards (both levels).** Report only when every other reference to the variable in the function lies at or after its first use in the same block. The variable must not be `global`/`nonlocal`, and the function must not reach its locals dynamically (`locals()`, `vars()`, `exec()`, `eval()`). The right-hand side must not suspend or bind (`await`, `yield`, walrus). Module and class bodies are never checked, because other code can observe their bindings.
+- **Binding guards (both levels).** Report only when every other reference to the variable in the function lies at or after its first use in the same block, and that first use reads the value rather than overwriting it. The variable must not be `global`/`nonlocal`, and the function must not reach its locals dynamically (`locals()`, `vars()`, `exec()`, `eval()`). The right-hand side must not suspend or bind (`await`, `yield`, walrus). Module and class bodies are never checked, because other code can observe their bindings.
 - **`conservative` (default).** Only order-independent right-hand sides are reported. These are:
   - literals
   - exact arithmetic on numeric literals
   - containers of order-independent items
   - calls to unshadowed empty built-in constructors
-  - local names the reorder window doesn't rebind
+  - local names that are definitely bound before the assignment and that the reorder window doesn't rebind
 
   Moving these can't change behavior.
 
