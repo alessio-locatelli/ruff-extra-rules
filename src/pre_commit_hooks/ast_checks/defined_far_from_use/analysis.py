@@ -48,10 +48,11 @@ class _FunctionFacts:
 
 
 class _Block:
-    __slots__ = ("_effects", "exits", "name_positions", "statements", "terminals")
+    __slots__ = ("_builtin_names", "_effects", "exits", "name_positions", "statements", "terminals")
 
-    def __init__(self, statements: list[ast.stmt]) -> None:
+    def __init__(self, statements: list[ast.stmt], builtin_names: frozenset[str]) -> None:
         self.statements = statements
+        self._builtin_names = builtin_names
         self.name_positions: dict[str, list[int]] = {}
         for position, statement in enumerate(statements):
             for node in ast.walk(statement):
@@ -69,7 +70,7 @@ class _Block:
     def _statement_effects(self, position: int) -> tuple[StatementEffects, int]:
         if position not in self._effects:
             statement = self.statements[position]
-            self._effects[position] = (statement_effects(statement), _statement_count(statement))
+            self._effects[position] = (statement_effects(statement, self._builtin_names), _statement_count(statement))
         return self._effects[position]
 
 
@@ -119,7 +120,7 @@ def _function_findings(
         for index, statement in enumerate(statements):
             target = _assignment_target(statement)
             if target is not None and target.id not in facts.redeclared | facts.captured:
-                block = block or _Block(statements)
+                block = block or _Block(statements, facts.builtin_names)
                 finding = _candidate_finding(block, index, target, facts, options, definitely_bound=bound)
                 if finding is not None:
                     yield finding

@@ -107,10 +107,10 @@ class StatementEffects:
     calls: bool
 
 
-def statement_effects(statement: ast.stmt) -> StatementEffects:
+def statement_effects(statement: ast.stmt, builtin_names: frozenset[str]) -> StatementEffects:
     nodes = list(ast.walk(statement))
     rebound = frozenset(name for node in nodes for name in iter_binding_names(node))
-    mutated = frozenset(name for node in nodes for name in _mutation_roots(node))
+    mutated = frozenset(name for node in nodes for name in _mutation_roots(node, builtin_names))
     return StatementEffects(rebound, rebound | mutated, any(isinstance(node, ast.Call) for node in nodes))
 
 
@@ -132,13 +132,13 @@ def may_reorder(
     return not _calls_validation(value) and not (_state_read_by(value) & exposed)
 
 
-def _mutation_roots(node: ast.AST) -> Iterator[str]:
+def _mutation_roots(node: ast.AST, builtin_names: frozenset[str]) -> Iterator[str]:
     if isinstance(node, ast.Attribute | ast.Subscript) and isinstance(node.ctx, ast.Store | ast.Del):
         yield from _root_names((node.value,))
     elif isinstance(node, ast.Call):
         if isinstance(node.func, ast.Attribute) and node.func.attr not in _READ_ONLY_METHODS:
             yield from _root_names((node.func.value,))
-        if not (isinstance(node.func, ast.Name) and node.func.id in _PURE_CALLABLES):
+        if not (isinstance(node.func, ast.Name) and node.func.id in _PURE_CALLABLES & builtin_names):
             arguments = (*node.args, *(keyword.value for keyword in node.keywords))
             yield from _root_names(
                 argument.value if isinstance(argument, ast.Starred) else argument for argument in arguments
