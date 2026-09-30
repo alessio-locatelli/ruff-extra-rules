@@ -932,8 +932,24 @@ def test_builtin_shadowed_by_an_enclosing_function_is_not_trusted() -> None:
         "globals()['set'] = frozenset\n\n\n",
         "import sys\n\nsys.modules[__name__].set = frozenset\n\n\n",
         "from helpers import *\n\n\n",
+        "import sys as runtime\n\nruntime.modules['builtins'].set = frozenset\n\n\n",
+        "from sys import modules\n\nmodules['builtins'].set = frozenset\n\n\n",
+        "import importlib\n\nimportlib.import_module('builtins').set = frozenset\n\n\n",
+        "__import__('builtins').set = frozenset\n\n\n",
     ],
-    ids=["import", "aliased-import", "from-import", "dunder", "globals", "sys-modules", "wildcard-import"],
+    ids=[
+        "import",
+        "aliased-import",
+        "from-import",
+        "dunder",
+        "globals",
+        "sys-modules",
+        "wildcard-import",
+        "aliased-sys",
+        "from-sys-import-modules",
+        "importlib",
+        "dunder-import",
+    ],
 )
 def test_builtins_are_not_trusted_when_the_file_can_replace_them(prefix: str) -> None:
     source = f"{prefix}def f():\n    result = set()\n    if ready():\n        return\n    use(result)\n"
