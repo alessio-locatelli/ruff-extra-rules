@@ -389,11 +389,11 @@ class CheckOrchestrator:
             prior_suppression_usages=prior_suppression_usages,
             prior_active_error_codes=prior_active_error_codes,
         )
-        new_failure_ids = {check_id for _fp, check_id in self.rule_failures[rule_failures_before:]}
 
         if violations is None:
             return None
 
+        new_failure_ids = {check_id for _fp, check_id in self.rule_failures[rule_failures_before:]}
         cacheable_ids = {check.check_id for check in checks if check.cacheable}
 
         terminal_negative_ids = {v.check_id for v in violations if _has_terminal_fix_state(v)}

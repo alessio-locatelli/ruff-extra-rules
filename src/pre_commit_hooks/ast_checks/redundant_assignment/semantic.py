@@ -95,7 +95,6 @@ def _count_chained_operations(node: ast.expr) -> int:
 
 
 def _adds_verbosity_or_context(var_name: str, rhs_source: str, rhs_node: ast.expr) -> bool:
-    var_lower = var_name.lower()
     rhs_lower = rhs_source.lower()
 
     descriptive_word_prefixes = {
@@ -133,6 +132,7 @@ def _adds_verbosity_or_context(var_name: str, rhs_source: str, rhs_node: ast.exp
         if first_part in descriptive_word_prefixes and first_part not in rhs_lower:
             return True
 
+    var_lower = var_name.lower()
     if isinstance(rhs_node, ast.Subscript | ast.Call):
         rhs_key_or_method = None
 
@@ -257,12 +257,12 @@ def _would_exceed_line_length(
     absolute_threshold: int = 25,
 ) -> bool:
     assignment = lifecycle.assignment
-    var_name = assignment.var_name
     rhs_source = assignment.rhs_source.strip()
 
     if len(rhs_source) >= absolute_threshold:
         return True
 
+    var_name = assignment.var_name
     len_diff = len(rhs_source) - len(var_name)
     return len_diff > 20
 
@@ -394,7 +394,6 @@ def report_reason(
 ) -> ReportReason | None:
     assignment = lifecycle.assignment
     argument_echo_reason = _argument_echo_reason(lifecycle)
-    is_argument_echo = argument_echo_reason is not None
 
     if (
         assignment.in_loop
@@ -411,6 +410,7 @@ def report_reason(
     ):
         return None
 
+    is_argument_echo = argument_echo_reason is not None
     if not is_argument_echo and _is_named_constant_pattern(assignment.var_name, assignment.rhs_node):
         return None
 

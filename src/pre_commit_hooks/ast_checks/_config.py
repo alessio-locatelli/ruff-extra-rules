@@ -14,7 +14,6 @@ from ._per_file_ignores import PerFileIgnore, PerFileIgnoreList
 if TYPE_CHECKING:
     import argparse
     from collections.abc import Iterable, Mapping, Sequence
-    from enum import Enum
 
     from ._base import ASTCheck
     from ._options import CheckOption
@@ -278,7 +277,7 @@ def resolve(
         if check_id not in enabled_check_ids:
             continue
         kwargs = {
-            option.name: _resolve_option_value(args, check_id, option, configured_options)
+            option.keyword: _resolve_option_value(args, check_id, option, configured_options)
             for option in check_class.OPTIONS
         }
         if kwargs:
@@ -325,8 +324,8 @@ def _resolve_option_value(
     args: argparse.Namespace,
     check_id: str,
     option: CheckOption,
-    configured: Mapping[str, Enum],
-) -> Enum:
+    configured: Mapping[str, object],
+) -> object:
     cli_value = getattr(args, option.dest(check_id), None)
     if cli_value is not None:
         return option.coerce(cli_value, CLI_SOURCE)

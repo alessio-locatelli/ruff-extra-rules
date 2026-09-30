@@ -10,6 +10,7 @@ from pre_commit_hooks.ast_checks import ALL_CHECKS
 from pre_commit_hooks.ast_checks._cli import main
 from pre_commit_hooks.ast_checks._config import discover, resolve
 from pre_commit_hooks.ast_checks._options import add_check_arguments
+from pre_commit_hooks.ast_checks.defined_far_from_use.reorder import DefinedFarFromUseLevel
 from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsLevel
 from pre_commit_hooks.ast_checks.redundant_assignment.semantic import AggressivenessLevel
 from pre_commit_hooks.ast_checks.redundant_dict_get.local import ProofLevel
@@ -120,6 +121,9 @@ def test_an_unreadable_config_file_is_reported_rather_than_skipped(
         ("[tool.ruff-extra-rules]\nmeaningless-vars = 1\n", "must be a table"),
         ('[tool.ruff-extra-rules.meaningless-vars]\nlvl = "aggressive"\n', "Unknown field `lvl`"),
         ('[tool.ruff-extra-rules.meaningless-vars]\nlevel = "permissive"\n', "expected one of: `conservative`"),
+        ("[tool.ruff-extra-rules.defined-far-from-use]\nmax-distance = 0\n", "expected an integer of at least 1"),
+        ("[tool.ruff-extra-rules.defined-far-from-use]\nmax-distance = true\n", "expected an integer of at least 1"),
+        ('[tool.ruff-extra-rules.defined-far-from-use]\nmax-distance = "5"\n', "expected an integer of at least 1"),
         ("[tool]\nruff-extra-rules = 1\n", "must be a table"),
     ],
     ids=[
@@ -135,6 +139,9 @@ def test_an_unreadable_config_file_is_reported_rather_than_skipped(
         "non-table-check-section",
         "unknown-option-field",
         "invalid-option-value",
+        "integer-option-below-minimum",
+        "boolean-integer-option",
+        "string-integer-option",
         "non-table-tool-section",
     ],
 )
@@ -217,9 +224,10 @@ def test_unknown_field_error_lists_the_valid_ones(project: Path, capsys: pytest.
         ("redundant-assignment", "aggressive", AggressivenessLevel.AGGRESSIVE),
         ("redundant-type-conversion", "aggressive", ConfidenceLevel.AGGRESSIVE),
         ("redundant-dict-get", "aggressive", ProofLevel.AGGRESSIVE),
+        ("defined-far-from-use", "aggressive", DefinedFarFromUseLevel.AGGRESSIVE),
         ("meaningless-vars", "conservative", MeaninglessVarsLevel.CONSERVATIVE),
     ],
-    ids=["tr1", "tr5", "tr6", "tr9", "explicit-default"],
+    ids=["tr1", "tr5", "tr6", "tr9", "tr11", "explicit-default"],
 )
 def test_a_checks_option_reaches_its_constructor_from_the_config_file(
     project: Path, check_id: str, option_value: str, expected: object
@@ -233,7 +241,43 @@ def test_a_checks_option_reaches_its_constructor_from_the_config_file(
         all_check_classes=ALL_CHECKS,
     )
 
-    assert resolved.check_kwargs[check_id] == {"level": expected}
+    assert resolved.check_kwargs[check_id]["level"] == expected
+
+
+@pytest.mark.parametrize(
+    ("config_value", "argv", "expected"),
+    [
+        (None, [], 5),
+        (3, [], 3),
+        (3, ["--defined-far-from-use-max-distance", "8"], 8),
+    ],
+    ids=["default", "config-file", "command-line-overrides"],
+)
+def test_an_integer_option_reaches_its_constructor_keyword(
+    project: Path, config_value: int | None, argv: list[str], expected: int
+) -> None:
+    if config_value is not None:
+        _write_config(project, f"[tool.ruff-extra-rules.defined-far-from-use]\nmax-distance = {config_value}\n")
+    check_class = next(cls for cls in ALL_CHECKS if cls().check_id == "defined-far-from-use")
+
+    resolved = resolve(
+        _parsed(argv, enabled=[check_class]),
+        enabled_check_classes=[check_class],
+        all_check_classes=ALL_CHECKS,
+    )
+
+    assert resolved.check_kwargs["defined-far-from-use"]["max_distance"] == expected
+
+
+def test_an_invalid_integer_option_on_the_command_line_is_rejected(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filepath = project / "module.py"
+    filepath.write_text("x = 1\n")
+
+    assert main([filepath.as_posix(), "--defined-far-from-use-max-distance", "0"]) == 2
+
+    assert "expected an integer of at least 1" in capsys.readouterr().err
 
 
 def _parsed(argv: list[str], *, enabled: Sequence[type[ASTCheck]]) -> argparse.Namespace:

@@ -59,16 +59,14 @@ def apply_fixes(
         fix_data = cast("RedundantAssignmentFixData", raw_fix_data)
 
         assign_line_idx = fix_data["assign_line"] - 1
-        use_line_idx = fix_data["use_line"] - 1
-        use_col = fix_data["use_col"]
 
         if assign_line_idx < 0 or assign_line_idx >= len(source_lines):
             continue
+        use_line_idx = fix_data["use_line"] - 1
         if use_line_idx < 0 or use_line_idx >= len(source_lines):
             continue
 
         rhs_source = fix_data["rhs_source"].strip()
-        var_name = fix_data["var_name"]
 
         fstring_start = fix_data.get("fstring_field_start_col")
         fstring_end = fix_data.get("fstring_field_end_col")
@@ -90,9 +88,11 @@ def apply_fixes(
             applied_violations.append(violation)
             continue
 
+        var_name = fix_data["var_name"]
         if not _can_safely_inline(var_name, rhs_source, use_line_idx, source_lines):
             continue
 
+        use_col = fix_data["use_col"]
         use_line = source_lines[use_line_idx]
 
         pattern = r"\b" + re.escape(var_name) + r"\b"

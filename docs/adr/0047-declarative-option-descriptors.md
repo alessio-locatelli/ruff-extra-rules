@@ -8,7 +8,7 @@ Adding `pyproject.toml` (ADR-0045) needs the same facts again — the key name, 
 
 A check declares its options once, as data, in a class-level `OPTIONS` tuple. The command-line flag, the TOML key, the accepted values, the validation and its error message, the valid-key list, and the constructor keyword are all derived from that one declaration. The two classmethods are removed rather than kept alongside it, so there is exactly one place an option can be declared.
 
-The option name is the constructor keyword. The flag is the check id joined to it (`--meaningless-vars-level`); the TOML key is the bare name inside the check's own sub-table. A check with nothing to configure declares nothing.
+The option name, with hyphens turned into underscores, is the constructor keyword. The flag is the check id joined to it (`--meaningless-vars-level`); the TOML key is the bare name inside the check's own sub-table. A check with nothing to configure declares nothing.
 
 Derived flags default to `None` rather than to the option's real default. Without that, a flag left unset is indistinguishable from one explicitly given its default value, and `argparse`'s own default would outrank the `pyproject.toml` value it is supposed to lose to — silently inverting the precedence order. The same requirement makes `--fix` a `None`-defaulted flag paired with `--no-fix`.
 
@@ -21,6 +21,6 @@ Derived flags default to `None` rather than to the option's real default. Withou
 
 ## Consequences
 
-- Adding a configurable option to a check is one declaration; adding a new _kind_ of option (something other than a fixed set of named values) requires a new descriptor type, which nothing needs yet.
+- Adding a configurable option to a check is one declaration; adding a new _kind_ of option requires a new descriptor type. Each descriptor type owns its own command-line parsing and value validation: `EnumOption` for a fixed set of named values, `IntOption` for an integer with a lower bound. A multi-word option name is kebab-case in the flag and TOML key and snake_case as the constructor keyword.
 - Every option is reachable from both sources by construction. That is what makes `ruff`'s inline `--config "key = value"` form unnecessary here (ADR-0045).
 - Help text is now shared between `--help` and configuration error messages, so it has to read sensibly in both.

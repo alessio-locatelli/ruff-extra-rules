@@ -331,12 +331,11 @@ class _Analyzer:
         return true_state, false_state
 
     def bind_assignment(self, statement: ast.Assign | ast.AnnAssign, state: _State) -> None:
-        targets = _assignment_targets(statement)
-        value = statement.value
         mutations = _mutation_targets(statement.targets if isinstance(statement, ast.Assign) else [statement.target])
         if mutations:
             state.clear()
             return
+        value = statement.value
         if value is not None and (
             any(isinstance(node, ast.NamedExpr) for node in ast.walk(value))
             or _has_unknown_call(value, self._candidates)
@@ -344,6 +343,7 @@ class _Analyzer:
         ):
             state.clear()
             return
+        targets = _assignment_targets(statement)
         if len(targets) != 1 or value is None:
             for target in targets:
                 state.drop(target)

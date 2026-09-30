@@ -780,12 +780,12 @@ class VariableTracker(ast.NodeVisitor):
         self.parent_stack.pop()
 
         scope_id = self._get_current_scope_id()
-        stmt_index = self._get_current_stmt_index()
         var_name = node.target.id
 
         if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
             return
 
+        stmt_index = self._get_current_stmt_index()
         self._track_rebinding_use(var_name, node.target.lineno, node.target.col_offset, scope_id, stmt_index)
 
     def _track_rebinding_use(self, var_name: str, line: int, col: int, scope_id: int, stmt_index: int) -> None:
@@ -940,7 +940,6 @@ class VariableTracker(ast.NodeVisitor):
             for assignment in assignment_list:
                 key = (scope_id, var_name)
                 all_uses = self.uses.get(key, [])
-                relevant_uses = [use for use in all_uses if use.stmt_index >= assignment.stmt_index]
 
                 child_scopes = self._get_closure_reachable_scopes(scope_id, var_name)
 
@@ -950,6 +949,7 @@ class VariableTracker(ast.NodeVisitor):
                 if is_captured_by_nonlocal:
                     continue
 
+                relevant_uses = [use for use in all_uses if use.stmt_index >= assignment.stmt_index]
                 for child_scope_id in child_scopes:
                     child_key = (child_scope_id, var_name)
                     child_uses = self.uses.get(child_key, [])

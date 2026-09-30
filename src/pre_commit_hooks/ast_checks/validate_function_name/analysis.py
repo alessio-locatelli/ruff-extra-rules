@@ -255,6 +255,17 @@ def _is_logging_only_function(func_node: ast.FunctionDef | ast.AsyncFunctionDef)
 def analyze_function(
     func_node: ast.FunctionDef | ast.AsyncFunctionDef,
 ) -> FunctionBehavior:
+    param_names: set[str] = set()
+    for arg in func_node.args.args:
+        param_names.add(arg.arg)
+    for arg in func_node.args.posonlyargs:
+        param_names.add(arg.arg)
+    for arg in func_node.args.kwonlyargs:
+        param_names.add(arg.arg)
+    if func_node.args.vararg:
+        param_names.add(func_node.args.vararg.arg)
+    if func_node.args.kwarg:
+        param_names.add(func_node.args.kwarg.arg)
     flags: FunctionBehavior = {
         "is_property": False,
         "disk_read": False,
@@ -276,18 +287,6 @@ def analyze_function(
         "collects": False,
         "returns_class": False,
     }
-
-    param_names: set[str] = set()
-    for arg in func_node.args.args:
-        param_names.add(arg.arg)
-    for arg in func_node.args.posonlyargs:
-        param_names.add(arg.arg)
-    for arg in func_node.args.kwonlyargs:
-        param_names.add(arg.arg)
-    if func_node.args.vararg:
-        param_names.add(func_node.args.vararg.arg)
-    if func_node.args.kwarg:
-        param_names.add(func_node.args.kwarg.arg)
 
     for deco in func_node.decorator_list:
         if (isinstance(deco, ast.Name) and deco.id == "property") or (
@@ -655,7 +654,6 @@ def extract_first_verb(docstring_line: str) -> str | None:
 
 def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis: FunctionBehavior) -> tuple[str, str]:
     old = func_node.name
-    entity = derive_entity_from_name(old)
 
     if old.startswith("test_"):
         return old, "function looks like a test"
@@ -672,6 +670,7 @@ def suggest_name_for(func_node: ast.FunctionDef | ast.AsyncFunctionDef, analysis
     if analysis["returns_class"]:
         return old, "returns a class object; get_ prefix is acceptable"
 
+    entity = derive_entity_from_name(old)
     first_line = first_docstring_line(func_node)
     if first_line:
         low = first_line.lower()

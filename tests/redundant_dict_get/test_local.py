@@ -171,6 +171,7 @@ def test_find_proofs_reports_the_supported_local_invariants(source: str, expecte
         ("def f(*config: dict[str, int]) -> int | None:\n    return config.get('port')\n"),
         ("def f(**config: dict[str, int]) -> int | None:\n    return config.get('port')\n"),
         "config = {'port': 5432}\nconfig, *other = build()\nvalue = config.get('port')\n",
+        "config = {'port': 5432}\nconfig, *other = [{}, 1]\nvalue = config.get('port')\n",
     ],
 )
 def test_find_proofs_rejects_mutation_escape_alias_and_non_dominating_cases(source: str) -> None:
