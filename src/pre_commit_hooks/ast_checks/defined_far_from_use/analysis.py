@@ -23,6 +23,8 @@ _TERMINAL_NODES = (ast.Return, ast.Raise, ast.Continue, ast.Break)
 _DYNAMIC_SCOPE_BUILTINS = frozenset({"locals", "vars", "exec", "eval"})
 _REORDER_SENSITIVE_NODES = (ast.Await, ast.Yield, ast.YieldFrom, ast.NamedExpr)
 _UBIQUITOUS_RECEIVERS = frozenset({"self", "cls"})
+_BUILTINS_REACHING_MODULES = frozenset({"builtins", "importlib", "sys"})
+_BUILTINS_REACHING_NAMES = frozenset({"__builtins__", "__import__", "globals"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,18 +89,18 @@ def find_findings(tree: ast.Module, level: DefinedFarFromUseLevel, max_distance:
 
 def _can_rebind_builtins(tree: ast.Module) -> bool:
     return any(
-        (isinstance(node, ast.Import) and any(alias.name == "builtins" for alias in node.names))
+        (
+            isinstance(node, ast.Import)
+            and any(alias.name.partition(".")[0] in _BUILTINS_REACHING_MODULES for alias in node.names)
+        )
         or (
             isinstance(node, ast.ImportFrom)
-            and (node.module == "builtins" or any(alias.name == "*" for alias in node.names))
+            and (
+                (node.module or "").partition(".")[0] in _BUILTINS_REACHING_MODULES
+                or any(alias.name == "*" for alias in node.names)
+            )
         )
-        or (isinstance(node, ast.Name) and node.id in {"__builtins__", "globals"})
-        or (
-            isinstance(node, ast.Attribute)
-            and node.attr == "modules"
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "sys"
-        )
+        or (isinstance(node, ast.Name) and node.id in _BUILTINS_REACHING_NAMES)
         for node in ast.walk(tree)
     )
 
