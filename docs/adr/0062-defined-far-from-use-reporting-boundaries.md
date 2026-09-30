@@ -23,13 +23,14 @@ TR11 (`defined-far-from-use`) is one default-enabled, report-only check with two
   - literals
   - exact arithmetic on numeric literals
   - lists and tuples of order-independent items, and sets and dict keys made only of literals, since hashing any other object can run code that depends on state
-  - calls to unshadowed empty built-in constructors
+  - calls to empty built-in constructors that no enclosing scope shadows, in files that don't import or reference the `builtins` namespace
   - local names that are definitely bound before the assignment and that the reorder window doesn't rebind
 
   Moving these can't change behavior.
 
 - **`aggressive`.** Any right-hand side is reported unless a local heuristic says the reorder may change behavior:
   - the right-hand side reads a name that the reorder window rebinds, mutates (attribute/subscript store or delete, or a method call not known to be read-only), or passes to a call not known to be pure
+  - the right-hand side reads a name that the function or a nested function declares `global` or `nonlocal`, and the reorder window makes any call
   - the right-hand side calls something whose name reads as validation (`check`, `validate`, `coerce`, …)
 
   These heuristics are expected to grow. A false positive at this level is treated as a gap to close with more special handling, not as an accepted cost of the level (see [adding-a-check.md](../adding-a-check.md)).

@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import ast
 import builtins
+from bisect import bisect_left, bisect_right
 from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pre_commit_hooks.ast_checks._scope import iter_binding_names, iter_within_scope
 
-from .reorder import DefinedFarFromUseLevel, exposed_names, may_reorder
+from .reorder import DefinedFarFromUseLevel, StatementEffects, may_reorder, statement_effects
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from collections.abc import Set as AbstractSet
 
 _FUNCTION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
 _NESTED_SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
@@ -45,18 +47,48 @@ class _FunctionFacts:
     builtin_names: frozenset[str]
 
 
-@dataclass(frozen=True, slots=True)
 class _Block:
-    statements: list[ast.stmt]
-    names: list[Counter[str]]
+    __slots__ = ("_effects", "exits", "name_positions", "statements", "terminals")
+
+    def __init__(self, statements: list[ast.stmt]) -> None:
+        self.statements = statements
+        self.name_positions: dict[str, list[int]] = {}
+        for position, statement in enumerate(statements):
+            for node in ast.walk(statement):
+                if isinstance(node, ast.Name):
+                    self.name_positions.setdefault(node.id, []).append(position)
+        self.exits = [position for position, statement in enumerate(statements) if _contains_exit(statement)]
+        self.terminals = [
+            position for position, statement in enumerate(statements) if isinstance(statement, _TERMINAL_NODES)
+        ]
+        self._effects: dict[int, tuple[StatementEffects, int]] = {}
+
+    def effects(self, start: int, stop: int) -> list[tuple[StatementEffects, int]]:
+        return [self._statement_effects(position) for position in range(start, stop)]
+
+    def _statement_effects(self, position: int) -> tuple[StatementEffects, int]:
+        if position not in self._effects:
+            statement = self.statements[position]
+            self._effects[position] = (statement_effects(statement), _statement_count(statement))
+        return self._effects[position]
 
 
 def find_findings(tree: ast.Module, level: DefinedFarFromUseLevel, max_distance: int) -> list[Finding]:
     module_bound = {name for node in iter_within_scope(tree) for name in iter_binding_names(node)}
     module_bound.update(name for node in ast.walk(tree) if isinstance(node, ast.Global) for name in node.names)
+    visible_builtins = frozenset() if _touches_builtins_namespace(tree) else frozenset(dir(builtins)) - module_bound
     findings: list[Finding] = []
-    _collect_findings(tree, frozenset(dir(builtins)) - module_bound, _Options(level, max_distance), findings)
+    _collect_findings(tree, visible_builtins, _Options(level, max_distance), findings)
     return findings
+
+
+def _touches_builtins_namespace(tree: ast.Module) -> bool:
+    return any(
+        (isinstance(node, ast.Import) and any(alias.name == "builtins" for alias in node.names))
+        or (isinstance(node, ast.ImportFrom) and node.module == "builtins")
+        or (isinstance(node, ast.Name) and node.id == "__builtins__")
+        for node in ast.walk(tree)
+    )
 
 
 def _collect_findings(
@@ -87,8 +119,8 @@ def _function_findings(
         for index, statement in enumerate(statements):
             target = _assignment_target(statement)
             if target is not None and target.id not in facts.redeclared | facts.captured:
-                block = block or _Block(statements, [_name_counts(item) for item in statements])
-                finding = _candidate_finding(block, index, target, facts, options, definitely_bound=frozenset(bound))
+                block = block or _Block(statements)
+                finding = _candidate_finding(block, index, target, facts, options, definitely_bound=bound)
                 if finding is not None:
                     yield finding
             _update_definitely_bound(bound, statement)
@@ -104,8 +136,11 @@ def _function_facts(
             occurrences[node.id] += 1
         elif isinstance(node, ast.Global | ast.Nonlocal):
             redeclared.update(node.names)
-        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _DYNAMIC_SCOPE_BUILTINS:
-            return None
+    if any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _DYNAMIC_SCOPE_BUILTINS
+        for node in _iter_own_scope(function)
+    ):
+        return None
     parameters = _parameters(function)
     bound = {name for node in iter_within_scope(function) for name in iter_binding_names(node)}
     captured = {
@@ -123,6 +158,21 @@ def _function_facts(
         frozenset(redeclared),
         builtin_names,
     )
+
+
+def _iter_own_scope(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterator[ast.AST]:
+    pending: list[ast.AST] = list(function.body)
+    while pending:
+        node = pending.pop()
+        yield node
+        if isinstance(node, ast.ClassDef):
+            pending.extend((*node.decorator_list, *node.bases, *node.keywords))
+        elif isinstance(node, (*_FUNCTION_NODES, ast.Lambda)):
+            decorators = node.decorator_list if isinstance(node, _FUNCTION_NODES) else []
+            defaults = [default for default in node.args.kw_defaults if default is not None]
+            pending.extend((*decorators, *node.args.defaults, *defaults))
+        else:
+            pending.extend(ast.iter_child_nodes(node))
 
 
 def _parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
@@ -195,10 +245,6 @@ def _assignment_target(statement: ast.stmt) -> ast.Name | None:
     return target if isinstance(target, ast.Name) else None
 
 
-def _name_counts(statement: ast.stmt) -> Counter[str]:
-    return Counter(node.id for node in ast.walk(statement) if isinstance(node, ast.Name))
-
-
 def _candidate_finding(
     block: _Block,
     index: int,
@@ -206,28 +252,27 @@ def _candidate_finding(
     facts: _FunctionFacts,
     options: _Options,
     *,
-    definitely_bound: frozenset[str],
+    definitely_bound: AbstractSet[str],
 ) -> Finding | None:
     name = target.id
     statements = block.statements
-    use_index = next((position for position in range(index + 1, len(statements)) if block.names[position][name]), None)
+    positions = block.name_positions[name]
+    first_later = bisect_right(positions, index)
     if (
-        use_index is None
-        or sum(counts[name] for counts in block.names[use_index:]) != facts.occurrences[name] - 1
-        or not _reads_before_rebinding(statements[use_index], name)
+        first_later == len(positions)
+        or len(positions) - first_later != facts.occurrences[name] - 1
+        or not _reads_before_rebinding(statements[use_index := positions[first_later]], name)
     ):
         return None
     value = _assigned_value(statements[index])
-    between = statements[index + 1 : use_index]
-    if any(isinstance(node, _REORDER_SENSITIVE_NODES) for node in ast.walk(value)) or any(
-        isinstance(statement, _TERMINAL_NODES) for statement in between
+    if any(isinstance(node, _REORDER_SENSITIVE_NODES) for node in ast.walk(value)) or _any_between(
+        block.terminals, index, use_index
     ):
         return None
-    exit_index = next(
-        (position for position in range(use_index - 1, index, -1) if _contains_exit(statements[position])), None
-    )
-    if exit_index is not None:
-        if not _may_reorder(value, statements[index + 1 : exit_index + 1], definitely_bound, facts, options):
+    last_exit = bisect_left(block.exits, use_index) - 1
+    if last_exit >= 0 and block.exits[last_exit] > index:
+        exit_index = block.exits[last_exit]
+        if not _may_reorder(value, block.effects(index + 1, exit_index + 1), definitely_bound, facts, options):
             return None
         return Finding(
             target,
@@ -235,8 +280,9 @@ def _candidate_finding(
             f"move the assignment below line {statements[exit_index].end_lineno}",
         )
     use = statements[use_index]
-    distance = _unrelated_statement_count(between, use, name)
-    if distance <= options.max_distance or not _may_reorder(value, between, definitely_bound, facts, options):
+    window = block.effects(index + 1, use_index)
+    distance = _unrelated_statement_count(window, use, name)
+    if distance <= options.max_distance or not _may_reorder(value, window, definitely_bound, facts, options):
         return None
     use_line = min(node.lineno for node in ast.walk(use) if isinstance(node, ast.Name) and node.id == name)
     return Finding(
@@ -244,6 +290,11 @@ def _candidate_finding(
         f"`{name}` is assigned {distance} unrelated statements before its first use; "
         f"move the assignment closer to line {use_line}",
     )
+
+
+def _any_between(positions: list[int], start: int, stop: int) -> bool:
+    candidate = bisect_right(positions, start)
+    return candidate < len(positions) and positions[candidate] < stop
 
 
 def _assigned_value(statement: ast.stmt) -> ast.expr:
@@ -259,17 +310,18 @@ def _reads_before_rebinding(statement: ast.stmt, name: str) -> bool:
 
 def _may_reorder(
     value: ast.expr,
-    window: list[ast.stmt],
-    definitely_bound: frozenset[str],
+    window: list[tuple[StatementEffects, int]],
+    definitely_bound: AbstractSet[str],
     facts: _FunctionFacts,
     options: _Options,
 ) -> bool:
     return may_reorder(
         value,
-        window,
+        [effects for effects, _count in window],
         options.level,
         stable_locals=facts.stable_locals & definitely_bound,
         builtin_names=facts.builtin_names,
+        rebindable_by_calls=facts.redeclared,
     )
 
 
@@ -297,15 +349,13 @@ def _contains_exit(node: ast.AST, *, in_loop: bool = False, in_guarded_try: bool
     )
 
 
-def _unrelated_statement_count(between: list[ast.stmt], use: ast.stmt, name: str) -> int:
+def _unrelated_statement_count(window: list[tuple[StatementEffects, int]], use: ast.stmt, name: str) -> int:
     use_inputs = (
         {node.id for node in ast.walk(use) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
         - _UBIQUITOUS_RECEIVERS
         - {name}
     )
-    return sum(
-        _statement_count(statement) for statement in between if use_inputs.isdisjoint(exposed_names((statement,)))
-    )
+    return sum(count for effects, count in window if use_inputs.isdisjoint(effects.exposed))
 
 
 def _statement_count(statement: ast.stmt) -> int:
