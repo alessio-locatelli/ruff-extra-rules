@@ -30,6 +30,7 @@ TR11 (`defined-far-from-use`) is one default-enabled, report-only check with two
 
 - **`aggressive`.** Any right-hand side is reported unless a local heuristic says the reorder may change behavior:
   - the right-hand side reads a name that the reorder window rebinds, mutates (attribute/subscript store or delete, or a method call not known to be read-only), or passes to a call not known to be pure
+  - evaluating the right-hand side mutates, or passes to a call not known to be pure, a name that the reorder window reads (`last = items.pop()` before `if not items: return`), or makes any call while the window reads a name the function or a nested function declares `global` or `nonlocal`
   - the right-hand side reads a name that the function or a nested function declares `global` or `nonlocal`, and the reorder window makes any call
   - the right-hand side calls something whose name reads as validation (`check`, `validate`, `coerce`, …)
 

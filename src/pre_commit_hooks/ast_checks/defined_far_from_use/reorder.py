@@ -104,6 +104,7 @@ class DefinedFarFromUseLevel(Enum):
 class StatementEffects:
     rebound: frozenset[str]
     exposed: frozenset[str]
+    read: frozenset[str]
     calls: bool
 
 
@@ -111,7 +112,8 @@ def statement_effects(statement: ast.stmt, builtin_names: frozenset[str]) -> Sta
     nodes = list(ast.walk(statement))
     rebound = frozenset(name for node in nodes for name in iter_binding_names(node))
     mutated = frozenset(name for node in nodes for name in _mutation_roots(node, builtin_names))
-    return StatementEffects(rebound, rebound | mutated, any(isinstance(node, ast.Call) for node in nodes))
+    read = frozenset(node.id for node in nodes if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load))
+    return StatementEffects(rebound, rebound | mutated, read, any(isinstance(node, ast.Call) for node in nodes))
 
 
 def may_reorder(
@@ -129,7 +131,16 @@ def may_reorder(
     exposed = frozenset().union(*(effects.exposed for effects in window))
     if any(effects.calls for effects in window):
         exposed |= rebindable_by_calls
-    return not _calls_validation(value) and not (_state_read_by(value) & exposed)
+    value_nodes = list(ast.walk(value))
+    mutated_by_value = frozenset(name for node in value_nodes for name in _mutation_roots(node, builtin_names))
+    if any(isinstance(node, ast.Call) for node in value_nodes):
+        mutated_by_value |= rebindable_by_calls
+    read_by_window = frozenset().union(*(effects.read for effects in window))
+    return (
+        not _calls_validation(value)
+        and not (_state_read_by(value) & exposed)
+        and not (mutated_by_value & read_by_window)
+    )
 
 
 def _mutation_roots(node: ast.AST, builtin_names: frozenset[str]) -> Iterator[str]:
