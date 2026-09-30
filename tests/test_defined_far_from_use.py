@@ -877,6 +877,38 @@ def test_aggressive_level_skips_a_value_a_called_helper_can_rebind(window: str, 
     assert _reported(source, AGGRESSIVE) == expected
 
 
+@pytest.mark.parametrize(
+    ("raise_statement", "handler", "expected"),
+    [
+        ("raise ValueError('x')", "except OSError:", ["result"]),
+        ("raise ValueError", "except (OSError, KeyError):", ["result"]),
+        ("raise KeyError", "except LookupError:", []),
+        ("raise ValueError", "except:", []),
+        ("raise ValueError", "except CustomError:", []),
+        ("raise CustomError", "except OSError:", []),
+        ("raise", "except OSError:", []),
+    ],
+    ids=["unmatched", "unmatched-tuple", "subclass", "bare-except", "unknown-handler", "unknown-raise", "re-raise"],
+)
+def test_raise_inside_try_is_an_exit_only_when_no_handler_can_catch_it(
+    raise_statement: str, handler: str, expected: list[str]
+) -> None:
+    source = (
+        "def f():\n"
+        "    result = 0\n"
+        "    try:\n"
+        "        try:\n"
+        f"            {raise_statement}\n"
+        "        except TypeError:\n"
+        "            pass\n"
+        f"    {handler}\n"
+        "        pass\n"
+        "    use(result)\n"
+    )
+
+    assert _reported(source) == expected
+
+
 def test_prefers_the_early_exit_message_when_both_triggers_apply() -> None:
     body = "".join(f"    step_{index}()\n" for index in range(6))
     source = f"def f():\n    result = 0\n{body}    if ready():\n        return\n    use(result)\n"
