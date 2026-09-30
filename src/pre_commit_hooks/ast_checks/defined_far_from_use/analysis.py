@@ -307,8 +307,21 @@ def _assigned_value(statement: ast.stmt) -> ast.expr:
 
 
 def _reads_before_rebinding(statement: ast.stmt, name: str) -> bool:
-    augmented = {id(node.target) for node in ast.walk(statement) if isinstance(node, ast.AugAssign)}
-    return not any(name in iter_binding_names(node) for node in ast.walk(statement) if id(node) not in augmented)
+    reading_targets = {id(node.target) for node in ast.walk(statement) if isinstance(node, ast.AugAssign)}
+    reading_targets.update(
+        id(target)
+        for node in ast.walk(statement)
+        if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None and _loads(node.value, name)
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
+    )
+    return not any(name in iter_binding_names(node) for node in ast.walk(statement) if id(node) not in reading_targets)
+
+
+def _loads(expression: ast.expr, name: str) -> bool:
+    return any(
+        isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Load)
+        for node in ast.walk(expression)
+    )
 
 
 def _may_reorder(

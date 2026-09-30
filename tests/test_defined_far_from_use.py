@@ -803,6 +803,23 @@ def test_distance_ignores_statements_preparing_other_inputs_of_the_use() -> None
     assert _reported(source.replace("collected)", ")"), max_distance=1) == ["result"]
 
 
+@pytest.mark.parametrize(
+    ("use", "expected"),
+    [
+        ("    result = result + 1\n", ["result"]),
+        ("    result: int = result * 2\n", ["result"]),
+        ("    for item in items():\n        result = result + item\n", ["result"]),
+        ("    for item in items():\n        result = item\n        result = result + 1\n", []),
+    ],
+    ids=["self-referential", "annotated-self-referential", "nested-self-referential", "overwritten-first"],
+)
+def test_distance_counts_a_self_referential_assignment_as_a_read(use: str, expected: list[str]) -> None:
+    body = "".join(f"    step_{index}()\n" for index in range(6))
+    source = f"def f():\n    result = 0\n{body}{use}    return result\n"
+
+    assert _reported(source) == expected
+
+
 def test_distance_skips_a_value_overwritten_before_it_is_read() -> None:
     body = "".join(f"    step_{index}()\n" for index in range(6))
     source = f"def f():\n    result = 0\n{body}    result = 1\n    use(result)\n"
