@@ -219,7 +219,7 @@ def test_early_exit_message_names_the_line_to_move_below() -> None:
         """,
         """
         def f(items):
-            result = compute(items)
+            result = items[0]
             if len(items) > 3:
                 return
             use(result)
@@ -361,6 +361,41 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
             use(result, x)
         """,
         """
+        def f(items):
+            last = items.pop()
+            if not items:
+                return
+            use(last)
+        """,
+        """
+        def f(it):
+            first = next(it)
+            for x in it:
+                if x:
+                    return
+            use(first)
+        """,
+        """
+        def f(items):
+            result = compute(items)
+            if len(items) > 3:
+                return
+            use(result)
+        """,
+        """
+        def f():
+            total = 0
+
+            def bump():
+                nonlocal total
+                total += 1
+
+            value = bump()
+            if total:
+                return
+            use(value)
+        """,
+        """
         async def f():
             value = await fetch()
             if done():
@@ -388,6 +423,10 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
         "rebound-callee",
         "shadowed-pure-builtin",
         "comprehension-target-shadows-its-input",
+        "value-mutates-what-the-guard-reads",
+        "value-advances-an-iterator-the-window-reads",
+        "value-passes-a-root-the-guard-reads",
+        "value-calls-a-helper-rebinding-what-the-guard-reads",
         "mutated-callee",
         "await",
         "walrus",
