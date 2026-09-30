@@ -79,17 +79,23 @@ class _Block:
 def find_findings(tree: ast.Module, level: DefinedFarFromUseLevel, max_distance: int) -> list[Finding]:
     module_bound = {name for node in iter_within_scope(tree) for name in iter_binding_names(node)}
     module_bound.update(name for node in ast.walk(tree) if isinstance(node, ast.Global) for name in node.names)
-    visible_builtins = frozenset() if _touches_builtins_namespace(tree) else frozenset(dir(builtins)) - module_bound
+    visible_builtins = frozenset() if _can_rebind_builtins(tree) else frozenset(dir(builtins)) - module_bound
     findings: list[Finding] = []
     _collect_findings(tree, visible_builtins, _Options(level, max_distance), findings)
     return findings
 
 
-def _touches_builtins_namespace(tree: ast.Module) -> bool:
+def _can_rebind_builtins(tree: ast.Module) -> bool:
     return any(
         (isinstance(node, ast.Import) and any(alias.name == "builtins" for alias in node.names))
         or (isinstance(node, ast.ImportFrom) and node.module == "builtins")
-        or (isinstance(node, ast.Name) and node.id == "__builtins__")
+        or (isinstance(node, ast.Name) and node.id in {"__builtins__", "globals"})
+        or (
+            isinstance(node, ast.Attribute)
+            and node.attr == "modules"
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "sys"
+        )
         for node in ast.walk(tree)
     )
 
