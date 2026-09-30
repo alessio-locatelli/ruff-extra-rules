@@ -810,6 +810,64 @@ def test_builtin_shadowed_by_an_enclosing_function_is_not_trusted() -> None:
     assert _reported(source) == []
 
 
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "import builtins\n\n\n",
+        "import builtins as b\n\n\n",
+        "from builtins import list\n\n\n",
+        "x = __builtins__\n\n\n",
+    ],
+    ids=["import", "aliased-import", "from-import", "dunder"],
+)
+def test_builtins_are_not_trusted_when_the_file_can_replace_them(prefix: str) -> None:
+    source = f"{prefix}def f():\n    result = set()\n    if ready():\n        return\n    use(result)\n"
+
+    assert _reported(source) == []
+
+
+@pytest.mark.parametrize(
+    ("helper", "expected"),
+    [
+        ("    def helper():\n        return locals()\n\n", ["result"]),
+        ("    helper = lambda: eval('1')\n", ["result"]),
+        ("    def helper(scope=locals()):\n        return scope\n\n", []),
+        ("    @register(vars())\n    def helper():\n        return 1\n\n", []),
+        ("    class Helper(Base, meta=exec('')):\n        pass\n\n", []),
+        ("    helper = [locals() for _ in range(1)]\n", []),
+    ],
+    ids=["nested-body", "lambda-body", "default", "decorator", "class-header", "comprehension"],
+)
+def test_dynamic_scope_access_is_scoped_to_the_analyzed_function(helper: str, expected: list[str]) -> None:
+    source = f"def f():\n{helper}    result = 0\n    if ready():\n        return\n    use(result, helper)\n"
+
+    assert _reported(source) == expected
+
+
+@pytest.mark.parametrize(
+    ("window", "expected"),
+    [("bump()", []), ("pass", ["before"])],
+    ids=["calls-the-rebinding-helper", "no-call"],
+)
+def test_aggressive_level_skips_a_value_a_called_helper_can_rebind(window: str, expected: list[str]) -> None:
+    source = f"""
+    def f(flag):
+        count = 0
+
+        def bump():
+            nonlocal count
+            count += 1
+
+        before = count
+        {window}
+        if flag:
+            return
+        use(before, bump)
+    """
+
+    assert _reported(source, AGGRESSIVE) == expected
+
+
 def test_prefers_the_early_exit_message_when_both_triggers_apply() -> None:
     body = "".join(f"    step_{index}()\n" for index in range(6))
     source = f"def f():\n    result = 0\n{body}    if ready():\n        return\n    use(result)\n"

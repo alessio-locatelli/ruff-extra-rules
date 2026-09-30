@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
@@ -99,29 +100,36 @@ class DefinedFarFromUseLevel(Enum):
     AGGRESSIVE = auto()
 
 
+@dataclass(frozen=True, slots=True)
+class StatementEffects:
+    rebound: frozenset[str]
+    exposed: frozenset[str]
+    calls: bool
+
+
+def statement_effects(statement: ast.stmt) -> StatementEffects:
+    nodes = list(ast.walk(statement))
+    rebound = frozenset(name for node in nodes for name in iter_binding_names(node))
+    mutated = frozenset(name for node in nodes for name in _mutation_roots(node))
+    return StatementEffects(rebound, rebound | mutated, any(isinstance(node, ast.Call) for node in nodes))
+
+
 def may_reorder(
     value: ast.expr,
-    window: Sequence[ast.stmt],
+    window: Sequence[StatementEffects],
     level: DefinedFarFromUseLevel,
     *,
     stable_locals: frozenset[str],
     builtin_names: frozenset[str],
+    rebindable_by_calls: frozenset[str],
 ) -> bool:
     if level is DefinedFarFromUseLevel.CONSERVATIVE:
-        return _is_order_independent(value, stable_locals - rebound_names(window), builtin_names)
-    return not _calls_validation(value) and not (_state_read_by(value) & exposed_names(window))
-
-
-def rebound_names(statements: Iterable[ast.stmt]) -> frozenset[str]:
-    return frozenset(
-        name for statement in statements for node in ast.walk(statement) for name in iter_binding_names(node)
-    )
-
-
-def exposed_names(statements: Iterable[ast.stmt]) -> frozenset[str]:
-    return rebound_names(statements) | frozenset(
-        name for statement in statements for node in ast.walk(statement) for name in _mutation_roots(node)
-    )
+        rebound = frozenset().union(*(effects.rebound for effects in window))
+        return _is_order_independent(value, stable_locals - rebound, builtin_names)
+    exposed = frozenset().union(*(effects.exposed for effects in window))
+    if any(effects.calls for effects in window):
+        exposed |= rebindable_by_calls
+    return not _calls_validation(value) and not (_state_read_by(value) & exposed)
 
 
 def _mutation_roots(node: ast.AST) -> Iterator[str]:
