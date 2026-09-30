@@ -155,9 +155,9 @@ def _root_names(expressions: Iterable[ast.expr]) -> Iterator[str]:
 
 
 def _state_read_by(value: ast.expr) -> frozenset[str]:
-    loaded = {node.id for node in ast.walk(value) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)}
-    local = {node.id for node in ast.walk(value) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}
-    return frozenset(loaded - local)
+    return frozenset(
+        node.id for node in ast.walk(value) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    )
 
 
 def _calls_validation(value: ast.expr) -> bool:
