@@ -23,7 +23,7 @@ TR11 (`defined-far-from-use`) is one default-enabled, report-only check with two
   - literals
   - exact arithmetic on numeric literals
   - lists and tuples of order-independent items, and sets and dict keys made only of literals, since hashing any other object can run code that depends on state
-  - calls to empty built-in constructors that no enclosing scope shadows, in files that don't import or reference the `builtins` namespace, `globals()`, or `sys.modules`
+  - calls to empty built-in constructors that no enclosing scope shadows, in files that have no wildcard import and don't import or reference the `builtins` namespace, `globals()`, or `sys.modules`
   - local names that are definitely bound before the assignment and that the reorder window doesn't rebind
 
   Moving these can't change behavior.
