@@ -133,6 +133,24 @@ def _reported(source: str, level: DefinedFarFromUseLevel = CONSERVATIVE, max_dis
                     return
             use(result)
         """,
+        """
+        def f():
+            seed = 1
+            result = seed
+            if ready():
+                return
+            use(result)
+        """,
+        """
+        def f(items):
+            seed = 1
+            for item in items:
+                use(item)
+            result = seed
+            if ready():
+                return
+            use(result)
+        """,
     ],
     ids=[
         "constant",
@@ -148,6 +166,8 @@ def _reported(source: str, level: DefinedFarFromUseLevel = CONSERVATIVE, max_dis
         "annotated-with-exit-in-handler",
         "async",
         "return-inside-loop",
+        "local-bound-earlier",
+        "local-bound-before-a-loop",
     ],
 )
 def test_reports_order_independent_assignment_before_an_early_exit(source: str) -> None:
@@ -549,6 +569,68 @@ def test_aggressive_level_skips_reorders_that_may_change_behavior(source: str) -
                 return
             use(result)
         """,
+        """
+        def f():
+            result = later
+            if ready():
+                return
+            later = 1
+            use(result)
+        """,
+        """
+        def f(flag):
+            if flag:
+                seed = 1
+            result = seed
+            if ready():
+                return
+            use(result)
+        """,
+        """
+        def f():
+            seed: int
+            result = seed
+            if ready():
+                return
+            use(result)
+        """,
+        """
+        def f():
+            seed = 1
+            del seed
+            result = seed
+            if ready():
+                return
+            use(result)
+        """,
+        """
+        def f():
+            seed = 1
+            try:
+                ready()
+            except OSError as seed:
+                log(seed)
+            result = seed
+            if ready():
+                return
+            use(result)
+        """,
+        """
+        def f():
+            result = 0
+            if ready():
+                return
+            result = 1
+            use(result)
+        """,
+        """
+        def f():
+            result = 0
+            if ready():
+                return
+            for result in items():
+                use(result)
+        """,
     ],
     ids=[
         "guard-uses-the-variable",
@@ -577,6 +659,13 @@ def test_aggressive_level_skips_reorders_that_may_change_behavior(source: str) -
         "conservative-builtin-with-arguments",
         "conservative-division",
         "conservative-dict-unpacking",
+        "conservative-local-bound-later",
+        "conservative-local-bound-conditionally",
+        "conservative-local-only-annotated",
+        "conservative-local-deleted",
+        "conservative-local-unbound-by-except",
+        "first-use-overwrites",
+        "first-use-rebinds-as-loop-target",
     ],
 )
 def test_skips_assignments_that_cannot_be_moved_past_the_exit(source: str) -> None:
@@ -638,6 +727,13 @@ def test_distance_ignores_statements_preparing_other_inputs_of_the_use() -> None
 
     assert _reported(source, max_distance=1) == []
     assert _reported(source.replace("collected)", ")"), max_distance=1) == ["result"]
+
+
+def test_distance_skips_a_value_overwritten_before_it_is_read() -> None:
+    body = "".join(f"    step_{index}()\n" for index in range(6))
+    source = f"def f():\n    result = 0\n{body}    result = 1\n    use(result)\n"
+
+    assert _reported(source) == []
 
 
 def test_prefers_the_early_exit_message_when_both_triggers_apply() -> None:

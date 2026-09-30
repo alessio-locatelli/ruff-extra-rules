@@ -40,6 +40,7 @@ class _Options:
 class _FunctionFacts:
     occurrences: Counter[str]
     stable_locals: frozenset[str]
+    parameters: frozenset[str]
     redeclared: frozenset[str]
 
 
@@ -68,16 +69,17 @@ def _function_findings(function: ast.FunctionDef | ast.AsyncFunctionDef, options
     facts = _function_facts(function)
     if facts is None:
         return
-    for statements in _iter_blocks(function.body):
+    for statements, bound_before_block in _iter_blocks(function.body, facts.parameters):
         block: _Block | None = None
+        bound = set(bound_before_block)
         for index, statement in enumerate(statements):
             target = _assignment_target(statement)
-            if target is None or target.id in facts.redeclared:
-                continue
-            block = block or _Block(statements, [_name_counts(item) for item in statements])
-            finding = _candidate_finding(block, index, target, facts, options)
-            if finding is not None:
-                yield finding
+            if target is not None and target.id not in facts.redeclared:
+                block = block or _Block(statements, [_name_counts(item) for item in statements])
+                finding = _candidate_finding(block, index, target, facts, options, definitely_bound=frozenset(bound))
+                if finding is not None:
+                    yield finding
+            _update_definitely_bound(bound, statement)
 
 
 def _function_facts(function: ast.FunctionDef | ast.AsyncFunctionDef) -> _FunctionFacts | None:
@@ -103,15 +105,44 @@ def _function_facts(function: ast.FunctionDef | ast.AsyncFunctionDef) -> _Functi
         if argument is not None
     }
     bound = {name for node in iter_within_scope(function) for name in iter_binding_names(node)}
-    return _FunctionFacts(occurrences, frozenset((parameters | bound) - redeclared), frozenset(redeclared))
+    return _FunctionFacts(
+        occurrences,
+        frozenset((parameters | bound) - redeclared),
+        frozenset(parameters - redeclared),
+        frozenset(redeclared),
+    )
 
 
-def _iter_blocks(statements: list[ast.stmt]) -> Iterator[list[ast.stmt]]:
-    yield statements
+def _iter_blocks(
+    statements: list[ast.stmt], bound_before_block: frozenset[str]
+) -> Iterator[tuple[list[ast.stmt], frozenset[str]]]:
+    yield statements, bound_before_block
+    bound = set(bound_before_block)
     for statement in statements:
         if not isinstance(statement, _NESTED_SCOPE_NODES):
             for child in _child_blocks(statement):
-                yield from _iter_blocks(child)
+                yield from _iter_blocks(child, frozenset(bound))
+        _update_definitely_bound(bound, statement)
+
+
+def _update_definitely_bound(bound: set[str], statement: ast.stmt) -> None:
+    if isinstance(statement, ast.Assign | ast.AnnAssign | ast.AugAssign):
+        targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
+        if not isinstance(statement, ast.AnnAssign) or statement.value is not None:
+            bound.update(
+                node.id
+                for target in targets
+                for node in ast.walk(target)
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
+            )
+    elif isinstance(statement, (ast.Import, ast.ImportFrom, *_FUNCTION_NODES, ast.ClassDef)):
+        bound.update(iter_binding_names(statement))
+    bound.difference_update(
+        name
+        for node in ast.walk(statement)
+        if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Del)) or isinstance(node, ast.ExceptHandler)
+        for name in iter_binding_names(node)
+    )
 
 
 def _child_blocks(statement: ast.stmt) -> Iterator[list[ast.stmt]]:
@@ -142,12 +173,22 @@ def _name_counts(statement: ast.stmt) -> Counter[str]:
 
 
 def _candidate_finding(
-    block: _Block, index: int, target: ast.Name, facts: _FunctionFacts, options: _Options
+    block: _Block,
+    index: int,
+    target: ast.Name,
+    facts: _FunctionFacts,
+    options: _Options,
+    *,
+    definitely_bound: frozenset[str],
 ) -> Finding | None:
     name = target.id
     statements = block.statements
     use_index = next((position for position in range(index + 1, len(statements)) if block.names[position][name]), None)
-    if use_index is None or sum(counts[name] for counts in block.names[use_index:]) != facts.occurrences[name] - 1:
+    if (
+        use_index is None
+        or sum(counts[name] for counts in block.names[use_index:]) != facts.occurrences[name] - 1
+        or not _reads_before_rebinding(statements[use_index], name)
+    ):
         return None
     value = _assigned_value(statements[index])
     between = statements[index + 1 : use_index]
@@ -159,7 +200,7 @@ def _candidate_finding(
         (position for position in range(use_index - 1, index, -1) if _contains_exit(statements[position])), None
     )
     if exit_index is not None:
-        if not _may_reorder(value, statements[index + 1 : exit_index + 1], facts, options):
+        if not _may_reorder(value, statements[index + 1 : exit_index + 1], definitely_bound, facts, options):
             return None
         return Finding(
             target,
@@ -168,7 +209,7 @@ def _candidate_finding(
         )
     use = statements[use_index]
     distance = _unrelated_statement_count(between, use, name)
-    if distance <= options.max_distance or not _may_reorder(value, between, facts, options):
+    if distance <= options.max_distance or not _may_reorder(value, between, definitely_bound, facts, options):
         return None
     use_line = min(node.lineno for node in ast.walk(use) if isinstance(node, ast.Name) and node.id == name)
     return Finding(
@@ -184,12 +225,23 @@ def _assigned_value(statement: ast.stmt) -> ast.expr:
     return statement.value
 
 
-def _may_reorder(value: ast.expr, window: list[ast.stmt], facts: _FunctionFacts, options: _Options) -> bool:
+def _reads_before_rebinding(statement: ast.stmt, name: str) -> bool:
+    augmented = {id(node.target) for node in ast.walk(statement) if isinstance(node, ast.AugAssign)}
+    return not any(name in iter_binding_names(node) for node in ast.walk(statement) if id(node) not in augmented)
+
+
+def _may_reorder(
+    value: ast.expr,
+    window: list[ast.stmt],
+    definitely_bound: frozenset[str],
+    facts: _FunctionFacts,
+    options: _Options,
+) -> bool:
     return may_reorder(
         value,
         window,
         options.level,
-        stable_locals=facts.stable_locals,
+        stable_locals=facts.stable_locals & definitely_bound,
         builtin_names=options.builtin_names,
     )
 

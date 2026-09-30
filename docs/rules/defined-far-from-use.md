@@ -52,7 +52,7 @@ Statements that compute other values used by the same statement don't count towa
 ## Options
 
 - `level`:
-  - `conservative` (default) only reports values that are safe to move, such as literals, empty containers, and other local variables that the code in between doesn't reassign.
+  - `conservative` (default) only reports values that are safe to move, such as literals, empty containers, and other local variables that are already set and that the code in between doesn't reassign.
   - `aggressive` also reports calls and attribute reads. Moving those changes when they run, so review each report. The check still leaves alone values that share state with the code in between, and calls that look like validation.
 - `max-distance` (default `5`): the most unrelated statements allowed between an assignment and its first use.
 
