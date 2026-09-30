@@ -33,7 +33,6 @@ class Finding:
 class _Options:
     level: DefinedFarFromUseLevel
     max_distance: int
-    builtin_names: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +42,7 @@ class _FunctionFacts:
     stable_locals: frozenset[str]
     parameters: frozenset[str]
     redeclared: frozenset[str]
+    builtin_names: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,22 +52,33 @@ class _Block:
 
 
 def find_findings(tree: ast.Module, level: DefinedFarFromUseLevel, max_distance: int) -> list[Finding]:
-    options = _Options(level, max_distance, _unshadowed_builtins(tree))
+    module_bound = {name for node in iter_within_scope(tree) for name in iter_binding_names(node)}
+    module_bound.update(name for node in ast.walk(tree) if isinstance(node, ast.Global) for name in node.names)
     findings: list[Finding] = []
-    for node in ast.walk(tree):
-        if isinstance(node, _FUNCTION_NODES):
-            findings.extend(_function_findings(node, options))
+    _collect_findings(tree, frozenset(dir(builtins)) - module_bound, _Options(level, max_distance), findings)
     return findings
 
 
-def _unshadowed_builtins(tree: ast.Module) -> frozenset[str]:
-    bound = {name for node in ast.walk(tree) for name in iter_binding_names(node)}
-    bound.update(node.arg for node in ast.walk(tree) if isinstance(node, ast.arg))
-    return frozenset(dir(builtins)) - bound
+def _collect_findings(
+    node: ast.AST, visible_builtins: frozenset[str], options: _Options, findings: list[Finding]
+) -> None:
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, _FUNCTION_NODES):
+            child_builtins = (
+                visible_builtins
+                - _parameters(child)
+                - {name for scope_node in iter_within_scope(child) for name in iter_binding_names(scope_node)}
+            )
+            findings.extend(_function_findings(child, child_builtins, options))
+            _collect_findings(child, child_builtins, options, findings)
+        else:
+            _collect_findings(child, visible_builtins, options, findings)
 
 
-def _function_findings(function: ast.FunctionDef | ast.AsyncFunctionDef, options: _Options) -> Iterator[Finding]:
-    facts = _function_facts(function)
+def _function_findings(
+    function: ast.FunctionDef | ast.AsyncFunctionDef, builtin_names: frozenset[str], options: _Options
+) -> Iterator[Finding]:
+    facts = _function_facts(function, builtin_names)
     if facts is None:
         return
     for statements, bound_before_block in _iter_blocks(function.body, facts.parameters):
@@ -83,7 +94,9 @@ def _function_findings(function: ast.FunctionDef | ast.AsyncFunctionDef, options
             _update_definitely_bound(bound, statement)
 
 
-def _function_facts(function: ast.FunctionDef | ast.AsyncFunctionDef) -> _FunctionFacts | None:
+def _function_facts(
+    function: ast.FunctionDef | ast.AsyncFunctionDef, builtin_names: frozenset[str]
+) -> _FunctionFacts | None:
     occurrences: Counter[str] = Counter()
     redeclared: set[str] = set()
     for node in ast.walk(function):
@@ -93,18 +106,7 @@ def _function_facts(function: ast.FunctionDef | ast.AsyncFunctionDef) -> _Functi
             redeclared.update(node.names)
         elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _DYNAMIC_SCOPE_BUILTINS:
             return None
-    arguments = function.args
-    parameters = {
-        argument.arg
-        for argument in (
-            *arguments.posonlyargs,
-            *arguments.args,
-            *arguments.kwonlyargs,
-            arguments.vararg,
-            arguments.kwarg,
-        )
-        if argument is not None
-    }
+    parameters = _parameters(function)
     bound = {name for node in iter_within_scope(function) for name in iter_binding_names(node)}
     captured = {
         node.id
@@ -119,7 +121,23 @@ def _function_facts(function: ast.FunctionDef | ast.AsyncFunctionDef) -> _Functi
         frozenset((parameters | bound) - redeclared),
         frozenset(parameters - redeclared),
         frozenset(redeclared),
+        builtin_names,
     )
+
+
+def _parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    arguments = function.args
+    return {
+        argument.arg
+        for argument in (
+            *arguments.posonlyargs,
+            *arguments.args,
+            *arguments.kwonlyargs,
+            arguments.vararg,
+            arguments.kwarg,
+        )
+        if argument is not None
+    }
 
 
 def _iter_blocks(
@@ -251,7 +269,7 @@ def _may_reorder(
         window,
         options.level,
         stable_locals=facts.stable_locals & definitely_bound,
-        builtin_names=options.builtin_names,
+        builtin_names=facts.builtin_names,
     )
 
 
