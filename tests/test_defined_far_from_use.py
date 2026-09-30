@@ -376,6 +376,21 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
             use(first)
         """,
         """
+        def f(it):
+            result = list(it)
+            for item in it:
+                if item:
+                    return
+            use(result)
+        """,
+        """
+        def f(it):
+            result = it.position
+            if any(it):
+                return
+            use(result)
+        """,
+        """
         def f(items):
             result = compute(items)
             if len(items) > 3:
@@ -426,6 +441,8 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
         "value-mutates-what-the-guard-reads",
         "value-advances-an-iterator-the-window-reads",
         "value-passes-a-root-the-guard-reads",
+        "value-consumes-an-iterator-the-window-reads",
+        "window-consumes-an-iterator-the-value-reads",
         "value-calls-a-helper-rebinding-what-the-guard-reads",
         "mutated-callee",
         "await",
