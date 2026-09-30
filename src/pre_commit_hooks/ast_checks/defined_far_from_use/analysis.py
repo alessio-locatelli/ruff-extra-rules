@@ -39,6 +39,7 @@ class _Options:
 @dataclass(frozen=True, slots=True)
 class _FunctionFacts:
     occurrences: Counter[str]
+    captured: frozenset[str]
     stable_locals: frozenset[str]
     parameters: frozenset[str]
     redeclared: frozenset[str]
@@ -74,7 +75,7 @@ def _function_findings(function: ast.FunctionDef | ast.AsyncFunctionDef, options
         bound = set(bound_before_block)
         for index, statement in enumerate(statements):
             target = _assignment_target(statement)
-            if target is not None and target.id not in facts.redeclared:
+            if target is not None and target.id not in facts.redeclared | facts.captured:
                 block = block or _Block(statements, [_name_counts(item) for item in statements])
                 finding = _candidate_finding(block, index, target, facts, options, definitely_bound=frozenset(bound))
                 if finding is not None:
@@ -105,8 +106,16 @@ def _function_facts(function: ast.FunctionDef | ast.AsyncFunctionDef) -> _Functi
         if argument is not None
     }
     bound = {name for node in iter_within_scope(function) for name in iter_binding_names(node)}
+    captured = {
+        node.id
+        for scope in ast.walk(function)
+        if scope is not function and isinstance(scope, _NESTED_SCOPE_NODES)
+        for node in ast.walk(scope)
+        if isinstance(node, ast.Name)
+    }
     return _FunctionFacts(
         occurrences,
+        frozenset(captured),
         frozenset((parameters | bound) - redeclared),
         frozenset(parameters - redeclared),
         frozenset(redeclared),
