@@ -88,7 +88,10 @@ def find_findings(tree: ast.Module, level: DefinedFarFromUseLevel, max_distance:
 def _can_rebind_builtins(tree: ast.Module) -> bool:
     return any(
         (isinstance(node, ast.Import) and any(alias.name == "builtins" for alias in node.names))
-        or (isinstance(node, ast.ImportFrom) and node.module == "builtins")
+        or (
+            isinstance(node, ast.ImportFrom)
+            and (node.module == "builtins" or any(alias.name == "*" for alias in node.names))
+        )
         or (isinstance(node, ast.Name) and node.id in {"__builtins__", "globals"})
         or (
             isinstance(node, ast.Attribute)
