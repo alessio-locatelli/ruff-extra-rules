@@ -345,6 +345,14 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
             use(value)
         """,
         """
+        def f(obj, len):
+            old = obj.value
+            len(obj)
+            if done():
+                return
+            use(old)
+        """,
+        """
         async def f():
             value = await fetch()
             if done():
@@ -370,6 +378,7 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
         "starred-argument",
         "keyword-argument",
         "rebound-callee",
+        "shadowed-pure-builtin",
         "mutated-callee",
         "await",
         "walrus",
