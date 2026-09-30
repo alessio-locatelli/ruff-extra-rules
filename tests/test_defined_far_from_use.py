@@ -637,6 +637,25 @@ def test_aggressive_level_skips_reorders_that_may_change_behavior(source: str) -
             use(result)
         """,
         """
+        def f(items):
+            for item in items:
+                seed = item
+            result = seed
+            if ready():
+                return
+            use(result)
+        """,
+        """
+        def f(command):
+            match command:
+                case 1:
+                    seed = 1
+            result = seed
+            if ready():
+                return
+            use(result)
+        """,
+        """
         def f():
             seed = 1
             del seed
@@ -705,6 +724,8 @@ def test_aggressive_level_skips_reorders_that_may_change_behavior(source: str) -
         "conservative-dict-unpacking",
         "conservative-local-bound-later",
         "conservative-local-bound-conditionally",
+        "conservative-local-bound-in-a-loop",
+        "conservative-local-bound-in-a-match-case",
         "conservative-local-only-annotated",
         "conservative-local-deleted",
         "conservative-local-unbound-by-except",
