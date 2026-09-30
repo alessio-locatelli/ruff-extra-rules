@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .defined_far_from_use import DefinedFarFromUseCheck
 from .excessive_blank_lines import ExcessiveBlankLinesCheck
 from .meaningless_vars import MeaninglessVarsCheck
 from .misplaced_comment import MisplacedCommentCheck
@@ -27,4 +28,5 @@ ALL_CHECKS: list[type[ASTCheck]] = [
     UnusedPytriageCheck,
     RedundantDictGetCheck,
     RedundantEnumValueCheck,
+    DefinedFarFromUseCheck,
 ]

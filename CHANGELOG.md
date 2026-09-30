@@ -6,6 +6,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Added
+
+- Add TR11, `defined-far-from-use`, which reports a local variable assigned before an early `return`, `raise`, `continue`, or `break` that skips its use, or more than `max-distance` (default 5) unrelated statements before its first use. By default it reports only values that are safe to move, such as literals and empty containers; `level = "aggressive"` also reports calls and attribute reads. It is report-only.
+
 ## [0.4.6] - 2026-09-17
 
 ### Fixed

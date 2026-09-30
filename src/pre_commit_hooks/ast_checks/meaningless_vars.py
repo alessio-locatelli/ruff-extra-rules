@@ -464,7 +464,6 @@ def _apply_fixes(
     ignored_lines: set[int],
     encoding: str = "utf-8",
 ) -> FixOutcome:
-    lines = source.splitlines(keepends=True)
     has_future_annotations = _has_future_annotations_import(tree)
 
     violations_by_scope: dict[int | None, list[MeaninglessVarsFixData]] = {}
@@ -501,6 +500,7 @@ def _apply_fixes(
     if not all_replacements:
         return FixOutcome.DECLINED
 
+    lines = source.splitlines(keepends=True)
     all_replacements.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
     for line_num, byte_col, old_name, new_name in all_replacements:

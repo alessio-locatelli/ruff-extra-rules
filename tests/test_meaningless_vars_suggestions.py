@@ -944,7 +944,6 @@ def test_annotation_and_name_helper_edge_cases() -> None:
     nested = ast.parse("Result[User]", mode="eval").body
     multi_generator = ast.parse("[user.id for user in users for group in groups]", mode="eval").body
     wrong_base = ast.parse("[group.id for user in users]", mode="eval").body
-    private_attribute = ast.parse("[user._id for user in users]", mode="eval").body
 
     assert _annotation_name(qualified) == "user"
     assert _annotation_name(nested) == "result"
@@ -952,6 +951,7 @@ def test_annotation_and_name_helper_edge_cases() -> None:
     assert _comprehension_name(multi_generator) is None
     assert isinstance(wrong_base, ast.ListComp)
     assert _comprehension_name(wrong_base) is None
+    private_attribute = ast.parse("[user._id for user in users]", mode="eval").body
     assert isinstance(private_attribute, ast.ListComp)
     assert _comprehension_name(private_attribute) is None
     assert _pluralize(None) is None
