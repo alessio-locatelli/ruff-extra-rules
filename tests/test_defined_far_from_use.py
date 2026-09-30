@@ -779,6 +779,37 @@ def test_distance_skips_a_variable_read_in_a_closure() -> None:
     assert _reported(source.replace("def inner():\n        return result", "inner = lambda: result")) == []
 
 
+@pytest.mark.parametrize(
+    ("shadowing", "expected"),
+    [
+        ("def other():\n    set = frozenset\n    return set\n\n\n", ["result"]),
+        ("class Other:\n    set = frozenset\n\n\n", ["result"]),
+        ("set = frozenset\n\n\n", []),
+        ("def other():\n    global set\n    set = frozenset\n\n\n", []),
+    ],
+    ids=["unrelated-function", "class-attribute", "module", "global-declaration"],
+)
+def test_builtin_shadowing_is_resolved_per_scope(shadowing: str, expected: list[str]) -> None:
+    source = f"{shadowing}def f():\n    result = set()\n    if ready():\n        return\n    use(result)\n"
+
+    assert _reported(source) == expected
+
+
+def test_builtin_shadowed_by_an_enclosing_function_is_not_trusted() -> None:
+    source = """
+    def outer(set):
+        def f():
+            result = set()
+            if ready():
+                return
+            use(result)
+
+        return f
+    """
+
+    assert _reported(source) == []
+
+
 def test_prefers_the_early_exit_message_when_both_triggers_apply() -> None:
     body = "".join(f"    step_{index}()\n" for index in range(6))
     source = f"def f():\n    result = 0\n{body}    if ready():\n        return\n    use(result)\n"
