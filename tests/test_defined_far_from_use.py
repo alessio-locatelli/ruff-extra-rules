@@ -353,6 +353,14 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
             use(old)
         """,
         """
+        def f(x):
+            result = [x for x in x]
+            x = [2]
+            if done():
+                return
+            use(result, x)
+        """,
+        """
         async def f():
             value = await fetch()
             if done():
@@ -379,6 +387,7 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
         "keyword-argument",
         "rebound-callee",
         "shadowed-pure-builtin",
+        "comprehension-target-shadows-its-input",
         "mutated-callee",
         "await",
         "walrus",
