@@ -172,13 +172,13 @@ def _is_order_independent(node: ast.expr, stable_locals: frozenset[str], builtin
         return True
     if isinstance(node, ast.Name):
         return node.id in stable_locals
-    if isinstance(node, ast.Tuple | ast.List | ast.Set):
+    if isinstance(node, ast.Tuple | ast.List):
         return all(_is_order_independent(element, stable_locals, builtin_names) for element in node.elts)
+    if isinstance(node, ast.Set):
+        return all(_is_literal_key(element) for element in node.elts)
     if isinstance(node, ast.Dict):
         return all(
-            key is not None
-            and _is_order_independent(key, stable_locals, builtin_names)
-            and _is_order_independent(item, stable_locals, builtin_names)
+            key is not None and _is_literal_key(key) and _is_order_independent(item, stable_locals, builtin_names)
             for key, item in zip(node.keys, node.values, strict=True)
         )
     if isinstance(node, ast.Call):
@@ -189,6 +189,12 @@ def _is_order_independent(node: ast.expr, stable_locals: frozenset[str], builtin
             and not node.keywords
         )
     return _is_exact_arithmetic(node)
+
+
+def _is_literal_key(node: ast.expr) -> bool:
+    if isinstance(node, ast.Tuple):
+        return all(_is_literal_key(element) for element in node.elts)
+    return isinstance(node, ast.Constant) or _is_exact_arithmetic(node)
 
 
 def _is_exact_arithmetic(node: ast.expr) -> bool:

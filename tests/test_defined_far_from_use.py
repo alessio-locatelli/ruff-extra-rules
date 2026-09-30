@@ -51,7 +51,7 @@ def _reported(source: str, level: DefinedFarFromUseLevel = CONSERVATIVE, max_dis
         """,
         """
         def f(a):
-            result = [a, "x", (1, 2.5), {"k": a}, {a}]
+            result = [a, "x", (1, 2.5), {"k": a}, {1, -2, ("x", 3)}]
             if ready():
                 return
             use(result)
@@ -582,6 +582,20 @@ def test_aggressive_level_skips_reorders_that_may_change_behavior(source: str) -
             use(result)
         """,
         """
+        def f(item):
+            result = {item}
+            if ready():
+                return
+            use(result)
+        """,
+        """
+        def f(item):
+            result = {item: 1}
+            if ready():
+                return
+            use(result)
+        """,
+        """
         def f():
             result = {**defaults}
             if ready():
@@ -677,6 +691,8 @@ def test_aggressive_level_skips_reorders_that_may_change_behavior(source: str) -
         "conservative-shadowed-builtin",
         "conservative-builtin-with-arguments",
         "conservative-division",
+        "conservative-set-of-names",
+        "conservative-dict-with-name-keys",
         "conservative-dict-unpacking",
         "conservative-local-bound-later",
         "conservative-local-bound-conditionally",
@@ -753,6 +769,14 @@ def test_distance_skips_a_value_overwritten_before_it_is_read() -> None:
     source = f"def f():\n    result = 0\n{body}    result = 1\n    use(result)\n"
 
     assert _reported(source) == []
+
+
+def test_distance_skips_a_variable_read_in_a_closure() -> None:
+    body = "".join(f"    step_{index}()\n" for index in range(6))
+    source = f"def f():\n    result = 0\n{body}    def inner():\n        return result\n    use(inner)\n"
+
+    assert _reported(source) == []
+    assert _reported(source.replace("def inner():\n        return result", "inner = lambda: result")) == []
 
 
 def test_prefers_the_early_exit_message_when_both_triggers_apply() -> None:
