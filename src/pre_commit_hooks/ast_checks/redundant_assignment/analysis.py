@@ -55,6 +55,8 @@ class UsageInfo:
     in_comprehension: bool = False
     node: ast.expr | None = None
     enclosing_stmt: ast.stmt | None = None
+    enclosing_expression: ast.expr | None = None
+    enclosing_call_depth: int = 0
     in_fstring_expression: bool = False
     fstring_field_span: tuple[int, int] | None = None
     is_keyword_argument_echo: bool = False
@@ -850,6 +852,15 @@ class VariableTracker(ast.NodeVisitor):
             enclosing_call
         )
 
+        enclosing_expression: ast.expr = node
+        enclosing_call_depth = 0
+        for parent in reversed(self.parent_stack):
+            if isinstance(parent, ast.stmt):
+                break
+            if isinstance(parent, ast.expr):
+                enclosing_expression = parent
+            enclosing_call_depth += isinstance(parent, ast.Call)
+
         usage = UsageInfo(
             var_name=node.id,
             line=node.lineno,
@@ -864,6 +875,8 @@ class VariableTracker(ast.NodeVisitor):
             in_comprehension=self.comprehension_depth > 0,
             node=node,
             enclosing_stmt=self.current_stmt,
+            enclosing_expression=enclosing_expression,
+            enclosing_call_depth=enclosing_call_depth,
             in_fstring_expression=in_fstring_expression,
             fstring_field_span=fstring_field_span,
             is_keyword_argument_echo=is_keyword_argument_echo,

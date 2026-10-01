@@ -6,6 +6,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Fixed
+
+- `redundant-assignment` preserves intermediate variables at the default level when inlining would create a deeply nested call expression or an overly long use line, or when the assigned value spans multiple lines. This also applies to argument echoes; aggressive reporting is unchanged.
+
 ### Added
 
 - Add TR11, `defined-far-from-use`, which reports a local variable assigned before an early `return`, `raise`, `continue`, or `break` that skips its use, or more than `max-distance` (default 5) unrelated statements before its first use. By default it reports only values that are safe to move, such as literals and empty containers; `level = "aggressive"` also reports calls and attribute reads. It is report-only.
