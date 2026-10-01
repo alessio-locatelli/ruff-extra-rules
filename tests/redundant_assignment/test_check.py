@@ -1641,7 +1641,7 @@ def rebind():
     ],
 )
 def test_check_does_not_mark_unfixable_violation_fixable(source: str, message_filter: str) -> None:
-    matching = [v for v in _check(source) if message_filter in v.message]
+    matching = [v for v in _check(source, level=AggressivenessLevel.AGGRESSIVE) if message_filter in v.message]
     assert matching
     assert all(not v.fixable for v in matching)
 

@@ -12,6 +12,7 @@ from pre_commit_hooks.ast_checks.redundant_assignment.analysis import (
 from pre_commit_hooks.ast_checks.redundant_assignment.semantic import (
     _adds_verbosity_or_context,
     _argument_echo_reason,
+    _call_nesting_depth,
     _contains_nondeterministic_call,
     _is_generic_call_result_name,
     _is_named_constant_pattern,
@@ -20,6 +21,21 @@ from pre_commit_hooks.ast_checks.redundant_assignment.semantic import (
     calculate_semantic_value,
     should_autofix,
 )
+
+
+@pytest.mark.parametrize("suffix", [".attribute" * 1500, " + value" * 1500], ids=["attribute", "binop"])
+@pytest.mark.parametrize(
+    ("leaf", "expected_depth"),
+    [("value", 0), ("load()", 1), ("outer(inner())", 2), ("a(b(c(d())))", 3)],
+    ids=["no-calls", "one-call", "two-calls", "capped-calls"],
+)
+def test_call_nesting_depth_handles_deep_expressions(suffix: str, leaf: str, expected_depth: int) -> None:
+    node = ast.parse(leaf + suffix, mode="eval").body
+    depths: dict[ast.AST, int] = {}
+
+    assert _call_nesting_depth(node, depths) == expected_depth
+    assert depths[node] == expected_depth
+    assert _call_nesting_depth(node, depths) == expected_depth
 
 
 def _make_single_use_lifecycle(

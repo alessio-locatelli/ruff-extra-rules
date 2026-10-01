@@ -128,6 +128,7 @@ class RedundantAssignmentCheck(BaseCheck):
 
         violations: list[Violation] = []
         suppression_usages: list[SuppressionUsage] = []
+        call_depths: dict[ast.AST, int] = {}
 
         for lifecycle in lifecycles:
             key = (lifecycle.assignment.scope_id, lifecycle.assignment.var_name)
@@ -156,6 +157,8 @@ class RedundantAssignmentCheck(BaseCheck):
                 lifecycle,
                 pattern,
                 level=self._level,
+                source_lines=tracker.source_lines,
+                call_depths=call_depths,
                 allow_inline_suppression=assignment_suppression is not None,
             )
             if reason is None:

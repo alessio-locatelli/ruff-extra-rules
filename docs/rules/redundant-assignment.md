@@ -4,7 +4,7 @@ Detects and optionally auto-fixes redundant variable assignments where the varia
 
 ## Why?
 
-Unnecessary intermediate variables add cognitive load without providing value. However, variables that add semantic meaning (transformative verbs like "formatted", "validated") or break down complex expressions are preserved. This includes a variable introduced purely to keep a line under the length limit: a multiline call/expression is preferable to a redundant intermediate variable invented just to shorten a line — the length problem belongs to the expression's own formatting, not to naming a value that doesn't otherwise need a name.
+Unnecessary intermediate variables add cognitive load without providing value. However, variables that add semantic meaning (transformative verbs like "formatted", "validated") or break down complex expressions are preserved. At the default level, variables are also preserved when inlining would make the use expression deeply nested or too long, or when the assigned value spans multiple lines.
 
 ## Patterns detected
 
@@ -67,12 +67,21 @@ print(msg)
 
 `--redundant-assignment-level={conservative,aggressive}` (default `conservative`) controls how eagerly a violation is flagged:
 
-- **`conservative`** (default): flags only the clearest cases, and leaves alone a variable name that looks like it's documenting a non-obvious value rather than just restating it — e.g. `warning = conn.recv()` is not flagged, since `warning` adds real information `recv()` alone doesn't convey.
+- **`conservative`** (default): flags only the clearest cases. It preserves variables that explain a non-obvious value, split a deeply nested expression, keep a use line short, or hold a value written across multiple lines. For example, `warning = conn.recv()` is not flagged, since `warning` adds information `recv()` alone doesn't convey.
 - **`aggressive`**: flags a broader range of low-value assignments, at the cost of more false positives on descriptively-named variables.
 
 Defaulting to `conservative` is deliberate: someone confronted with a flood of suggestions on unfamiliar code is more likely to disable the check outright than to go discover a stricter flag, so the out-of-the-box experience undersells rather than oversells what gets flagged.
 
 `--fix` applies identically at either reporting level, to whatever is mechanically safe to inline.
+
+The default level preserves `responses` here, even when the parameter of `to_vcr_cassette_dict` is also named `responses`:
+
+```python
+responses = cache.responses.values()
+write_cassette(to_vcr_cassette_dict(responses), path)
+```
+
+Inlining would combine fetching the responses, converting them, and writing the cassette into one nested expression. A simple call such as `consume(load())` remains eligible. The exact readability limits are recorded in [ADR-0063](../adr/0063-redundant-assignment-conservative-readability.md).
 
 ```yaml
 - id: ruff-extra-rules

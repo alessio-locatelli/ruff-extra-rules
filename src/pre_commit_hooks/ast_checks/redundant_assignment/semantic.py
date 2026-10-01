@@ -385,11 +385,65 @@ def _argument_echo_reason(lifecycle: VariableLifecycle) -> ReportReason | None:
     return None
 
 
+def _call_nesting_depth(node: ast.AST, depths: dict[ast.AST, int]) -> int:
+    cached_depth = depths.get(node)
+    if cached_depth is not None:
+        return cached_depth
+
+    stack = [(node, ast.iter_child_nodes(node), int(isinstance(node, ast.Call)))]
+    while True:
+        current, children, nesting_depth = stack[-1]
+        child = next(children, None) if nesting_depth < 3 else None
+        if child is None:
+            depths[current] = nesting_depth
+            stack.pop()
+            if not stack:
+                return nesting_depth
+            child_depth = nesting_depth
+            current, children, nesting_depth = stack[-1]
+        else:
+            cached_child_depth = depths.get(child)
+            if cached_child_depth is None:
+                stack.append((child, ast.iter_child_nodes(child), int(isinstance(child, ast.Call))))
+                continue
+            child_depth = cached_child_depth
+
+        stack[-1] = (
+            current,
+            children,
+            min(3, max(nesting_depth, int(isinstance(current, ast.Call)) + child_depth)),
+        )
+
+
+def _conservative_use_is_readable(
+    lifecycle: VariableLifecycle,
+    source_lines: list[str],
+    call_depths: dict[ast.AST, int],
+) -> bool:
+    assignment = lifecycle.assignment
+    rhs_source = assignment.rhs_source
+    if "\n" in rhs_source or "\r" in rhs_source:
+        return False
+
+    use = lifecycle.uses[0]
+    use_line = source_lines[use.line - 1]
+    if len(use_line) > 79 or exceeds_line_length_when_inlined(assignment.var_name, rhs_source, use_line):
+        return False
+
+    assert use.enclosing_expression is not None
+    if _call_nesting_depth(use.enclosing_expression, call_depths) >= 3:
+        return False
+
+    return use.enclosing_call_depth + _call_nesting_depth(assignment.rhs_node, call_depths) < 3
+
+
 def report_reason(
     lifecycle: VariableLifecycle,
     pattern: PatternType,
     level: AggressivenessLevel = AggressivenessLevel.CONSERVATIVE,
     *,
+    source_lines: list[str],
+    call_depths: dict[ast.AST, int],
     allow_inline_suppression: bool = False,
 ) -> ReportReason | None:
     assignment = lifecycle.assignment
@@ -421,6 +475,11 @@ def report_reason(
         return None
 
     if lifecycle.uses and all(use.in_comprehension for use in lifecycle.uses):
+        return None
+
+    if level is AggressivenessLevel.CONSERVATIVE and not _conservative_use_is_readable(
+        lifecycle, source_lines, call_depths
+    ):
         return None
 
     if argument_echo_reason is not None:

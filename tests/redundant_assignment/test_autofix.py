@@ -13,6 +13,7 @@ from pre_commit_hooks.ast_checks.redundant_assignment.autofix import (
     _cleanup_blank_lines_around_removals,
     apply_fixes,
 )
+from pre_commit_hooks.ast_checks.redundant_assignment.semantic import AggressivenessLevel
 from tests.factories import ViolationFactory
 
 if TYPE_CHECKING:
@@ -336,6 +337,7 @@ def test_autofix_respects_word_boundaries(
     assert expected in filepath.read_text()
 
 
+@pytest.mark.parametrize("check", [RedundantAssignmentCheck(level=AggressivenessLevel.AGGRESSIVE)], ids=["aggressive"])
 def test_autofix_respects_line_length(checked: CheckedFn) -> None:
     source = """
 def func():
