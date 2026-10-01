@@ -6,6 +6,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-01
+
 ### Fixed
 
 - `redundant-assignment` preserves intermediate variables at the default level when inlining would create a deeply nested call expression or an overly long use line, or when the assigned value spans multiple lines. This also applies to argument echoes; aggressive reporting is unchanged.
