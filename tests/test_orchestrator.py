@@ -3338,7 +3338,7 @@ def test_load_checks_ignore_set_skips_matching_check() -> None:
     checks = load_checks(ignore={"meaningless-vars"})
     check_ids = {c.check_id for c in checks}
     assert "meaningless-vars" not in check_ids
-    assert len(check_ids) == len(ALL_CHECKS) - 2
+    assert len(check_ids) == sum(check().default_enabled for check in ALL_CHECKS) - 1
 
 
 def test_load_checks_ignore_composes_with_select() -> None:
@@ -3350,7 +3350,9 @@ def test_load_checks_ignore_composes_with_select() -> None:
 def test_load_checks_extend_select_adds_to_defaults() -> None:
     checks = load_checks(extend_select={"unused-pytriage"})
 
-    assert {check.check_id for check in checks} == {check().check_id for check in ALL_CHECKS}
+    assert {check.check_id for check in checks} == {
+        check().check_id for check in ALL_CHECKS if check().default_enabled or check().check_id == "unused-pytriage"
+    }
 
 
 def test_load_checks_extend_select_adds_to_explicit_selection() -> None:

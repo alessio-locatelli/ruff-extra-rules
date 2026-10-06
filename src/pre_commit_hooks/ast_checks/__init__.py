@@ -11,6 +11,7 @@ from .redundant_dict_get import RedundantDictGetCheck
 from .redundant_enum_value import RedundantEnumValueCheck
 from .redundant_super_init import RedundantSuperInitCheck
 from .redundant_type_conversion import RedundantTypeConversionCheck
+from .suppression_rationale import SuppressionRationaleCheck
 from .unused_pytriage import UnusedPytriageCheck
 from .validate_function_name import ValidateFunctionNameCheck
 
@@ -29,4 +30,5 @@ ALL_CHECKS: list[type[ASTCheck]] = [
     RedundantDictGetCheck,
     RedundantEnumValueCheck,
     DefinedFarFromUseCheck,
+    SuppressionRationaleCheck,
 ]
