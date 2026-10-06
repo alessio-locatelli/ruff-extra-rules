@@ -108,7 +108,7 @@ class LSPClient:
         environment: Mapping[str, str] | None = None,
         on_notification: Callable[[str, dict[str, Any]], None] | None = None,
     ) -> None:
-        self._process = subprocess.Popen(  # noqa: S603
+        self._process = subprocess.Popen(  # noqa: S603 -- Caller supplies the server command.
             command,
             cwd=cwd,
             stdin=subprocess.PIPE,
@@ -176,7 +176,7 @@ class LSPClient:
 
     def request(
         self, method: str, params: dict[str, Any] | None = None, *, timeout: float = DEFAULT_REQUEST_TIMEOUT_SECONDS
-    ) -> Any:  # noqa: ANN401
+    ) -> Any:  # noqa: ANN401 -- LSP response shapes depend on the requested method.
         self._next_id += 1
         msg_id = self._next_id
         box: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=1)

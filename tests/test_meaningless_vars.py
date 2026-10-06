@@ -685,7 +685,9 @@ def test_autofix_follows_closure_reference_into_nested_function() -> None:
 
     assert "data" not in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace
+    )
 
     class FakeResponse:
         def json(self) -> dict[str, str]:
@@ -1316,7 +1318,9 @@ def test_autofix_renames_walrus_target_inside_default_evaluated_in_enclosing_sco
 
     assert "data" not in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace
+    )
 
     class FakeResponse:
         def json(self) -> str:
@@ -1351,7 +1355,9 @@ def test_autofix_follows_closure_through_scope_that_itself_contains_a_shadowing_
 
     assert "def deeper():\n            data = " in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace
+    )
 
     class FakeResponse:
         def json(self) -> str:
@@ -1404,7 +1410,9 @@ def outer(response):
 
     assert "def inner(x: data):" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace
+    )
 
     class FakeResponse:
         def json(self) -> str:
@@ -1438,7 +1446,7 @@ def test_autofix_still_follows_annotation_closure_without_deferred_annotations()
     assert "data" not in fixed_content
     assert "def inner(x: payload):" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
         compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec", dont_inherit=True), module_namespace
     )
 
@@ -1499,7 +1507,9 @@ def test_autofix_follows_closure_into_type_parameter_bound_and_default() -> None
     assert "data" not in fixed_content
     assert "def inner[**Q, T: payload = payload, *Ts = payload, **P = payload]():" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace
+    )
 
     class FakeResponse:
         def json(self) -> str:
@@ -1535,7 +1545,9 @@ def test_autofix_does_not_rename_type_parameter_bound_referencing_a_peer_type_pa
 
     assert "def inner[data, T: data]():" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace
+    )
 
     class FakeResponse:
         def json(self) -> str:
@@ -1571,7 +1583,9 @@ def test_autofix_does_not_reuse_a_nested_functions_own_mapping_for_its_default()
     assert "def inner(x=payload):" in fixed_content
     assert "inner_payload: InnerPayload = response.json()" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace
+    )
 
     class FakeResponse:
         def json(self) -> str:
@@ -1625,7 +1639,9 @@ def test_autofix_does_not_rename_type_alias_bound_referencing_a_peer_type_parame
     assert "type Alias[data, T: data] = T" in fixed_content
     assert "payload: Payload = response.json()" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace
+    )
 
     class FakeResponse:
         def json(self) -> str:
@@ -1675,7 +1691,9 @@ def test_autofix_follows_closure_into_type_alias_value() -> None:
     assert "data" not in fixed_content
     assert "type Alias[T: int] = tuple[T, payload]" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace)  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
+        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace
+    )
 
     class FakeResponse:
         def json(self) -> str:
@@ -1712,7 +1730,7 @@ def test_autofix_follows_closure_into_generic_functions_own_annotation_despite_b
     assert "def inner[T](value: payload):" in fixed_content
     assert "data = 1" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
         compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec", dont_inherit=True), module_namespace
     )
 
@@ -1746,7 +1764,7 @@ def test_autofix_does_not_rename_generic_functions_own_annotation_referencing_a_
 
     assert "def inner[data](value: data) -> data:" in fixed_content
     module_namespace: dict[str, Any] = {}
-    exec(  # noqa: S102
+    exec(  # noqa: S102 -- Trusted test fixture.
         compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec", dont_inherit=True), module_namespace
     )
 

@@ -74,11 +74,11 @@ def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None
     assert git is not None
 
     with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603 -- Trusted test command.
 
         file1 = tmp_path / "file1.py"
         file1.write_text("def get_name():\n    return 'foo'\n")
-        subprocess.run([git, "add", "file1.py"], check=True, cwd=tmp_path)  # noqa: S603
+        subprocess.run([git, "add", "file1.py"], check=True, cwd=tmp_path)  # noqa: S603 -- Trusted test command.
 
         matches = git_grep_filter([str(file1)], "def get_", fixed_string=True)
         assert matches == [str(file1)]
@@ -92,11 +92,11 @@ def test_git_grep_filter_includes_permission_denied_tracked_file(tmp_path: Path)
     assert git is not None
 
     with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603 -- Trusted test command.
 
         unreadable = tmp_path / "unreadable.py"
         unreadable.write_text("data = 1\n")
-        subprocess.run([git, "add", "unreadable.py"], check=True, cwd=tmp_path)  # noqa: S603
+        subprocess.run([git, "add", "unreadable.py"], check=True, cwd=tmp_path)  # noqa: S603 -- Trusted test command.
 
         with restricted_permissions(unreadable, 0o000, restore=0o644):
             matches = git_grep_filter([str(unreadable)], "data", fixed_string=True)
@@ -109,7 +109,7 @@ def test_git_grep_filter_includes_file_deleted_since_discovery(tmp_path: Path) -
     assert git is not None
 
     with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603 -- Trusted test command.
 
         vanished = tmp_path / "vanished.py"
 
@@ -123,7 +123,7 @@ def test_git_grep_filter_includes_untracked_file(tmp_path: Path) -> None:
     assert git is not None
 
     with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603 -- Trusted test command.
 
         untracked = tmp_path / "untracked.py"
         untracked.write_text("data = 1\n")
@@ -138,7 +138,7 @@ def test_git_grep_filter_includes_gitignored_file(tmp_path: Path) -> None:
     assert git is not None
 
     with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603
+        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603 -- Trusted test command.
         (tmp_path / ".gitignore").write_text("ignored.py\n")
 
         ignored = tmp_path / "ignored.py"
@@ -152,7 +152,7 @@ def test_git_grep_filter_includes_gitignored_file(tmp_path: Path) -> None:
 def test_git_grep_filter_match_order_is_independent_of_hash_seed(tmp_path: Path) -> None:
     git = shutil.which("git")
     assert git is not None
-    subprocess.run([git, "init", "-q"], check=True, cwd=tmp_path)  # noqa: S603
+    subprocess.run([git, "init", "-q"], check=True, cwd=tmp_path)  # noqa: S603 -- Trusted test command.
 
     names = [f"file{i}.py" for i in range(10)]
     for name in names:
@@ -165,7 +165,7 @@ def test_git_grep_filter_match_order_is_independent_of_hash_seed(tmp_path: Path)
 
     outputs = set()
     for seed in ("0", "1", "2"):
-        run_result = subprocess.run(  # noqa: S603
+        run_result = subprocess.run(  # noqa: S603 -- Trusted test command.
             [sys.executable, "-c", script],
             cwd=tmp_path,
             capture_output=True,

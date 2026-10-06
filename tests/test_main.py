@@ -125,7 +125,7 @@ def test_real_invocation_does_not_leak_a_traceback_onto_stderr(tmp_path: Path) -
     filepath.write_text("data = requests.get(url)\n")
 
     with restricted_permissions(filepath, 0o000, restore=0o644):
-        completed_process = subprocess.run(  # noqa: S603
+        completed_process = subprocess.run(  # noqa: S603 -- Trusted test command.
             [sys.executable, "-m", "pre_commit_hooks.ast_checks", "--select", "meaningless-vars", filepath],
             capture_output=True,
             text=True,
@@ -144,7 +144,7 @@ def test_verbose_flag_surfaces_the_underlying_exception_on_stderr(tmp_path: Path
     filepath.write_text("data = requests.get(url)\n")
 
     with restricted_permissions(filepath, 0o000, restore=0o644):
-        completed_process = subprocess.run(  # noqa: S603
+        completed_process = subprocess.run(  # noqa: S603 -- Trusted test command.
             [
                 sys.executable,
                 "-m",
@@ -181,7 +181,9 @@ def test_verbose_flag_does_not_change_violations_or_exit_code(tmp_path: Path) ->
             "aggressive",
             *extra_args,
         ]
-        return subprocess.run([*cmd, filepath], capture_output=True, text=True, check=False, timeout=30)  # noqa: S603
+        return subprocess.run(  # noqa: S603 -- Trusted test command.
+            [*cmd, filepath], capture_output=True, text=True, check=False, timeout=30
+        )
 
     quiet = _run()
     verbose = _run("--verbose")

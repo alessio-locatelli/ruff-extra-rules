@@ -150,7 +150,7 @@ def test_ty_version_returns_stripped_stdout(monkeypatch: pytest.MonkeyPatch) -> 
         ),
     ],
 )
-def test_ty_version_normalizes_any_failure_to_os_error(monkeypatch: pytest.MonkeyPatch, run: Any) -> None:  # noqa: ANN401
+def test_ty_version_normalizes_any_failure_to_os_error(monkeypatch: pytest.MonkeyPatch, run: object) -> None:
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(OSError, match="could not determine"):
         _ty_version()
@@ -645,7 +645,7 @@ def test_repository_root_reuses_a_daemon_path_from_subdirectories_and_path_alias
     assert git is not None
     repository = tmp_path / "repository"
     repository.mkdir()
-    subprocess.run([git, "init", "-q", repository], check=True)  # noqa: S603
+    subprocess.run([git, "init", "-q", repository], check=True)  # noqa: S603 -- Trusted temporary test repo.
     nested = repository / "nested"
     nested.mkdir()
     alias = tmp_path / "alias"
@@ -1199,7 +1199,7 @@ _REAL_POPEN = subprocess.Popen
 def test_spawn_daemon_raises_check_unavailable_error_on_a_reported_self_test_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def _fake_popen(_args: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401
+    def _fake_popen(_args: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401 -- Match Popen kwargs.
         return _REAL_POPEN([sys.executable, "-c", "print('FAILED: simulated self-test failure', flush=True)"], **kwargs)
 
     monkeypatch.setattr(daemon_module.subprocess, "Popen", _fake_popen)
@@ -1210,7 +1210,7 @@ def test_spawn_daemon_raises_check_unavailable_error_on_a_reported_self_test_fai
 def test_spawn_daemon_raises_os_error_on_a_reported_bind_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def _fake_popen(_args: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401
+    def _fake_popen(_args: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401 -- Match Popen kwargs.
         return _REAL_POPEN([sys.executable, "-c", "print('BIND_FAILED: simulated bind failure', flush=True)"], **kwargs)
 
     monkeypatch.setattr(daemon_module.subprocess, "Popen", _fake_popen)
@@ -1224,7 +1224,7 @@ def test_spawn_daemon_raises_os_error_when_nothing_is_printed_within_the_wait_ti
     monkeypatch.setattr(daemon_module, "_SPAWN_WAIT_TIMEOUT_SECONDS", 0.2)
     spawned: list[subprocess.Popen[bytes]] = []
 
-    def _fake_popen(_args: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401
+    def _fake_popen(_args: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401 -- Match Popen kwargs.
         process = _REAL_POPEN([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
         spawned.append(process)
         return process
@@ -1265,7 +1265,7 @@ def test_kill_spawn_attempt_escalates_to_sigkill_when_sigterm_is_ignored(monkeyp
 def test_spawn_daemon_raises_os_error_on_an_unexpected_startup_line(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def _fake_popen(_args: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401
+    def _fake_popen(_args: list[str], **kwargs: Any) -> subprocess.Popen[bytes]:  # noqa: ANN401 -- Match Popen kwargs.
         return _REAL_POPEN([sys.executable, "-c", "print('nonsense', flush=True)"], **kwargs)
 
     monkeypatch.setattr(daemon_module.subprocess, "Popen", _fake_popen)

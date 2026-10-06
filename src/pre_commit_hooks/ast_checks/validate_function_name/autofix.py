@@ -331,7 +331,7 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
     new_name = suggestion.suggested_name
     old_len = len(old_name)
 
-    for line_num, col in sorted(set(positions), reverse=True):  # pytriage: TR6
+    for line_num, col in sorted(set(positions), reverse=True):  # pytriage: TR6 -- Apply each rename once.
         line_idx = line_num - 1
         line = lines[line_idx]
         lines[line_idx] = line[:col] + new_name + line[col + old_len :]

@@ -37,7 +37,10 @@ def filter_excluded_files(filepaths: list[str], exclude_patterns: Sequence[Exclu
     return [
         filepath
         for filepath in filepaths
-        if not _is_excluded(PurePosixPath(os.path.abspath(filepath)), patterns_by_anchor)  # noqa: PTH100
+        if not _is_excluded(
+            PurePosixPath(os.path.abspath(filepath)),  # noqa: PTH100 -- Preserve symlink aliases.
+            patterns_by_anchor,
+        )
     ]
 
 
@@ -74,7 +77,7 @@ def _list_python_files_in_dir(directory: Path) -> list[str]:
     resolved_dir = directory.resolve()
     try:
         cmd: list[str | Path] = ["git", "-C", directory, "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
-        git_ls_files_result = subprocess.run(  # noqa: S603
+        git_ls_files_result = subprocess.run(  # noqa: S603 -- Fixed Git command; no shell.
             cmd, capture_output=True, text=True, errors="surrogateescape", check=False, timeout=30
         )
         if git_ls_files_result.returncode == 0 and not git_ls_files_result.stderr:
@@ -142,7 +145,7 @@ def _warn_about_ignored_python_files(directory: Path) -> None:
         return
     try:
         git = shutil.which("git") or "git"
-        with subprocess.Popen(  # noqa: S603
+        with subprocess.Popen(  # noqa: S603 -- Fixed Git command; no shell.
             [
                 git,
                 "-C",

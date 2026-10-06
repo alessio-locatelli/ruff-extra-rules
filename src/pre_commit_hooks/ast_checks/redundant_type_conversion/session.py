@@ -419,7 +419,7 @@ def get_session() -> CandidateSession:
 
 
 def _acquire_session() -> CandidateSession:
-    from . import daemon  # noqa: PLC0415
+    from . import daemon  # noqa: PLC0415 -- Defer the daemon import to avoid the session/daemon import cycle.
 
     try:
         return daemon.connect(Path.cwd())
@@ -443,7 +443,7 @@ def peek_session() -> PersistentSession | None:
 
 
 def record_direct_input_if_session_active(filepath: Path, source: str) -> None:
-    global _daemon_probe_failed, _daemon_probe_next_retry_at, _session  # noqa: PLW0603
+    global _daemon_probe_failed, _daemon_probe_next_retry_at, _session  # noqa: PLW0603 -- Shared daemon state.
     with _session_lock:
         if _session is not None:
             _session.record_direct_input(filepath, source)
@@ -454,7 +454,7 @@ def record_direct_input_if_session_active(filepath: Path, source: str) -> None:
         if now < _daemon_probe_next_retry_at:
             return
 
-        from . import daemon  # noqa: PLC0415
+        from . import daemon  # noqa: PLC0415 -- Defer the daemon import to avoid the session/daemon import cycle.
 
         probe = daemon.probe_existing(Path.cwd())
         if probe.session is not None:

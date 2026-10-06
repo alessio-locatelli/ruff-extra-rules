@@ -29,7 +29,7 @@ class PerFileIgnoreList:
         if not self.entries:
             return frozenset()
 
-        absolute = PurePosixPath(os.path.abspath(filepath))  # noqa: PTH100
+        absolute = PurePosixPath(os.path.abspath(filepath))  # noqa: PTH100 -- Preserve symlink aliases.
         ignored: set[str] = set()
         for entry in self.entries:
             if _matches(entry, absolute) != entry.negated:

@@ -65,7 +65,7 @@ class CheckResult(list[Violation]):
         suppression_usages: Iterable[SuppressionUsage] = (),
     ) -> None:
         super().__init__(violations)
-        self.suppression_usages = tuple(suppression_usages)  # pytriage: TR6
+        self.suppression_usages = tuple(suppression_usages)  # pytriage: TR6 -- Freeze cached usage records.
 
 
 @dataclass(frozen=True, slots=True)

@@ -110,7 +110,12 @@ def _cleanup_confirmed_dead_daemon(root: Path) -> None:
 
 def _ty_version() -> str:
     try:
-        completed_process = subprocess.run(["ty", "--version"], capture_output=True, text=True, check=True)  # noqa: S607
+        completed_process = subprocess.run(
+            ["ty", "--version"],  # noqa: S607 -- Use the session's ty from PATH.
+            capture_output=True,
+            text=True,
+            check=True,
+        )
     except (OSError, subprocess.CalledProcessError) as error:
         msg = f"could not determine the local `ty --version`: {error!r}"
         raise OSError(msg) from error
@@ -348,7 +353,7 @@ def _try_connect(socket_path: Path, daemon_identity: str) -> socket.socket | Non
 
 
 def _spawn_daemon(root: Path) -> None:
-    process = subprocess.Popen(  # noqa: S603
+    process = subprocess.Popen(  # noqa: S603 -- Start this package with the current Python interpreter.
         [sys.executable, "-m", "pre_commit_hooks.ast_checks.redundant_type_conversion", root],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,

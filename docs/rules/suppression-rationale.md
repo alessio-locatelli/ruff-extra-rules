@@ -31,7 +31,7 @@ A separator without text does not count. An immediately preceding contiguous com
 import plugin  # noqa: F401
 ```
 
-A blank line breaks the association. The check uses adjacency alone: it does not judge an explanation's quality, length, relevance, or truthfulness. Ambiguous and malformed cases are accepted to avoid false positives, including trailing content that might be another pragma.
+A blank line breaks the association. A preceding block containing only suppression directives or other recognized pragmas does not count as an explanation. Other comments count by adjacency alone: the check does not judge an explanation's quality, length, relevance, or truthfulness. Ambiguous and malformed cases are accepted to avoid false positives, including trailing content that might be another pragma.
 
 Supported comments include legacy `noqa`, file-level `ruff: noqa` and `flake8: noqa`, and Ruff's `ignore[...]`, `file-ignore[...]`, and `disable[...]` directives. Ruff rule names are supported as well as codes. For a clearly matched `ruff: disable[...]` / `ruff: enable[...]` range, only `disable` needs an explanation; `enable` does not. Unmatched or unusual ranges are accepted.
 

@@ -28,7 +28,7 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
         cmd.extend(["-e", pattern, "--"])
         cmd.extend(filepaths)
 
-        git_grep_result = subprocess.run(  # noqa: S603
+        git_grep_result = subprocess.run(  # noqa: S603 -- Git operands follow --; no shell.
             cmd, capture_output=True, text=True, errors="surrogateescape", check=False, timeout=30
         )
 

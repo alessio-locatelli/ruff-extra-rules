@@ -394,7 +394,7 @@ class _ValueVisitor(ast.NodeVisitor):
         if node.value is not None:
             self.visit(node.value)
 
-    def visit_TypeAlias(self, node: ast.TypeAlias) -> None:  # noqa: ARG002
+    def visit_TypeAlias(self, _node: ast.TypeAlias) -> None:
         return
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:

@@ -136,7 +136,7 @@ def test_inline_rationales(directive: str, trailing: str, expected_count: int) -
         ("# Explain the module.\n\n# ruff: file-ignore[F401]\n", (3,)),
         ("# Explain the module.\n#\n# noqa\n", ()),
         ("#\n# noqa\n", (2,)),
-        ("# noqa: F401 #\n# noqa\n", (1,)),
+        ("# noqa: F401 #\n# noqa\n", (1, 2)),
         ("value = 1  # unrelated trailing comment\nimport foo  # noqa: F401\n", (2,)),
         ("text = '''\n# Explanation in a string\n'''  # noqa\n", (3,)),
         ("def run():\n    # Different topic.\n    import foo  # noqa: F401\n", ()),
@@ -166,6 +166,37 @@ def test_preceding_rationale_association(source: str, expected_lines: tuple[int,
     violations = SuppressionRationaleCheck().check(Path("example.py"), ast.parse(source), source)
 
     assert tuple(violation.line for violation in violations) == expected_lines
+
+
+@pytest.mark.parametrize(
+    "preceding",
+    [
+        "#NOQA:F401",
+        "#### noqa: F401",
+        "# ruff: ignore[F401]",
+        "# pytriage: TR1",
+        "# type: ignore",
+        "# pylint: disable=unused-import",
+        "# NOSONAR",
+    ],
+    ids=["legacy-case", "legacy-hashes", "native", "pytriage", "type-ignore", "pylint", "sonar"],
+)
+def test_pragma_only_blocks_do_not_explain_a_suppression(preceding: str) -> None:
+    source = f"{preceding}\n# noqa\n"
+    violations = SuppressionRationaleCheck().check(Path("example.py"), ast.parse(source), source)
+
+    assert 2 in {violation.line for violation in violations}
+
+
+@pytest.mark.parametrize(
+    "preceding",
+    ["# Imported for registration.\n# ruff: ignore[F401]", "# This mentions # noqa without being a pragma."],
+    ids=["prose-in-block", "prose-mentions-pragma"],
+)
+def test_prose_in_a_comment_block_still_counts(preceding: str) -> None:
+    source = f"{preceding}\n# noqa\n"
+
+    assert SuppressionRationaleCheck().check(Path("example.py"), ast.parse(source), source) == []
 
 
 @pytest.mark.parametrize(
