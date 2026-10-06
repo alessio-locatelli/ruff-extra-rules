@@ -55,6 +55,7 @@ repos:
         language: system
         types: [python]
         files: ^(src|tests|benchmarks/fixtures)/
+        args: ["--extend-select=unused-pytriage,suppression-rationale"]
         # It deliberately contains "bad" (and otherwise non-representative) example
         # code for our own test suite (see docs/adr/0009-lint-tests-directory.md).
         exclude: ^tests/fixtures/
@@ -68,6 +69,7 @@ repos:
         exclude: ^tests/fixtures/
         args:
           [
+            "--extend-select=unused-pytriage,suppression-rationale",
             "--meaningless-vars-level=aggressive",
             "--redundant-assignment-level=aggressive",
             "--defined-far-from-use-level=aggressive",

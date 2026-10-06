@@ -1880,7 +1880,7 @@ def test_drain_cross_file_candidates_skips_an_unresolvable_direct_path(
     monkeypatch.setattr(CheckOrchestrator, "_process_single_file", lambda *_args: [])
     real_resolve = Path.resolve
 
-    def resolve(filepath: Path, strict: bool = False) -> Path:  # noqa: FBT002
+    def resolve(filepath: Path, strict: bool = False) -> Path:  # noqa: FBT002 -- Path.resolve signature.
         if filepath == main_file:
             msg = "simulated resolve failure"
             raise OSError(msg)

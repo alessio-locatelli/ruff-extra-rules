@@ -1690,4 +1690,4 @@ def test_orchestrator_skips_file_with_invalid_syntax(tmp_path: Path) -> None:
     orchestrator = CheckOrchestrator(checks=[RedundantAssignmentCheck()])
     violations = orchestrator.process_files([str(filepath)])
 
-    assert violations.get(str(filepath), []) == []  # pytriage: TR6
+    assert violations.get(str(filepath), []) == []  # pytriage: TR6 -- Orchestrator keys are strings.

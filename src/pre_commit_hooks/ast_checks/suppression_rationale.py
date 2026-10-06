@@ -17,6 +17,7 @@ from ._base import (
     record_suppression_usage_if_ignored,
     tokenize_source,
 )
+from .misplaced_comment import LINTER_PRAGMA_PATTERNS
 
 if TYPE_CHECKING:
     import ast
@@ -33,6 +34,7 @@ _NATIVE = re.compile(r"#\s*ruff\s*:\s*(file-ignore|ignore|disable|enable)\s*\[([
 _RANGE_FRAGMENT = re.compile(r"#\s*ruff\s*:\s*(?:disable|enable)")
 _ISORT_SKIP = re.compile(r"#+\s*(?:ruff\s*:\s*)?isort: ?(skip_file|skip)")
 _PYTRIAGE_CODE = re.compile(r"TR[0-9]+", re.IGNORECASE)
+_PRAGMA_PREFIX = re.compile("|".join([*LINTER_PRAGMA_PATTERNS, r"#\s*(?:pytriage:|NOSONAR\b|fmt:)"]), re.IGNORECASE)
 
 type _Action = Literal["line", "file", "file-ignore", "disable", "enable", "off", "on"]
 _NATIVE_ACTIONS: dict[str, _Action] = {
@@ -127,7 +129,9 @@ def _has_inline_rationale(text: str, directive: _Directive) -> bool:
     return bool(trailing)
 
 
-def _preceding_rationale_lines(comments: tuple[tokenize.TokenInfo, ...], comment_only: set[int]) -> set[int]:
+def _preceding_rationale_lines(
+    comments: tuple[tokenize.TokenInfo, ...], comment_only: set[int], directives: dict[int, _Directive]
+) -> set[int]:
     explained: set[int] = set()
     previous_line = 0
     nonempty_block = False
@@ -136,7 +140,11 @@ def _preceding_rationale_lines(comments: tuple[tokenize.TokenInfo, ...], comment
         if line != previous_line + 1:
             nonempty_block = False
         if line in comment_only:
-            nonempty_block |= bool(token.string.lstrip("#").strip())
+            nonempty_block |= (
+                bool(token.string.lstrip("#").strip())
+                and line not in directives
+                and _PRAGMA_PREFIX.match(token.string) is None
+            )
             if nonempty_block:
                 explained.add(line + 1)
         else:
@@ -220,7 +228,7 @@ class SuppressionRationaleCheck(BaseCheck):
             for token in comments
             if (directive := _recognize(token.string, pytriage_by_line.get(token.start[0]))) is not None
         }
-        explained = _preceding_rationale_lines(comments, comment_only)
+        explained = _preceding_rationale_lines(comments, comment_only, directives)
         matched = _matched_range_starts(tokens, directives, comment_only)
         violations: list[Violation] = []
         usages: list[SuppressionUsage] = []

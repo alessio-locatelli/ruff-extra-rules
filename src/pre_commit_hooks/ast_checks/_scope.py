@@ -119,16 +119,16 @@ def class_scope_binding_names(node: ast.ClassDef) -> set[str]:
                 if default is not None:
                     self.visit(default)
 
-        def visit_ListComp(self, node: ast.ListComp) -> None:  # noqa: ARG002
+        def visit_ListComp(self, _node: ast.ListComp) -> None:
             return
 
-        def visit_SetComp(self, node: ast.SetComp) -> None:  # noqa: ARG002
+        def visit_SetComp(self, _node: ast.SetComp) -> None:
             return
 
-        def visit_DictComp(self, node: ast.DictComp) -> None:  # noqa: ARG002
+        def visit_DictComp(self, _node: ast.DictComp) -> None:
             return
 
-        def visit_GeneratorExp(self, node: ast.GeneratorExp) -> None:  # noqa: ARG002
+        def visit_GeneratorExp(self, _node: ast.GeneratorExp) -> None:
             return
 
         def visit_Name(self, node: ast.Name) -> None:
@@ -166,13 +166,13 @@ def class_scope_global_or_nonlocal_names(node: ast.ClassDef) -> set[str]:
     names: set[str] = set()
 
     class Visitor(ast.NodeVisitor):
-        def visit_FunctionDef(self, node: ast.FunctionDef) -> None:  # noqa: ARG002
+        def visit_FunctionDef(self, _node: ast.FunctionDef) -> None:
             return
 
-        def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:  # noqa: ARG002
+        def visit_AsyncFunctionDef(self, _node: ast.AsyncFunctionDef) -> None:
             return
 
-        def visit_ClassDef(self, node: ast.ClassDef) -> None:  # noqa: ARG002
+        def visit_ClassDef(self, _node: ast.ClassDef) -> None:
             return
 
         def visit_Global(self, node: ast.Global) -> None:

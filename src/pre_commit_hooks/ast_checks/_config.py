@@ -214,7 +214,7 @@ def _load(args: argparse.Namespace, cwd: Path) -> tuple[Mapping[str, Any], Path,
         return {}, cwd, CLI_SOURCE
 
     if args.config is not None:
-        path = Path(os.path.abspath(args.config))  # noqa: PTH100
+        path = Path(os.path.abspath(args.config))  # noqa: PTH100 -- Preserve symlink aliases.
         if not path.is_file():
             message = f"Could not read `{path}`: no such file"
             raise ConfigError(message)

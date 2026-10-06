@@ -114,7 +114,7 @@ def _has_await_expression(node: ast.expr) -> bool:
         def __init__(self) -> None:
             self.has_await = False
 
-        def visit_Await(self, node: ast.Await) -> None:  # noqa: ARG002
+        def visit_Await(self, _node: ast.Await) -> None:
             self.has_await = True
 
     detector = AwaitDetector()
@@ -217,13 +217,21 @@ def _collect_module_binding_facts(tree: ast.Module) -> tuple[bool, dict[str, int
             shadowing.add(node.id)
         elif isinstance(node, ast.alias):
             shadowing.add((node.asname or node.name).split(".")[0])
-        elif isinstance(node, ast.MatchAs | ast.MatchStar) and node.name is not None:
-            shadowing.add(node.name)
         elif isinstance(node, ast.MatchMapping) and node.rest is not None:
             shadowing.add(node.rest)
-        elif isinstance(node, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple | ast.ClassDef):  # noqa: SIM114
-            shadowing.add(node.name)
-        elif isinstance(node, ast.ExceptHandler) and node.name is not None:
+        elif (
+            isinstance(
+                node,
+                ast.MatchAs
+                | ast.MatchStar
+                | ast.TypeVar
+                | ast.ParamSpec
+                | ast.TypeVarTuple
+                | ast.ClassDef
+                | ast.ExceptHandler,
+            )
+            and node.name is not None
+        ):
             shadowing.add(node.name)
     return has_wildcard_import, function_name_counts, shadowing
 
@@ -404,7 +412,7 @@ class VariableTracker(ast.NodeVisitor):
         self.try_depth = try_depth
         self._exit_scope()
 
-    visit_AsyncFunctionDef = visit_FunctionDef  # noqa: N815
+    visit_AsyncFunctionDef = visit_FunctionDef  # noqa: N815 -- Match ast.NodeVisitor's callback names.
 
     def visit_For(self, node: ast.For | ast.AsyncFor) -> None:
         self._record_compound_target_rebindings(node.target, self._get_current_stmt_index())
@@ -419,7 +427,7 @@ class VariableTracker(ast.NodeVisitor):
             self.visit(stmt)
         self.control_flow_depth -= 1
 
-    visit_AsyncFor = visit_For  # noqa: N815
+    visit_AsyncFor = visit_For  # noqa: N815 -- Match ast.NodeVisitor's callback names.
 
     def visit_While(self, node: ast.While) -> None:
         self.loop_depth += 1
@@ -461,7 +469,7 @@ class VariableTracker(ast.NodeVisitor):
         self.control_flow_depth -= 1
         self.parent_stack.pop()
 
-    visit_TryStar = visit_Try  # noqa: N815
+    visit_TryStar = visit_Try  # noqa: N815 -- Match ast.NodeVisitor's callback names.
 
     def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
         if node.name is not None:
@@ -474,7 +482,7 @@ class VariableTracker(ast.NodeVisitor):
             self._register_local_binding(scope_id, (alias.asname or alias.name).split(".")[0])
         self.generic_visit(node)
 
-    visit_ImportFrom = visit_Import  # noqa: N815
+    visit_ImportFrom = visit_Import  # noqa: N815 -- Match ast.NodeVisitor's callback names.
 
     def visit_With(self, node: ast.With | ast.AsyncWith) -> None:
         self.control_flow_depth += 1
@@ -485,7 +493,7 @@ class VariableTracker(ast.NodeVisitor):
         self.generic_visit(node)
         self.control_flow_depth -= 1
 
-    visit_AsyncWith = visit_With  # noqa: N815
+    visit_AsyncWith = visit_With  # noqa: N815 -- Match ast.NodeVisitor's callback names.
 
     def visit_Match(self, node: ast.Match) -> None:
         self.parent_stack.append(node)
@@ -1075,7 +1083,7 @@ class VariableTracker(ast.NodeVisitor):
             return _suspension_precedes_use(use)
         return False
 
-    def _reference_reassigned_in_range(  # noqa: PLR0917
+    def _reference_reassigned_in_range(  # noqa: PLR0917 -- Distinct source and statement coordinates.
         self,
         name: str,
         scope_id: int,

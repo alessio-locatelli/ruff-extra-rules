@@ -91,7 +91,7 @@ class RedundantTypeConversionCheck(BaseCheck):
         return True
 
     def get_prefilter_pattern(self) -> list[str] | None:
-        from . import daemon  # noqa: PLC0415
+        from . import daemon  # noqa: PLC0415 -- Load daemon support only when checking its state.
 
         if daemon.socket_exists_for(Path.cwd()):
             return None

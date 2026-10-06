@@ -67,7 +67,7 @@ def test_prefilter_pattern_matches_the_configured_levels_eligible_constructors(
     monkeypatch.setattr(daemon_module, "socket_exists_for", lambda _root: False)
     pattern = RedundantTypeConversionCheck(level=level).get_prefilter_pattern()
     assert pattern is not None
-    assert set(pattern) == expected  # pytriage: TR6
+    assert set(pattern) == expected  # pytriage: TR6 -- Compare constructor patterns independently of their order.
 
 
 def test_fix_always_declines() -> None:
@@ -216,7 +216,7 @@ def test_tracking_check_does_not_reuse_normal_analysis_cache(
         _candidates: object,
         _source: str,
         *,
-        level: object,  # noqa: ARG001
+        level: object,  # noqa: ARG001 -- Match the analysis callback's keyword signature.
         ignored_lines: set[int],
     ) -> list[SimpleNamespace]:
         ignored_lines_seen.append(ignored_lines)
