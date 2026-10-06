@@ -6,6 +6,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Added
+
+- Add opt-in TR12, `suppression-rationale`, which requires an inline explanation or an immediately preceding comment block for Ruff and `pytriage` suppression comments. It accepts ambiguous cases, does not judge explanation quality, and provides no automatic fix.
+
 ## [0.5.0] - 2026-10-01
 
 ### Fixed

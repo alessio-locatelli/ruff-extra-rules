@@ -324,7 +324,7 @@ class _FormatSuppressionScanner:
         return set(range(self._suppressed_from, self._last_line + 1))
 
 
-def _scan_token_stream(
+def ignored_lines_and_classify_comments_and_pytriage_from_tokens(
     tokens: Iterable[tokenize.TokenInfo], *patterns: re.Pattern[str]
 ) -> tuple[set[int], set[int], set[int], set[int], tuple[PytriageComment, ...]]:
     ignored: set[int] = set()
@@ -358,7 +358,9 @@ def _scan_token_stream(
 def ignored_lines_and_pytriage_comments_from_tokens(
     tokens: Iterable[tokenize.TokenInfo], *patterns: re.Pattern[str]
 ) -> tuple[set[int], set[int], tuple[PytriageComment, ...]]:
-    ignored, _comment_only, _trailing, format_suppressed, comments = _scan_token_stream(tokens, *patterns)
+    ignored, _comment_only, _trailing, format_suppressed, comments = (
+        ignored_lines_and_classify_comments_and_pytriage_from_tokens(tokens, *patterns)
+    )
     return ignored, format_suppressed, comments
 
 
@@ -371,7 +373,7 @@ def find_ignored_lines_and_pytriage_comments(
 def find_ignored_lines_and_classify_comments_and_pytriage(
     source: str, *patterns: re.Pattern[str]
 ) -> tuple[set[int], set[int], set[int], set[int], tuple[PytriageComment, ...]]:
-    return _scan_token_stream(tokenize_source(source), *patterns)
+    return ignored_lines_and_classify_comments_and_pytriage_from_tokens(tokenize_source(source), *patterns)
 
 
 def find_suppression_usage(
@@ -453,7 +455,7 @@ def classify_comment_lines(source: str) -> tuple[set[int], set[int]]:
 def find_ignored_lines_and_classify_comments(
     source: str, *patterns: re.Pattern[str]
 ) -> tuple[set[int], set[int], set[int]]:
-    ignored, comment_only, trailing, _format_suppressed, _comments = _scan_token_stream(
-        tokenize_source(source), *patterns
+    ignored, comment_only, trailing, _format_suppressed, _comments = (
+        ignored_lines_and_classify_comments_and_pytriage_from_tokens(tokenize_source(source), *patterns)
     )
     return ignored, comment_only, trailing
