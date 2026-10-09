@@ -1,12 +1,12 @@
 - id: ruff-extra-rules
   name: Extra Python rule checks (ruff-extra-rules)
-  description: Run multiple AST-based checks in a single pass, including redundant-enum-value (TR10) and defined-far-from-use (TR11). Excludes redundant-type-conversion (TR6) and redundant-dict-get (TR9); see the ruff-extra-rules-ty hook.
+  description: Flags code that ruff does not catch, such as meaningless variable names, redundant assignments, and variables defined far from their use.
   entry: python -m pre_commit_hooks.ruff_extra_rules
   language: python
   types: [python]
 - id: ruff-extra-rules-ty
   name: Extra Python rule checks (redundant-type-conversion, redundant-dict-get)
-  description: Run redundant-type-conversion (TR6) and redundant-dict-get (TR9), plus unused-pytriage (TR8) when selected. TR6 shares a persistent ty daemon across files (ADR-0041), so this hook runs as a single, serial process.
+  description: Flags redundant type conversions and redundant dict.get() calls. Requires ty on PATH.
   entry: python -m pre_commit_hooks.ruff_extra_rules_ty
   language: python
   types: [python]
