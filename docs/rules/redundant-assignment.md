@@ -16,6 +16,7 @@ Unnecessary intermediate variables add cognitive load without providing value. H
 
 ```python
 # Redundant - adds no value:
+
 x = "foo"
 func(x=x)
 
@@ -25,29 +26,41 @@ func(x=x)
 func(x)
 
 # Redundant - simple pass-through:
+
 result = get_value()
 return result
 
 # Adds clarity - transformative verb indicates processing:
+
 formatted_timestamp = format_iso8601(raw_ts)
 return formatted_timestamp
 
 # Adds clarity - breaks down complex chained expression:
+
 collection_places = singleton_factory(mongo_client)[DATABASE_NAME]["places"]
 return collection_places.find_one({"_id": place_id})
 
 # Not flagged - conditional assignment with subsequent use:
+
 if condition:
     msg = "foo"
 else:
     msg = "bar"
 msg += " suffix"  # Uses the conditional value
 print(msg)
+
+# Not flagged - a comment directly above explains the variable:
+# Matches the upstream API's page size.
+page_size = 50
+fetch(page_size=page_size)
 ```
+
+A comment counts only when it is on the line directly above the assignment. A blank line in between leaves the assignment subject to the usual rules. See [ADR-0064](../adr/0064-redundant-assignment-comment-above-preserves-variable.md).
 
 ## Features
 
 - **Smart semantic analysis**: Preserves variables that add meaning through:
+  - A comment directly above the assignment
   - Transformative verbs ("formatted", "validated", "parsed", etc.)
   - Long expressions (60+ characters)
   - Chained operations (`obj[x][y]`, `foo.bar.baz`)
@@ -103,6 +116,7 @@ Inlining would combine fetching the responses, converting them, and writing the 
 
 ```python
 # Before:
+
 x = "foo"
 func(x=x)
 

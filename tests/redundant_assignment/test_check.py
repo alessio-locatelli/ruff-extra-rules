@@ -239,11 +239,6 @@ parent_url = "https://example.com"
 print(parent_url)
 """,
         """
-# Configuration URL
-_url = "https://example.com"
-print(_url)
-""",
-        """
 async def test_json(client):
     response = await get_test_response(client, '/null_content')
     assert await response.json() is None
@@ -271,24 +266,9 @@ def func():
     assert variable.attribute_name
 """,
         """
-def auto_clear_fixture():
-    # Exclude cache.
-    # The prefixes are hard-coded in external library
-    cache_prefixes = ("responses", "redirects")
-    process(cache_prefixes)
-""",
-        """
 def func():
     prefixes = ("responses", "redirects")
     process(prefixes)
-""",
-        """
-def func():
-    # First comment line
-    # Second comment line
-    # Third comment line with URL: https://example.com/path
-    variable = calculate_value()
-    return variable
 """,
         """
 def func():
@@ -458,15 +438,12 @@ def func():
         "snapshot-before-name-reassignment",
         "snapshot-before-attribute-reassignment",
         "global-scope-without-underscore",
-        "global-scope-with-comment-above",
         "await-on-assignment-and-usage",
         "await-on-assignment-only",
         "ternary-operator",
         "ternary-in-function",
         "long-rhs-over-79-chars",
-        "comment-above-in-function-scope",
         "rhs-at-25-char-threshold",
-        "comment-above-multiline",
         "would-require-parentheses",
         "closure-variable",
         "closure-with-mock",
@@ -1181,6 +1158,28 @@ def func(ctx_factory):
 def test_untracked_rebinding_not_flagged_as_redundant(source: str, excluded_names: tuple[str, ...]) -> None:
     violations = _check(source, level=AggressivenessLevel.AGGRESSIVE)
     assert all(f"'{name}'" not in v.message for v in violations for name in excluded_names)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'def func():\n    # Explains x\n    x = "foo"\n    func(x=x)\n',
+        'def func():\n    # First comment line\n    # Second comment line\n    x = "foo"\n    func(x=x)\n',
+        '# Explains _x\n_x = "foo"\nfunc(x=_x)\n',
+    ],
+    ids=["function-scope", "multiline-comment", "global-scope"],
+)
+def test_comment_directly_above_assignment_prevents_report(source: str) -> None:
+    uncommented = "".join(line for line in source.splitlines(keepends=True) if not line.lstrip().startswith("#"))
+
+    assert _check(uncommented) != []
+    assert _check(source) == []
+
+
+def test_comment_separated_by_blank_line_does_not_prevent_report() -> None:
+    source = 'def func():\n    # Explains x\n\n    x = "foo"\n    func(x=x)\n'
+
+    assert [v.line for v in _check(source)] == [4]
 
 
 def test_ignore_marker_inside_string_literal_does_not_suppress_violation() -> None:
