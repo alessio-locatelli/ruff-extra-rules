@@ -5,7 +5,7 @@ Custom pre-commit/prek hooks providing fast, AST-based Python rule checks that r
 ## Language
 
 **Hook**:
-An installable unit registered in `.pre-commit-hooks.yaml` that pre-commit/prek invokes as a subprocess against a set of files. Each hook runs a fixed set of checks in one pass, report-only by default, with `--select`/`--ignore`/`--fix` narrowing and fixing like `ruff check`'s own flags (see `docs/adr/0008-ruff-check-cli-parity.md`). A selection is intersected with the hook's own fixed set rather than rejected, so one project's configuration can serve every hook.
+An installable unit registered in `.pre-commit-hooks.yaml` that pre-commit/prek invokes as a subprocess against a set of files. Each hook runs a fixed set of checks in one pass, report-only by default, with `--select`/`--ignore`/`--fix` narrowing and fixing like `ruff check`'s own flags (see `docs/adr/0008-ruff-check-cli-parity.md`). A selection is intersected with the hook's own fixed set rather than rejected, so one project's configuration can serve every hook, unless the configuration's `hooks` key declares which hooks the project runs (see `docs/adr/0065-declared-hooks-validate-check-ownership.md`).
 _Avoid_: linter, tool
 
 **Check**:

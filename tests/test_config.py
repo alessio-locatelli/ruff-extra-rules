@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import re
+from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 import pytest
@@ -9,6 +11,7 @@ from pre_commit_hooks import ruff_extra_rules, ruff_extra_rules_ty
 from pre_commit_hooks.ast_checks import ALL_CHECKS
 from pre_commit_hooks.ast_checks._cli import main
 from pre_commit_hooks.ast_checks._config import discover, resolve
+from pre_commit_hooks.ast_checks._hooks import HOOK_CHECKS
 from pre_commit_hooks.ast_checks._options import add_check_arguments
 from pre_commit_hooks.ast_checks.defined_far_from_use.reorder import DefinedFarFromUseLevel
 from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsLevel
@@ -19,13 +22,18 @@ from tests._helpers import restricted_permissions
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-    from pathlib import Path
 
     from pre_commit_hooks.ast_checks._base import ASTCheck
 
 pytestmark = pytest.mark.uses_project_config
 
 _UNSUGGESTABLE = "data = 1\n"
+_MAIN_HOOK_ONLY = '[tool.ruff-extra-rules]\nhooks = ["ruff-extra-rules"]\n'
+_TY_HOOK_ONLY = '[tool.ruff-extra-rules]\nhooks = ["ruff-extra-rules-ty"]\n'
+_BOTH_HOOKS = '[tool.ruff-extra-rules]\nhooks = ["ruff-extra-rules", "ruff-extra-rules-ty"]\n'
+_ENTRYPOINTS = pytest.mark.parametrize(
+    "entrypoint", [main, ruff_extra_rules.main, ruff_extra_rules_ty.main], ids=["all", "default", "ty"]
+)
 
 
 @pytest.fixture
@@ -39,6 +47,12 @@ def _write_config(directory: Path, body: str) -> Path:
     path = directory / "pyproject.toml"
     path.write_text(body)
     return path
+
+
+class _UndeclaredHookCase(NamedTuple):
+    body: str
+    argv: list[str]
+    needle: str
 
 
 class _ExtendSelectCase(NamedTuple):
@@ -125,6 +139,8 @@ def test_an_unreadable_config_file_is_reported_rather_than_skipped(
         ("[tool.ruff-extra-rules.defined-far-from-use]\nmax-distance = true\n", "expected an integer of at least 1"),
         ('[tool.ruff-extra-rules.defined-far-from-use]\nmax-distance = "5"\n', "expected an integer of at least 1"),
         ("[tool]\nruff-extra-rules = 1\n", "must be a table"),
+        ('[tool.ruff-extra-rules]\nhooks = "ruff-extra-rules"\n', "expected a list of strings"),
+        ('[tool.ruff-extra-rules]\nhooks = ["nope"]\n', "Unknown hook `nope`"),
     ],
     ids=[
         "malformed-toml",
@@ -143,6 +159,8 @@ def test_an_unreadable_config_file_is_reported_rather_than_skipped(
         "boolean-integer-option",
         "string-integer-option",
         "non-table-tool-section",
+        "non-list-hooks",
+        "unknown-hook",
     ],
 )
 def test_invalid_configuration_exits_two_and_names_its_source(
@@ -535,3 +553,88 @@ def test_an_uncompilable_exclude_pattern_on_the_command_line_is_rejected(
 
     assert main([str(filepath), "--exclude", "[bad"]) == 2
     assert "Invalid file pattern" in capsys.readouterr().err
+
+
+@_ENTRYPOINTS
+@pytest.mark.parametrize(
+    "case",
+    [
+        _UndeclaredHookCase(
+            _MAIN_HOOK_ONLY + 'select = ["redundant-type-conversion"]\n',
+            [],
+            "`redundant-type-conversion` in `select` from",
+        ),
+        _UndeclaredHookCase(
+            _MAIN_HOOK_ONLY + 'extend-select = ["redundant-dict-get"]\n',
+            [],
+            "`redundant-dict-get` in `extend-select` from",
+        ),
+        _UndeclaredHookCase(
+            _MAIN_HOOK_ONLY + '[tool.ruff-extra-rules.redundant-dict-get]\nlevel = "aggressive"\n',
+            [],
+            "`redundant-dict-get` in `[tool.ruff-extra-rules.redundant-dict-get]` from",
+        ),
+        _UndeclaredHookCase(
+            _MAIN_HOOK_ONLY,
+            ["--select", "redundant-type-conversion"],
+            "`redundant-type-conversion` in `--select` from the CLI",
+        ),
+        _UndeclaredHookCase(
+            _MAIN_HOOK_ONLY,
+            ["--extend-select", "redundant-dict-get"],
+            "`redundant-dict-get` in `--extend-select` from the CLI",
+        ),
+        _UndeclaredHookCase(
+            _MAIN_HOOK_ONLY,
+            ["--redundant-type-conversion-level", "aggressive"],
+            "`redundant-type-conversion` in `--redundant-type-conversion-level` from the CLI",
+        ),
+        _UndeclaredHookCase(
+            _TY_HOOK_ONLY + '[tool.ruff-extra-rules.meaningless-vars]\nlevel = "aggressive"\n',
+            [],
+            "runs only under `ruff-extra-rules`, which `hooks`",
+        ),
+    ],
+    ids=["select", "extend-select", "check-table", "cli-select", "cli-extend-select", "cli-option", "ty-only"],
+)
+def test_a_check_no_declared_hook_runs_is_rejected_by_every_entrypoint(
+    project: Path,
+    capsys: pytest.CaptureFixture[str],
+    entrypoint: Callable[[list[str] | None], int],
+    case: _UndeclaredHookCase,
+) -> None:
+    path = _write_config(project, case.body)
+
+    assert entrypoint(case.argv) == 2
+
+    err = capsys.readouterr().err
+    assert case.needle in err
+    assert f"`hooks` in `{path}` does not include" in err
+
+
+@_ENTRYPOINTS
+@pytest.mark.parametrize(
+    "body",
+    [
+        _BOTH_HOOKS
+        + 'select = ["meaningless-vars", "redundant-type-conversion"]\n'
+        + '[tool.ruff-extra-rules.redundant-dict-get]\nlevel = "aggressive"\n',
+        _MAIN_HOOK_ONLY,
+        _MAIN_HOOK_ONLY + 'ignore = ["redundant-type-conversion"]\nextend-select = ["unused-pytriage"]\n',
+        _MAIN_HOOK_ONLY + '[tool.ruff-extra-rules.per-file-ignores]\n"tests/**" = ["redundant-dict-get"]\n',
+    ],
+    ids=["both-hooks", "default-selection", "ignored-and-shared-checks", "per-file-ignores"],
+)
+def test_checks_a_declared_hook_runs_are_accepted(
+    project: Path, capsys: pytest.CaptureFixture[str], entrypoint: Callable[[list[str] | None], int], body: str
+) -> None:
+    _write_config(project, body)
+
+    assert entrypoint([]) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_declared_hooks_name_every_published_hook() -> None:
+    manifest = (Path(__file__).resolve().parent.parent / ".pre-commit-hooks.yaml").read_text()
+
+    assert sorted(re.findall(r"^- id: (\S+)$", manifest, re.MULTILINE)) == sorted(HOOK_CHECKS)

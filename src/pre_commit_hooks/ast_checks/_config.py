@@ -4,10 +4,11 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from ._discovery import ExcludePattern
 from ._globs import InvalidGlobError, compile_glob
+from ._hooks import HOOK_CHECK_IDS
 from ._options import ConfigError
 from ._per_file_ignores import PerFileIgnore, PerFileIgnoreList
 
@@ -23,8 +24,9 @@ CONFIG_FILENAME = "pyproject.toml"
 CLI_SOURCE = "the CLI"
 
 PER_FILE_IGNORES_KEY = "per-file-ignores"
+HOOKS_KEY = "hooks"
 
-_GLOBAL_KEYS = frozenset({"exclude", "extend-select", "fix", "ignore", PER_FILE_IGNORES_KEY, "select"})
+_GLOBAL_KEYS = frozenset({"exclude", "extend-select", "fix", HOOKS_KEY, "ignore", PER_FILE_IGNORES_KEY, "select"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,11 +113,15 @@ def _split_check_ids(values: list[str]) -> set[str]:
     return {check_id.strip() for value in values for check_id in value.split(",") if check_id.strip()}
 
 
-def _validate_check_ids(check_ids: Iterable[str], key: str, source: str, known: Iterable[str]) -> None:
-    unknown = set(check_ids) - set(known)
+def _validate_known(values: Iterable[str], noun: str, key: str, source: str, known: Iterable[str]) -> None:
+    unknown = set(values) - set(known)
     if unknown:
-        message = f"Unknown check {_quoted(unknown)} in `{key}` from {source}; expected one of: {_quoted(known)}"
+        message = f"Unknown {noun} {_quoted(unknown)} in `{key}` from {source}; expected one of: {_quoted(known)}"
         raise ConfigError(message)
+
+
+def _validate_check_ids(check_ids: Iterable[str], key: str, source: str, known: Iterable[str]) -> None:
+    _validate_known(check_ids, "check", key, source, known)
 
 
 def _table_check_ids(table: Mapping[str, Any], key: str, source: str, known: Iterable[str]) -> set[str] | None:
@@ -133,6 +139,36 @@ def _cli_check_ids(cli_values: list[str], key: str, known: Iterable[str]) -> set
         raise ConfigError(message)
     _validate_check_ids(selected, f"--{key}", CLI_SOURCE, known)
     return selected
+
+
+def _table_hooks(table: Mapping[str, Any], source: str) -> frozenset[str] | None:
+    configured = _table_string_list(table, HOOKS_KEY, source)
+    if configured is None:
+        return None
+    _validate_known(configured, "hook", HOOKS_KEY, source, HOOK_CHECK_IDS)
+    return frozenset(configured)
+
+
+class _NamedCheck(NamedTuple):
+    check_id: str
+    key: str
+    source: str
+
+
+def _named_checks(check_ids: Iterable[str] | None, key: str, source: str) -> list[_NamedCheck]:
+    return [_NamedCheck(check_id, key, source) for check_id in sorted(check_ids or ())]
+
+
+def _validate_declared_hooks(hooks: frozenset[str], hooks_source: str, named_checks: Iterable[_NamedCheck]) -> None:
+    runnable = {check_id for hook_id in hooks for check_id in HOOK_CHECK_IDS[hook_id]}
+    for check_id, key, source in named_checks:
+        if check_id not in runnable:
+            owners = {hook_id for hook_id, check_ids in HOOK_CHECK_IDS.items() if check_id in check_ids}
+            message = (
+                f"`{check_id}` in `{key}` from {source} runs only under {_quoted(owners)}, "
+                f"which `{HOOKS_KEY}` in {hooks_source} does not include"
+            )
+            raise ConfigError(message)
 
 
 def _validated_glob(pattern: str, key: str, source: str) -> str:
@@ -256,6 +292,18 @@ def resolve(
     configured_extend_select = _table_check_ids(table, "extend-select", source, known_check_ids)
     configured_ignore = _table_check_ids(table, "ignore", source, known_check_ids)
     configured_per_file_ignores = _table_per_file_ignores(table, source, known_check_ids, root)
+    declared_hooks = _table_hooks(table, source)
+
+    cli_select = _cli_check_ids(args.select, "select", known_check_ids) if args.select is not None else None
+    cli_extend_select = (
+        _cli_check_ids(args.extend_select, "extend-select", known_check_ids) if args.extend_select is not None else None
+    )
+    named_checks = [
+        *_named_checks(configured_select, "select", source),
+        *_named_checks(configured_extend_select, "extend-select", source),
+        *_named_checks(cli_select, "--select", CLI_SOURCE),
+        *_named_checks(cli_extend_select, "--extend-select", CLI_SOURCE),
+    ]
 
     enabled_check_ids = {check_class().check_id for check_class in enabled_check_classes}
     check_kwargs: dict[str, dict[str, Any]] = {}
@@ -274,6 +322,13 @@ def resolve(
             for option in check_class.OPTIONS
             if option.name in sub_table
         }
+        if check_id in table:
+            named_checks.append(_NamedCheck(check_id, f"[tool.{TABLE_NAME}.{check_id}]", source))
+        named_checks.extend(
+            _NamedCheck(check_id, option.flag(check_id), CLI_SOURCE)
+            for option in check_class.OPTIONS
+            if getattr(args, option.dest(check_id), None) is not None
+        )
         if check_id not in enabled_check_ids:
             continue
         kwargs = {
@@ -283,14 +338,13 @@ def resolve(
         if kwargs:
             check_kwargs[check_id] = kwargs
 
+    if declared_hooks is not None:
+        _validate_declared_hooks(declared_hooks, source, named_checks)
+
     return ResolvedConfig(
         root=root,
-        select=_cli_check_ids(args.select, "select", known_check_ids) if args.select is not None else configured_select,
-        extend_select=(
-            _cli_check_ids(args.extend_select, "extend-select", known_check_ids)
-            if args.extend_select is not None
-            else configured_extend_select
-        ),
+        select=cli_select if cli_select is not None else configured_select,
+        extend_select=cli_extend_select if cli_extend_select is not None else configured_extend_select,
         ignore=_cli_check_ids(args.ignore, "ignore", known_check_ids) if args.ignore is not None else configured_ignore,
         exclude=(
             _exclude_patterns(
