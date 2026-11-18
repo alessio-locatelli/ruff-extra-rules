@@ -1,3 +1,7 @@
+default_language_version:
+  # The default is no project language-version mapping; hooks use their own language_version or default resolution (https://github.com/j178/prek/blob/v0.5.7/docs/reference/configuration.md#default_language_version). We override it because Python hooks must stay on the supported 3.14 baseline when development Python advances.
+  python: python3.14
+
 ci:
   skip: [
       # Using `language: python` + `additional_dependencies: - .` will fail on CI with:
