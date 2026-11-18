@@ -2,6 +2,8 @@
 
 **Update, ADR-0058:** `extend-select` adds checks to the default or explicit `select` set without changing `select`'s restrictive meaning.
 
+**Update, ADR-0065:** an optional `hooks` key declares which published hooks a project runs; when set, naming a check none of them runs is rejected rather than ignored.
+
 Until now every setting came from CLI arguments alone: ADR-0019 recorded that no config-file parsing, environment-variable precedence, or project-root discovery existed anywhere in this pipeline. That put each check's configuration in `.pre-commit-config.yaml`'s `args`, where it is invisible to anyone running the checks directly and has to be repeated per hook.
 
 `ruff` and `ty` are the reference points, but they do not agree on how configuration is discovered, so "match ruff and ty" was not one target. `ruff` resolves hierarchically: the closest config file wins for each individual file, with no merging across files. `ty` walks up from the project directory once and uses a single project-level config. This decision follows `ty`.

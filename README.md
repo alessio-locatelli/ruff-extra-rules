@@ -55,7 +55,7 @@ repos:
 
 `ruff-extra-rules-ty` runs [redundant-type-conversion](docs/rules/redundant-type-conversion.md) and [redundant-dict-get](docs/rules/redundant-dict-get.md). When `unused-pytriage` is enabled through `extend-select`, it also audits TR6 and TR9 suppressions. The hook is optional and requires [`ty`](https://github.com/astral-sh/ty) on `PATH`.
 
-`ruff-extra-rules` always excludes `redundant-type-conversion` and `redundant-dict-get`; `ruff-extra-rules-ty` owns those checks and the shared `unused-pytriage` audit. Both read the same configuration and accept the same options; a check one hook can't run is simply left out rather than rejected, so a single configuration works for both.
+`ruff-extra-rules` always excludes `redundant-type-conversion` and `redundant-dict-get`; `ruff-extra-rules-ty` owns those checks and the shared `unused-pytriage` audit. Both read the same configuration and accept the same options; a check one hook can't run is simply left out rather than rejected, so a single configuration works for both. To catch settings that no hook you run will apply, list your hooks in `hooks` (see below).
 
 Run `check-ast` and `ruff-check` in the same `.pre-commit-config.yaml` — syntax errors are their job, not this tool's; see the [FAQ](docs/faq.md#does-this-catch-syntax-errors).
 
@@ -69,6 +69,7 @@ fix = true                          # apply safe fixes without passing --fix
 exclude = ["vendor/**"]             # glob patterns, relative to this file
 ignore = ["misplaced-comment"]      # or select = [...] to run only certain checks
 extend-select = ["unused-pytriage"]
+hooks = ["ruff-extra-rules"]         # optional: the hooks this project runs
 
 [tool.ruff-extra-rules.meaningless-vars]
 level = "aggressive"                # each check's own settings live in its own table
@@ -81,6 +82,8 @@ level = "aggressive"                # each check's own settings live in its own 
 Patterns use the same glob syntax as `ruff`'s, so an entry copied from your `[tool.ruff.lint.per-file-ignores]` covers the same files. `--per-file-ignores 'tests/**:meaningless-vars'` is the command-line form.
 
 The nearest `pyproject.toml` with a `[tool.ruff-extra-rules]` table, searching upward from where the command runs, is the one used — so a monorepo can configure everything from its root. The search stops at your git repository. Command-line arguments win over the file, `--config` points at a specific file, and `--isolated` ignores configuration files entirely. `extend-select` adds to either the default selection or an explicit `select` list; `ignore` is applied afterward.
+
+With `hooks` set, a check you select or configure that none of the listed hooks runs is an error instead of being silently skipped — e.g. a `[tool.ruff-extra-rules.redundant-type-conversion]` table when `hooks` lists only `ruff-extra-rules`.
 
 ### Inline Suppression
 

@@ -6,6 +6,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Added
+
+- Add an optional `hooks` setting to `[tool.ruff-extra-rules]` that lists the hooks a project runs. When it is set, selecting or configuring a check that none of the listed hooks runs — for example, `redundant-type-conversion` settings with only `ruff-extra-rules` listed — fails with exit code 2 instead of being silently ignored.
+
 ## [0.6.0] - 2026-10-06
 
 ### Added
