@@ -154,7 +154,7 @@ _ITERABLE_PROTOCOL_HEADS = frozenset(
     }
 )
 
-_MAPPING_PROTOCOL_HEADS = frozenset({"Mapping", "MutableMapping", "dict", "ChainMap", "OrderedDict", "defaultdict"})
+_MAPPING_PROTOCOL_HEADS = frozenset({"Mapping", "MutableMapping", "dict", "ChainMap"})
 
 _DEDUP_SAFE_HEADS: dict[str, frozenset[str]] = {
     "set": _COMPARISON_SAFE_HEADS["set"] | {"KeysView"},

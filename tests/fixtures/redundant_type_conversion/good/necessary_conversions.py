@@ -1,4 +1,5 @@
 import json
+from collections import defaultdict
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any, overload
@@ -66,6 +67,13 @@ def describe(*, places: object | None = None) -> None: ...
 
 def pass_a_set_by_keyword_to_an_object_parameter(missing: set[str]) -> None:
     describe(places=tuple(missing))
+
+
+def group_without_leaking_the_defaultdict(pairs: list[tuple[str, int]]) -> dict[str, list[int]]:
+    groups: defaultdict[str, list[int]] = defaultdict(list)
+    for key, value in pairs:
+        groups[key].append(value)
+    return dict(groups)
 
 
 @overload

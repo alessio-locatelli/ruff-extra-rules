@@ -12,6 +12,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 - `validate-function-name` no longer treats the exception a function raises as evidence of what it does. A `get_` function whose loop returns a match and which ends with `raise KeyError(key)` keeps its name instead of being reported as `create_`.
 - `defined-far-from-use` at `aggressive` level no longer suggests moving a clock reading, such as `start = time.perf_counter()` or `now = datetime.now()`, closer to its use, since that changes what it measures.
 - `redundant-type-conversion` at `aggressive` level no longer reports a conversion passed straight to a parameter that accepts anything, such as `json.dumps(tuple(a_set))` or `print(tuple(a_set))`, unless the value already has the target type. Such a parameter can't reveal a mismatch, and the conversion can still change what the call does.
+- `redundant-type-conversion` at `aggressive` level no longer reports `dict(x)` when `x` is a `defaultdict`, `Counter`, or `OrderedDict`. Dropping the conversion would pass that object on, so a missing key would no longer raise `KeyError` (`defaultdict`, `Counter`), or equality would start to depend on key order (`OrderedDict`).
 
 ## [0.7.0] - 2026-11-18
 
