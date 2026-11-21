@@ -7,6 +7,7 @@ from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import (
     IMMUTABLE_CONSTRUCTORS,
     MUTABLE_CONSTRUCTORS,
     ConfidenceLevel,
+    accepts_any_argument,
     eligible_constructors,
     hover_passes_gate,
     is_comparison_safe_hover,
@@ -298,3 +299,44 @@ def test_is_comparison_safe_hover(hover_text: str, constructor: str, expected: b
 )
 def test_is_purepath_hover(hover_text: str, expected: bool) -> None:
     assert is_purepath_hover(hover_text) is expected
+
+
+@pytest.mark.parametrize(
+    ("parameter_labels", "expected"),
+    [
+        ([], True),
+        ([None], True),
+        (["obj: Any"], True),
+        (["*values: object"], True),
+        (["value"], True),
+        (["value=()"], True),
+        (["x: object = None"], True),
+        (["x: Any | None = None"], True),
+        (["x: Unknown & ~AlwaysFalsy"], True),
+        (["b: tuple[str, ...]"], False),
+        (["names: Iterable[str]"], False),
+        (["mapping: dict[str, object] = {}"], False),
+        (["key: Callable[[Any], str] | None = None"], False),
+        (["v: int", "v: tuple[str, ...]"], False),
+        (["v: int", "v: object"], True),
+    ],
+    ids=[
+        "no-signature",
+        "no-active-parameter",
+        "any",
+        "variadic-object",
+        "unannotated",
+        "unannotated-with-default",
+        "object-with-default",
+        "any-union-member",
+        "narrowed-unknown",
+        "concrete-type",
+        "protocol-type",
+        "object-nested-in-a-generic",
+        "any-nested-in-a-callable",
+        "every-overload-typed",
+        "one-overload-unconstrained",
+    ],
+)
+def test_accepts_any_argument(parameter_labels: list[str | None], *, expected: bool) -> None:
+    assert accepts_any_argument(parameter_labels) is expected

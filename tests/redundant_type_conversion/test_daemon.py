@@ -109,6 +109,9 @@ class _FakeSession:
             time.sleep(self.hover_delay_seconds)
         return self.hover_result
 
+    def receiving_parameters(self, _filepath: Path, _line0: int, _char_utf16: int, /) -> list[str | None]:
+        return ["obj: Any", None]
+
     def finalize(self, _filepath: Path, _source: str, /) -> None:
         return
 
@@ -165,6 +168,10 @@ def test_ty_version_normalizes_any_failure_to_os_error(monkeypatch: pytest.Monke
             {"result": [("code", "msg", 1, 1)]},
         ),
         ({"op": "hover", "filepath": "f.py", "line0": 0, "char_utf16": 0}, {"result": "str"}),
+        (
+            {"op": "receiving_parameters", "filepath": "f.py", "line0": 0, "char_utf16": 0},
+            {"result": ["obj: Any", None]},
+        ),
         ({"op": "finalize", "filepath": "f.py", "source": "x"}, {"result": None}),
         ({"op": "cached_redundancies", "filepath": "f.py", "source": "x", "cache_key": "strict"}, {"result": None}),
         (
@@ -180,6 +187,7 @@ def test_ty_version_normalizes_any_failure_to_os_error(monkeypatch: pytest.Monke
         "is_within_root",
         "open_or_update",
         "hover",
+        "receiving_parameters",
         "finalize",
         "cached_redundancies",
         "cache_redundancies",
@@ -290,6 +298,7 @@ def test_handle_connection_serves_a_real_round_trip_over_a_background_thread() -
             assert handshake_response == {"result": "ok"}
 
             assert client.hover(Path("f.py"), 0, 0) == "int"
+            assert client.receiving_parameters(Path("f.py"), 0, 0) == ["obj: Any", None]
             assert client.reconcile_direct_inputs() == []
             client._call("shutdown")
     finally:

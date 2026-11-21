@@ -17,10 +17,12 @@ class FakeSession:
     __slots__ = (
         "_diagnostics_by_content",
         "_hover_by_position",
+        "_parameters_by_position",
         "_redundancies_by_content",
         "closed_files",
         "hover_calls",
         "opened_content",
+        "receiving_parameter_calls",
         "within_root",
     )
 
@@ -29,10 +31,13 @@ class FakeSession:
         *,
         diagnostics_by_content: dict[str, frozenset[tuple[object, ...]]],
         hover_by_position: dict[tuple[int, int], str | None],
+        parameters_by_position: dict[tuple[int, int], list[str | None]] | None = None,
         within_root: bool = True,
     ) -> None:
         self._diagnostics_by_content = diagnostics_by_content
         self._hover_by_position = hover_by_position
+        self._parameters_by_position = parameters_by_position or {}
+        self.receiving_parameter_calls: list[tuple[int, int]] = []
         self._redundancies_by_content: dict[tuple[str, str], list[Redundancy]] = {}
         self.opened_content: list[str] = []
         self.hover_calls: list[tuple[int, int]] = []
@@ -53,6 +58,10 @@ class FakeSession:
     def hover(self, _filepath: Path, line0: int, char_utf16: int, /) -> str | None:
         self.hover_calls.append((line0, char_utf16))
         return self._hover_by_position.get((line0, char_utf16))
+
+    def receiving_parameters(self, _filepath: Path, line0: int, char_utf16: int, /) -> list[str | None]:
+        self.receiving_parameter_calls.append((line0, char_utf16))
+        return self._parameters_by_position.get((line0, char_utf16), [])
 
     def analysis_transaction(self) -> contextlib.AbstractContextManager[None]:
         return contextlib.nullcontext()

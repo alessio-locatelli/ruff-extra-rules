@@ -383,6 +383,60 @@ def test_hover(tmp_path: Path, hover_result: object, *, hover_raises: bool, expe
     assert session.hover(tmp_path / "f.py", 0, 0) == expected
 
 
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        (None, []),
+        ({"signatures": None}, []),
+        (
+            {
+                "activeParameter": 1,
+                "signatures": [
+                    {"label": "(a: int, b: str) -> None", "parameters": [{"label": "a: int"}, {"label": "b: str"}]}
+                ],
+            },
+            ["b: str"],
+        ),
+        (
+            {
+                "activeParameter": 0,
+                "signatures": [
+                    {"parameters": [{"label": "v: int"}]},
+                    {"activeParameter": 1, "parameters": [{"label": "a: int"}, {"label": "b: object"}]},
+                ],
+            },
+            ["v: int", "b: object"],
+        ),
+        ({"signatures": [{"label": "(...) -> None", "parameters": []}]}, [None]),
+        ({"activeParameter": 2, "signatures": [{"parameters": [{"label": "a: int"}]}]}, [None]),
+        ({"activeParameter": 0, "signatures": [{"parameters": [{"label": [1, 7]}]}]}, [None]),
+        ({"activeParameter": 0, "signatures": ["not-a-signature"]}, [None]),
+    ],
+    ids=[
+        "none-result",
+        "signatures-not-a-list",
+        "top-level-active-parameter",
+        "per-signature-active-parameter",
+        "gradual-signature",
+        "active-parameter-out-of-range",
+        "offset-label",
+        "signature-not-a-dict",
+    ],
+)
+def test_receiving_parameters(tmp_path: Path, response: object, expected: list[str | None]) -> None:
+    client = _StubLSPClient(hover_result=response)
+    session = _session_with_stub_client(client)
+
+    assert session.receiving_parameters(tmp_path / "f.py", 0, 0) == expected
+
+
+def test_receiving_parameters_propagates_a_failed_request(tmp_path: Path) -> None:
+    session = _session_with_stub_client(_StubLSPClient(hover_raises=True))
+
+    with pytest.raises(LSPError):
+        session.receiving_parameters(tmp_path / "f.py", 0, 0)
+
+
 def test_hover_strips_a_docstring_appended_after_tys_own_separator(tmp_path: Path) -> None:
     raw = "<class 'CallsiteParameter'>\n---------------------------------------------\nDocstring here.\n"
     client = _StubLSPClient(hover_result={"contents": {"kind": "plaintext", "value": raw}})

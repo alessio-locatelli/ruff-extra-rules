@@ -11,6 +11,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 - `redundant-assignment` counts a variable read inside an assignment target, such as `calls[source] += 1` or `self.name: str = source`, as a use. It no longer reports such a variable as used only once.
 - `validate-function-name` no longer treats the exception a function raises as evidence of what it does. A `get_` function whose loop returns a match and which ends with `raise KeyError(key)` keeps its name instead of being reported as `create_`.
 - `defined-far-from-use` at `aggressive` level no longer suggests moving a clock reading, such as `start = time.perf_counter()` or `now = datetime.now()`, closer to its use, since that changes what it measures.
+- `redundant-type-conversion` at `aggressive` level no longer reports a conversion passed straight to a parameter that accepts anything, such as `json.dumps(tuple(a_set))` or `print(tuple(a_set))`, unless the value already has the target type. Such a parameter can't reveal a mismatch, and the conversion can still change what the call does.
 
 ## [0.7.0] - 2026-11-18
 
