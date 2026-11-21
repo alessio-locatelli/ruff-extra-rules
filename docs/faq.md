@@ -48,6 +48,19 @@ Try the checks directly, with no persistent install:
 uvx --from git+https://github.com/alessio-locatelli/ruff-extra-rules python -m pre_commit_hooks.ast_checks src/
 ```
 
+To run every check at its `aggressive` level, pass each check's level option. `--isolated` ignores your project's configuration, so its `select`, `ignore`, or exclusions can't skip anything. `redundant-type-conversion` needs [`ty`](https://github.com/astral-sh/ty) on `PATH`, which `--with ty` provides:
+
+```bash
+uvx --from git+https://github.com/alessio-locatelli/ruff-extra-rules --with ty python -m pre_commit_hooks.ast_checks \
+  --isolated \
+  --defined-far-from-use-level=aggressive \
+  --meaningless-vars-level=aggressive \
+  --redundant-assignment-level=aggressive \
+  --redundant-dict-get-level=aggressive \
+  --redundant-type-conversion-level=aggressive \
+  src/
+```
+
 There are no other installable hook ids and no console-script entry point (`[project.scripts]` in `pyproject.toml` is intentionally empty) — every check runs via `python -m pre_commit_hooks.ast_checks`.
 
 Run `ruff check` (or `check-ast`) yourself alongside this, the same way `.pre-commit-config.yaml` would — see [Does this catch syntax errors?](#does-this-catch-syntax-errors).
