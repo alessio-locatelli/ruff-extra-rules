@@ -317,6 +317,46 @@ def func(obj):
     assert any(use.context == "attribute_or_subscript_assignment" for use in obj_uses)
 
 
+@pytest.mark.parametrize(
+    "target",
+    [
+        "calls[source] = 1",
+        "calls[source] += 1",
+        "calls[source]: int = 1",
+        "calls.setdefault(source, [])[0] = 1",
+        'calls["key"][source] = 1',
+        "calls[source].attr = 1",
+        "registry[source], other = 1, 2",
+        "self.attr: str = source",
+        "cache[source] = 1",
+        "calls[source]: int",
+        "source.attr: int",
+    ],
+    ids=[
+        "subscript-slice",
+        "augmented-subscript-slice",
+        "annotated-subscript-slice",
+        "call-rooted-target",
+        "nested-subscript-slice",
+        "subscript-under-attribute",
+        "tuple-element-subscript-slice",
+        "annotated-attribute-value",
+        "global-base-subscript-slice",
+        "bare-annotated-subscript-slice",
+        "bare-annotated-attribute-base",
+    ],
+)
+def test_read_inside_assignment_target_counts_as_use(target: str) -> None:
+    source = f"""
+def func(self, calls, registry, value):
+    global cache
+    source = value.upper()
+    {target}
+    return len(source)
+"""
+    assert len(_lifecycle_for(source, "source").uses) == 2
+
+
 def test_decorator_use_is_tracked_by_variable_tracker() -> None:
     source = """
 def outer():

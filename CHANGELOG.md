@@ -6,6 +6,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Fixed
+
+- `redundant-assignment` counts a variable read inside an assignment target, such as `calls[source] += 1` or `self.name: str = source`, as a use. It no longer reports such a variable as used only once.
+
 ## [0.7.0] - 2026-11-18
 
 ### Added

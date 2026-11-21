@@ -659,12 +659,8 @@ class VariableTracker(ast.NodeVisitor):
 
         base = _unwind_to_base_name(node)
 
-        if base is not None:
+        if base is not None and (scope_id, base.id) not in self.global_vars | self.nonlocal_vars:
             var_name = base.id
-
-            if (scope_id, var_name) in self.global_vars | self.nonlocal_vars:
-                return
-
             usage = UsageInfo(
                 var_name=var_name,
                 line=base.lineno,
@@ -682,6 +678,18 @@ class VariableTracker(ast.NodeVisitor):
             if key not in self.uses:
                 self.uses[key] = []
             self.uses[key].append(usage)
+
+        self._visit_target_chain_reads(node)
+
+    def _visit_target_chain_reads(self, node: ast.Attribute | ast.Subscript) -> None:
+        self.parent_stack.append(node)
+        if isinstance(node.value, ast.Attribute | ast.Subscript):
+            self._visit_target_chain_reads(node.value)
+        elif not isinstance(node.value, ast.Name):
+            self.visit(node.value)
+        if isinstance(node, ast.Subscript):
+            self.visit(node.slice)
+        self.parent_stack.pop()
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         scope_id = self._get_current_scope_id()
@@ -728,6 +736,12 @@ class VariableTracker(ast.NodeVisitor):
 
             self.visit(node.value)
             self.currently_assigning.clear()
+        elif node.value is None:
+            self.visit(node.target)
+        else:
+            assert isinstance(node.target, ast.Attribute | ast.Subscript)
+            self._track_attribute_or_subscript_base_usage(node.target, stmt_index)
+            self.visit(node.value)
 
     def visit_AugAssign(self, node: ast.AugAssign) -> None:
         scope_id = self._get_current_scope_id()
