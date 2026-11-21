@@ -67,7 +67,7 @@ def test_prefilter_pattern_matches_the_configured_levels_eligible_constructors(
     monkeypatch.setattr(daemon_module, "socket_exists_for", lambda _root: False)
     pattern = RedundantTypeConversionCheck(level=level).get_prefilter_pattern()
     assert pattern is not None
-    assert set(pattern) == expected  # pytriage: TR6 -- Compare constructor patterns independently of their order.
+    assert set(pattern) == expected
 
 
 def test_fix_always_declines() -> None:

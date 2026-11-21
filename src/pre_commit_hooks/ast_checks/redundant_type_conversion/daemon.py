@@ -463,7 +463,7 @@ def _dispatch(message: dict[str, Any], session: PersistentSession) -> dict[str, 
             drained = session.reconcile_direct_inputs()
             return {"result": [str(path) for path in drained]}  # pytriage: TR6 -- Path isn't JSON-serializable
     except LSPError as error:
-        return {"error": str(error)}  # pytriage: TR6 -- LSPError isn't JSON-serializable
+        return {"error": str(error)}
     except (KeyError, TypeError) as error:
         return {"error": f"malformed request for op {op!r}: {error!r}"}
     return {"error": f"unknown op: {op!r}"}
