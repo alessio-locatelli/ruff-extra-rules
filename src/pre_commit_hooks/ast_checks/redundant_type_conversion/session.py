@@ -255,8 +255,7 @@ class TySession:
         resolved = filepath.resolve()
         if not self._keep_open or not self.is_within_root(resolved):
             return
-        uri = resolved.as_uri()
-        self._direct_input_digests[uri] = hashlib.sha256(source.encode()).digest()
+        self._direct_input_digests[resolved.as_uri()] = hashlib.sha256(source.encode()).digest()
 
     def forget_direct_input(self, filepath: Path) -> None:
         resolved = filepath.resolve()
