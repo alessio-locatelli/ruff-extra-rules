@@ -14,6 +14,26 @@ _EXACT_ARITHMETIC_OPERATORS = (ast.Add, ast.Sub, ast.Mult)
 _EXACT_UNARY_OPERATORS = (ast.UAdd, ast.USub)
 _EMPTY_CONSTRUCTORS = frozenset({"dict", "frozenset", "list", "set", "tuple"})
 _VALIDATION_WORDS = frozenset({"assert", "check", "coerce", "ensure", "require", "validate", "verify"})
+_CLOCK_READERS = frozenset(
+    {
+        "clock_gettime",
+        "clock_gettime_ns",
+        "default_timer",
+        "monotonic",
+        "monotonic_ns",
+        "now",
+        "perf_counter",
+        "perf_counter_ns",
+        "process_time",
+        "process_time_ns",
+        "thread_time",
+        "thread_time_ns",
+        "time",
+        "time_ns",
+        "today",
+        "utcnow",
+    }
+)
 _PURE_CALLABLES = frozenset(
     {
         "abs",
@@ -125,6 +145,7 @@ def may_reorder(
     read_by_window = frozenset().union(*(effects.read for effects in window))
     return (
         not _calls_validation(value)
+        and not _reads_clock(value)
         and not (_state_read_by(value) & exposed)
         and not (mutated_by_value & read_by_window)
     )
@@ -163,6 +184,10 @@ def _calls_validation(value: ast.expr) -> bool:
         isinstance(node, ast.Call) and not _VALIDATION_WORDS.isdisjoint(_callee_name(node.func).lower().split("_"))
         for node in ast.walk(value)
     )
+
+
+def _reads_clock(value: ast.expr) -> bool:
+    return any(isinstance(node, ast.Call) and _callee_name(node.func) in _CLOCK_READERS for node in ast.walk(value))
 
 
 def _callee_name(func: ast.expr) -> str:

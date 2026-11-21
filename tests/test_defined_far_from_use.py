@@ -280,6 +280,34 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
             use(value)
         """,
         """
+        def f():
+            start = time.perf_counter()
+            if not enabled():
+                return
+            use(start)
+        """,
+        """
+        def f():
+            stamp = datetime.now(UTC)
+            if not enabled():
+                return
+            use(stamp)
+        """,
+        """
+        def f(start):
+            elapsed = perf_counter() - start
+            if not enabled():
+                return
+            use(elapsed)
+        """,
+        """
+        def f():
+            start = time.clock_gettime(time.CLOCK_MONOTONIC)
+            if not enabled():
+                return
+            use(start)
+        """,
+        """
         def f(state):
             old = state.current
             state.current = 1
@@ -429,6 +457,10 @@ def test_aggressive_level_also_reports_expressions_that_may_have_side_effects(so
         "snapshot-before-a-method-call",
         "argument-shared-with-the-guard",
         "validation-call",
+        "clock-reading",
+        "datetime-now",
+        "imported-clock-function",
+        "clock-gettime",
         "attribute-store",
         "subscript-delete",
         "rebound-root",
