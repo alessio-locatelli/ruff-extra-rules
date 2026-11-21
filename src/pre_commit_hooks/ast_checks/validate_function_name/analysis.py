@@ -202,7 +202,7 @@ def _iter_scope(seed: list[tuple[ast.AST, bool]]) -> Iterator[tuple[ast.AST, boo
         elif isinstance(node, (ast.With, ast.AsyncWith)):
             stack.extend((item, conditional) for item in reversed(node.items))
             stack.extend(reversed(_seed_block(node.body, base_conditional=conditional)))
-        elif isinstance(node, ast.GeneratorExp):
+        elif isinstance(node, (ast.GeneratorExp, ast.Raise)):
             stack.extend((child, True) for child in reversed(list(ast.iter_child_nodes(node))))
         else:
             stack.extend((child, conditional) for child in reversed(list(ast.iter_child_nodes(node))))

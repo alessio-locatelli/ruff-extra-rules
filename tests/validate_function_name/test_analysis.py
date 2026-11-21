@@ -495,6 +495,27 @@ def get_config(settings):
             "get_thing",
             {"disk_read": True},
         ),
+        (
+            (
+                "def get_two(items, key):\n"
+                "    for k, v in items.items():\n"
+                "        if k == key:\n"
+                "            return v\n"
+                "    raise KeyError(key)\n"
+            ),
+            "get_two",
+            {"creates_object": False},
+        ),
+        (
+            "def get_thing(path):\n    raise ConfigError(Detail(open(path).read()))\n",
+            "get_thing",
+            {"creates_object": False, "disk_read": False},
+        ),
+        (
+            "def get_thing():\n    raise ValueError from Thing()\n",
+            "get_thing",
+            {"creates_object": False},
+        ),
     ],
     ids=[
         "get-or-create-module-cache-not-mutation",
@@ -562,6 +583,9 @@ def get_config(settings):
         "qualified-lowercase-attribute-call-not-creates-object",
         "finally-block-always-runs-still-flagged",
         "nested-helper-default-value-still-flagged",
+        "raised-exception-after-loop-not-creates-object",
+        "raised-exception-arguments-not-evidence",
+        "raise-cause-not-creates-object",
     ],
 )
 def test_analyze_function_flags(source: str, func_name: str, flags: dict[str, bool]) -> None:
