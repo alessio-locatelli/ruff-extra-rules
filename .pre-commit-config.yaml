@@ -105,11 +105,7 @@ repos:
         files: ^(src|tests)/
         exclude: ^tests/fixtures/
         require_serial: true
-        args:
-          [
-            "--redundant-type-conversion-level=aggressive",
-            "--ignore=unused-pytriage",
-          ]
+        args: ["--redundant-type-conversion-level=aggressive"]
 
   - repo: https://github.com/alessio-locatelli/ruff-extra-rules
     rev: v0.6.0

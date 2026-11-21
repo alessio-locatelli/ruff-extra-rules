@@ -1066,7 +1066,7 @@ def test_cleanup_if_still_owned_leaves_a_replacement_daemons_files_alone(tmp_pat
     daemon_module._cleanup_if_still_owned(tmp_path)
 
     assert socket_path.exists()
-    assert pid_path.read_text(encoding="utf-8") == str(replacement_pid)  # pytriage: TR6 -- read_text() returns str
+    assert pid_path.read_text(encoding="utf-8") == str(replacement_pid)
 
 
 def test_connect_waits_for_a_busy_daemon_instead_of_spawning_a_competing_one(
