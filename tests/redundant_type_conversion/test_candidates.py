@@ -469,6 +469,34 @@ def test_a_candidate_is_marked_reachable_from_a_string_interpolation_only_when_i
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
+        ("sink(str(x))\n", True),
+        ("sink(1, key=str(x))\n", True),
+        ("obj.method(str(x))\n", True),
+        ("sink(**dict(x))\n", False),
+        ("sink(*list(x))\n", False),
+        ("sink(str(x) + y)\n", False),
+        ("sink([str(x)])\n", False),
+        ("y = str(x)\n", False),
+    ],
+    ids=[
+        "positional-argument",
+        "keyword-argument",
+        "method-argument",
+        "double-star-unpacking",
+        "star-unpacking",
+        "operand-of-an-argument",
+        "element-of-an-argument",
+        "assignment-value",
+    ],
+)
+def test_a_candidate_is_marked_a_direct_call_argument_only_when_it_is(source: str, *, expected: bool) -> None:
+    (candidate,) = find_candidates(ast.parse(source), ALL_CONSTRUCTORS)
+    assert candidate.direct_call_argument is expected
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
         ("logger.info(str(x))\n", True),
         ("logger.debug(str(x))\n", True),
         ("logger.warning(str(x))\n", True),

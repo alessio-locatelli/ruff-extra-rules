@@ -46,6 +46,8 @@ class PersistentSession(Protocol):
 
     def hover(self, filepath: Path, line0: int, char_utf16: int, /) -> str | None: ...
 
+    def receiving_parameters(self, filepath: Path, line0: int, char_utf16: int, /) -> list[str | None]: ...
+
     def finalize(self, filepath: Path, source: str, /) -> None: ...
 
     def cached_redundancies(self, filepath: Path, source: str, cache_key: str, /) -> list[Redundancy] | None: ...
@@ -70,6 +72,8 @@ class CandidateSession(PersistentSession, Protocol):
 _TY_COMMAND = ("ty", "server")
 
 _HOVER_DOC_SEPARATOR = re.compile(r"\n-{3,}\n")
+
+_CLIENT_CAPABILITIES = {"textDocument": {"signatureHelp": {"signatureInformation": {"activeParameterSupport": True}}}}
 
 _MIN_TY_VERSION = "0.0.84"
 
@@ -138,6 +142,18 @@ def takes_list(items: list[int]) -> int:
 def caller(it: Iterator[int]) -> None:
     takes_list(it)
 """
+
+
+def _active_parameter_label(signature: object, default_active: object) -> str | None:
+    if not isinstance(signature, dict):
+        return None
+    active = signature.get("activeParameter", default_active)
+    parameters = signature.get("parameters")
+    if not isinstance(active, int) or not isinstance(parameters, list) or not 0 <= active < len(parameters):
+        return None
+    parameter = parameters[active]
+    label = parameter.get("label") if isinstance(parameter, dict) else None
+    return label if isinstance(label, str) else None
 
 
 def _diagnostic_key(diagnostic: dict[str, Any]) -> tuple[Any, ...]:
@@ -238,6 +254,20 @@ class TySession:
             return None
         match = _HOVER_DOC_SEPARATOR.search(value)
         return value[: match.start()] if match else value
+
+    def receiving_parameters(self, filepath: Path, line0: int, char_utf16: int) -> list[str | None]:
+        uri = filepath.resolve().as_uri()
+        response = self._client.request(
+            "textDocument/signatureHelp",
+            {"textDocument": {"uri": uri}, "position": {"line": line0, "character": char_utf16}},
+            timeout=10.0,
+        )
+        if not isinstance(response, dict):
+            return []
+        signatures = response.get("signatures")
+        if not isinstance(signatures, list):
+            return []
+        return [_active_parameter_label(signature, response.get("activeParameter")) for signature in signatures]
 
     def analysis_transaction(self) -> contextlib.AbstractContextManager[None]:
         return contextlib.nullcontext()
@@ -360,7 +390,7 @@ def _spawn(
     try:
         client.request(
             "initialize",
-            {"processId": None, "rootUri": root.resolve().as_uri(), "capabilities": {}},
+            {"processId": None, "rootUri": root.resolve().as_uri(), "capabilities": _CLIENT_CAPABILITIES},
             timeout=20.0,
         )
         client.notify("initialized", {})

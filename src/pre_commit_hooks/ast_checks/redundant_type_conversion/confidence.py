@@ -44,26 +44,49 @@ def _is_unreliable(hover_text: str) -> bool:
     return head in {"Any", "Unknown"}
 
 
-def _split_top_level_union(hover_text: str) -> list[str]:
+def _split_top_level(text: str, separator: str) -> list[str]:
     members: list[str] = []
     depth = 0
     start = 0
     index = 0
-    length = len(hover_text)
+    length = len(text)
     while index < length:
-        char = hover_text[index]
+        char = text[index]
         if char in "([{":
             depth += 1
         elif char in ")]}":
             depth -= 1
-        elif depth == 0 and hover_text.startswith(" | ", index):
-            members.append(hover_text[start:index])
-            index += 3
+        elif depth == 0 and text.startswith(separator, index):
+            members.append(text[start:index])
+            index += len(separator)
             start = index
             continue
         index += 1
-    members.append(hover_text[start:])
+    members.append(text[start:])
     return members
+
+
+def _split_top_level_union(hover_text: str) -> list[str]:
+    return _split_top_level(hover_text, " | ")
+
+
+_UNCONSTRAINED_PARAMETER_TYPES = frozenset({"Any", "Unknown", "object"})
+
+
+def _parameter_is_unconstrained(label: str | None) -> bool:
+    if label is None:
+        return True
+    _name, separator, annotation = label.partition(": ")
+    if not separator:
+        return True
+    annotation = _split_top_level(annotation, " = ")[0]
+    return any(
+        member.split(" & ", 1)[0] in _UNCONSTRAINED_PARAMETER_TYPES for member in _split_top_level_union(annotation)
+    )
+
+
+def accepts_any_argument(parameter_labels: list[str | None]) -> bool:
+    return not parameter_labels or any(_parameter_is_unconstrained(label) for label in parameter_labels)
 
 
 def is_exact_match(hover_text: str, constructor: str) -> bool:

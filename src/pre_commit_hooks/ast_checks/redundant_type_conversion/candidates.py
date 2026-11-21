@@ -23,6 +23,7 @@ class Candidate:
     purepath_ambiguous: bool
     used_in_string_interpolation: bool
     used_in_logging_call: bool
+    direct_call_argument: bool
     mutated_after_copy: bool
 
 
@@ -48,6 +49,7 @@ def find_candidates(tree: ast.Module, eligible: frozenset[str]) -> list[Candidat
             purepath_ambiguous=scan.purepath_ambiguous,
             used_in_string_interpolation=id(raw.call) in scan.interpolated,
             used_in_logging_call=id(raw.call) in scan.logging_call_arguments,
+            direct_call_argument=id(raw.call) in scan.call_arguments,
             mutated_after_copy=id(raw.call) in scan.mutated,
         )
         for raw in scan.raw_candidates
@@ -83,6 +85,7 @@ class _Scan:
     purepath_ambiguous: bool
     interpolated: frozenset[int]
     logging_call_arguments: frozenset[int]
+    call_arguments: frozenset[int]
     mutated: frozenset[int]
     raw_candidates: list[_RawCandidate]
 
@@ -292,6 +295,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
     interpolated_names: set[str] = set()
     interpolated_call_ids: set[int] = set()
     logging_call_arguments: set[int] = set()
+    call_arguments: set[int] = set()
     mutating_node_ids_by_name: dict[str, set[int]] = {}
     raw_candidates: list[_RawCandidate] = []
     bindings = _collect_bindings(tree)
@@ -359,6 +363,14 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
                     )
                 )
 
+        if isinstance(node, ast.Call):
+            call_arguments.update(id(arg) for arg in node.args if isinstance(arg, ast.Call))
+            call_arguments.update(
+                id(keyword.value)
+                for keyword in node.keywords
+                if keyword.arg is not None and isinstance(keyword.value, ast.Call)
+            )
+
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
@@ -405,6 +417,7 @@ def _scan(tree: ast.Module, eligible: frozenset[str]) -> _Scan:
         purepath_ambiguous=bool(purepath_shadowed & PUREPATH_HOVER_NAMES),
         interpolated=frozenset(interpolated),
         logging_call_arguments=frozenset(logging_call_arguments),
+        call_arguments=frozenset(call_arguments),
         mutated=frozenset(mutated),
         raw_candidates=raw_candidates,
     )

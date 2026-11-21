@@ -41,7 +41,7 @@ _CONNECT_TIMEOUT_SECONDS = 5.0
 _IDLE_TIMEOUT_SECONDS = 15 * 60
 _CLIENT_REQUEST_TIMEOUT_SECONDS = 60.0
 _STEADY_STATE_CALL_TIMEOUT_SECONDS = 60.0
-_PROTOCOL_VERSION = "6"
+_PROTOCOL_VERSION = "7"
 
 type RPCParameter = str | int | list[str] | list[Redundancy]
 
@@ -163,6 +163,13 @@ class RemoteTySession:
         hover_text = self._call("hover", filepath=_canonical_rpc_path(filepath), line0=line0, char_utf16=char_utf16)
         assert not isinstance(hover_text, (list, bool))
         return hover_text
+
+    def receiving_parameters(self, filepath: Path, line0: int, char_utf16: int) -> list[str | None]:
+        labels = self._call(
+            "receiving_parameters", filepath=_canonical_rpc_path(filepath), line0=line0, char_utf16=char_utf16
+        )
+        assert isinstance(labels, list)
+        return labels
 
     @contextlib.contextmanager
     def analysis_transaction(self) -> Iterator[None]:
@@ -432,6 +439,9 @@ def _dispatch(message: dict[str, Any], session: PersistentSession) -> dict[str, 
         if op == "hover":
             hover_text = session.hover(Path(message["filepath"]), message["line0"], message["char_utf16"])
             return {"result": hover_text}
+        if op == "receiving_parameters":
+            labels = session.receiving_parameters(Path(message["filepath"]), message["line0"], message["char_utf16"])
+            return {"result": labels}
         if op == "finalize":
             session.finalize(Path(message["filepath"]), message["source"])
             return {"result": None}

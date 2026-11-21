@@ -31,10 +31,15 @@ def _decide(
     *,
     diagnostics_by_content: dict[str, frozenset[tuple[object, ...]]],
     hover_by_position: dict[tuple[int, int], str | None],
+    parameters_by_position: dict[tuple[int, int], list[str | None]] | None = None,
     level: ConfidenceLevel = ConfidenceLevel.CONSERVATIVE,
     ignored_lines: set[int] | None = None,
 ) -> tuple[list[RedundantConversion], FakeSession]:
-    session = FakeSession(diagnostics_by_content=diagnostics_by_content, hover_by_position=hover_by_position)
+    session = FakeSession(
+        diagnostics_by_content=diagnostics_by_content,
+        hover_by_position=hover_by_position,
+        parameters_by_position=parameters_by_position,
+    )
     candidates = find_candidates(ast.parse(source), eligible_constructors(level))
     redundant = decide_candidates(
         session, Path("test.py"), candidates, source, level=level, ignored_lines=ignored_lines or set()
@@ -292,6 +297,51 @@ def test_decide_candidates_still_flags(
     assert redundant[0].candidate.constructor == expected_constructor
 
 
+@pytest.mark.parametrize(
+    ("parameters", "reported"),
+    [(["obj: Any"], False), ([], False), (["items: Iterable[str]"], True)],
+    ids=["unconstrained-parameter", "no-signature", "typed-parameter"],
+)
+def test_decide_candidates_trusts_a_non_exact_call_argument_only_when_its_parameter_is_typed(
+    parameters: list[str | None], *, reported: bool
+) -> None:
+    source = "sink(tuple(é))\n"
+    redundant, session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset()},
+        hover_by_position={(0, 11): "set[str]"},
+        parameters_by_position={(0, 13): parameters},
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert session.receiving_parameter_calls == [(0, 13)]
+    assert bool(redundant) is reported
+
+
+@pytest.mark.parametrize(
+    ("source", "hover_by_position"),
+    [
+        ("sink(tuple(x))\n", {(0, 11): "tuple[str, ...]"}),
+        ("y = tuple(x)\n", {(0, 10): "set[str]"}),
+        ("sink(tuple(x) + y)\n", {(0, 11): "set[str]"}),
+        ("sink(*tuple(x))\n", {(0, 12): "set[str]"}),
+    ],
+    ids=["exact-match", "not-a-call-argument", "nested-in-an-expression", "starred-argument"],
+)
+def test_decide_candidates_does_not_ask_for_the_receiving_parameter(
+    source: str, hover_by_position: dict[tuple[int, int], str | None]
+) -> None:
+    _redundant, session = _decide(
+        source,
+        diagnostics_by_content={source: frozenset()},
+        hover_by_position=hover_by_position,
+        level=ConfidenceLevel.AGGRESSIVE,
+    )
+
+    assert session.hover_calls
+    assert session.receiving_parameter_calls == []
+
+
 def test_decide_candidates_skips_the_recheck_entirely_when_hover_gate_fails() -> None:
     source = "y = str(x)\n"
     redundant, session = _decide(
@@ -468,6 +518,28 @@ def test_decide_candidates_still_closes_the_file_when_a_candidate_raises_unexpec
     with pytest.raises(RuntimeError, match="unexpected failure"):
         decide_candidates(
             session, Path("test.py"), candidates, source, level=ConfidenceLevel.CONSERVATIVE, ignored_lines=set()
+        )
+
+    assert session.closed_files == [Path("test.py")]
+
+
+class _SessionRaisingFromSignatureHelp(FakeSession):
+    __slots__ = ()
+
+    def receiving_parameters(self, _filepath: Path, _line0: int, _char_utf16: int) -> list[str | None]:
+        raise LSPError("simulated signature help failure")
+
+
+def test_decide_candidates_reports_a_failed_signature_request_as_unavailable() -> None:
+    source = "sink(tuple(x))\n"
+    session = _SessionRaisingFromSignatureHelp(
+        diagnostics_by_content={source: frozenset()}, hover_by_position={(0, 11): "set[str]"}
+    )
+    candidates = find_candidates(ast.parse(source), eligible_constructors(ConfidenceLevel.AGGRESSIVE))
+
+    with pytest.raises(CheckUnavailableError, match="lost its connection to `ty`"):
+        decide_candidates(
+            session, Path("test.py"), candidates, source, level=ConfidenceLevel.AGGRESSIVE, ignored_lines=set()
         )
 
     assert session.closed_files == [Path("test.py")]

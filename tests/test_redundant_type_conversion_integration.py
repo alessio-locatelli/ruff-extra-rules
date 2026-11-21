@@ -56,7 +56,7 @@ def test_same_scope_scalar_conversion_is_flagged() -> None:
 def test_cross_file_call_site_conversion_is_flagged_at_aggressive() -> None:
     violations = _check(BAD_ROOT / "cross_file_call_site.py", level=ConfidenceLevel.AGGRESSIVE)
 
-    assert {v.line for v in violations} == {5, 6}
+    assert {v.line for v in violations} == {5, 6, 7}
     assert {v.error_code for v in violations} == {"TR6"}
 
 

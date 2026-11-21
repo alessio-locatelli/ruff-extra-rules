@@ -8,6 +8,7 @@ from pre_commit_hooks.ast_checks._base import CheckUnavailableError, byte_col_to
 
 from .confidence import (
     MUTABLE_CONSTRUCTORS,
+    accepts_any_argument,
     hover_passes_gate,
     is_comparison_safe_hover,
     is_exact_match,
@@ -57,6 +58,8 @@ class RedundancySession(Protocol):
 
     def hover(self, filepath: Path, line0: int, char_utf16: int, /) -> str | None: ...
 
+    def receiving_parameters(self, filepath: Path, line0: int, char_utf16: int, /) -> list[str | None]: ...
+
     def analysis_transaction(self) -> contextlib.AbstractContextManager[None]: ...
 
     def finalize(self, filepath: Path, source: str, /) -> None: ...
@@ -65,6 +68,15 @@ class RedundancySession(Protocol):
 def _open_or_raise(session: RedundancySession, filepath: Path, content: str) -> frozenset[tuple[object, ...]]:
     try:
         return session.open_or_update(filepath, content)
+    except LSPError as error:
+        raise CheckUnavailableError(_SESSION_LOST_HINT) from error
+
+
+def _receiving_parameters_or_raise(
+    session: RedundancySession, filepath: Path, line0: int, char_utf16: int
+) -> list[str | None]:
+    try:
+        return session.receiving_parameters(filepath, line0, char_utf16)
     except LSPError as error:
         raise CheckUnavailableError(_SESSION_LOST_HINT) from error
 
@@ -120,8 +132,7 @@ def decide_candidates(
             for candidate in candidates:
                 line_text = source_lines[candidate.line - 1]
                 arg_end_char = byte_col_to_char_col(line_text, candidate.arg_end_col)
-                hover_char = len(line_text[: arg_end_char - 1].encode("utf-16-le")) // 2
-                hover_text = session.hover(filepath, candidate.line - 1, hover_char)
+                hover_text = session.hover(filepath, candidate.line - 1, _utf16_col(line_text, arg_end_char - 1))
                 if not hover_passes_gate(hover_text, level, candidate.constructor):
                     continue
                 assert hover_text is not None
@@ -153,6 +164,20 @@ def decide_candidates(
                 if candidate.used_in_logging_call and not is_exact_match(hover_text, candidate.constructor):
                     continue
 
+                if (
+                    candidate.direct_call_argument
+                    and not is_exact_match(hover_text, candidate.constructor)
+                    and accepts_any_argument(
+                        _receiving_parameters_or_raise(
+                            session,
+                            filepath,
+                            candidate.line - 1,
+                            _utf16_col(line_text, byte_col_to_char_col(line_text, candidate.call_end_col)),
+                        )
+                    )
+                ):
+                    continue
+
                 candidates_with_hovers.append((candidate, hover_text))
 
             for candidate, hover_text in candidates_with_hovers:
@@ -174,6 +199,10 @@ def decide_candidates(
             session.finalize(filepath, source)
 
     return redundant
+
+
+def _utf16_col(line_text: str, char_col: int) -> int:
+    return len(line_text[:char_col].encode("utf-16-le")) // 2
 
 
 def _build_modified_text(source_lines: list[str], candidate: Candidate) -> str:
