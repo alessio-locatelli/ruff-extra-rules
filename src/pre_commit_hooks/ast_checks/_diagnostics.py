@@ -76,7 +76,7 @@ def report(orchestrator: CheckOrchestrator, all_violations: dict[str, list[Viola
             elif v.fix_outcome is FixOutcome.DECLINED:
                 hint = " --fix left the source unchanged because this change is not safe to apply automatically."
             elif v.fixable:
-                hint = " Run with --fix to inline automatically."
+                hint = " Run with --fix to apply it automatically."
             else:
                 hint = ""
             print(
