@@ -16,6 +16,10 @@ logger = logging.getLogger("linter")
 
 
 def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: bool = False) -> list[str]:
+    return _git_grep_any(filepaths, (pattern,), fixed_string=fixed_string)
+
+
+def _git_grep_any(filepaths: Sequence[str], patterns: Sequence[str], *, fixed_string: bool) -> list[str]:
     if not filepaths:
         return []
 
@@ -25,7 +29,9 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
         cmd = ["git", "grep", "--no-color", "--files-with-matches", "--null", "--untracked", "--no-exclude-standard"]
         if fixed_string:
             cmd.append("--fixed-strings")
-        cmd.extend(["-e", pattern, "--"])
+        for pattern in patterns:
+            cmd.extend(["-e", pattern])
+        cmd.append("--")
         cmd.extend(filepaths)
 
         git_grep_result = subprocess.run(  # noqa: S603 -- Git operands follow --; no shell.
@@ -41,7 +47,7 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
             return matches + unreadable
         if git_grep_result.returncode == 1 and not git_grep_result.stderr:
             return unreadable
-        return _python_fallback_filter(filepaths, pattern)
+        return _python_fallback_filter(filepaths, patterns)
 
     except (
         subprocess.SubprocessError,
@@ -49,16 +55,16 @@ def git_grep_filter(filepaths: Sequence[str], pattern: str, *, fixed_string: boo
         subprocess.TimeoutExpired,
     ):
         logger.debug("git grep failed", exc_info=True)
-        return _python_fallback_filter(filepaths, pattern)
+        return _python_fallback_filter(filepaths, patterns)
 
 
-def _python_fallback_filter(filepaths: Sequence[str], pattern: str) -> list[str]:
+def _python_fallback_filter(filepaths: Sequence[str], patterns: Sequence[str]) -> list[str]:
     matches = []
     for filepath in filepaths:
         try:
             with Path(filepath).open(encoding="utf-8") as f:
                 content = f.read()
-                if pattern in content:
+                if any(pattern in content for pattern in patterns):
                     matches.append(filepath)
         except OSError, UnicodeDecodeError:
             logger.debug("File: %s", filepath, exc_info=True)
@@ -70,8 +76,4 @@ def batch_filter_files(filepaths: Sequence[str], patterns: list[str]) -> list[st
     if not patterns:
         return list(filepaths)
 
-    all_matches = set()
-    for pattern in patterns:
-        matches = git_grep_filter(filepaths, pattern, fixed_string=True)
-        all_matches.update(matches)
-    return sorted(all_matches)
+    return sorted(set(_git_grep_any(filepaths, patterns, fixed_string=True)))

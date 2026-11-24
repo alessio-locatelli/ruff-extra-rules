@@ -224,6 +224,14 @@ def test_git_grep_filter_falls_back_to_python_search(
     assert any(m.endswith("file2.py") for m in matches)
 
 
+def test_batch_filter_files_falls_back_to_python_search_for_any_pattern(sample_files: list[str]) -> None:
+    with mock.patch("subprocess.run") as mock_run:
+        _fail_git_not_found(mock_run)
+        matches = batch_filter_files(sample_files, ["data", "def get_"])
+
+    assert {Path(m).name for m in matches} == {"file1.py", "file2.py", "file3.py"}
+
+
 def test_python_fallback_includes_unreadable_files(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     file1 = tmp_path / "readable.py"
     file1.write_text("data = 123")
