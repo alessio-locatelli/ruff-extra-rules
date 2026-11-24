@@ -55,6 +55,7 @@ uvx --from git+https://github.com/alessio-locatelli/ruff-extra-rules --with ty p
   --isolated \
   --defined-far-from-use-level=aggressive \
   --meaningless-vars-level=aggressive \
+  --overly-broad-return-type-level=aggressive \
   --redundant-assignment-level=aggressive \
   --redundant-dict-get-level=aggressive \
   --redundant-type-conversion-level=aggressive \

@@ -7,7 +7,12 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from pre_commit_hooks.ast_checks._scope import definition_header, iter_binding_names, iter_within_scope
+from pre_commit_hooks.ast_checks._scope import (
+    can_rebind_builtins,
+    definition_header,
+    iter_binding_names,
+    iter_within_scope,
+)
 
 from .reorder import DefinedFarFromUseLevel, StatementEffects, may_reorder, statement_effects
 
@@ -23,8 +28,6 @@ _TERMINAL_NODES = (ast.Return, ast.Raise, ast.Continue, ast.Break)
 _DYNAMIC_SCOPE_BUILTINS = frozenset({"locals", "vars", "exec", "eval"})
 _REORDER_SENSITIVE_NODES = (ast.Await, ast.Yield, ast.YieldFrom, ast.NamedExpr)
 _UBIQUITOUS_RECEIVERS = frozenset({"self", "cls"})
-_BUILTINS_REACHING_MODULES = frozenset({"builtins", "importlib", "sys"})
-_BUILTINS_REACHING_NAMES = frozenset({"__builtins__", "__import__", "globals"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,28 +84,10 @@ class _Block:
 def find_findings(tree: ast.Module, level: DefinedFarFromUseLevel, max_distance: int) -> list[Finding]:
     module_bound = {name for node in iter_within_scope(tree) for name in iter_binding_names(node)}
     module_bound.update(name for node in ast.walk(tree) if isinstance(node, ast.Global) for name in node.names)
-    visible_builtins = frozenset() if _can_rebind_builtins(tree) else frozenset(dir(builtins)) - module_bound
+    visible_builtins = frozenset() if can_rebind_builtins(tree) else frozenset(dir(builtins)) - module_bound
     findings: list[Finding] = []
     _collect_findings(tree, visible_builtins, _Options(level, max_distance), findings)
     return findings
-
-
-def _can_rebind_builtins(tree: ast.Module) -> bool:
-    return any(
-        (
-            isinstance(node, ast.Import)
-            and any(alias.name.partition(".")[0] in _BUILTINS_REACHING_MODULES for alias in node.names)
-        )
-        or (
-            isinstance(node, ast.ImportFrom)
-            and (
-                (node.module or "").partition(".")[0] in _BUILTINS_REACHING_MODULES
-                or any(alias.name == "*" for alias in node.names)
-            )
-        )
-        or (isinstance(node, ast.Name) and node.id in _BUILTINS_REACHING_NAMES)
-        for node in ast.walk(tree)
-    )
 
 
 def _collect_findings(

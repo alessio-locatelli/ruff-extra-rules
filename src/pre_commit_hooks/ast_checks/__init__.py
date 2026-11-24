@@ -6,6 +6,7 @@ from .defined_far_from_use import DefinedFarFromUseCheck
 from .excessive_blank_lines import ExcessiveBlankLinesCheck
 from .meaningless_vars import MeaninglessVarsCheck
 from .misplaced_comment import MisplacedCommentCheck
+from .overly_broad_return_type import OverlyBroadReturnTypeCheck
 from .redundant_assignment import RedundantAssignmentCheck
 from .redundant_dict_get import RedundantDictGetCheck
 from .redundant_enum_value import RedundantEnumValueCheck
@@ -31,4 +32,5 @@ ALL_CHECKS: list[type[ASTCheck]] = [
     RedundantEnumValueCheck,
     DefinedFarFromUseCheck,
     SuppressionRationaleCheck,
+    OverlyBroadReturnTypeCheck,
 ]
