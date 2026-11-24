@@ -3546,7 +3546,7 @@ def test_main_reports_fixable_violation_without_fix_flag(tmp_path: Path, capsys:
 
     err = capsys.readouterr().err
     assert "[FIXABLE]" in err
-    assert "Run with --fix to inline automatically." in err
+    assert "Run with --fix to apply it automatically." in err
 
 
 def test_main_fix_flag_marks_violation_fixed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
