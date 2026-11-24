@@ -363,10 +363,13 @@ def test_unused_pytriage_and_cached_usage(tmp_path: Path, explanation: str) -> N
 
 def test_rule_is_opt_in_and_has_no_configuration() -> None:
     assert "suppression-rationale" not in {check.check_id for check in load_checks()}
-    checks = load_checks(extend_select={"suppression-rationale"})
-    assert checks[-1].check_id == "suppression-rationale"
-    assert checks[-1].OPTIONS == ()
-    assert checks[-1].get_prefilter_pattern() == ["#"]
+    (check,) = (
+        check
+        for check in load_checks(extend_select={"suppression-rationale"})
+        if check.check_id == "suppression-rationale"
+    )
+    assert check.OPTIONS == ()
+    assert check.get_prefilter_pattern() == ["#"]
 
 
 def test_fix_mode_reports_without_changing_source(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

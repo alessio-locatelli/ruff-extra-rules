@@ -15,6 +15,27 @@ _COMPREHENSION_NODES: tuple[type[ast.AST], ...] = (
 
 _DEFINITION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
+_BUILTINS_REACHING_MODULES = frozenset({"builtins", "importlib", "sys"})
+_BUILTINS_REACHING_NAMES = frozenset({"__builtins__", "__import__", "globals"})
+
+
+def can_rebind_builtins(tree: ast.Module) -> bool:
+    return any(
+        (
+            isinstance(node, ast.Import)
+            and any(alias.name.partition(".")[0] in _BUILTINS_REACHING_MODULES for alias in node.names)
+        )
+        or (
+            isinstance(node, ast.ImportFrom)
+            and (
+                (node.module or "").partition(".")[0] in _BUILTINS_REACHING_MODULES
+                or any(alias.name == "*" for alias in node.names)
+            )
+        )
+        or (isinstance(node, ast.Name) and node.id in _BUILTINS_REACHING_NAMES)
+        for node in ast.walk(tree)
+    )
+
 
 def _walrus_targets(nodes: Iterable[ast.AST]) -> Iterator[ast.Name]:
     for node in nodes:

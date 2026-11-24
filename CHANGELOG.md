@@ -6,6 +6,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Added
+
+- Add TR13, `overly-broad-return-type`, which reports an abstract return annotation such as `Mapping[str, int]` or `Sequence[int]` when every `return` in the function produces the same concrete type, such as `MappingProxyType` or `list`. By default it checks functions and methods that no subclass can override; `level = "aggressive"` also checks other methods. It is report-only.
+
 ### Fixed
 
 - `redundant-enum-value` no longer reports `.value` on an enum class that a nested function's default argument rebinds, as in `def inner(arg=(State := other)):`.

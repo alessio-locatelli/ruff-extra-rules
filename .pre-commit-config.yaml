@@ -77,6 +77,7 @@ repos:
             "--meaningless-vars-level=aggressive",
             "--redundant-assignment-level=aggressive",
             "--defined-far-from-use-level=aggressive",
+            "--overly-broad-return-type-level=aggressive",
           ]
       - id: local-ruff-extra-rules-ty
         name: Extra Python rule checks (redundant-type-conversion, redundant-dict-get, serial)

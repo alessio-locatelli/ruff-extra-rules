@@ -15,6 +15,7 @@ from pre_commit_hooks.ast_checks._hooks import HOOK_CHECKS
 from pre_commit_hooks.ast_checks._options import add_check_arguments
 from pre_commit_hooks.ast_checks.defined_far_from_use.reorder import DefinedFarFromUseLevel
 from pre_commit_hooks.ast_checks.meaningless_vars import MeaninglessVarsLevel
+from pre_commit_hooks.ast_checks.overly_broad_return_type.analysis import OverlyBroadReturnTypeLevel
 from pre_commit_hooks.ast_checks.redundant_assignment.semantic import AggressivenessLevel
 from pre_commit_hooks.ast_checks.redundant_dict_get.local import ProofLevel
 from pre_commit_hooks.ast_checks.redundant_type_conversion.confidence import ConfidenceLevel
@@ -243,9 +244,10 @@ def test_unknown_field_error_lists_the_valid_ones(project: Path, capsys: pytest.
         ("redundant-type-conversion", "aggressive", ConfidenceLevel.AGGRESSIVE),
         ("redundant-dict-get", "aggressive", ProofLevel.AGGRESSIVE),
         ("defined-far-from-use", "aggressive", DefinedFarFromUseLevel.AGGRESSIVE),
+        ("overly-broad-return-type", "aggressive", OverlyBroadReturnTypeLevel.AGGRESSIVE),
         ("meaningless-vars", "conservative", MeaninglessVarsLevel.CONSERVATIVE),
     ],
-    ids=["tr1", "tr5", "tr6", "tr9", "tr11", "explicit-default"],
+    ids=["tr1", "tr5", "tr6", "tr9", "tr11", "tr13", "explicit-default"],
 )
 def test_a_checks_option_reaches_its_constructor_from_the_config_file(
     project: Path, check_id: str, option_value: str, expected: object
