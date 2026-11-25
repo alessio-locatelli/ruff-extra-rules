@@ -9,11 +9,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 
 from pre_commit_hooks.ast_checks._base import FixOutcome, Violation
+from pre_commit_hooks.ast_checks._references import collect_replacements, collect_scope_replacements
 from pre_commit_hooks.ast_checks.meaningless_vars import (
     MeaninglessVarsCheck,
     MeaninglessVarsLevel,
-    _collect_replacements,
-    _collect_scope_replacements,
     _function_name_describes_parameter,
 )
 
@@ -694,6 +693,26 @@ def test_autofix_follows_closure_reference_into_nested_function() -> None:
             return {"k": "v"}
 
     assert module_namespace["outer"](FakeResponse()) == {"k": "v"}
+
+
+def test_autofix_declines_when_a_class_body_reads_and_rebinds_the_name(tmp_path: Path) -> None:
+    source = """def outer(response):
+    data: Payload = response.json()
+
+    class View:
+        loaded = data
+        data = None
+
+    return View
+"""
+    filepath = tmp_path / "test.py"
+    filepath.write_text(source)
+    tree = ast.parse(source)
+    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
+    violations = check.check(filepath, tree, source)
+
+    assert FixOutcome.APPLIED not in check.fix(filepath, violations, source, tree).outcomes
+    assert filepath.read_text() == source
 
 
 def test_autofix_follows_closure_reference_into_lambda() -> None:
@@ -1786,7 +1805,7 @@ def test_autofix_does_not_rename_generic_functions_own_annotation_referencing_a_
     ids=["bound", "annotation"],
 )
 def test_collect_replacements_preserves_peer_names_inside_nested_generic_scopes(source: str) -> None:
-    replacements = _collect_replacements(
+    replacements = collect_replacements(
         ast.parse(source).body[0],
         {"data": "payload", "result": "secondary_result"},
         has_future_annotations=False,
@@ -1929,10 +1948,10 @@ def test_scope_replacement_helpers_support_class_bodies_and_modules() -> None:
     class_tree = ast.parse("class Container:\n    value = data\n")
     module_tree = ast.parse("data = value\n")
 
-    assert _collect_replacements(class_tree.body[0], {"data": "payload"}, has_future_annotations=False) == [
+    assert collect_replacements(class_tree.body[0], {"data": "payload"}, has_future_annotations=False) == [
         (2, 12, "data", "payload")
     ]
-    assert _collect_scope_replacements(
+    assert collect_scope_replacements(
         module_tree,
         {"data": "payload"},
         has_future_annotations=False,
@@ -1976,7 +1995,7 @@ class Container[T: data](data, key=data):
     ]
 
     assert sorted(
-        _collect_replacements(
+        collect_replacements(
             ast.parse(source).body[0],
             {"data": "payload"},
             has_future_annotations=has_future_annotations,
@@ -1987,7 +2006,7 @@ class Container[T: data](data, key=data):
 def test_scope_replacement_helpers_support_generic_methods_without_return_annotations() -> None:
     tree = ast.parse("class Container:\n    def method[T: data](self, value: data):\n        return data\n")
 
-    assert sorted(_collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False)) == sorted(
+    assert sorted(collect_replacements(tree.body[0], {"data": "payload"}, has_future_annotations=False)) == sorted(
         [
             (2, 18, "data", "payload"),
             (2, 37, "data", "payload"),
@@ -1999,7 +2018,7 @@ def test_scope_replacement_helpers_support_generic_methods_without_return_annota
 def test_scope_replacement_helpers_preserve_generic_class_header_peer_names() -> None:
     tree = ast.parse("class Container[data](lambda: (data, result)):\n    pass\n")
 
-    assert _collect_replacements(
+    assert collect_replacements(
         tree.body[0],
         {"data": "payload", "result": "value"},
         has_future_annotations=False,

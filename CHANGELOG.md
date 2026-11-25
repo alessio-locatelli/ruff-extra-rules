@@ -9,6 +9,8 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 ### Fixed
 
 - `redundant-enum-value` no longer reports `.value` on an enum class that a nested function's default argument rebinds, as in `def inner(arg=(State := other)):`.
+- `validate-function-name`'s fix renames references in the decorators, default arguments, and annotations of a function whose body rebinds the renamed name, instead of leaving them behind to raise `NameError`. It also stops renaming a same-named comprehension variable or type parameter, which silently changed what the code referred to, and declines when a class body both assigns and reads the name, where which binding a read sees depends on the order of execution.
+- `meaningless-vars`'s fix leaves a variable alone when a class body in its function both assigns and reads the same name. When the read ran before the class's own assignment, the fix left it unchanged, and the class raised `NameError` when it was created.
 
 ## [0.8.0] - 2026-11-24
 

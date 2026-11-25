@@ -606,60 +606,41 @@ _GENERIC_METHOD_ANNOTATIONS_SOURCE = (
     "    return Container\n"
 )
 
-_GENERIC_METHOD_ANNOTATIONS_EXPECTED = (
-    "def outer(response):\n"
-    "    payload: Payload = response.json()\n"
-    "\n"
-    "    class Container:\n"
-    "        data = int\n"
-    "\n"
-    "        def method[T: data](self, value: data) -> data:\n"
-    "            return payload\n"
-    "\n"
-    "    return Container\n"
-)
+
+def test_main_fix_renames_past_a_lambda_local_binding_in_a_class_body(tmp_path: Path) -> None:
+    filepath = tmp_path / "module.py"
+    filepath.write_text(
+        "def outer(response):\n"
+        "    data: Payload = response.json()\n"
+        "\n"
+        "    class Container:\n"
+        "        thunk = lambda: (data := 'lambda value')\n"
+        "        captured = data\n"
+        "\n"
+        "    return Container.captured\n"
+    )
+
+    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
+
+    assert filepath.read_text() == (
+        "def outer(response):\n"
+        "    payload: Payload = response.json()\n"
+        "\n"
+        "    class Container:\n"
+        "        thunk = lambda: (data := 'lambda value')\n"
+        "        captured = payload\n"
+        "\n"
+        "    return Container.captured\n"
+    )
 
 
 @pytest.mark.parametrize(
-    ("source", "expected"),
+    "source",
     [
-        pytest.param(
-            _GENERIC_METHOD_ANNOTATIONS_SOURCE,
-            _GENERIC_METHOD_ANNOTATIONS_EXPECTED,
-            id="generic-method-annotations",
-        ),
+        pytest.param(_GENERIC_METHOD_ANNOTATIONS_SOURCE, id="generic-method-annotations"),
         pytest.param(
             "def outer(response):\n"
             "    data: Payload = response.json()\n"
-            "\n"
-            "    class Container:\n"
-            "        thunk = lambda: (data := 'lambda value')\n"
-            "        captured = data\n"
-            "\n"
-            "    return Container.captured\n",
-            "def outer(response):\n"
-            "    payload: Payload = response.json()\n"
-            "\n"
-            "    class Container:\n"
-            "        thunk = lambda: (data := 'lambda value')\n"
-            "        captured = payload\n"
-            "\n"
-            "    return Container.captured\n",
-            id="lambda-local-binding",
-        ),
-        pytest.param(
-            "def outer(response):\n"
-            "    data: Payload = response.json()\n"
-            "\n"
-            "    class Container:\n"
-            "        def method(value=(data := 'class value')):\n"
-            "            return value\n"
-            "\n"
-            "        captured = data\n"
-            "\n"
-            "    return Container.data, Container.captured\n",
-            "def outer(response):\n"
-            "    payload: Payload = response.json()\n"
             "\n"
             "    class Container:\n"
             "        def method(value=(data := 'class value')):\n"
@@ -670,73 +651,32 @@ _GENERIC_METHOD_ANNOTATIONS_EXPECTED = (
             "    return Container.data, Container.captured\n",
             id="method-default-binding",
         ),
+        pytest.param(
+            "def outer(response):\n"
+            "    data: Payload = response.json()\n"
+            "\n"
+            "    class Container:\n"
+            "        data = int\n"
+            "\n"
+            "        class Nested(data):\n"
+            "            value = data\n"
+            "\n"
+            "        thunk = lambda: data\n"
+            "\n"
+            "        values = [data for _ in (data,)]\n"
+            "\n"
+            "    return Container.Nested.__bases__[0], Container.Nested.value, Container.thunk(), Container.values\n",
+            id="nested-class-headers-and-comprehension-iterables",
+        ),
     ],
 )
-def test_main_fix_preserves_class_bindings(
-    tmp_path: Path,
-    source: str,
-    expected: str,
-) -> None:
+def test_main_fix_declines_when_a_class_body_assigns_and_reads_the_name(tmp_path: Path, source: str) -> None:
     filepath = tmp_path / "module.py"
     filepath.write_text(source)
 
     assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
 
-    assert filepath.read_text() == expected
-
-
-def test_generic_method_annotations_preserve_class_binding_at_runtime() -> None:
-    namespace = _exec_module(_GENERIC_METHOD_ANNOTATIONS_EXPECTED)
-
-    container = namespace["outer"](_Response())
-    method = container.method
-
-    assert method.__type_params__[0].__bound__ is int
-    assert method.__annotations__ == {"value": int, "return": int}
-    assert container().method(None) == "response value"
-
-
-def test_main_fix_preserves_class_bindings_in_nested_class_headers_and_comprehension_iterables(tmp_path: Path) -> None:
-    filepath = tmp_path / "module.py"
-    filepath.write_text(
-        "def outer(response):\n"
-        "    data: Payload = response.json()\n"
-        "\n"
-        "    class Container:\n"
-        "        data = int\n"
-        "\n"
-        "        class Nested(data):\n"
-        "            value = data\n"
-        "\n"
-        "        thunk = lambda: data\n"
-        "\n"
-        "        values = [data for _ in (data,)]\n"
-        "\n"
-        "    return Container.Nested.__bases__[0], Container.Nested.value, Container.thunk(), Container.values\n"
-    )
-
-    assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
-
-    assert filepath.read_text() == (
-        "def outer(response):\n"
-        "    payload: Payload = response.json()\n"
-        "\n"
-        "    class Container:\n"
-        "        data = int\n"
-        "\n"
-        "        class Nested(data):\n"
-        "            value = payload\n"
-        "\n"
-        "        thunk = lambda: payload\n"
-        "\n"
-        "        values = [payload for _ in (data,)]\n"
-        "\n"
-        "    return Container.Nested.__bases__[0], Container.Nested.value, Container.thunk(), Container.values\n"
-    )
-
-    namespace = _exec_module(filepath.read_text())
-
-    assert namespace["outer"](_Response()) == (int, "response value", "response value", ["response value"])
+    assert filepath.read_text() == source
 
 
 def test_main_directory_argument_matches_explicit_file_argument_for_untracked_file(

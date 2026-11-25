@@ -361,6 +361,105 @@ def test_apply_fix_leaves_subclass_super_call_untouched(tmp_path: Path) -> None:
     assert "return super().get_data()" in file_content
 
 
+@pytest.mark.parametrize(
+    "shadowing",
+    [
+        "    get_data = None\n",
+        "    def inner(arg=(get_data := None)):\n        return arg\n",
+        "    callback = lambda arg=(get_data := None): arg\n",
+    ],
+    ids=["assignment", "nested-default-walrus", "lambda-default-walrus"],
+)
+def test_apply_fix_renames_header_references_of_a_shadowing_function(tmp_path: Path, shadowing: str) -> None:
+    test_file = tmp_path / "module.py"
+    test_file.write_text(
+        "def get_data():\n"
+        '    f = open("f.txt")\n'
+        "    return f.read()\n"
+        "\n"
+        "\n"
+        "@decorate(get_data)\n"
+        "def outer(items=get_data, *, other=get_data) -> type(get_data):\n"
+        f"{shadowing}"
+        "    return items\n"
+    )
+
+    suggestion = _suggestion_for(test_file, "get_data")
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
+
+    new_name = suggestion.suggested_name
+    assert test_file.read_text().count(new_name) == 5
+
+
+@pytest.mark.parametrize(
+    "user",
+    [
+        "def outer(items=[get_data for get_data in (1, 2)]):\n    get_data = None\n    return items\n",
+        "def outer[get_data](value: get_data) -> get_data:\n    return value\n",
+        "class Box[get_data]:\n    value: get_data\n",
+    ],
+    ids=["comprehension-target", "function-type-parameter", "class-type-parameter"],
+)
+def test_apply_fix_leaves_names_bound_by_other_scopes(tmp_path: Path, user: str) -> None:
+    test_file = tmp_path / "module.py"
+    test_file.write_text(f'def get_data():\n    f = open("f.txt")\n    return f.read()\n\n\n{user}')
+
+    suggestion = _suggestion_for(test_file, "get_data")
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
+
+    assert (
+        test_file.read_text()
+        == f'def {suggestion.suggested_name}():\n    f = open("f.txt")\n    return f.read()\n\n\n{user}'
+    )
+
+
+@pytest.mark.parametrize(
+    "user",
+    [
+        "class Container:\n    loader = get_data\n    get_data = 42\n",
+        "class Container:\n    get_data = 42\n    loader = get_data\n",
+        "class Container:\n    get_data: int\n    loader = get_data\n",
+        "class Container:\n    get_data = 42\n    if FLAG:\n        del get_data\n    loader = get_data\n",
+        "class Container:\n    values = [item for item in get_data()]\n    get_data = 42\n",
+        (
+            "class Container:\n    @inspect\n    def method(self, value: get_data) -> get_data:\n"
+            "        pass\n\n    get_data = 42\n"
+        ),
+        "class Container:\n    def method(self, loader=get_data):\n        pass\n\n    get_data = 42\n",
+        "class Container:\n    if FLAG:\n        get_data = 42\n\n    def method[T: get_data](self):\n        pass\n",
+        "class Container:\n    if FLAG:\n        get_data = 42\n\n    class Inner[T = get_data]:\n        pass\n",
+    ],
+    ids=[
+        "read-before-binding",
+        "read-after-binding",
+        "annotation-only-declaration",
+        "conditional-deletion",
+        "comprehension-iterable",
+        "method-annotations",
+        "method-default",
+        "method-type-parameter-bound",
+        "class-type-parameter-default",
+    ],
+)
+def test_apply_fix_declines_when_a_class_body_assigns_and_reads_the_name(tmp_path: Path, user: str) -> None:
+    test_file = tmp_path / "module.py"
+    source = f'def get_data():\n    f = open("f.txt")\n    return f.read()\n\n\n{user}'
+    test_file.write_text(source)
+
+    assert apply_fix(test_file, _suggestion_for(test_file, "get_data")) is FixOutcome.DECLINED
+    assert test_file.read_text() == source
+
+
+def test_apply_fix_renames_when_a_class_body_only_assigns_the_name(tmp_path: Path) -> None:
+    test_file = tmp_path / "module.py"
+    source = 'def get_data():\n    f = open("f.txt")\n    return f.read()\n\n\nclass Container:\n    get_data = 42\n'
+    test_file.write_text(source)
+    suggestion = _suggestion_for(test_file, "get_data")
+
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
+    assert test_file.read_text() == source.replace("def get_data():", f"def {suggestion.suggested_name}():", 1)
+
+
 def test_apply_fix_does_not_rename_nested_shadowing_function(tmp_path: Path) -> None:
     test_file = tmp_path / "module.py"
     test_file.write_text(

@@ -21,11 +21,10 @@ from ._base import (
     split_lines_like_ast,
 )
 from ._options import EnumOption
-from ._scope import class_scope_binding_names, definition_header, iter_binding_names, iter_within_scope_from
+from ._references import class_bound_and_read_names, collect_scope_replacements, has_future_annotations_import
 from .meaningless_vars_suggestions import Confidence, plan_suggestions
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
     from ._options import CheckOption
@@ -35,7 +34,6 @@ logger = logging.getLogger("meaningless_vars")
 IGNORE_PATTERN = ignore_pattern_for("TR1")
 
 type VariableName = str
-type _ComprehensionNode = ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
 
 
 class MeaninglessVarsFixData(TypedDict):
@@ -141,303 +139,6 @@ class MeaninglessNameVisitor(ast.NodeVisitor):
         self._check_name(arg.arg, arg.lineno, arg.col_offset)
 
 
-_CROSSABLE_SCOPE_NODES = (
-    ast.FunctionDef,
-    ast.AsyncFunctionDef,
-    ast.Lambda,
-    ast.ListComp,
-    ast.SetComp,
-    ast.DictComp,
-    ast.GeneratorExp,
-)
-
-
-def _binds_name_in_nested_scope(scope_node: ast.AST, name: VariableName) -> bool:
-    if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda):
-        args = scope_node.args
-        all_args = [
-            *args.args,
-            *args.posonlyargs,
-            *args.kwonlyargs,
-            *([args.vararg] if args.vararg else []),
-            *([args.kwarg] if args.kwarg else []),
-        ]
-        if any(arg.arg == name for arg in all_args):
-            return True
-        if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef) and any(
-            isinstance(type_param, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple) and type_param.name == name
-            for type_param in scope_node.type_params
-        ):
-            return True
-
-        for child in _iter_own_scope_descendants(scope_node):
-            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and child.name == name:
-                return True
-            if name in iter_binding_names(child):
-                return True
-        return False
-
-    assert isinstance(scope_node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp)
-    return any(
-        isinstance(target, ast.Name) and target.id == name
-        for generator in scope_node.generators
-        for target in ast.walk(generator.target)
-    )
-
-
-def _has_future_annotations_import(tree: ast.Module) -> bool:
-    return any(
-        isinstance(stmt, ast.ImportFrom)
-        and stmt.module == "__future__"
-        and any(a.name == "annotations" for a in stmt.names)
-        for stmt in tree.body
-    )
-
-
-def _signature_annotations(args: ast.arguments) -> Iterator[ast.expr]:
-    all_args = [*args.posonlyargs, *args.args, *args.kwonlyargs]
-    if args.vararg:
-        all_args.append(args.vararg)
-    if args.kwarg:
-        all_args.append(args.kwarg)
-    for arg in all_args:
-        if arg.annotation is not None:
-            yield arg.annotation
-
-
-def _type_param_defaults_and_bounds(type_params: list[ast.type_param]) -> Iterator[ast.expr]:
-    for type_param in type_params:
-        if isinstance(type_param, ast.TypeVar):
-            if type_param.bound is not None:
-                yield type_param.bound
-            if type_param.default_value is not None:
-                yield type_param.default_value
-        elif isinstance(type_param, ast.ParamSpec | ast.TypeVarTuple) and type_param.default_value is not None:
-            yield type_param.default_value
-
-
-def _peer_filtered_replace_names(
-    type_params: list[ast.type_param], replace_names: dict[VariableName, VariableName]
-) -> dict[VariableName, VariableName]:
-    peer_type_param_names = {
-        type_param.name
-        for type_param in type_params
-        if isinstance(type_param, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple)
-    }
-    return {name: new for name, new in replace_names.items() if name not in peer_type_param_names}
-
-
-def _outer_scope_children(
-    scope_node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | _ComprehensionNode,
-    *,
-    has_future_annotations: bool,
-) -> Iterator[ast.AST]:
-    if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef):
-        yield from definition_header(scope_node)
-        if not scope_node.type_params and not has_future_annotations:
-            yield from _signature_annotations(scope_node.args)
-            if scope_node.returns is not None:
-                yield scope_node.returns
-    elif isinstance(scope_node, ast.Lambda):
-        yield from definition_header(scope_node)
-    else:
-        yield scope_node.generators[0].iter
-
-
-def _own_scope_children(
-    scope_node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | _ComprehensionNode,
-) -> Iterator[ast.AST]:
-    if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef):
-        yield from scope_node.body
-    elif isinstance(scope_node, ast.Lambda):
-        yield scope_node.body
-    elif isinstance(scope_node, ast.DictComp):
-        yield scope_node.key
-        yield scope_node.value
-        yield from _comprehension_own_scope_generators(scope_node.generators)
-    else:
-        yield scope_node.elt
-        yield from _comprehension_own_scope_generators(scope_node.generators)
-
-
-def _comprehension_own_scope_generators(generators: list[ast.comprehension]) -> Iterator[ast.AST]:
-    for index, generator in enumerate(generators):
-        if index > 0:
-            yield generator.iter
-        yield generator.target
-        yield from generator.ifs
-
-
-def _iter_own_scope_descendants(
-    scope_node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | _ComprehensionNode,
-) -> Iterator[ast.AST]:
-    yield from iter_within_scope_from(_own_scope_children(scope_node))
-
-
-def _collect_replacements(
-    node: ast.AST,
-    replace_names: dict[VariableName, VariableName],
-    *,
-    outer_replace_names: dict[VariableName, VariableName] | None = None,
-    has_future_annotations: bool,
-) -> list[tuple[int, int, VariableName, VariableName]]:
-    if outer_replace_names is None:
-        outer_replace_names = replace_names
-
-    if isinstance(node, ast.Name):
-        if node.id in replace_names:
-            return [(node.lineno, node.col_offset, node.id, replace_names[node.id])]
-        return []
-
-    if isinstance(node, _CROSSABLE_SCOPE_NODES):
-        replacements: list[tuple[int, int, VariableName, VariableName]] = []
-        for outer_child in _outer_scope_children(node, has_future_annotations=has_future_annotations):
-            replacements.extend(
-                _collect_replacements(
-                    outer_child,
-                    replace_names,
-                    outer_replace_names=outer_replace_names,
-                    has_future_annotations=has_future_annotations,
-                )
-            )
-
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.type_params:
-            bound_default_names = _peer_filtered_replace_names(node.type_params, replace_names)
-            if bound_default_names:
-                for expr in _type_param_defaults_and_bounds(node.type_params):
-                    replacements.extend(
-                        _collect_replacements(
-                            expr,
-                            bound_default_names,
-                            outer_replace_names=bound_default_names,
-                            has_future_annotations=has_future_annotations,
-                        )
-                    )
-
-            if not has_future_annotations and bound_default_names:
-                for expr in _signature_annotations(node.args):
-                    replacements.extend(
-                        _collect_replacements(
-                            expr,
-                            bound_default_names,
-                            outer_replace_names=bound_default_names,
-                            has_future_annotations=has_future_annotations,
-                        )
-                    )
-                if node.returns is not None:
-                    replacements.extend(
-                        _collect_replacements(
-                            node.returns,
-                            bound_default_names,
-                            outer_replace_names=bound_default_names,
-                            has_future_annotations=has_future_annotations,
-                        )
-                    )
-
-        nested_names = {
-            name: new for name, new in outer_replace_names.items() if not _binds_name_in_nested_scope(node, name)
-        }
-        if nested_names:
-            for own_child in _own_scope_children(node):
-                replacements.extend(
-                    _collect_replacements(
-                        own_child,
-                        nested_names,
-                        outer_replace_names=nested_names,
-                        has_future_annotations=has_future_annotations,
-                    )
-                )
-        return replacements
-
-    if isinstance(node, ast.TypeAlias):
-        replacements = _collect_replacements(
-            node.name,
-            replace_names,
-            outer_replace_names=outer_replace_names,
-            has_future_annotations=has_future_annotations,
-        )
-        filtered_names = _peer_filtered_replace_names(node.type_params, replace_names)
-        if filtered_names:
-            for expr in _type_param_defaults_and_bounds(node.type_params):
-                replacements.extend(
-                    _collect_replacements(
-                        expr,
-                        filtered_names,
-                        outer_replace_names=filtered_names,
-                        has_future_annotations=has_future_annotations,
-                    )
-                )
-            replacements.extend(
-                _collect_replacements(
-                    node.value,
-                    filtered_names,
-                    outer_replace_names=filtered_names,
-                    has_future_annotations=has_future_annotations,
-                )
-            )
-        return replacements
-
-    if isinstance(node, ast.ClassDef):
-        class_replacements: list[tuple[int, int, VariableName, VariableName]] = []
-
-        def collect(
-            target: ast.AST,
-            replacements: dict[VariableName, VariableName],
-            *,
-            outer_names: dict[VariableName, VariableName],
-        ) -> None:
-            class_replacements.extend(
-                _collect_replacements(
-                    target,
-                    replacements,
-                    outer_replace_names=outer_names,
-                    has_future_annotations=has_future_annotations,
-                )
-            )
-
-        class_names = class_scope_binding_names(node)
-        class_replace_names = {name: new for name, new in outer_replace_names.items() if name not in class_names}
-        if replace_names:
-            for decorator in node.decorator_list:
-                collect(decorator, replace_names, outer_names=outer_replace_names)
-        header_names = _peer_filtered_replace_names(node.type_params, replace_names)
-        if header_names:
-            for base in node.bases:
-                collect(base, header_names, outer_names=header_names)
-            for keyword in node.keywords:
-                collect(keyword.value, header_names, outer_names=header_names)
-            for expression in _type_param_defaults_and_bounds(node.type_params):
-                collect(expression, header_names, outer_names=header_names)
-        for child in node.body:
-            collect(child, class_replace_names, outer_names=outer_replace_names)
-        return class_replacements
-
-    return [
-        replacement
-        for child in ast.iter_child_nodes(node)
-        for replacement in _collect_replacements(
-            child,
-            replace_names,
-            outer_replace_names=outer_replace_names,
-            has_future_annotations=has_future_annotations,
-        )
-    ]
-
-
-def _collect_scope_replacements(
-    scope: ast.AST, replace_names: dict[VariableName, VariableName], *, has_future_annotations: bool
-) -> list[tuple[int, int, VariableName, VariableName]]:
-    if isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
-        children: Iterator[ast.AST] = _own_scope_children(scope)
-    else:
-        children = ast.iter_child_nodes(scope)
-    return [
-        replacement
-        for child in children
-        for replacement in _collect_replacements(child, replace_names, has_future_annotations=has_future_annotations)
-    ]
-
-
 def _find_enclosing_function(tree: ast.Module, line: int) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
     best: ast.FunctionDef | ast.AsyncFunctionDef | None = None
     for node in ast.walk(tree):
@@ -458,7 +159,7 @@ def _apply_fixes(
     ignored_lines: set[int],
     encoding: str = "utf-8",
 ) -> FixOutcome:
-    has_future_annotations = _has_future_annotations_import(tree)
+    has_future_annotations = has_future_annotations_import(tree)
 
     violations_by_scope: dict[int | None, list[MeaninglessVarsFixData]] = {}
     scope_nodes: dict[int | None, ast.AST] = {}
@@ -479,8 +180,10 @@ def _apply_fixes(
         scope_replacements[scope_id] = replacements
 
     all_replacements: list[tuple[int, int, VariableName, VariableName]] = []
-    for scope_id, replacements in scope_replacements.items():
-        collected = _collect_scope_replacements(
+    for scope_id, scope_names in scope_replacements.items():
+        ambiguous = class_bound_and_read_names(scope_nodes[scope_id], scope_names)
+        replacements = {old: new for old, new in scope_names.items() if old not in ambiguous}
+        collected = collect_scope_replacements(
             scope_nodes[scope_id], replacements, has_future_annotations=has_future_annotations
         )
         by_old_name: dict[VariableName, list[tuple[int, int, VariableName, VariableName]]] = {}
