@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from pre_commit_hooks._filelock import locked, locking_is_available
+from pre_commit_hooks._filelock import locked_directory, locking_is_available
 from pre_commit_hooks._lsp import LSPError, read_framed_message, write_framed_message
 from pre_commit_hooks.ast_checks._base import CheckUnavailableError
 
@@ -41,7 +41,7 @@ _CONNECT_TIMEOUT_SECONDS = 5.0
 _IDLE_TIMEOUT_SECONDS = 15 * 60
 _CLIENT_REQUEST_TIMEOUT_SECONDS = 60.0
 _STEADY_STATE_CALL_TIMEOUT_SECONDS = 60.0
-_PROTOCOL_VERSION = "7"
+_PROTOCOL_VERSION = "8"
 
 type RPCParameter = str | int | list[str] | list[Redundancy]
 
@@ -52,6 +52,17 @@ class _VersionMismatchError(Exception):
 
 class _ShutdownRequestedError(Exception):
     pass
+
+
+class _SocketBinding(NamedTuple):
+    path: Path
+    identity: os.stat_result
+
+    def is_current(self) -> bool:
+        try:
+            return os.path.samestat(self.identity, self.path.lstat())
+        except OSError:
+            return False
 
 
 def _socket_path(root: Path) -> Path:
@@ -95,13 +106,24 @@ def _daemon_process_is_alive(root: Path) -> bool:
     return True
 
 
-def _cleanup_if_still_owned(root: Path) -> None:
-    if _read_recorded_pid(root) not in (os.getpid(), None):
-        return
-    _cleanup_confirmed_dead_daemon(root)
+@contextlib.contextmanager
+def _spawn_lock(root: Path, *, timeout_seconds: float) -> Iterator[None]:
+    if not locking_is_available():
+        msg = f"file locking is unavailable on this platform (os.name={os.name!r}); cannot safely spawn a ty daemon"
+        raise OSError(msg)
+    with locked_directory(
+        root, timeout_seconds=timeout_seconds, poll_interval_seconds=_SPAWN_LOCK_POLL_INTERVAL_SECONDS
+    ):
+        yield
 
 
-def _cleanup_confirmed_dead_daemon(root: Path) -> None:
+def _cleanup_if_still_owned(root: Path, binding: _SocketBinding) -> None:
+    with contextlib.suppress(OSError), _spawn_lock(root, timeout_seconds=0.0):
+        if binding.is_current() and _read_recorded_pid(root) == os.getpid():
+            _remove_daemon_files(root)
+
+
+def _remove_daemon_files(root: Path) -> None:
     with contextlib.suppress(OSError):
         _socket_path(root).unlink()
     with contextlib.suppress(OSError):
@@ -239,26 +261,22 @@ def connect(root: Path) -> RemoteTySession:
     socket_path = _socket_path(root)
     daemon_identity = _daemon_identity(root)
 
+    original_binding = None
+    with contextlib.suppress(OSError):
+        original_binding = _SocketBinding(socket_path, socket_path.lstat())
     sock, already_confirmed_departing = _try_connect_or_departing(socket_path, daemon_identity)
     if sock is not None:
         return RemoteTySession(sock)
 
-    if not locking_is_available():
-        msg = f"file locking is unavailable on this platform (os.name={os.name!r}); cannot safely spawn a ty daemon"
-        raise OSError(msg)
-
-    lock_path = socket_path.with_suffix(".spawn.lock")
-    socket_path.parent.mkdir(parents=True, exist_ok=True)
-    with locked(
-        lock_path, timeout_seconds=_SPAWN_LOCK_TIMEOUT_SECONDS, poll_interval_seconds=_SPAWN_LOCK_POLL_INTERVAL_SECONDS
-    ):
+    with _spawn_lock(root, timeout_seconds=_SPAWN_LOCK_TIMEOUT_SECONDS):
         sock, daemon_is_departing = _try_connect_or_departing(socket_path, daemon_identity)
         if sock is not None:
             return RemoteTySession(sock)
-        daemon_is_departing = daemon_is_departing or already_confirmed_departing
+        if already_confirmed_departing and original_binding is not None and original_binding.is_current():
+            daemon_is_departing = True
 
-        if not daemon_is_departing and _daemon_process_is_alive(root):
-            sock, daemon_is_departing = _wait_for_busy_daemon(socket_path, daemon_identity)
+        if not daemon_is_departing and socket_path.exists() and _daemon_process_is_alive(root):
+            sock, daemon_is_departing = _wait_for_busy_daemon(root, daemon_identity)
             if sock is not None:
                 return RemoteTySession(sock)
             if not daemon_is_departing:
@@ -281,35 +299,38 @@ def _try_connect_or_departing(socket_path: Path, daemon_identity: str) -> tuple[
         return None, True
 
 
-def _wait_for_busy_daemon(socket_path: Path, daemon_identity: str) -> tuple[socket.socket | None, bool]:
+def _wait_for_busy_daemon(root: Path, daemon_identity: str) -> tuple[socket.socket | None, bool]:
+    socket_path = _socket_path(root)
     deadline = time.monotonic() + _BUSY_DAEMON_RETRY_TIMEOUT_SECONDS
     while time.monotonic() < deadline:
         time.sleep(_BUSY_DAEMON_RETRY_INTERVAL_SECONDS)
         sock, daemon_is_departing = _try_connect_or_departing(socket_path, daemon_identity)
         if sock is not None:
             return sock, False
-        if daemon_is_departing:
+        if daemon_is_departing or not socket_path.exists() or not _daemon_process_is_alive(root):
             return None, True
     return None, False
 
 
 def probe_existing(root: Path) -> ExistingDaemonProbe:
     root = repository_root(root)
-    if not _socket_path(root).exists():
+    socket_path = _socket_path(root)
+    if not socket_path.exists():
         return ExistingDaemonProbe(None)
     try:
         daemon_identity = _daemon_identity(root)
     except OSError:
         return ExistingDaemonProbe(None, terminal_failure=True)
-    socket_path = _socket_path(root)
     sock, departing = _try_connect_or_departing(socket_path, daemon_identity)
     if sock is not None:
         return ExistingDaemonProbe(RemoteTySession(sock))
     if not departing and _daemon_process_is_alive(root):
-        sock, _departing = _wait_for_busy_daemon(socket_path, daemon_identity)
+        sock, _departing = _wait_for_busy_daemon(root, daemon_identity)
         return ExistingDaemonProbe(RemoteTySession(sock) if sock is not None else None)
     if not departing:
-        _cleanup_confirmed_dead_daemon(root)
+        with contextlib.suppress(OSError), _spawn_lock(root, timeout_seconds=0.0):
+            if not _daemon_process_is_alive(root):
+                _remove_daemon_files(root)
     return ExistingDaemonProbe(None)
 
 
@@ -533,20 +554,27 @@ def _serve_connection(
         logger.debug("ty daemon dropped a client connection due to a connection-level error", exc_info=True)
 
 
-def _accept_loop(sock: socket.socket, session: PersistentSession, daemon_identity: str) -> None:
+def _accept_loop(
+    sock: socket.socket, session: PersistentSession, daemon_identity: str, binding: _SocketBinding
+) -> bool:
     session_lock = threading.Lock()
     shutdown_requested = threading.Event()
     workers: list[threading.Thread] = []
     sock.settimeout(min(_ACCEPT_POLL_INTERVAL_SECONDS, _IDLE_TIMEOUT_SECONDS))
     idle_deadline = time.monotonic() + _IDLE_TIMEOUT_SECONDS
+    orphaned = False
 
     while not shutdown_requested.is_set():
+        if not binding.is_current():
+            orphaned = True
+            sock.close()
+            break
         try:
             conn, _peer = sock.accept()
         except TimeoutError:
             workers = [worker for worker in workers if worker.is_alive()]
             if not workers and time.monotonic() >= idle_deadline:
-                return
+                break
             continue
         idle_deadline = time.monotonic() + _IDLE_TIMEOUT_SECONDS
         workers = [worker for worker in workers if worker.is_alive()]
@@ -560,6 +588,7 @@ def _accept_loop(sock: socket.socket, session: PersistentSession, daemon_identit
 
     for worker in workers:
         worker.join()
+    return orphaned
 
 
 def _serve(root: Path) -> None:
@@ -581,32 +610,28 @@ def _serve(root: Path) -> None:
         print(f"FAILED: could not start a ty session for {root}: {error}", flush=True)
         return
 
-    try:
-        _self_test()
-    except (OSError, CheckUnavailableError) as error:
-        session.close()
-        print(f"FAILED: self-test failed: {error}", flush=True)
-        return
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+        orphaned = True
+        try:
+            try:
+                _self_test()
+            except (OSError, CheckUnavailableError) as error:
+                print(f"FAILED: self-test failed: {error}", flush=True)
+                return
 
-    pid_path.write_text(str(os.getpid()), encoding="utf-8")
+            try:
+                sock.bind(str(socket_path))
+                binding = _SocketBinding(socket_path, socket_path.lstat())
+                pid_path.write_text(str(os.getpid()), encoding="utf-8")
+                sock.listen(_LISTEN_BACKLOG)
+            except OSError as error:
+                print(f"BIND_FAILED: could not bind {socket_path}: {error!r}", flush=True)
+                return
 
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    try:
-        sock.bind(str(socket_path))
-    except OSError as error:
-        session.close()
-        with contextlib.suppress(OSError):
-            pid_path.unlink()
-        print(f"BIND_FAILED: could not bind {socket_path}: {error!r}", flush=True)
-        return
-    sock.listen(_LISTEN_BACKLOG)
-
-    print("READY", flush=True)
-    _detach_stdio()
-
-    try:
-        _accept_loop(sock, session, daemon_identity)
-    finally:
-        session.close()
-        sock.close()
-        _cleanup_if_still_owned(root)
+            print("READY", flush=True)
+            _detach_stdio()
+            orphaned = _accept_loop(sock, session, daemon_identity, binding)
+        finally:
+            session.close()
+            if not orphaned:
+                _cleanup_if_still_owned(root, binding)
