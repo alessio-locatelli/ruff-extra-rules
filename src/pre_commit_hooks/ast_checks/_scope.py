@@ -47,8 +47,32 @@ def _walrus_targets(nodes: Iterable[ast.AST]) -> Iterator[ast.Name]:
             yield from _walrus_targets(ast.iter_child_nodes(node))
 
 
+def own_scope_children(scope_node: ast.AST) -> Iterator[ast.AST]:
+    if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        yield from scope_node.body
+    elif isinstance(scope_node, ast.Lambda):
+        yield scope_node.body
+    elif isinstance(scope_node, ast.DictComp):
+        yield scope_node.key
+        yield scope_node.value
+        yield from _comprehension_own_scope_generators(scope_node.generators)
+    elif isinstance(scope_node, ast.ListComp | ast.SetComp | ast.GeneratorExp):
+        yield scope_node.elt
+        yield from _comprehension_own_scope_generators(scope_node.generators)
+    else:
+        yield from ast.iter_child_nodes(scope_node)
+
+
+def _comprehension_own_scope_generators(generators: list[ast.comprehension]) -> Iterator[ast.AST]:
+    for index, generator in enumerate(generators):
+        if index > 0:
+            yield generator.iter
+        yield generator.target
+        yield from generator.ifs
+
+
 def iter_within_scope(node: ast.AST) -> Iterator[ast.AST]:
-    yield from iter_within_scope_from(ast.iter_child_nodes(node))
+    yield from iter_within_scope_from(own_scope_children(node))
 
 
 def definition_header(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef) -> list[ast.expr]:
@@ -67,7 +91,7 @@ def iter_within_scope_from(children: Iterable[ast.AST]) -> Iterator[ast.AST]:
         elif isinstance(child, _DEFINITION_NODES):
             yield from iter_within_scope_from(definition_header(child))
         else:
-            yield from iter_within_scope(child)
+            yield from iter_within_scope_from(ast.iter_child_nodes(child))
 
 
 def collect_scope_names(scope: ast.AST) -> set[str]:

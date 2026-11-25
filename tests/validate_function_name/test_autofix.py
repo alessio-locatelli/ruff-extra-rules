@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import textwrap
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -359,6 +360,57 @@ def test_apply_fix_leaves_subclass_super_call_untouched(tmp_path: Path) -> None:
     assert f"class Base:\n    def {new_name}(self):" in file_content
     assert "class Child(Base):\n    def get_data(self):" in file_content
     assert "return super().get_data()" in file_content
+
+
+@pytest.mark.parametrize(
+    ("prefix", "declaration"),
+    [
+        ("", "global"),
+        ("def enclosing():\n    get_data = None\n", "nonlocal"),
+    ],
+    ids=["global", "nonlocal"],
+)
+def test_apply_fix_declines_rename_with_explicit_scope_declaration(
+    tmp_path: Path, prefix: str, declaration: str
+) -> None:
+    test_file = tmp_path / "module.py"
+    outer = (
+        "def outer(arg=(get_data := None)):\n"
+        f"    {declaration} get_data\n"
+        "    def get_data():\n"
+        '        f = open("f.txt")\n'
+        "        return f.read()\n"
+        "    return get_data()\n"
+    )
+    source = prefix + (textwrap.indent(outer, "    ") if prefix else outer)
+    test_file.write_text(source)
+
+    suggestion = _suggestion_for(test_file, "get_data")
+    assert apply_fix(test_file, suggestion) is FixOutcome.DECLINED
+    assert test_file.read_text() == source
+
+
+def test_apply_fix_ignores_binding_in_enclosing_function_default(tmp_path: Path) -> None:
+    test_file = tmp_path / "module.py"
+    test_file.write_text(
+        "def outer(arg=(get_data := None)):\n"
+        "    def get_data():\n"
+        '        f = open("f.txt")\n'
+        "        return f.read()\n"
+        "    return get_data()\n"
+    )
+
+    suggestion = _suggestion_for(test_file, "get_data")
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
+
+    new_name = suggestion.suggested_name
+    assert test_file.read_text() == (
+        "def outer(arg=(get_data := None)):\n"
+        f"    def {new_name}():\n"
+        '        f = open("f.txt")\n'
+        "        return f.read()\n"
+        f"    return {new_name}()\n"
+    )
 
 
 @pytest.mark.parametrize(

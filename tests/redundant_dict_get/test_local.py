@@ -463,3 +463,42 @@ def test_find_proofs_rejects_aggressive_dict_proof_after_function_binding() -> N
 )
 def test_binds_name_recognizes_all_binding_forms(source: str, name: str) -> None:
     assert _binds_name(ast.parse(source), name)
+
+
+@pytest.mark.parametrize(
+    ("setup", "definition", "expected_lines"),
+    [
+        ("", "    def deferred():\n        config.clear()\n", [6]),
+        ("", "    if enabled:\n        class Immediate:\n            config.clear()\n", []),
+        (
+            "def invoke(fn):\n    fn()\n    return fn\n",
+            "    @invoke\n    def deferred():\n        config.clear()\n",
+            [],
+        ),
+        (
+            "class Base:\n    def __init_subclass__(cls):\n        config.clear()\n",
+            "    class Derived(Base):\n        pass\n",
+            [],
+        ),
+        (
+            "class Meta(type):\n    def __init__(cls, *args):\n        config.clear()\n",
+            "    class Constructed(metaclass=Meta):\n        pass\n",
+            [],
+        ),
+    ],
+    ids=["deferred-function", "conditional-class", "decorator", "init-subclass", "metaclass"],
+)
+def test_loop_membership_tracks_definition_execution(setup: str, definition: str, expected_lines: list[int]) -> None:
+    source = (
+        f"{setup}"
+        "required = {'port', 'host'}\n"
+        "config = {'port': 5432, 'host': 80}\n"
+        "if not required <= config.keys():\n"
+        "    raise ValueError\n"
+        "for key in required:\n"
+        "    value = config.get(key)\n"
+        f"{definition}"
+    )
+    tree = ast.parse(source)
+
+    assert [proof.candidate.call.lineno for proof in find_proofs(tree, find_candidates(tree))] == expected_lines

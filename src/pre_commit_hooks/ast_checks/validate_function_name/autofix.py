@@ -271,6 +271,12 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
 
     scope_node, is_method = _resolve_rename_scope(tree, func_node)
 
+    if any(
+        isinstance(node, ast.Global | ast.Nonlocal) and func_node.name in node.names
+        for node in (iter_within_scope(scope_node) if is_method else ast.walk(scope_node))
+    ):
+        return FixOutcome.DECLINED
+
     if not is_method and (
         _is_rebound_in_scope(scope_node, func_node.name, func_node)
         or class_bound_and_read_names(scope_node, [func_node.name])

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
-from pre_commit_hooks.ast_checks._scope import iter_binding_names, iter_within_scope
+from pre_commit_hooks.ast_checks._scope import iter_binding_names, iter_within_scope, iter_within_scope_from
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -620,38 +620,37 @@ def _loop_body_invalidates_state(statements: list[ast.stmt], state: _State, cand
     tracked_names = state.aliases.keys()
     if not tracked_names:
         return False
-    for statement in statements:
-        for node in [statement, *iter_within_scope(statement)]:
-            if isinstance(node, ast.Call) and id(node) not in candidates:
-                return True
-            if isinstance(node, ast.Await | ast.Yield | ast.YieldFrom):
-                return True
-            if isinstance(node, ast.AugAssign):
-                return True
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del) and node.id in tracked_names:
-                return True
-            if isinstance(node, ast.Import | ast.ImportFrom) and any(
-                name in tracked_names for name in iter_binding_names(node)
-            ):
-                return True
-            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and node.name in tracked_names:
-                return True
-            if (
-                isinstance(node, ast.Subscript)
-                and isinstance(node.ctx, ast.Store | ast.Del)
-                and isinstance(node.value, ast.Name)
-                and node.value.id in tracked_names
-            ):
-                return True
+    for node in iter_within_scope_from(statements):
+        if isinstance(node, ast.Call) and id(node) not in candidates:
+            return True
+        if isinstance(node, ast.Await | ast.Yield | ast.YieldFrom):
+            return True
+        if isinstance(node, ast.AugAssign):
+            return True
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del) and node.id in tracked_names:
+            return True
+        if isinstance(node, ast.Import | ast.ImportFrom) and any(
+            name in tracked_names for name in iter_binding_names(node)
+        ):
+            return True
+        if isinstance(node, ast.ClassDef):
+            return True
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and (
+            node.decorator_list or node.name in tracked_names
+        ):
+            return True
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Store | ast.Del)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in tracked_names
+        ):
+            return True
     return False
 
 
 def _contains_loop_control(statements: list[ast.stmt]) -> bool:
-    return any(
-        isinstance(node, ast.Break | ast.Continue)
-        for statement in statements
-        for node in [statement, *iter_within_scope(statement)]
-    )
+    return any(isinstance(node, ast.Break | ast.Continue) for node in iter_within_scope_from(statements))
 
 
 def _pattern_names(pattern: ast.pattern) -> set[str]:

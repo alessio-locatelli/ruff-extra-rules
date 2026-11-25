@@ -56,7 +56,7 @@ def _names_bound_by(statements: list[ast.stmt]) -> set[str]:
 def _enum_attribute_rebinding_names(statement: ast.stmt) -> set[str]:
     return {
         node.value.id
-        for node in iter_within_scope(statement)
+        for node in ast.walk(statement)
         if isinstance(node, ast.Attribute)
         and isinstance(node.ctx, ast.Store | ast.Del)
         and isinstance(node.value, ast.Name)
@@ -67,7 +67,7 @@ def _enum_attribute_rebinding_names(statement: ast.stmt) -> set[str]:
 def _member_value_rebindings(statement: ast.stmt, member_aliases: dict[str, tuple[str, str]]) -> set[tuple[str, str]]:
     rebindings = {
         (node.value.value.id, node.value.attr)
-        for node in iter_within_scope(statement)
+        for node in ast.walk(statement)
         if isinstance(node, ast.Attribute)
         and isinstance(node.ctx, ast.Store | ast.Del)
         and node.attr == "_value_"
@@ -76,7 +76,7 @@ def _member_value_rebindings(statement: ast.stmt, member_aliases: dict[str, tupl
     }
     rebindings.update(
         member_aliases[node.value.id]
-        for node in iter_within_scope(statement)
+        for node in ast.walk(statement)
         if isinstance(node, ast.Attribute)
         and isinstance(node.ctx, ast.Store | ast.Del)
         and node.attr == "_value_"

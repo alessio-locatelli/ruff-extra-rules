@@ -5,6 +5,7 @@ import builtins
 from bisect import bisect_left, bisect_right
 from collections import Counter
 from dataclasses import dataclass
+from itertools import chain
 from typing import TYPE_CHECKING
 
 from pre_commit_hooks.ast_checks._scope import (
@@ -130,7 +131,7 @@ def _function_facts(
 ) -> _FunctionFacts | None:
     occurrences: Counter[str] = Counter()
     redeclared: set[str] = set()
-    for node in ast.walk(function):
+    for node in chain.from_iterable(map(ast.walk, function.body)):
         if isinstance(node, ast.Name):
             occurrences[node.id] += 1
         elif isinstance(node, ast.Global | ast.Nonlocal):
@@ -144,8 +145,8 @@ def _function_facts(
     bound = {name for node in iter_within_scope(function) for name in iter_binding_names(node)}
     captured = {
         node.id
-        for scope in ast.walk(function)
-        if scope is not function and isinstance(scope, _NESTED_SCOPE_NODES)
+        for scope in chain.from_iterable(map(ast.walk, function.body))
+        if isinstance(scope, _NESTED_SCOPE_NODES)
         for node in ast.walk(scope)
         if isinstance(node, ast.Name)
     }

@@ -56,14 +56,26 @@ def test_iter_within_scope_descent_rules(source: str, node_type: type[ast.AST] |
         assert len([n for n in nodes if isinstance(n, node_type)]) == 1
 
 
-def test_iter_within_scope_starts_inside_a_function_scope() -> None:
-    tree = ast.parse("def outer():\n    local_var = 1\n    return local_var\n\nmodule_var = 2\n")
-    func_node = tree.body[0]
-    assert isinstance(func_node, ast.FunctionDef)
+@pytest.mark.parametrize(
+    ("source", "names"),
+    [
+        ("@decorate\ndef f(arg=outside, *, flag=(seen := 1)):\n    local = 1", {"local"}),
+        ("async def f(arg: Annotation = outside) -> ReturnType:\n    local = 1", {"local"}),
+        ("@decorate\nclass Container(Base, metaclass=Meta):\n    local = 1", {"local"}),
+        ("lambda arg=outside: arg + local", {"arg", "local"}),
+        (
+            "[item for item in outside if predicate(item) for other in remaining]",
+            {"item", "predicate", "other", "remaining"},
+        ),
+        ("{item: value for item in outside}", {"item", "value"}),
+    ],
+    ids=["function", "async-function", "class", "lambda", "list-comprehension", "dict-comprehension"],
+)
+def test_iter_within_scope_starts_inside_the_root_scope(source: str, names: set[str]) -> None:
+    statement = ast.parse(source).body[0]
+    scope = statement.value if isinstance(statement, ast.Expr) else statement
 
-    names = {n.id for n in iter_within_scope(func_node) if isinstance(n, ast.Name)}
-
-    assert names == {"local_var"}
+    assert collect_scope_names(scope) == names
 
 
 @pytest.mark.parametrize(

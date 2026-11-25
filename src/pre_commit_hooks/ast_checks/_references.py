@@ -3,7 +3,13 @@ from __future__ import annotations
 import ast
 from typing import TYPE_CHECKING
 
-from ._scope import class_scope_binding_names, definition_header, iter_binding_names, iter_within_scope_from
+from ._scope import (
+    class_scope_binding_names,
+    definition_header,
+    iter_binding_names,
+    iter_within_scope,
+    own_scope_children,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
@@ -41,12 +47,7 @@ def _binds_name_in_nested_scope(scope_node: ast.AST, name: str) -> bool:
         ):
             return True
 
-        for child in _iter_own_scope_descendants(scope_node):
-            if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and child.name == name:
-                return True
-            if name in iter_binding_names(child):
-                return True
-        return False
+        return any(name in iter_binding_names(child) for child in iter_within_scope(scope_node))
 
     assert isinstance(scope_node, ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp)
     return any(
@@ -113,36 +114,6 @@ def _outer_scope_children(
         yield scope_node.generators[0].iter
 
 
-def _own_scope_children(
-    scope_node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | _ComprehensionNode,
-) -> Iterator[ast.AST]:
-    if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef):
-        yield from scope_node.body
-    elif isinstance(scope_node, ast.Lambda):
-        yield scope_node.body
-    elif isinstance(scope_node, ast.DictComp):
-        yield scope_node.key
-        yield scope_node.value
-        yield from _comprehension_own_scope_generators(scope_node.generators)
-    else:
-        yield scope_node.elt
-        yield from _comprehension_own_scope_generators(scope_node.generators)
-
-
-def _comprehension_own_scope_generators(generators: list[ast.comprehension]) -> Iterator[ast.AST]:
-    for index, generator in enumerate(generators):
-        if index > 0:
-            yield generator.iter
-        yield generator.target
-        yield from generator.ifs
-
-
-def _iter_own_scope_descendants(
-    scope_node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | _ComprehensionNode,
-) -> Iterator[ast.AST]:
-    yield from iter_within_scope_from(_own_scope_children(scope_node))
-
-
 def collect_replacements(
     node: ast.AST,
     replace_names: dict[str, str],
@@ -207,7 +178,7 @@ def collect_replacements(
             name: new for name, new in outer_replace_names.items() if not _binds_name_in_nested_scope(node, name)
         }
         if nested_names:
-            for own_child in _own_scope_children(node):
+            for own_child in own_scope_children(node):
                 replacements.extend(
                     collect_replacements(
                         own_child,
@@ -339,12 +310,8 @@ def class_bound_and_read_names(scope: ast.AST, names: Iterable[str]) -> set[str]
 def collect_scope_replacements(
     scope: ast.AST, replace_names: dict[str, str], *, has_future_annotations: bool
 ) -> list[Replacement]:
-    if isinstance(scope, ast.FunctionDef | ast.AsyncFunctionDef):
-        children: Iterator[ast.AST] = _own_scope_children(scope)
-    else:
-        children = ast.iter_child_nodes(scope)
     return [
         replacement
-        for child in children
+        for child in own_scope_children(scope)
         for replacement in collect_replacements(child, replace_names, has_future_annotations=has_future_annotations)
     ]
