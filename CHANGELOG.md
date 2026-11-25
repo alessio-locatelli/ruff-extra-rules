@@ -12,6 +12,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ### Fixed
 
+- The `redundant-type-conversion` daemon shuts down after its socket is deleted or replaced. Existing connections can finish, and new hook runs can start a replacement.
 - `redundant-type-conversion` at `aggressive` level preserves conversions from mutable collections and live views to `tuple` or `frozenset`. It still reports redundant conversions when the argument already has the target type.
 - `redundant-type-conversion` requires every possible type in a union to match the conversion target. For example, `tuple(x)` stays when `x` could be either a tuple or a list.
 - `redundant-enum-value` no longer reports `.value` on an enum class that a nested function's default argument rebinds, as in `def inner(arg=(State := other)):`.

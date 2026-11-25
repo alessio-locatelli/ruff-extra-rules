@@ -27,6 +27,7 @@ from pre_commit_hooks.ast_checks.redundant_type_conversion.daemon import (
     _dispatch,
     _handle_connection,
     _ShutdownRequestedError,
+    _SocketBinding,
     _spawn_daemon,
     _ty_version,
     _VersionMismatchError,
@@ -414,7 +415,7 @@ def test_accept_loop_ends_when_a_served_connection_requests_shutdown(tmp_path: P
 
         thread = threading.Thread(target=_client)
         thread.start()
-        _accept_loop(sock, _FakeSession(), daemon_identity="v1")
+        _accept_loop(sock, _FakeSession(), "v1", _SocketBinding(socket_path, socket_path.lstat()))
         thread.join(timeout=5)
         assert not thread.is_alive()
 
@@ -437,7 +438,7 @@ def test_accept_loop_ends_on_a_version_mismatch(tmp_path: Path) -> None:
 
         thread = threading.Thread(target=_client)
         thread.start()
-        _accept_loop(sock, _FakeSession(), daemon_identity="v1")
+        _accept_loop(sock, _FakeSession(), "v1", _SocketBinding(socket_path, socket_path.lstat()))
         thread.join(timeout=5)
         assert not thread.is_alive()
 
@@ -451,10 +452,27 @@ def test_accept_loop_returns_on_idle_timeout(tmp_path: Path, monkeypatch: pytest
         sock.bind(str(socket_path))
         sock.listen(1)
 
-        _accept_loop(sock, session, daemon_identity="v1")
+        _accept_loop(sock, session, "v1", _SocketBinding(socket_path, socket_path.lstat()))
 
     session.close()
     assert session.close_calls == 1
+
+
+def test_accept_loop_detects_an_atomically_replaced_socket(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(daemon_module, "_IDLE_TIMEOUT_SECONDS", 0.2)
+    socket_path = tmp_path / "d.sock"
+    replacement_path = tmp_path / "replacement.sock"
+    with (
+        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock,
+        socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as replacement,
+    ):
+        sock.bind(str(socket_path))
+        sock.listen(1)
+        binding = _SocketBinding(socket_path, socket_path.lstat())
+        replacement.bind(str(replacement_path))
+        replacement_path.replace(socket_path)
+
+        assert _accept_loop(sock, _FakeSession(), "v1", binding)
 
 
 def test_accept_loop_drops_a_stalled_connection_and_still_serves_the_next_one(
@@ -482,7 +500,7 @@ def test_accept_loop_drops_a_stalled_connection_and_still_serves_the_next_one(
             thread = threading.Thread(target=_well_behaved_client)
             thread.start()
 
-            _accept_loop(sock, _FakeSession(), daemon_identity="v1")
+            _accept_loop(sock, _FakeSession(), "v1", _SocketBinding(socket_path, socket_path.lstat()))
 
             thread.join(timeout=5)
             assert not thread.is_alive()
@@ -513,7 +531,7 @@ def test_accept_loop_drops_a_connection_with_a_truncated_frame_and_still_serves_
         thread = threading.Thread(target=_well_behaved_client)
         thread.start()
 
-        _accept_loop(sock, _FakeSession(), daemon_identity="v1")
+        _accept_loop(sock, _FakeSession(), "v1", _SocketBinding(socket_path, socket_path.lstat()))
 
         thread.join(timeout=5)
         assert not thread.is_alive()
@@ -550,7 +568,7 @@ def test_accept_loop_drops_a_connection_whose_reply_write_fails_and_still_serves
         thread = threading.Thread(target=_well_behaved_client)
         thread.start()
 
-        _accept_loop(sock, _FakeSession(), daemon_identity="v1")
+        _accept_loop(sock, _FakeSession(), "v1", _SocketBinding(socket_path, socket_path.lstat()))
 
         thread.join(timeout=5)
         assert not thread.is_alive()
@@ -564,7 +582,8 @@ def test_accept_loop_serves_a_new_connections_handshake_while_another_is_mid_req
         sock.bind(str(socket_path))
         sock.listen(2)
 
-        server_thread = threading.Thread(target=_accept_loop, args=(sock, session, "v1"))
+        binding = _SocketBinding(socket_path, socket_path.lstat())
+        server_thread = threading.Thread(target=_accept_loop, args=(sock, session, "v1", binding))
         server_thread.start()
 
         def _slow_client() -> None:
@@ -636,7 +655,7 @@ def test_accept_loop_serializes_concurrent_calls_into_the_shared_session(tmp_pat
             thread.start()
             time.sleep(0.05)
 
-        _accept_loop(sock, session, daemon_identity="v1")
+        _accept_loop(sock, session, "v1", _SocketBinding(socket_path, socket_path.lstat()))
 
         for thread in threads:
             thread.join(timeout=5)
@@ -699,6 +718,32 @@ def test_try_connect_existing_cleans_up_a_crashed_daemons_stale_socket(
 
     assert not socket_path.exists()
     assert not pid_path.exists()
+
+
+def test_try_connect_existing_preserves_a_daemon_published_before_stale_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    socket_path = daemon_module._socket_path(tmp_path)
+    pid_path = daemon_module._pid_path(tmp_path)
+    socket_path.parent.mkdir(parents=True)
+    socket_path.touch()
+    live_process_check = daemon_module._daemon_process_is_alive
+
+    def _publish_replacement(root: Path) -> bool:
+        if live_process_check(root):
+            return True
+        socket_path.rename(tmp_path / "stale.sock")
+        socket_path.touch()
+        pid_path.write_text(str(os.getpid()), encoding="utf-8")
+        return False
+
+    monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
+    monkeypatch.setattr(daemon_module, "_try_connect", lambda *_a: None)
+    monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", _publish_replacement)
+
+    assert try_connect_existing(tmp_path) is None
+    assert socket_path.exists()
+    assert pid_path.read_text(encoding="utf-8") == str(os.getpid())
 
 
 def test_try_connect_existing_leaves_a_departing_but_still_alive_daemons_socket_alone(
@@ -898,10 +943,18 @@ def test_try_connect_or_departing_converts_version_mismatch_to_a_departing_resul
             thread.join(timeout=5)
 
 
-def test_context_change_rejects_an_existing_daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("change", ["context", "protocol"], ids=str)
+def test_identity_change_rejects_an_existing_daemon(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
+) -> None:
     socket_path = tmp_path / "d.sock"
-    monkeypatch.setenv("TY_TEST_CONTEXT", "first")
-    first_identity = daemon_module._daemon_identity(tmp_path)
+    monkeypatch.setenv("TY_TEST_CONTEXT", "current")
+    with monkeypatch.context() as previous:
+        if change == "protocol":
+            previous.setattr(daemon_module, "_PROTOCOL_VERSION", "7")
+        else:
+            previous.setenv("TY_TEST_CONTEXT", "previous")
+        previous_identity = daemon_module._daemon_identity(tmp_path)
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     with sock:
         sock.bind(str(socket_path))
@@ -913,12 +966,11 @@ def test_context_change_rejects_an_existing_daemon(tmp_path: Path, monkeypatch: 
             with conn:
                 handshake = daemon_module.read_framed_message(conn.makefile("rb"))
                 assert handshake is not None
-                assert handshake["ty_version"] != first_identity
+                assert handshake["ty_version"] != previous_identity
                 daemon_module.write_framed_message(conn.makefile("wb"), {"error": "version_mismatch"})
 
         thread = threading.Thread(target=_server)
         thread.start()
-        monkeypatch.setenv("TY_TEST_CONTEXT", "second")
         try:
             result_sock, departing = daemon_module._try_connect_or_departing(
                 socket_path, daemon_module._daemon_identity(tmp_path)
@@ -947,33 +999,61 @@ def test_connect_reuses_a_daemon_spawned_by_a_peer_while_waiting_for_the_lock(
     session.close()
 
 
-def test_connect_remembers_a_pre_lock_version_mismatch_even_once_the_daemon_has_vanished(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
-) -> None:
-    peer_sock = socketpair_peer
+def test_cache_replacement_does_not_bypass_a_held_spawn_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    socket_path = daemon_module._socket_path(tmp_path)
+    socket_path.parent.mkdir(parents=True)
+    spawn_daemon = Mock()
+    monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
+    monkeypatch.setattr(daemon_module, "_spawn_daemon", spawn_daemon)
+    monkeypatch.setattr(daemon_module, "_SPAWN_LOCK_TIMEOUT_SECONDS", 0.0)
 
-    daemon_alive_check = Mock()
+    with daemon_module._spawn_lock(tmp_path, timeout_seconds=0.0):
+        socket_path.parent.rename(tmp_path / "moved-cache")
+        socket_path.parent.mkdir()
+        with pytest.raises(TimeoutError, match="Timed out"):
+            connect(tmp_path)
+
+    spawn_daemon.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("socket_change", "expected_spawns"),
+    [("none", 1), ("removed", 1), ("replaced", 0)],
+    ids=["same-socket", "missing-socket", "replaced-socket"],
+)
+def test_connect_applies_a_pre_lock_mismatch_only_to_the_rejecting_socket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    socketpair_peer: socket.socket,
+    socket_change: str,
+    expected_spawns: int,
+) -> None:
+    socket_path = daemon_module._socket_path(tmp_path)
+    socket_path.parent.mkdir(parents=True)
+    socket_path.touch()
+    attempts = _scripted_try_connect([daemon_module._VersionMismatchError(), None, socketpair_peer])
+
+    def _try_connect(path: Path, identity: str) -> socket.socket | None:
+        try:
+            return attempts(path, identity)
+        except daemon_module._VersionMismatchError:
+            if socket_change == "removed":
+                socket_path.unlink()
+            elif socket_change == "replaced":
+                socket_path.rename(tmp_path / "previous.sock")
+                socket_path.touch()
+            raise
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
-    monkeypatch.setattr(
-        daemon_module,
-        "_try_connect",
-        _scripted_try_connect([daemon_module._VersionMismatchError(), None, peer_sock]),
-    )
-    monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", daemon_alive_check)
-    monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_TIMEOUT_SECONDS", 5.0)
-    spawn_calls: list[Path] = []
-    monkeypatch.setattr(daemon_module, "_spawn_daemon", spawn_calls.append)
+    monkeypatch.setattr(daemon_module, "_try_connect", _try_connect)
+    monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", lambda _root: True)
+    monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_INTERVAL_SECONDS", 0.01)
+    spawn_daemon = Mock()
+    monkeypatch.setattr(daemon_module, "_spawn_daemon", spawn_daemon)
 
-    start = time.monotonic()
-    session = connect(tmp_path)
-    elapsed = time.monotonic() - start
+    connect(tmp_path).close()
 
-    daemon_alive_check.assert_not_called()
-    assert spawn_calls == [tmp_path]
-    assert session._sock is peer_sock
-    assert elapsed < 5.0
-    session.close()
+    assert spawn_daemon.call_count == expected_spawns
 
 
 def test_connect_raises_os_error_when_spawn_succeeds_but_the_socket_stays_unreachable(
@@ -1039,20 +1119,20 @@ def test_cleanup_if_still_owned_removes_its_own_socket_and_pidfile(tmp_path: Pat
     socket_path.touch()
     pid_path.write_text(str(os.getpid()), encoding="utf-8")
 
-    daemon_module._cleanup_if_still_owned(tmp_path)
+    daemon_module._cleanup_if_still_owned(tmp_path, _SocketBinding(socket_path, socket_path.lstat()))
 
     assert not socket_path.exists()
     assert not pid_path.exists()
 
 
-def test_cleanup_if_still_owned_removes_files_when_no_pidfile_exists_yet(tmp_path: Path) -> None:
+def test_cleanup_if_still_owned_leaves_socket_alone_without_a_pidfile(tmp_path: Path) -> None:
     socket_path = daemon_module._socket_path(tmp_path)
     socket_path.parent.mkdir(parents=True)
     socket_path.touch()
 
-    daemon_module._cleanup_if_still_owned(tmp_path)
+    daemon_module._cleanup_if_still_owned(tmp_path, _SocketBinding(socket_path, socket_path.lstat()))
 
-    assert not socket_path.exists()
+    assert socket_path.exists()
 
 
 def test_cleanup_if_still_owned_leaves_a_replacement_daemons_files_alone(tmp_path: Path) -> None:
@@ -1063,15 +1143,34 @@ def test_cleanup_if_still_owned_leaves_a_replacement_daemons_files_alone(tmp_pat
     replacement_pid = os.getpid() + 1
     pid_path.write_text(str(replacement_pid), encoding="utf-8")
 
-    daemon_module._cleanup_if_still_owned(tmp_path)
+    daemon_module._cleanup_if_still_owned(tmp_path, _SocketBinding(socket_path, socket_path.lstat()))
 
     assert socket_path.exists()
     assert pid_path.read_text(encoding="utf-8") == str(replacement_pid)
 
 
+def test_cleanup_if_still_owned_leaves_a_replaced_socket_with_the_same_pid(tmp_path: Path) -> None:
+    socket_path = daemon_module._socket_path(tmp_path)
+    pid_path = daemon_module._pid_path(tmp_path)
+    socket_path.parent.mkdir(parents=True)
+    socket_path.touch()
+    pid_path.write_text(str(os.getpid()), encoding="utf-8")
+    binding = _SocketBinding(socket_path, socket_path.lstat())
+    socket_path.rename(tmp_path / "previous.sock")
+    socket_path.touch()
+
+    daemon_module._cleanup_if_still_owned(tmp_path, binding)
+
+    assert socket_path.exists()
+    assert pid_path.exists()
+
+
 def test_connect_waits_for_a_busy_daemon_instead_of_spawning_a_competing_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
+    socket_path = daemon_module._socket_path(tmp_path)
+    socket_path.parent.mkdir(parents=True)
+    socket_path.touch()
     peer_sock = socketpair_peer
     attempts: list[socket.socket | None] = [None, None, None, peer_sock]
 
@@ -1092,6 +1191,9 @@ def test_connect_waits_for_a_busy_daemon_instead_of_spawning_a_competing_one(
 def test_connect_raises_os_error_when_a_busy_daemon_never_frees_up(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    socket_path = daemon_module._socket_path(tmp_path)
+    socket_path.parent.mkdir(parents=True)
+    socket_path.touch()
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
     monkeypatch.setattr(daemon_module, "_try_connect", lambda *_a: None)
     monkeypatch.setattr(daemon_module, "_daemon_process_is_alive", lambda _root: True)
@@ -1109,6 +1211,9 @@ def test_connect_raises_os_error_when_a_busy_daemon_never_frees_up(
 def test_connect_spawns_a_replacement_when_a_busy_daemon_turns_out_to_be_departing_mid_wait(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, socketpair_peer: socket.socket
 ) -> None:
+    socket_path = daemon_module._socket_path(tmp_path)
+    socket_path.parent.mkdir(parents=True)
+    socket_path.touch()
     peer_sock = socketpair_peer
 
     monkeypatch.setattr(daemon_module, "_ty_version", lambda: "v1")
@@ -1156,22 +1261,33 @@ def test_connect_spawns_a_fresh_daemon_immediately_after_a_version_mismatch_inst
     session.close()
 
 
-def test_wait_for_busy_daemon_bails_out_early_once_the_daemon_starts_departing(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("change", ["mismatch", "missing-socket", "dead-process"], ids=str)
+def test_wait_for_busy_daemon_bails_out_when_a_replacement_can_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
+    socket_path = daemon_module._socket_path(tmp_path)
+    socket_path.parent.mkdir(parents=True)
+    socket_path.touch()
     monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_INTERVAL_SECONDS", 0.01)
     monkeypatch.setattr(daemon_module, "_BUSY_DAEMON_RETRY_TIMEOUT_SECONDS", 5.0)
-    attempts: list[socket.socket | None] = [None]
+    apply_change = iter((False, True))
 
     def _try_connect_side_effect(_socket_path: Path, _client_ty_version: str) -> socket.socket | None:
-        if attempts:
-            return attempts.pop(0)
-        raise daemon_module._VersionMismatchError
+        if not next(apply_change):
+            return None
+        if change == "mismatch":
+            raise daemon_module._VersionMismatchError
+        if change == "missing-socket":
+            socket_path.unlink()
+        else:
+            daemon_module._pid_path(tmp_path).unlink()
+        return None
 
+    daemon_module._pid_path(tmp_path).write_text(str(os.getpid()), encoding="utf-8")
     monkeypatch.setattr(daemon_module, "_try_connect", _try_connect_side_effect)
 
     start = time.monotonic()
-    sock, departing = _wait_for_busy_daemon(Path("unused.sock"), "v1")
+    sock, departing = _wait_for_busy_daemon(tmp_path, "v1")
     elapsed = time.monotonic() - start
 
     assert sock is None
@@ -1364,20 +1480,6 @@ def test_serve_prints_failed_when_bind_fails(
     assert "BIND_FAILED: could not bind" in capsys.readouterr().out
 
 
-def test_serve_removes_its_own_pidfile_when_bind_fails(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(daemon_module, "_IDLE_TIMEOUT_SECONDS", 0.2)
-    socket_path = daemon_module._socket_path(tmp_path)
-    pid_path = daemon_module._pid_path(tmp_path)
-    socket_path.mkdir(parents=True)
-
-    daemon_module._serve(tmp_path)
-
-    assert "BIND_FAILED: could not bind" in capsys.readouterr().out
-    assert not pid_path.exists()
-
-
 class TestRealDaemonEndToEnd:
     __slots__ = ()
 
@@ -1451,3 +1553,41 @@ class TestRealDaemonEndToEnd:
         shutdown_if_running(tmp_path)
 
         assert try_connect_existing(tmp_path) is None
+
+    @pytest.mark.parametrize("move_cache", [False, True], ids=["unlink-socket", "move-cache"])
+    def test_orphan_drains_its_client_and_leaves_the_replacement_running(
+        self, tmp_path: Path, move_cache: bool
+    ) -> None:
+        socket_path = daemon_module._socket_path(tmp_path)
+        pid_path = daemon_module._pid_path(tmp_path)
+        with subprocess.Popen(  # noqa: S603 -- Start the daemon with the test interpreter.
+            [sys.executable, "-m", "pre_commit_hooks.ast_checks.redundant_type_conversion", tmp_path],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        ) as orphan:
+            try:
+                daemon_module._await_ready(orphan, tmp_path)
+                original = connect(tmp_path)
+                try:
+                    with original.analysis_transaction():
+                        if move_cache:
+                            socket_path.parent.rename(tmp_path / "moved-cache")
+                        else:
+                            socket_path.unlink()
+
+                        connect(tmp_path).close()
+                        replacement_pid = pid_path.read_text()
+                        assert replacement_pid != str(orphan.pid)
+                        assert original.is_within_root(tmp_path / "check.py")
+                finally:
+                    original.close()
+
+                assert orphan.wait(timeout=5) == 0
+                assert pid_path.read_text() == replacement_pid
+                replacement = try_connect_existing(tmp_path)
+                assert replacement is not None
+                replacement.close()
+            finally:
+                orphan.terminate()
