@@ -554,3 +554,19 @@ def test_config_selects_redundant_enum_value(tmp_path: Path) -> None:
     config.write_text('[tool.ruff-extra-rules]\nselect = ["redundant-enum-value"]\n')
 
     assert main(["--config", str(config), str(filepath)]) == 1
+
+
+@pytest.mark.parametrize(
+    "definition",
+    [
+        "if enabled:\n    def mutate():\n        State.OPEN._value_ = 'changed'\n    mutate()\n",
+        "if enabled:\n    class Immediate:\n        State.OPEN._value_ = 'changed'\n",
+    ],
+    ids=["conditional-function-call", "conditional-class"],
+)
+def test_enum_member_rebinding_in_nested_definitions_invalidates_proof(definition: str) -> None:
+    source = (
+        f"from enum import StrEnum\nclass State(StrEnum):\n    OPEN = 'open'\n{definition}value = State.OPEN.value\n"
+    )
+
+    assert _check(source) == []

@@ -98,6 +98,14 @@ Run linters, tests, coverage.
 
 For the error message format (shown to the user), follow the up-to-date Ruff format. Do not reinvent the wheel.
 
+## Scope traversal
+
+Use `iter_within_scope(node)` for descendants of a scope root. A function, lambda, or class root starts at its body. A comprehension root starts with its result expressions, targets, filters, and later iterables. Its first iterable belongs to the enclosing scope. `own_scope_children(node)` returns only the starting nodes.
+
+Use `iter_within_scope_from(nodes)` to visit supplied statements or expressions in their enclosing scope. The walk includes those nodes. At nested definitions, it visits the expressions returned by `definition_header()` (decorators, defaults, bases, and class keyword values). At nested comprehensions, it includes assignment-expression targets that bind in the enclosing scope. Checks that analyze annotations or comprehension reads handle those expressions explicitly. Use a full subtree walk when a mutation can affect a later proof through a call and the check does not resolve call targets.
+
+Use `iter_binding_names(node)` to identify bindings among the visited nodes. Read parameter names explicitly from `ast.arguments`.
+
 ## Performance
 
 The existing optimizations a new check should reuse rather than reimplement:

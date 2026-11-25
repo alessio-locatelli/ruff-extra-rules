@@ -939,6 +939,18 @@ def test_builtin_shadowing_is_resolved_per_scope(shadowing: str, expected: list[
     assert _reported(source) == expected
 
 
+def test_default_argument_read_does_not_count_as_a_read_of_the_function_local() -> None:
+    source = """
+    def f(arg=result):
+        result = 0
+        if ready():
+            return
+        use(result)
+    """
+
+    assert _reported(source, max_distance=1) == ["result"]
+
+
 def test_builtin_shadowed_by_an_enclosing_function_is_not_trusted() -> None:
     source = """
     def outer(set):

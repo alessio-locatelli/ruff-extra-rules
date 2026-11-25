@@ -12,6 +12,11 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ### Fixed
 
+- `validate-function-name` can rename a nested function when the enclosing function's default argument binds the same name in an outer scope. It declines when a `global` or `nonlocal` declaration can affect the rename.
+- `redundant-dict-get` accounts for decorator and class construction calls when checking dictionary keys across loop iterations. An undecorated function body alone no longer invalidates the proof.
+- `redundant-enum-value` suppresses suggestions when nested definitions can change an enum member's value.
+- `defined-far-from-use` tracks function locals from the body. A default argument that reads a same-named outer variable no longer hides a distant use of the local.
+
 - The `redundant-type-conversion` daemon shuts down after its socket is deleted or replaced. Existing connections can finish, and new hook runs can start a replacement.
 - `redundant-type-conversion` at `aggressive` level preserves conversions from mutable collections and live views to `tuple` or `frozenset`. It still reports redundant conversions when the argument already has the target type.
 - `redundant-type-conversion` requires every possible type in a union to match the conversion target. For example, `tuple(x)` stays when `x` could be either a tuple or a list.
