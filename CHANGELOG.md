@@ -6,6 +6,10 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ## [Unreleased]
 
+### Fixed
+
+- `redundant-enum-value` no longer reports `.value` on an enum class that a nested function's default argument rebinds, as in `def inner(arg=(State := other)):`.
+
 ## [0.8.0] - 2026-11-24
 
 ### Fixed

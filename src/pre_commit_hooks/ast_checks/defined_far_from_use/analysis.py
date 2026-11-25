@@ -7,7 +7,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from pre_commit_hooks.ast_checks._scope import iter_binding_names, iter_within_scope
+from pre_commit_hooks.ast_checks._scope import definition_header, iter_binding_names, iter_within_scope
 
 from .reorder import DefinedFarFromUseLevel, StatementEffects, may_reorder, statement_effects
 
@@ -179,12 +179,8 @@ def _iter_own_scope(function: ast.FunctionDef | ast.AsyncFunctionDef) -> Iterato
     while pending:
         node = pending.pop()
         yield node
-        if isinstance(node, ast.ClassDef):
-            pending.extend((*node.decorator_list, *node.bases, *node.keywords))
-        elif isinstance(node, (*_FUNCTION_NODES, ast.Lambda)):
-            decorators = node.decorator_list if isinstance(node, _FUNCTION_NODES) else []
-            defaults = [default for default in node.args.kw_defaults if default is not None]
-            pending.extend((*decorators, *node.args.defaults, *defaults))
+        if isinstance(node, _NESTED_SCOPE_NODES):
+            pending.extend(definition_header(node))
         else:
             pending.extend(ast.iter_child_nodes(node))
 

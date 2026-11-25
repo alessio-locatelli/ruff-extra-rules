@@ -173,6 +173,15 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
             "    return State.OPEN.value\n"
         ),
         (
+            "from enum import StrEnum\n\n"
+            "class State(StrEnum):\n"
+            "    OPEN = 'open'\n\n"
+            "def read():\n"
+            "    def inner(arg=(State := object())):\n"
+            "        return arg\n\n"
+            "    return State.OPEN.value\n"
+        ),
+        (
             "from enum import StrEnum, nonmember\n"
             "from types import SimpleNamespace\n\n"
             "class State(StrEnum):\n"
@@ -413,6 +422,7 @@ def test_check_reports_direct_local_enum_member_values(source: str, expressions:
         "custom-metaclass",
         "value-rebinding",
         "parameter-shadowing",
+        "nested-default-rebinding",
         "nonmember-attribute",
         "qualified-nonmember-attribute",
         "decorated-enum-class",

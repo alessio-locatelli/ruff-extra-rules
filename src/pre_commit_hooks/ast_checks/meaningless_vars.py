@@ -21,7 +21,7 @@ from ._base import (
     split_lines_like_ast,
 )
 from ._options import EnumOption
-from ._scope import class_scope_binding_names, iter_binding_names, iter_within_scope_from
+from ._scope import class_scope_binding_names, definition_header, iter_binding_names, iter_within_scope_from
 from .meaningless_vars_suggestions import Confidence, plan_suggestions
 
 if TYPE_CHECKING:
@@ -194,11 +194,6 @@ def _has_future_annotations_import(tree: ast.Module) -> bool:
     )
 
 
-def _signature_defaults(args: ast.arguments) -> Iterator[ast.expr]:
-    yield from args.defaults
-    yield from (default for default in args.kw_defaults if default is not None)
-
-
 def _signature_annotations(args: ast.arguments) -> Iterator[ast.expr]:
     all_args = [*args.posonlyargs, *args.args, *args.kwonlyargs]
     if args.vararg:
@@ -238,14 +233,13 @@ def _outer_scope_children(
     has_future_annotations: bool,
 ) -> Iterator[ast.AST]:
     if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef):
-        yield from scope_node.decorator_list
-        yield from _signature_defaults(scope_node.args)
+        yield from definition_header(scope_node)
         if not scope_node.type_params and not has_future_annotations:
             yield from _signature_annotations(scope_node.args)
             if scope_node.returns is not None:
                 yield scope_node.returns
     elif isinstance(scope_node, ast.Lambda):
-        yield from _signature_defaults(scope_node.args)
+        yield from definition_header(scope_node)
     else:
         yield scope_node.generators[0].iter
 
