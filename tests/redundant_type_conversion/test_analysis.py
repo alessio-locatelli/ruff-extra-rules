@@ -309,7 +309,7 @@ def test_decide_candidates_trusts_a_non_exact_call_argument_only_when_its_parame
     redundant, session = _decide(
         source,
         diagnostics_by_content={source: frozenset()},
-        hover_by_position={(0, 11): "set[str]"},
+        hover_by_position={(0, 11): "Sequence[str]"},
         parameters_by_position={(0, 13): parameters},
         level=ConfidenceLevel.AGGRESSIVE,
     )
@@ -322,9 +322,9 @@ def test_decide_candidates_trusts_a_non_exact_call_argument_only_when_its_parame
     ("source", "hover_by_position"),
     [
         ("sink(tuple(x))\n", {(0, 11): "tuple[str, ...]"}),
-        ("y = tuple(x)\n", {(0, 10): "set[str]"}),
-        ("sink(tuple(x) + y)\n", {(0, 11): "set[str]"}),
-        ("sink(*tuple(x))\n", {(0, 12): "set[str]"}),
+        ("y = tuple(x)\n", {(0, 10): "Sequence[str]"}),
+        ("sink(tuple(x) + y)\n", {(0, 11): "Sequence[str]"}),
+        ("sink(*tuple(x))\n", {(0, 12): "Sequence[str]"}),
     ],
     ids=["exact-match", "not-a-call-argument", "nested-in-an-expression", "starred-argument"],
 )
@@ -533,7 +533,7 @@ class _SessionRaisingFromSignatureHelp(FakeSession):
 def test_decide_candidates_reports_a_failed_signature_request_as_unavailable() -> None:
     source = "sink(tuple(x))\n"
     session = _SessionRaisingFromSignatureHelp(
-        diagnostics_by_content={source: frozenset()}, hover_by_position={(0, 11): "set[str]"}
+        diagnostics_by_content={source: frozenset()}, hover_by_position={(0, 11): "Sequence[str]"}
     )
     candidates = find_candidates(ast.parse(source), eligible_constructors(ConfidenceLevel.AGGRESSIVE))
 

@@ -36,7 +36,7 @@ CHECK_ID = "redundant-type-conversion"
 
 
 def _cache_key(level: ConfidenceLevel, *, collect_suppression_usage: bool) -> str:
-    return f"{level.name}:{'tracking' if collect_suppression_usage else 'normal'}"
+    return f"v3:{level.name}:{'tracking' if collect_suppression_usage else 'normal'}"
 
 
 def _format_message(constructor: str, argument_type: str) -> str:

@@ -118,10 +118,25 @@ def test_conservative_hover_gate(hover_text: str, constructor: str, expected: bo
         ("frozenset[int]", "set", True),
         ("Mapping[str, int]", "dict", True),
         ("KeysView[str]", "set", True),
+        ("KeysView[str]", "frozenset", False),
+        ("KeysView[str]", "tuple", False),
+        ("ValuesView[int]", "tuple", False),
+        ("ItemsView[str, int]", "tuple", False),
         ("AbstractSet[int]", "frozenset", True),
+        ("set[int]", "frozenset", False),
+        ("MutableSet[int]", "frozenset", False),
+        ("list[int]", "tuple", False),
+        ("set[int]", "tuple", False),
+        ("dict[str, int]", "tuple", False),
+        ("bytearray", "tuple", False),
+        ("deque[int]", "tuple", False),
+        ("MutableMapping[str, int]", "tuple", False),
+        ("MutableSequence[int]", "tuple", False),
+        ("MutableSet[int]", "tuple", False),
+        ("Sequence[int]", "tuple", True),
         ("str", "list", True),
         ("bytes", "list", True),
-        ("memoryview", "tuple", True),
+        ("memoryview", "tuple", False),
         ("str & ~AlwaysFalsy", "list", True),
         ("bytes", "bytearray", True),
         ("memoryview", "bytearray", True),
@@ -162,10 +177,25 @@ def test_conservative_hover_gate(hover_text: str, constructor: str, expected: bo
         "frozenset-to-set",
         "mapping-protocol",
         "keysview",
+        "keysview-to-frozenset",
+        "keysview-to-tuple",
+        "valuesview-to-tuple",
+        "itemsview-to-tuple",
         "abstractset-to-frozenset",
+        "set-to-frozenset",
+        "mutable-set-to-frozenset",
+        "list-to-tuple",
+        "set-to-tuple",
+        "dict-to-tuple",
+        "bytearray-to-tuple",
+        "deque-to-tuple",
+        "mutable-mapping-to-tuple",
+        "mutable-sequence-to-tuple",
+        "mutable-set-to-tuple",
+        "sequence-to-tuple",
         "str-is-iterable",
         "bytes-is-iterable",
-        "memoryview-is-iterable",
+        "memoryview-to-tuple",
         "narrowed-intersection-type",
         "bytes-to-bytearray",
         "memoryview-to-bytearray",
@@ -219,6 +249,32 @@ def test_aggressive_hover_gate(hover_text: str, constructor: str, expected: bool
 )
 def test_is_exact_match(hover_text: str, constructor: str, expected: bool) -> None:
     assert is_exact_match(hover_text, constructor) is expected
+
+
+@pytest.mark.parametrize(
+    ("hover_text", "constructor"),
+    [
+        ("tuple[int, ...] | list[int]", "tuple"),
+        ("list[int] | tuple[int, ...]", "tuple"),
+        ("frozenset[int] | set[int]", "frozenset"),
+        ("set[int] | frozenset[int]", "frozenset"),
+        ('Literal["["] | list[int]', "str"),
+        (r'Literal["\"["] | list[int]', "str"),
+    ],
+    ids=["tuple-first", "list-first", "frozenset-first", "set-first", "bracket-in-literal", "escaped-quote-in-literal"],
+)
+def test_mixed_union_cannot_match_a_constructor(hover_text: str, constructor: str) -> None:
+    assert not is_exact_match(hover_text, constructor)
+    assert not hover_passes_gate(hover_text, ConfidenceLevel.CONSERVATIVE, constructor)
+    assert not hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, constructor)
+
+
+def test_matching_union_members_are_exact_at_both_levels() -> None:
+    hover_text = """Literal["a | b"] | Literal['[']"""
+
+    assert is_exact_match(hover_text, "str")
+    assert hover_passes_gate(hover_text, ConfidenceLevel.CONSERVATIVE, "str")
+    assert hover_passes_gate(hover_text, ConfidenceLevel.AGGRESSIVE, "str")
 
 
 @pytest.mark.parametrize(
