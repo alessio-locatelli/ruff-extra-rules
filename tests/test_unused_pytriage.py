@@ -149,9 +149,9 @@ def _make_recording_rerun_audit(*, report_with_usages: bool) -> _RecordingRerunA
 
 
 def test_unused_pytriage_reports_redundant_known_suppression(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    git_worktree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("def example():\n    result = 1  # pytriage: TR1\n    return result\n")
 
     assert (
@@ -169,9 +169,9 @@ def test_unused_pytriage_reports_redundant_known_suppression(
 
 
 def test_unused_pytriage_reports_a_code_on_a_non_candidate_line(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    git_worktree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("while True:  # pytriage: TR1\n    break\n")
 
     assert main([str(filepath), "--select", "meaningless-vars,unused-pytriage", "--no-fix"]) == 1
@@ -179,9 +179,9 @@ def test_unused_pytriage_reports_a_code_on_a_non_candidate_line(
 
 
 def test_unused_pytriage_alone_does_not_audit_inactive_checks(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    git_worktree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("def example():\n    result = 1  # pytriage: TR1\n    return result\n")
 
     assert main([str(filepath), "--select", "unused-pytriage"]) == 0
@@ -193,8 +193,8 @@ def test_unused_pytriage_is_opt_in_by_default() -> None:
     assert "unused-pytriage" in {check.check_id for check in load_checks(select={"unused-pytriage"})}
 
 
-def test_unused_pytriage_keeps_a_used_suppression_clean(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    filepath = tmp_path / "module.py"
+def test_unused_pytriage_keeps_a_used_suppression_clean(git_worktree: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text("def example():\n    result = get_result()  # pytriage: TR1\n    return result\n")
 
     assert (
@@ -210,9 +210,9 @@ def test_unused_pytriage_keeps_a_used_suppression_clean(tmp_path: Path, capsys: 
     ids=["duplicate", "unknown", "self"],
 )
 def test_unused_pytriage_ignores_non_reportable_entries(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], comment: str
+    git_worktree: Path, capsys: pytest.CaptureFixture[str], comment: str
 ) -> None:
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(f"def example():\n    result = 42  {comment}\n    return result\n")
 
     assert main([str(filepath), "--select", "meaningless-vars,unused-pytriage"]) == (1 if "TR1" in comment else 0)
@@ -223,9 +223,9 @@ def test_unused_pytriage_ignores_non_reportable_entries(
 
 
 def test_unused_pytriage_does_not_audit_format_suppressed_comments(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    git_worktree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("# fmt: off\ndef example():\n    result = 42  # pytriage: TR1\n    return result\n# fmt: on\n")
 
     assert main([str(filepath), "--select", "meaningless-vars,unused-pytriage"]) == 0
@@ -233,9 +233,9 @@ def test_unused_pytriage_does_not_audit_format_suppressed_comments(
 
 
 def test_unused_pytriage_reports_at_the_final_location_after_other_fixes(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    git_worktree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text('"""Doc."""\n\n\n\ndef example():\n    result = 42  # pytriage: TR1\n    return result\n')
 
     assert (
@@ -252,10 +252,10 @@ def test_unused_pytriage_reports_at_the_final_location_after_other_fixes(
     assert ":5:18: TR8:" in capsys.readouterr().err
 
 
-def test_unused_pytriage_uses_cached_suppression_usage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    filepath = tmp_path / "module.py"
+def test_unused_pytriage_uses_cached_suppression_usage(git_worktree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text("def example():\n    result = get_result()  # pytriage: TR1\n    return result\n")
-    cache_dir = tmp_path / "cache"
+    cache_dir = git_worktree / "cache"
     check_args = {"meaningless-vars": {"level": MeaninglessVarsLevel.AGGRESSIVE}}
     checks = load_checks(select={"meaningless-vars", "unused-pytriage"}, check_args=check_args)
 
@@ -272,7 +272,7 @@ def test_unused_pytriage_uses_cached_suppression_usage(tmp_path: Path, monkeypat
     assert second.process_files([str(filepath)]) == {}
 
 
-def test_unused_pytriage_supports_checks_with_a_default_tracking_hook(tmp_path: Path) -> None:
+def test_unused_pytriage_supports_checks_with_a_default_tracking_hook(git_worktree: Path) -> None:
     class PlainCheck(BaseCheck):
         @property
         def check_id(self) -> str:
@@ -292,7 +292,7 @@ def test_unused_pytriage_supports_checks_with_a_default_tracking_hook(tmp_path: 
         def check(self, _filepath: Path, _tree: ast.Module, _source: str) -> CheckResult:
             return CheckResult([], [SuppressionUsage("plain-check", "TR99", 2)])
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("x = 1\n# pytriage: TR99\n")
 
     assert (
@@ -301,7 +301,7 @@ def test_unused_pytriage_supports_checks_with_a_default_tracking_hook(tmp_path: 
     )
 
 
-def test_unused_pytriage_failure_is_recorded(tmp_path: Path) -> None:
+def test_unused_pytriage_failure_is_recorded(git_worktree: Path) -> None:
     class FailingAudit(UnusedPytriageCheck):
         __slots__ = ()
 
@@ -310,7 +310,7 @@ def test_unused_pytriage_failure_is_recorded(tmp_path: Path) -> None:
         ) -> CheckResult:
             raise RuntimeError("audit failed")
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("x = 1  # pytriage: TR99\n")
     orchestrator = CheckOrchestrator(checks=[FailingAudit()])
 
@@ -318,7 +318,7 @@ def test_unused_pytriage_failure_is_recorded(tmp_path: Path) -> None:
     assert orchestrator.rule_failures == [(str(filepath), "unused-pytriage")]
 
 
-def test_unused_pytriage_refresh_records_an_audit_failure_after_fix(tmp_path: Path) -> None:
+def test_unused_pytriage_refresh_records_an_audit_failure_after_fix(git_worktree: Path) -> None:
     class FailingRefreshAudit(UnusedPytriageCheck):
         __slots__ = ("calls",)
 
@@ -333,7 +333,7 @@ def test_unused_pytriage_refresh_records_an_audit_failure_after_fix(tmp_path: Pa
                 raise RuntimeError("refresh audit failed")
             return super().check_with_suppression_usage(source, usages, active_error_codes)
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text('"""Doc."""  # pytriage: TR99\n\n\n\ndef example() -> str:\n    return "hi"\n')
     audit = FailingRefreshAudit()
     orchestrator = CheckOrchestrator(checks=[ExcessiveBlankLinesCheck(), audit], fix_mode=True)
@@ -344,10 +344,10 @@ def test_unused_pytriage_refresh_records_an_audit_failure_after_fix(tmp_path: Pa
     assert orchestrator.rule_failures == [(str(filepath), "unused-pytriage")]
 
 
-def test_unused_pytriage_rerun_retains_always_rerun_suppression_context(tmp_path: Path) -> None:
-    filepath = tmp_path / "module.py"
+def test_unused_pytriage_rerun_retains_always_rerun_suppression_context(git_worktree: Path) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text("x = 1  # pytriage: TR99\n")
-    cache_dir = tmp_path / "cache"
+    cache_dir = git_worktree / "cache"
     cacheable_check = cast("ASTCheck", _make_cacheable_rerun_check(violation_line=None, suppression_usage_line=None))
     CheckOrchestrator(checks=[cacheable_check], cache_dir=cache_dir).process_files([str(filepath)])
     audit = _make_recording_rerun_audit(report_with_usages=True)
@@ -369,11 +369,11 @@ def test_unused_pytriage_rerun_retains_always_rerun_suppression_context(tmp_path
 
 
 def test_unused_pytriage_rerun_discards_stale_cached_usage_after_always_fix(
-    tmp_path: Path,
+    git_worktree: Path,
 ) -> None:
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("x = 1  # pytriage: TR97\nbad = 1\n")
-    cache_dir = tmp_path / "cache"
+    cache_dir = git_worktree / "cache"
     cacheable_check = cast("ASTCheck", _make_cacheable_rerun_check(violation_line=2, suppression_usage_line=1))
     CheckOrchestrator(checks=[cacheable_check], cache_dir=cache_dir).process_files([str(filepath)])
     audit = _make_recording_rerun_audit(report_with_usages=False)

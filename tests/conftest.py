@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -28,3 +29,10 @@ def _isolated_from_this_repositorys_own_configuration(request: pytest.FixtureReq
 def _no_leftover_tri006_daemon_in_this_repo() -> Iterator[None]:
     yield
     tri006_daemon.shutdown_if_running(_REPO_ROOT)
+
+
+@pytest.fixture
+def git_worktree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    subprocess.run(["git", "init", "-q"], check=True, cwd=tmp_path)  # noqa: S607 -- Git is required on PATH.
+    monkeypatch.chdir(tmp_path)
+    return tmp_path

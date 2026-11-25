@@ -488,8 +488,12 @@ A requirement is a **MUST NOT** when the behavior is inherently unsafe, misleadi
 - **MUST** provide a safe behavior when a file changed concurrently.
 - **MUST** define whether ignored files are analyzed.
 - **MUST** define how VCS ignore rules are handled.
-- **MUST** not assume that Git is installed unless Git integration is explicitly required.
-- **MUST** gracefully degrade when optional VCS integration is unavailable.
+- **MUST** require Git on `PATH` for linting and accept lint inputs only from the current Git working tree.
+- **MUST** stop with a diagnostic and a non-zero exit status when Git cannot identify the working tree, discover directory inputs, or search candidate files.
+- **MUST** treat a `git grep` exit status of 1 with empty stderr as a successful search with no matches.
+- **MUST** interpret explicitly named files as literal paths.
+- **MUST** reject explicit or discovered inputs selected for linting that use a symbolic link or belong to an embedded working tree, including a submodule.
+- **MUST** continue without the supplementary ignored-file warning if its Git status probe fails after successful directory discovery.
 - **MUST** handle repositories with unusual paths and worktree layouts correctly.
 - **MUST NOT** execute arbitrary repository-controlled commands merely to determine lint scope unless explicitly required and safely constrained.
 - **MUST** treat repository configuration as potentially untrusted when the tool may run in untrusted repositories.

@@ -21,6 +21,7 @@ import pre_commit_hooks.ast_checks.validate_function_name as vfn_module
 from pre_commit_hooks import ruff_extra_rules, ruff_extra_rules_ty
 from pre_commit_hooks._cache import CacheManager
 from pre_commit_hooks._filelock import locked
+from pre_commit_hooks._git import GitError
 from pre_commit_hooks._lsp import LSPError
 from pre_commit_hooks.ast_checks import ALL_CHECKS, _cli, _discovery, _orchestrator
 from pre_commit_hooks.ast_checks._base import (
@@ -127,14 +128,9 @@ def test_expand_directories_leaves_plain_files_untouched(tmp_path: Path) -> None
     ]
 
 
-def test_expand_directories_globs_python_files_outside_a_git_repo(tmp_path: Path) -> None:
-
-    (tmp_path / "pkg").mkdir()
-    py_file = tmp_path / "pkg" / "module.py"
-    py_file.write_text("x = 1\n")
-    (tmp_path / "pkg" / "notes.txt").write_text("not python\n")
-
-    assert expand_directories([str(tmp_path)]) == [str(py_file.resolve())]
+def test_expand_directories_reports_non_repository(tmp_path: Path) -> None:
+    with pytest.raises(GitError, match=r"git ls-files failed.*not a git repository"):
+        expand_directories([str(tmp_path)])
 
 
 def test_expand_directories_uses_git_ls_files_inside_a_git_repo(tmp_path: Path) -> None:
@@ -463,21 +459,12 @@ def test_expand_directories_skips_tracked_file_deleted_from_working_tree(tmp_pat
         assert expand_directories([str(tmp_path)]) == []
 
 
-def test_expand_directories_falls_back_when_git_ls_files_fails(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
-
-    (tmp_path / "pkg").mkdir()
-    py_file = tmp_path / "pkg" / "module.py"
-    py_file.write_text("x = 1\n")
-
-    with mock.patch("subprocess.run") as mock_run, caplog.at_level("DEBUG"):
-        mock_run.side_effect = FileNotFoundError("git not found")
-        matches = expand_directories([str(tmp_path)])
-
-    assert matches == [str(py_file.resolve())]
-
-    assert all(record.levelname == "DEBUG" for record in caplog.records)
+def test_expand_directories_reports_missing_git(git_worktree: Path) -> None:
+    with (
+        mock.patch("subprocess.run", side_effect=FileNotFoundError()),
+        pytest.raises(GitError, match="git ls-files could not start"),
+    ):
+        expand_directories([str(git_worktree)])
 
 
 def test_expand_directories_includes_a_file_with_a_non_utf8_name(tmp_path: Path) -> None:
@@ -498,10 +485,10 @@ def test_expand_directories_includes_a_file_with_a_non_utf8_name(tmp_path: Path)
         assert Path(matches[0]).exists()
 
 
-def test_main_directory_with_no_python_files_returns_zero(tmp_path: Path) -> None:
-    (tmp_path / "notes.txt").write_text("not python\n")
+def test_main_directory_with_no_python_files_returns_zero(git_worktree: Path) -> None:
+    (git_worktree / "notes.txt").write_text("not python\n")
 
-    assert main([str(tmp_path)]) == 0
+    assert main([str(git_worktree)]) == 0
 
 
 def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -521,8 +508,8 @@ def test_main_directory_argument_checks_files_inside_it(tmp_path: Path, capsys: 
         assert "TR1" in capsys.readouterr().err
 
 
-def test_main_fix_renames_enclosing_references_in_class_bodies_and_methods(tmp_path: Path) -> None:
-    filepath = tmp_path / "module.py"
+def test_main_fix_renames_enclosing_references_in_class_bodies_and_methods(git_worktree: Path) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "def outer(response):\n"
         "    data: Payload = response.json()\n"
@@ -568,8 +555,8 @@ def test_main_fix_renames_enclosing_references_in_class_bodies_and_methods(tmp_p
     assert namespace["outer"](_Response()) == ("response value", "response value", "response value")
 
 
-def test_main_fix_assigns_distinct_names_to_reverse_order_nested_closures(tmp_path: Path) -> None:
-    filepath = tmp_path / "module.py"
+def test_main_fix_assigns_distinct_names_to_reverse_order_nested_closures(git_worktree: Path) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "def outer(response, response2):\n"
         "    def inner():\n"
@@ -607,8 +594,8 @@ _GENERIC_METHOD_ANNOTATIONS_SOURCE = (
 )
 
 
-def test_main_fix_renames_past_a_lambda_local_binding_in_a_class_body(tmp_path: Path) -> None:
-    filepath = tmp_path / "module.py"
+def test_main_fix_renames_past_a_lambda_local_binding_in_a_class_body(git_worktree: Path) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "def outer(response):\n"
         "    data: Payload = response.json()\n"
@@ -670,8 +657,8 @@ def test_main_fix_renames_past_a_lambda_local_binding_in_a_class_body(tmp_path: 
         ),
     ],
 )
-def test_main_fix_declines_when_a_class_body_assigns_and_reads_the_name(tmp_path: Path, source: str) -> None:
-    filepath = tmp_path / "module.py"
+def test_main_fix_declines_when_a_class_body_assigns_and_reads_the_name(git_worktree: Path, source: str) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text(source)
 
     assert main([str(filepath), "--fix", "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
@@ -714,9 +701,9 @@ def test_main_directory_scan_does_not_crash_on_a_file_with_a_non_utf8_name(tmp_p
         assert main([str(tmp_path), "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"]) == 1
 
 
-def test_process_files_handles_utf8_bom(tmp_path: Path) -> None:
+def test_process_files_handles_utf8_bom(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "with_bom.py"
+    filepath = git_worktree / "with_bom.py"
     filepath.write_bytes(b"\xef\xbb\xbfdata = 1\n")
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
@@ -726,9 +713,9 @@ def test_process_files_handles_utf8_bom(tmp_path: Path) -> None:
     assert violations[str(filepath)][0].error_code == "TR1"
 
 
-def test_apply_fixes_handles_utf8_bom(tmp_path: Path) -> None:
+def test_apply_fixes_handles_utf8_bom(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "with_bom.py"
+    filepath = git_worktree / "with_bom.py"
     filepath.write_bytes(
         b"\xef\xbb\xbfimport requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -743,9 +730,9 @@ def test_apply_fixes_handles_utf8_bom(tmp_path: Path) -> None:
     )
 
 
-def test_apply_fixes_recomputes_stale_positions(tmp_path: Path) -> None:
+def test_apply_fixes_recomputes_stale_positions(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "stale_positions.py"
+    filepath = git_worktree / "stale_positions.py"
     filepath.write_text('"""Module docstring."""\n\n\n\ndef func_scope():\n    x = "foo"\n    print(x)\n')
 
     checks = load_checks(select={"excessive-blank-lines", "redundant-assignment"})
@@ -763,9 +750,9 @@ def test_apply_fixes_recomputes_stale_positions(tmp_path: Path) -> None:
     assert '"foo"' in file_content
 
 
-def test_apply_fixes_refreshes_non_fixable_checks_position_too(tmp_path: Path) -> None:
+def test_apply_fixes_refreshes_non_fixable_checks_position_too(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "def compute():\n"
         "    x = 1\n"
@@ -794,10 +781,10 @@ def test_apply_fixes_refreshes_non_fixable_checks_position_too(tmp_path: Path) -
 
 
 def test_apply_fixes_refreshes_non_fixable_checks_position_after_an_aborted_fix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\n\n"
         "def request():\n"
@@ -841,9 +828,9 @@ def test_apply_fixes_refreshes_non_fixable_checks_position_after_an_aborted_fix(
     assert super_init_violation.line == actual_super_init_line
 
 
-def test_apply_fixes_refreshes_a_participating_checks_own_left_open_violation(tmp_path: Path) -> None:
+def test_apply_fixes_refreshes_a_participating_checks_own_left_open_violation(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "def get_ready(user: dict) -> bool:\n"
         '    return user.get("status") == "ready"\n'
@@ -987,10 +974,10 @@ def test_post_fix_verification_declines_an_unconfirmed_applied_outcome(tmp_path:
     assert violation.fix_outcome is FixOutcome.DECLINED
 
 
-def test_fix_honors_pep263_encoding_declaration(tmp_path: Path) -> None:
+def test_fix_honors_pep263_encoding_declaration(git_worktree: Path) -> None:
 
     source = "# -*- coding: latin-1 -*-\nresult = func(\n    x\n)  # caf\xe9\n"
-    filepath = tmp_path / "latin1.py"
+    filepath = git_worktree / "latin1.py"
     filepath.write_bytes(source.encode("latin-1"))
 
     checks = load_checks(select={"misplaced-comment"})
@@ -1003,9 +990,9 @@ def test_fix_honors_pep263_encoding_declaration(tmp_path: Path) -> None:
     assert ")\n" in fixed_content
 
 
-def test_fix_preserves_crlf_line_endings(tmp_path: Path) -> None:
+def test_fix_preserves_crlf_line_endings(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "crlf.py"
+    filepath = git_worktree / "crlf.py"
     filepath.write_bytes(b"result = func(\r\n    x\r\n)  # comment\r\n\r\nother = 1\r\n")
 
     checks = load_checks(select={"misplaced-comment"})
@@ -1035,10 +1022,10 @@ def test_process_files_no_prefilter_pattern_checks_all_files(tmp_path: Path) -> 
 
 
 def test_process_files_no_candidates_after_prefilter_returns_empty(
-    tmp_path: Path,
+    git_worktree: Path,
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("x = 1\n")
 
     orchestrator = CheckOrchestrator(checks=[RedundantSuperInitCheck()])
@@ -1055,10 +1042,10 @@ def test_process_files_no_candidates_after_prefilter_returns_empty(
     ],
 )
 def test_process_files_unprocessable_reporting_is_gated_by_prefilter_match(
-    tmp_path: Path, check: ASTCheck, expect_unprocessable: bool
+    git_worktree: Path, check: ASTCheck, expect_unprocessable: bool
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("def foo(:\n")
 
     orchestrator = CheckOrchestrator(checks=[check])
@@ -1068,9 +1055,9 @@ def test_process_files_unprocessable_reporting_is_gated_by_prefilter_match(
     assert orchestrator.unprocessable_files == ([filepath.as_posix()] if expect_unprocessable else [])
 
 
-def test_process_files_none_pattern_check_still_sees_a_file_other_checks_patterns_miss(tmp_path: Path) -> None:
+def test_process_files_none_pattern_check_still_sees_a_file_other_checks_patterns_miss(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text('"""Doc."""\n\n\n\nclass Foo:\n    pass\n')
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(), ExcessiveBlankLinesCheck()])
@@ -1080,10 +1067,10 @@ def test_process_files_none_pattern_check_still_sees_a_file_other_checks_pattern
 
 
 def test_process_files_applies_each_checks_prefilter_independently(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     redundant_super_init = RedundantSuperInitCheck()
@@ -1104,13 +1091,15 @@ def test_process_files_applies_each_checks_prefilter_independently(
     [
         None,
         lambda p: p.write_bytes(b"# -*- coding: totally-bogus-enc -*-\ndata = 1\n"),
-        lambda p: p.write_bytes(b"# -*- coding: ascii -*-\nx = 1  # caf\xe9\n"),
-        lambda p: p.write_text("def foo(:\n"),
+        lambda p: p.write_bytes(b"# -*- coding: ascii -*-\ndata = 1  # caf\xe9\n"),
+        lambda p: p.write_text("data = (\n"),
     ],
     ids=["missing-file", "bad-encoding-cookie", "undecodable-content", "invalid-syntax"],
 )
-def test_process_files_unreadable_file_is_skipped(tmp_path: Path, write_file: Callable[[Path], None] | None) -> None:
-    filepath = tmp_path / "module.py"
+def test_process_files_unreadable_file_is_skipped(
+    git_worktree: Path, write_file: Callable[[Path], None] | None
+) -> None:
+    filepath = git_worktree / "module.py"
     if write_file is not None:
         write_file(filepath)
 
@@ -1118,6 +1107,7 @@ def test_process_files_unreadable_file_is_skipped(tmp_path: Path, write_file: Ca
     violations = orchestrator.process_files([str(filepath)])
 
     assert violations == {}
+    assert orchestrator.unprocessable_files == [str(filepath)]
 
 
 def test_process_files_resets_unprocessable_files_between_calls(tmp_path: Path) -> None:
@@ -1135,8 +1125,8 @@ def test_process_files_resets_unprocessable_files_between_calls(tmp_path: Path) 
     assert orchestrator.unprocessable_files == []
 
 
-def test_process_files_second_call_uses_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    filepath = tmp_path / "module.py"
+def test_process_files_second_call_uses_cache(git_worktree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
@@ -1150,9 +1140,11 @@ def test_process_files_second_call_uses_cache(tmp_path: Path, monkeypatch: pytes
     assert second[str(filepath)][0].error_code == "TR1"
 
 
-def test_cache_hit_and_cache_miss_report_equivalent_violations(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_cache_hit_and_cache_miss_report_equivalent_violations(
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
     checks: list[ASTCheck] = [MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE), ExcessiveBlankLinesCheck()]
 
@@ -1172,9 +1164,9 @@ def test_cache_hit_and_cache_miss_report_equivalent_violations(tmp_path: Path, m
     assert [as_comparable(v) for v in cache_hit] == [as_comparable(v) for v in cache_miss]
 
 
-def test_process_files_different_check_set_forces_recheck(tmp_path: Path) -> None:
+def test_process_files_different_check_set_forces_recheck(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
 
     meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
@@ -1243,8 +1235,8 @@ def test_get_cached_violations_ignores_corrupted_cache_entry(
     assert cached_violations is None
 
 
-def test_cache_violations_serialization_error_is_caught(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    filepath = tmp_path / "module.py"
+def test_cache_violations_serialization_error_is_caught(git_worktree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     orchestrator = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
@@ -1255,9 +1247,11 @@ def test_cache_violations_serialization_error_is_caught(tmp_path: Path, monkeypa
     assert violations[str(filepath)][0].error_code == "TR1"
 
 
-def test_process_files_check_exception_is_logged_and_skipped(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_process_files_check_exception_is_logged_and_skipped(
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("\n\n\ndata = 1\n")
 
     monkeypatch.setattr(MeaninglessVarsCheck, "check", raises(ValueError, "simulated check failure"))
@@ -1269,9 +1263,11 @@ def test_process_files_check_exception_is_logged_and_skipped(tmp_path: Path, mon
     assert error_codes == {"TR2"}
 
 
-def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_process_files_check_exception_records_rule_failure(
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     monkeypatch.setattr(MeaninglessVarsCheck, "check", raises(ValueError, "simulated check failure"))
@@ -1283,9 +1279,9 @@ def test_process_files_check_exception_records_rule_failure(tmp_path: Path, monk
     assert orchestrator.rule_failures == [(str(filepath), "meaningless-vars")]
 
 
-def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_process_files_rule_failure_is_not_cached(git_worktree: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     meaningless_vars = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
@@ -1309,9 +1305,11 @@ def test_process_files_rule_failure_is_not_cached(tmp_path: Path, monkeypatch: p
     assert second[str(filepath)][0].error_code == "TR1"
 
 
-def test_process_files_unavailable_checks_result_is_not_cached(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_process_files_unavailable_checks_result_is_not_cached(
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     meaningless_vars = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
@@ -2134,10 +2132,10 @@ class _CrashingAlwaysRerunCheck(_AlwaysRerunProbeCheck):
 
 
 def test_process_files_a_non_cacheable_checks_own_crash_does_not_block_caching_a_cacheable_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     orchestrator = CheckOrchestrator(
@@ -2189,10 +2187,10 @@ def test_process_files_non_cacheable_check_results_are_never_written_to_cache(tm
 
 
 def test_process_files_non_cacheable_check_does_not_disturb_a_cacheable_checks_own_caching(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
@@ -2214,10 +2212,10 @@ def test_process_files_non_cacheable_check_does_not_disturb_a_cacheable_checks_o
 
 
 def test_process_single_file_reports_unprocessable_when_always_rerun_group_fails_after_a_cache_hit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     meaningless_vars_only = CheckOrchestrator(checks=[MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)])
@@ -2254,9 +2252,11 @@ def test_process_files_enabling_a_non_cacheable_check_does_not_change_cache_iden
     assert without_probe.cache.hook_name == with_probe.cache.hook_name
 
 
-def test_fix_mode_skips_a_file_entirely_on_a_clean_cache_hit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_fix_mode_skips_a_file_entirely_on_a_clean_cache_hit(
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
 
     filepath.write_text('"""Doc mentioning a result value."""\n\n\ndef greet() -> str:\n    return "hi"\n')
 
@@ -2275,10 +2275,10 @@ def test_fix_mode_skips_a_file_entirely_on_a_clean_cache_hit(tmp_path: Path, mon
 
 
 def test_fix_mode_clean_cacheable_hit_still_fixes_a_dirty_always_rerun_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
 
     filepath.write_text('"""Doc mentioning a result value."""\n\n\n\ndef greet() -> str:\n    return "hi"\n')
 
@@ -2348,10 +2348,10 @@ def test_fix_mode_writes_cache_once_the_file_stops_changing(tmp_path: Path, monk
 
 
 def test_fix_mode_does_not_cache_a_check_id_with_a_rejected_fix(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "\n\n\nimport requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -2370,9 +2370,9 @@ def test_fix_mode_does_not_cache_a_check_id_with_a_rejected_fix(
     assert orchestrator.cache.get_cached_result(filepath, orchestrator.cache.hook_name) is None
 
 
-def test_fix_mode_two_configs_do_not_collide_on_the_same_files_cache_entry(tmp_path: Path) -> None:
+def test_fix_mode_two_configs_do_not_collide_on_the_same_files_cache_entry(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
 
     filepath.write_text('"""Doc mentioning a result value."""\n\n\ndef greet() -> str:\n    return "hi"\n')
 
@@ -2414,12 +2414,12 @@ def test_check_unavailable_error_is_recorded_once_and_disables_that_check(tmp_pa
     assert check.attempts == 1
 
 
-def test_check_unavailable_error_does_not_discard_other_checks_results(tmp_path: Path) -> None:
+def test_check_unavailable_error_does_not_discard_other_checks_results(git_worktree: Path) -> None:
     class _UnavailableCheck(_AlwaysRerunProbeCheck):
         def check(self, _filepath: Path, _tree: ast.Module, _source: str, /) -> list[Violation]:
             raise CheckUnavailableError("some prerequisite is missing")
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     orchestrator = CheckOrchestrator(
@@ -2431,7 +2431,7 @@ def test_check_unavailable_error_does_not_discard_other_checks_results(tmp_path:
     assert orchestrator.unavailable_checks == [("always-rerun-probe", "some prerequisite is missing")]
 
 
-def test_refresh_stale_positions_skips_a_check_already_known_unavailable(tmp_path: Path) -> None:
+def test_refresh_stale_positions_skips_a_check_already_known_unavailable(git_worktree: Path) -> None:
 
     class _UnavailableCheck(_AlwaysRerunProbeCheck):
         __slots__ = ("attempts",)
@@ -2444,7 +2444,7 @@ def test_refresh_stale_positions_skips_a_check_already_known_unavailable(tmp_pat
             self.attempts += 1
             raise CheckUnavailableError("some prerequisite is missing")
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -2461,7 +2461,7 @@ def test_refresh_stale_positions_skips_a_check_already_known_unavailable(tmp_pat
 
 
 def test_main_reports_check_unavailable_error_once_and_exits_nonzero(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     class _UnavailableCheck(_AlwaysRerunProbeCheck):
         check_id = "unavailable-probe"
@@ -2473,7 +2473,7 @@ def test_main_reports_check_unavailable_error_once_and_exits_nonzero(
     monkeypatch.setattr(_cli, "ALL_CHECKS", [*ALL_CHECKS, _UnavailableCheck])
     monkeypatch.setattr(_orchestrator, "ALL_CHECKS", [*ALL_CHECKS, _UnavailableCheck])
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("x = 1\n")
 
     exit_code = main([str(filepath), "--select", "unavailable-probe"])
@@ -2482,9 +2482,9 @@ def test_main_reports_check_unavailable_error_once_and_exits_nonzero(
     assert capsys.readouterr().err.count("some prerequisite is missing") == 1
 
 
-def test_apply_fixes_skips_check_with_no_fixable_violations(tmp_path: Path) -> None:
+def test_apply_fixes_skips_check_with_no_fixable_violations(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\n"
         "def request():\n"
@@ -2509,9 +2509,9 @@ def test_apply_fixes_skips_check_with_no_fixable_violations(tmp_path: Path) -> N
     assert by_check["redundant-super-init"].fixable is False
 
 
-def test_apply_fixes_does_not_mark_fixed_a_violation_fix_left_untouched(tmp_path: Path) -> None:
+def test_apply_fixes_does_not_mark_fixed_a_violation_fix_left_untouched(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import json\n\n\n"
         "def get_config():\n"
@@ -2536,9 +2536,9 @@ def test_apply_fixes_does_not_mark_fixed_a_violation_fix_left_untouched(tmp_path
     assert "def get_data(self):" in fixed_content
 
 
-def test_apply_fixes_distinguishes_violations_with_identical_messages(tmp_path: Path) -> None:
+def test_apply_fixes_distinguishes_violations_with_identical_messages(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "def get_data():\n"
         '    with open("f.txt") as f:\n'
@@ -2564,10 +2564,10 @@ def test_apply_fixes_distinguishes_violations_with_identical_messages(tmp_path: 
 
 
 def test_apply_fixes_marks_violation_rejected_when_fix_produces_invalid_syntax(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "\n\n\nimport requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -2595,10 +2595,10 @@ def test_apply_fixes_marks_violation_rejected_when_fix_produces_invalid_syntax(
 
 
 def test_apply_fixes_marks_violation_errored_when_fix_raises_unexpectedly(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "\n\n\nimport requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -2625,10 +2625,10 @@ def test_apply_fixes_marks_violation_errored_when_fix_raises_unexpectedly(
 
 
 def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\n"
         "def first():\n"
@@ -2678,10 +2678,10 @@ def test_apply_fixes_marks_already_resolved_violation_fixed_not_errored(
 
 
 def test_apply_fixes_records_rule_failure_when_fix_raises_after_resolving_everything(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -2739,10 +2739,10 @@ def _run_vfn_fix_with_patched_apply_fix(
 
 
 def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = _write_get_config_and_get_active_module(tmp_path)
+    filepath = _write_get_config_and_get_active_module(git_worktree)
     original_apply_fix = vfn_module.apply_fix
 
     def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> FixOutcome:
@@ -2764,10 +2764,10 @@ def test_apply_fixes_marks_only_the_rejected_violation_of_a_multi_write_check(
 
 
 def test_apply_fixes_marks_only_the_aborted_violation_of_a_multi_write_check(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = _write_get_config_and_get_active_module(tmp_path)
+    filepath = _write_get_config_and_get_active_module(git_worktree)
     original_apply_fix = vfn_module.apply_fix
 
     def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> FixOutcome:
@@ -2789,10 +2789,10 @@ def test_apply_fixes_marks_only_the_aborted_violation_of_a_multi_write_check(
 
 
 def test_apply_fixes_keeps_aborted_violation_aborted_even_when_the_external_edit_removes_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = _write_get_config_and_get_active_module(tmp_path)
+    filepath = _write_get_config_and_get_active_module(git_worktree)
     original_apply_fix = vfn_module.apply_fix
 
     def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> FixOutcome:
@@ -2815,10 +2815,10 @@ def test_apply_fixes_keeps_aborted_violation_aborted_even_when_the_external_edit
 
 
 def test_apply_fixes_keeps_aborted_violation_aborted_when_the_external_edit_leaves_invalid_python(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = _write_get_config_and_get_active_module(tmp_path)
+    filepath = _write_get_config_and_get_active_module(git_worktree)
     original_apply_fix = vfn_module.apply_fix
 
     def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> FixOutcome:
@@ -2841,10 +2841,10 @@ def test_apply_fixes_keeps_aborted_violation_aborted_when_the_external_edit_leav
 
 
 def test_apply_fixes_marks_errored_violation_of_a_multi_write_check_when_apply_fix_raises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
-    filepath = _write_get_config_and_get_active_module(tmp_path)
+    filepath = _write_get_config_and_get_active_module(git_worktree)
     original_apply_fix = vfn_module.apply_fix
 
     def flaky_apply_fix(fp: Path, suggestion: Suggestion) -> FixOutcome:
@@ -2965,11 +2965,11 @@ def _fix_raises(
     ],
 )
 def test_apply_fixes_marks_nothing_fixed(
-    tmp_path: Path,
+    git_worktree: Path,
     monkeypatch: pytest.MonkeyPatch,
     configure: Callable[[CheckOrchestrator, MeaninglessVarsCheck, pytest.MonkeyPatch], None],
 ) -> None:
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -3221,10 +3221,10 @@ def _run_shipped_fix_pair(tmp_path: Path, source: str) -> dict[str, list[Violati
     return _group_by_check_id(orchestrator.process_files([str(filepath)])[str(filepath)])
 
 
-def test_apply_fixes_marks_a_shipped_checks_violation_another_shipped_fix_removed(tmp_path: Path) -> None:
+def test_apply_fixes_marks_a_shipped_checks_violation_another_shipped_fix_removed(git_worktree: Path) -> None:
 
     by_check = _run_shipped_fix_pair(
-        tmp_path, "import requests\n\n\ndef request():\n    data = requests.get(url)\n    return data\n"
+        git_worktree, "import requests\n\n\ndef request():\n    data = requests.get(url)\n    return data\n"
     )
     (meaningless,) = by_check["meaningless-vars"]
 
@@ -3233,10 +3233,10 @@ def test_apply_fixes_marks_a_shipped_checks_violation_another_shipped_fix_remove
     assert by_check["redundant-assignment"][0].fix_outcome is FixOutcome.APPLIED
 
 
-def test_apply_fixes_does_not_double_report_a_violation_whose_message_another_fix_rewrote(tmp_path: Path) -> None:
+def test_apply_fixes_does_not_double_report_a_violation_whose_message_another_fix_rewrote(git_worktree: Path) -> None:
 
     by_check = _run_shipped_fix_pair(
-        tmp_path, "import requests\n\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
+        git_worktree, "import requests\n\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
 
     outcomes = [v.fix_outcome for violations in by_check.values() for v in violations]
@@ -3413,8 +3413,8 @@ def test_fixed_hook_entrypoint_selecting_only_a_check_it_cannot_run_exits_zero(
     assert entrypoint(["--isolated", "--select", selected, str(filepath)]) == 0
 
 
-def test_fixed_hook_entrypoint_runs_a_selected_check_it_does_own(tmp_path: Path) -> None:
-    filepath = tmp_path / "module.py"
+def test_fixed_hook_entrypoint_runs_a_selected_check_it_does_own(git_worktree: Path) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     exit_code = ruff_extra_rules.main(
@@ -3424,8 +3424,8 @@ def test_fixed_hook_entrypoint_runs_a_selected_check_it_does_own(tmp_path: Path)
     assert exit_code == 1
 
 
-def test_ty_hook_runs_redundant_dict_get_by_default(tmp_path: Path) -> None:
-    filepath = tmp_path / "module.py"
+def test_ty_hook_runs_redundant_dict_get_by_default(git_worktree: Path) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text("config = {'port': 5432}\nvalue = config.get('port')\n")
 
     assert ruff_extra_rules.main(["--isolated", "--select", "redundant-dict-get", str(filepath)]) == 0
@@ -3436,26 +3436,26 @@ def test_main_no_filenames_returns_zero() -> None:
     assert main([]) == 0
 
 
-def test_main_no_violations_returns_zero(tmp_path: Path) -> None:
-    filepath = tmp_path / "clean.py"
+def test_main_no_violations_returns_zero(git_worktree: Path) -> None:
+    filepath = git_worktree / "clean.py"
     filepath.write_text("x = 1\n")
 
     assert main([str(filepath)]) == 0
 
 
-def test_main_verbose_flag_does_not_change_a_clean_runs_exit_code(tmp_path: Path) -> None:
+def test_main_verbose_flag_does_not_change_a_clean_runs_exit_code(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "clean.py"
+    filepath = git_worktree / "clean.py"
     filepath.write_text("x = 1\n")
 
     assert main(["--verbose", str(filepath)]) == 0
 
 
 def test_main_unparseable_file_returns_one(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+    git_worktree: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
 
-    filepath = tmp_path / "broken.py"
+    filepath = git_worktree / "broken.py"
     filepath.write_text("data = foo(:\n")
 
     with caplog.at_level("DEBUG"):
@@ -3489,12 +3489,12 @@ def test_main_permission_denied_file_returns_one_inside_git_repo(
 
 
 def test_main_check_crash_returns_one_and_reports_check_and_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
 
     monkeypatch.setattr(MeaninglessVarsCheck, "check", raises(ValueError, "simulated check failure"))
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     exit_code = main([str(filepath), "--select", "meaningless-vars"])
@@ -3503,8 +3503,8 @@ def test_main_check_crash_returns_one_and_reports_check_and_file(
     assert f"{filepath}: error: check 'meaningless-vars' raised an unexpected exception" in capsys.readouterr().err
 
 
-def test_main_reports_non_fixable_violation(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    filepath = tmp_path / "module.py"
+def test_main_reports_non_fixable_violation(git_worktree: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "class Base:\n"
         "    def __init__(self):\n"
@@ -3524,9 +3524,9 @@ def test_main_reports_non_fixable_violation(tmp_path: Path, capsys: pytest.Captu
     assert "[FIXED]" not in err
 
 
-def test_main_reports_column_alongside_line(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_reports_column_alongside_line(git_worktree: Path, capsys: pytest.CaptureFixture[str]) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("def process():\n    data = requests.get(url)\n    return data\n")
 
     exit_code = main([str(filepath), "--select", "meaningless-vars", "--meaningless-vars-level", "aggressive"])
@@ -3535,8 +3535,10 @@ def test_main_reports_column_alongside_line(tmp_path: Path, capsys: pytest.Captu
     assert f"{filepath}:2:5: TR1:" in capsys.readouterr().err
 
 
-def test_main_reports_fixable_violation_without_fix_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    filepath = tmp_path / "module.py"
+def test_main_reports_fixable_violation_without_fix_flag(
+    git_worktree: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -3549,8 +3551,8 @@ def test_main_reports_fixable_violation_without_fix_flag(tmp_path: Path, capsys:
     assert "Run with --fix to apply it automatically." in err
 
 
-def test_main_fix_flag_marks_violation_fixed(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    filepath = tmp_path / "module.py"
+def test_main_fix_flag_marks_violation_fixed(git_worktree: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -3569,7 +3571,7 @@ def test_main_fix_flag_marks_violation_fixed(tmp_path: Path, capsys: pytest.Capt
 
 
 def test_main_fix_flag_reports_rejected_fix(
-    tmp_path: Path,
+    git_worktree: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
@@ -3580,7 +3582,7 @@ def test_main_fix_flag_reports_rejected_fix(
 
     monkeypatch.setattr(MeaninglessVarsCheck, "fix", broken_fix)
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -3601,7 +3603,7 @@ def test_main_fix_flag_reports_rejected_fix(
 
 
 def test_main_fix_flag_reports_errored_fix(
-    tmp_path: Path,
+    git_worktree: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
@@ -3612,7 +3614,7 @@ def test_main_fix_flag_reports_errored_fix(
 
     monkeypatch.setattr(MeaninglessVarsCheck, "fix", broken_fix)
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -3634,10 +3636,10 @@ def test_main_fix_flag_reports_errored_fix(
 
 
 def test_main_fix_flag_reports_failed_fix(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+    git_worktree: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
 
-    subdir = tmp_path / "readonly"
+    subdir = git_worktree / "readonly"
     subdir.mkdir()
     filepath = subdir / "module.py"
     filepath.write_text(
@@ -3661,7 +3663,7 @@ def test_main_fix_flag_reports_failed_fix(
 
 
 def test_main_fix_flag_reports_declined_fix_without_operational_hint(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     def declined_fix(
         _self: object, _fp: Path, violations: list[Violation], *_args: object, **_kwargs: object
@@ -3669,7 +3671,7 @@ def test_main_fix_flag_reports_declined_fix_without_operational_hint(
         return FixResult.for_violations(violations, FixOutcome.DECLINED)
 
     monkeypatch.setattr(MeaninglessVarsCheck, "fix", declined_fix)
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -3684,7 +3686,7 @@ def test_main_fix_flag_reports_declined_fix_without_operational_hint(
 
 
 def test_main_fix_flag_reports_aborted_fix(
-    tmp_path: Path,
+    git_worktree: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
@@ -3703,7 +3705,7 @@ def test_main_fix_flag_reports_aborted_fix(
 
     monkeypatch.setattr(MeaninglessVarsCheck, "fix", racing_fix)
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -3732,7 +3734,7 @@ def test_main_fix_flag_reports_aborted_fix(
 
 
 def test_main_reports_rule_failure_when_reread_fails_mid_fix_loop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 
     original_read_source = CheckOrchestrator._read_source
@@ -3747,7 +3749,7 @@ def test_main_reports_rule_failure_when_reread_fails_mid_fix_loop(
 
     monkeypatch.setattr(CheckOrchestrator, "_read_source", read_source_fails_on_second_call)
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\n"
         "def request():\n"
@@ -3771,7 +3773,7 @@ def test_main_reports_rule_failure_when_reread_fails_mid_fix_loop(
 
 
 def test_main_reports_rule_failure_when_recompute_raises_mid_fix_loop(
-    tmp_path: Path,
+    git_worktree: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
@@ -3792,7 +3794,7 @@ def test_main_reports_rule_failure_when_recompute_raises_mid_fix_loop(
 
     monkeypatch.setattr(MeaninglessVarsCheck, "check", check_raises_on_second_call)
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\n"
         "def request():\n"
@@ -3817,7 +3819,7 @@ def test_main_reports_rule_failure_when_recompute_raises_mid_fix_loop(
 
 
 def test_main_reports_rule_failure_when_fix_raises_after_resolving_everything(
-    tmp_path: Path,
+    git_worktree: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
@@ -3834,7 +3836,7 @@ def test_main_reports_rule_failure_when_fix_raises_after_resolving_everything(
 
     monkeypatch.setattr(MeaninglessVarsCheck, "fix", fix_then_raise)
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "import requests\n\ndef request():\n    data = requests.get(url)\n    return data.status_code\n"
     )
@@ -3855,9 +3857,9 @@ def test_main_reports_rule_failure_when_fix_raises_after_resolving_everything(
 
 
 def test_main_exclude_pattern_excludes_all_files_returns_zero(
-    tmp_path: Path,
+    git_worktree: Path,
 ) -> None:
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     exit_code = main([str(filepath), "--exclude", "*.py"])
@@ -3865,7 +3867,7 @@ def test_main_exclude_pattern_excludes_all_files_returns_zero(
 
 
 def test_main_check_specific_cli_arg_round_trip(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, git_worktree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
 
     class _Marker(Enum):
@@ -3902,7 +3904,7 @@ def test_main_check_specific_cli_arg_round_trip(
     monkeypatch.setattr(_cli, "ALL_CHECKS", [*ALL_CHECKS, ConfigurableCheck])
     monkeypatch.setattr(_orchestrator, "ALL_CHECKS", [*ALL_CHECKS, ConfigurableCheck])
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("x = 1\n")
 
     exit_code = main(
@@ -3961,10 +3963,10 @@ class _LevelFlagCase(NamedTuple):
     ids=["redundant-assignment", "meaningless-vars", "redundant-dict-get"],
 )
 def test_main_level_flag_switches_between_conservative_and_broader_reporting(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], case: _LevelFlagCase
+    git_worktree: Path, capsys: pytest.CaptureFixture[str], case: _LevelFlagCase
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(case.source)
 
     default_exit_code = main([str(filepath), "--select", case.check_id])
@@ -4025,10 +4027,10 @@ def test_main_ignoring_all_checks_returns_zero(tmp_path: Path, capsys: pytest.Ca
     ids=["select", "ignore"],
 )
 def test_main_trailing_comma_does_not_report_blank_unknown_check(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str, meaningless_vars_runs: bool
+    git_worktree: Path, capsys: pytest.CaptureFixture[str], flag: str, meaningless_vars_runs: bool
 ) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     exit_code = main([str(filepath), flag, "meaningless-vars,", "--meaningless-vars-level", "aggressive"])
@@ -4052,9 +4054,9 @@ def test_main_select_only_commas_is_a_configuration_error(tmp_path: Path, capsys
     assert "expected at least one check name" in err
 
 
-def test_main_select_and_ignore_compose(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_main_select_and_ignore_compose(git_worktree: Path, capsys: pytest.CaptureFixture[str]) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
 
     exit_code = main(
@@ -4080,9 +4082,9 @@ def test_main_select_and_ignore_compose(tmp_path: Path, capsys: pytest.CaptureFi
     ids=["select", "ignore"],
 )
 def test_main_accumulates_repeated_check_selection_arguments(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str, expected_codes: set[str]
+    git_worktree: Path, capsys: pytest.CaptureFixture[str], flag: str, expected_codes: set[str]
 ) -> None:
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "data = 1\n\n"
         "class Base:\n"
@@ -4123,8 +4125,7 @@ _BAD_FIXTURE_PATHS = sorted(_FIXTURES_DIR.glob("**/bad/*.py"))
 
 
 @pytest.fixture
-def isolated_tri006_daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
-    monkeypatch.chdir(tmp_path)
+def isolated_tri006_daemon(git_worktree: Path) -> Iterator[Path]:
     original_session = tri006_session_module._session
     original_probe_failed = tri006_session_module._daemon_probe_failed
     original_probe_next_retry_at = tri006_session_module._daemon_probe_next_retry_at
@@ -4132,13 +4133,13 @@ def isolated_tri006_daemon(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> I
     tri006_session_module._daemon_probe_failed = False
     tri006_session_module._daemon_probe_next_retry_at = 0.0
     try:
-        yield tmp_path
+        yield git_worktree
     finally:
         leftover_session = tri006_session_module.peek_session()
         if leftover_session is not None:
             leftover_session.close()
         for _ in range(3):
-            tri006_daemon.shutdown_if_running(tmp_path)
+            tri006_daemon.shutdown_if_running(git_worktree)
             time.sleep(0.2)
         tri006_session_module._session = original_session
         tri006_session_module._daemon_probe_failed = original_probe_failed
@@ -4179,15 +4180,17 @@ def test_main_handles_path_containing_spaces_and_unicode(
         encoding="utf-8",
     )
 
-    real_run = cast("Callable[..., subprocess.CompletedProcess[str]]", subprocess.run)
+    real_run = cast("Callable[..., subprocess.CompletedProcess[bytes]]", subprocess.run)
 
     grep_commands: list[list[str]] = []
-    grep_results: list[subprocess.CompletedProcess[str]] = []
+    grep_results: list[subprocess.CompletedProcess[bytes]] = []
 
-    def _spy_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def _spy_run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         completed_process = real_run(*args, **kwargs)
-        grep_commands.append(cast("list[str]", args[0]))
-        grep_results.append(completed_process)
+        command = cast("list[str]", args[0])
+        if command[:3] == ["git", "--literal-pathspecs", "grep"]:
+            grep_commands.append(command)
+            grep_results.append(completed_process)
         return completed_process
 
     with contextlib.chdir(tmp_path):
@@ -4197,8 +4200,8 @@ def test_main_handles_path_containing_spaces_and_unicode(
         monkeypatch.setattr(subprocess, "run", _spy_run)
         exit_code = main([str(filepath), "--select", "meaningless-vars", "--fix"])
 
-    assert grep_results, "git grep was never invoked -- fell back to the Python-only path"
-    assert all(result.stderr == "" for result in grep_results)
+    assert grep_results
+    assert all(not result.stderr for result in grep_results)
     assert any(result.returncode == 0 for result in grep_results)
 
     assert all(str(filepath) in command for command in grep_commands)
@@ -4210,13 +4213,13 @@ def test_main_handles_path_containing_spaces_and_unicode(
     )
 
 
-def test_process_files_handles_a_large_file(tmp_path: Path) -> None:
+def test_process_files_handles_a_large_file(git_worktree: Path) -> None:
 
     function_count = 300
     source = "import requests\n\n" + "\n\n".join(
         f"def func_{i}():\n    data = requests.get(url)\n    return data.status_code" for i in range(function_count)
     )
-    filepath = tmp_path / "large_module.py"
+    filepath = git_worktree / "large_module.py"
     filepath.write_text(source + "\n", encoding="utf-8")
 
     orchestrator = CheckOrchestrator(checks=load_checks(select={"meaningless-vars"}), fix_mode=True)
@@ -4320,11 +4323,11 @@ def test_a_cross_file_candidate_is_skipped_where_its_check_is_ignored(tmp_path: 
     assert violations.keys() == {str(main_file)}
 
 
-def test_an_ignored_check_leaves_the_remaining_ones_their_own_cache_identity(tmp_path: Path) -> None:
+def test_an_ignored_check_leaves_the_remaining_ones_their_own_cache_identity(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("data = 1\n")
-    cache_dir = tmp_path / ".cache"
+    cache_dir = git_worktree / ".cache"
 
     def orchestrate(per_file_ignores: PerFileIgnoreList) -> dict[str, list[Violation]]:
         return CheckOrchestrator(
@@ -4333,7 +4336,7 @@ def test_an_ignored_check_leaves_the_remaining_ones_their_own_cache_identity(tmp
             per_file_ignores=per_file_ignores,
         ).process_files([str(filepath)])
 
-    while_ignored = orchestrate(_ignoring("meaningless-vars", "module.py", tmp_path))
+    while_ignored = orchestrate(_ignoring("meaningless-vars", "module.py", git_worktree))
     assert {v.check_id for v in while_ignored[str(filepath)]} == {"probe-a"}
 
     assert {v.check_id for v in orchestrate(PerFileIgnoreList())[str(filepath)]} == {"probe-a", "meaningless-vars"}
@@ -4448,13 +4451,13 @@ def test_an_unreadable_file_is_reported_even_on_a_clean_cache_hit(tmp_path: Path
     assert probe.direct_inputs == []
 
 
-def test_an_entry_for_a_check_this_run_cannot_run_changes_nothing(tmp_path: Path) -> None:
+def test_an_entry_for_a_check_this_run_cannot_run_changes_nothing(git_worktree: Path) -> None:
 
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text("def broken(\n")
     orchestrator = CheckOrchestrator(
         checks=[_PrefilteredProbeCheck()],
-        per_file_ignores=_ignoring("some-other-hooks-check", "module.py", tmp_path),
+        per_file_ignores=_ignoring("some-other-hooks-check", "module.py", git_worktree),
     )
 
     assert orchestrator.process_files([str(filepath)]) == {}

@@ -11,6 +11,8 @@ from collections import defaultdict
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, NamedTuple
 
+from pre_commit_hooks._git import run_git
+
 from ._globs import anchored_pattern, glob_matches, relative_to_anchor
 
 if TYPE_CHECKING:
@@ -75,23 +77,14 @@ def expand_directories(filenames: list[str]) -> list[str]:
 
 def _list_python_files_in_dir(directory: Path) -> list[str]:
     resolved_dir = directory.resolve()
-    try:
-        cmd: list[str | Path] = ["git", "-C", directory, "ls-files", "-z", "--cached", "--others", "--exclude-standard"]
-        git_ls_files_result = subprocess.run(  # noqa: S603 -- Fixed Git command; no shell.
-            cmd, capture_output=True, text=True, errors="surrogateescape", check=False, timeout=30
-        )
-        if git_ls_files_result.returncode == 0 and not git_ls_files_result.stderr:
-            python_files = sorted(
-                str(candidate)
-                for f in git_ls_files_result.stdout.split("\0")
-                if f.endswith(".py") and (candidate := resolved_dir / f).exists()
-            )
-            _warn_about_ignored_python_files(directory)
-            return python_files
-    except subprocess.SubprocessError, FileNotFoundError, subprocess.TimeoutExpired:
-        logger.debug("git ls-files failed", exc_info=True)
-
-    return sorted(str(p) for p in resolved_dir.rglob("*.py"))
+    stdout = run_git("ls-files", ("-z", "--cached", "--others", "--exclude-standard"), cwd=directory)
+    python_files = sorted(
+        str(candidate)
+        for f in stdout.split("\0")
+        if f.endswith(".py") and (candidate := resolved_dir / f).exists(follow_symlinks=False)
+    )
+    _warn_about_ignored_python_files(directory)
+    return python_files
 
 
 _MAX_REPORTED_IGNORED_PATHS = 20

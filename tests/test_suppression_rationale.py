@@ -347,12 +347,12 @@ def test_pytriage_self_suppression_tracks_usage(codes: str) -> None:
 
 
 @pytest.mark.parametrize("explanation", ["", " needed"], ids=["used", "unused"])
-def test_unused_pytriage_and_cached_usage(tmp_path: Path, explanation: str) -> None:
-    filepath = tmp_path / "example.py"
+def test_unused_pytriage_and_cached_usage(git_worktree: Path, explanation: str) -> None:
+    filepath = git_worktree / "example.py"
     filepath.write_text(f"value = 1  # pytriage: TR12{explanation}\n")
     orchestrator = CheckOrchestrator(
         load_checks(select={"suppression-rationale", "unused-pytriage"}),
-        cache_dir=tmp_path / "cache",
+        cache_dir=git_worktree / "cache",
     )
     filename = str(filepath)
 
@@ -372,8 +372,8 @@ def test_rule_is_opt_in_and_has_no_configuration() -> None:
     assert check.get_prefilter_pattern() == ["#"]
 
 
-def test_fix_mode_reports_without_changing_source(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    filepath = tmp_path / "example.py"
+def test_fix_mode_reports_without_changing_source(git_worktree: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    filepath = git_worktree / "example.py"
     source = "import foo  # NOQA: F401\n"
     filepath.write_text(source)
 

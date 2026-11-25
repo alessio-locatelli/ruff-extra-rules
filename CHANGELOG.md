@@ -10,8 +10,13 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 - Add TR13, `overly-broad-return-type`, which reports an abstract return annotation such as `Mapping[str, int]` or `Sequence[int]` when every `return` in the function produces the same concrete type, such as `MappingProxyType` or `list`. By default it checks functions and methods that no subclass can override; `level = "aggressive"` also checks other methods. It is report-only.
 
+### Changed
+
+- Linting requires Git on `PATH` and inputs within the current Git working tree. Git discovery and search failures stop the run with an error. Paths through symbolic links or inside a nested repository are rejected.
+
 ### Fixed
 
+- Prefiltering checks files with Git pathspec characters in their names, such as `:(glob)x.py`.
 - Reduce AST traversal overhead in checks such as `defined-far-from-use`, `redundant-assignment`, and `redundant-enum-value`.
 - `validate-function-name` and `meaningless-vars` skip automatic renames when a stringified or quoted annotation could resolve differently after the fix.
 - `validate-function-name` can rename a nested function when the enclosing function's default argument binds the same name in an outer scope. It declines when a `global` or `nonlocal` declaration can affect the rename.

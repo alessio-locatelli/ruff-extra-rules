@@ -38,10 +38,8 @@ _ENTRYPOINTS = pytest.mark.parametrize(
 
 
 @pytest.fixture
-def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    (tmp_path / ".git").mkdir()
-    monkeypatch.chdir(tmp_path)
-    return tmp_path
+def project(git_worktree: Path) -> Path:
+    return git_worktree
 
 
 def _write_config(directory: Path, body: str) -> Path:

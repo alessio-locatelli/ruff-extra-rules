@@ -1682,8 +1682,8 @@ async def process():
     assert violations[0].fixable is False
 
 
-def test_orchestrator_skips_file_with_invalid_syntax(tmp_path: Path) -> None:
-    filepath = tmp_path / "broken.py"
+def test_orchestrator_skips_file_with_invalid_syntax(git_worktree: Path) -> None:
+    filepath = git_worktree / "broken.py"
     filepath.write_text("x = (((")
 
     orchestrator = CheckOrchestrator(checks=[RedundantAssignmentCheck()])

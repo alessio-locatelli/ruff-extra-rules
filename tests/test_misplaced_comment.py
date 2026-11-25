@@ -180,9 +180,9 @@ def test_cli_fix_handles_sphinx_attribute_comments(
     source: str,
     expected_source: str,
     expected_exit_code: int,
-    tmp_path: Path,
+    git_worktree: Path,
 ) -> None:
-    filepath = _write_module_source(tmp_path, source)
+    filepath = _write_module_source(git_worktree, source)
 
     assert main(["--select", "misplaced-comment", "--fix", str(filepath)]) == expected_exit_code
     assert filepath.read_bytes() == expected_source.encode()
