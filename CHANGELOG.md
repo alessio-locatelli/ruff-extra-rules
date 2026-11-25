@@ -12,6 +12,7 @@ Notes start at 0.0.50. Earlier tags shipped without them.
 
 ### Fixed
 
+- Reduce AST traversal overhead in checks such as `defined-far-from-use`, `redundant-assignment`, and `redundant-enum-value`.
 - `validate-function-name` and `meaningless-vars` skip automatic renames when a stringified or quoted annotation could resolve differently after the fix.
 - `validate-function-name` can rename a nested function when the enclosing function's default argument binds the same name in an outer scope. It declines when a `global` or `nonlocal` declaration can affect the rename.
 - `redundant-dict-get` accounts for decorator and class construction calls when checking dictionary keys across loop iterations. An undecorated function body alone no longer invalidates the proof.

@@ -613,7 +613,7 @@ def _contains_named_expression(node: ast.AST) -> bool:
 
 
 def _contains_suspension(node: ast.AST) -> bool:
-    return any(isinstance(child, ast.Await | ast.Yield | ast.YieldFrom) for child in ast.walk(node))
+    return any(isinstance(child, (ast.Await, ast.Yield, ast.YieldFrom)) for child in ast.walk(node))
 
 
 def _loop_body_invalidates_state(statements: list[ast.stmt], state: _State, candidates: dict[int, Candidate]) -> bool:

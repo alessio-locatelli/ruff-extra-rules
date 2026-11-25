@@ -13,7 +13,10 @@ _COMPREHENSION_NODES: tuple[type[ast.AST], ...] = (
     ast.GeneratorExp,
 )
 
-_DEFINITION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+_NAMED_DEFINITION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+_DEFINITION_NODES = (*_NAMED_DEFINITION_NODES, ast.Lambda)
+_STORE_OR_DELETE_CONTEXTS = (ast.Store, ast.Del)
+_NAMED_CAPTURE_NODES = (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)
 
 _BUILTINS_REACHING_MODULES = frozenset({"builtins", "importlib", "sys"})
 _BUILTINS_REACHING_NAMES = frozenset({"__builtins__", "__import__", "globals"})
@@ -48,7 +51,7 @@ def _walrus_targets(nodes: Iterable[ast.AST]) -> Iterator[ast.Name]:
 
 
 def own_scope_children(scope_node: ast.AST) -> Iterator[ast.AST]:
-    if isinstance(scope_node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+    if isinstance(scope_node, _NAMED_DEFINITION_NODES):
         yield from scope_node.body
     elif isinstance(scope_node, ast.Lambda):
         yield scope_node.body
@@ -99,15 +102,15 @@ def collect_scope_names(scope: ast.AST) -> set[str]:
 
 
 def iter_binding_names(node: ast.AST) -> Iterator[str]:
-    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+    if isinstance(node, ast.Name) and isinstance(node.ctx, _STORE_OR_DELETE_CONTEXTS):
         yield node.id
-    elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+    elif isinstance(node, _NAMED_DEFINITION_NODES):
         yield node.name
     elif isinstance(node, ast.Import):
         yield from (alias.asname or alias.name.split(".")[0] for alias in node.names)
     elif isinstance(node, ast.ImportFrom):
         yield from (alias.asname or alias.name for alias in node.names if alias.name != "*")
-    elif isinstance(node, ast.ExceptHandler | ast.MatchAs | ast.MatchStar) and node.name is not None:
+    elif isinstance(node, _NAMED_CAPTURE_NODES) and node.name is not None:
         yield node.name
     elif isinstance(node, ast.MatchMapping) and node.rest is not None:
         yield node.rest

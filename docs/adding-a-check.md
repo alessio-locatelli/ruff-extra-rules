@@ -118,7 +118,7 @@ Guidelines:
 
 - Let `CheckOrchestrator` read/parse each file once; don't re-read in `check()`/`fix()`.
 - Prefer O(n) over O(n²); use set lookups instead of list searches.
-- In code that runs once per AST node, pass `isinstance()` a module-level tuple of types rather than an inline union such as `ast.FunctionDef | ast.ClassDef`. Python builds the inline union on every call, which made `isinstance()` about seven times slower in a micro-benchmark on Python 3.14.
+- In code that runs once per AST node, pass `isinstance()` a tuple of types. Python builds inline unions such as `ast.FunctionDef | ast.ClassDef` on every call. Use an inline tuple for a one-off combination and a module-level tuple when multiple sites share the combination or profiling shows the call is especially hot.
 - `prek`/`pre-commit` may run hooks in parallel across files — avoid shared mutable state without locking (see `_cache.py`).
 
 ```bash

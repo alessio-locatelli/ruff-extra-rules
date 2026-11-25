@@ -152,7 +152,7 @@ def may_reorder(
 
 
 def _mutation_roots(node: ast.AST, builtin_names: frozenset[str]) -> Iterator[str]:
-    if isinstance(node, ast.Attribute | ast.Subscript) and isinstance(node.ctx, ast.Store | ast.Del):
+    if isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, (ast.Store, ast.Del)):
         yield from _root_names((node.value,))
     elif isinstance(node, ast.Call):
         if isinstance(node.func, ast.Attribute) and node.func.attr not in _READ_ONLY_METHODS:

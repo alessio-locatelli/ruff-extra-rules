@@ -13,6 +13,18 @@ if TYPE_CHECKING:
 
 type UsageContext = Literal["attribute_or_subscript_assignment", "augmented_assignment", "deletion", "unknown"]
 
+_FUNCTION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef)
+_STORE_OR_DELETE_CONTEXTS = (ast.Store, ast.Del)
+_NAMED_BINDING_NODES = (
+    ast.MatchAs,
+    ast.MatchStar,
+    ast.TypeVar,
+    ast.ParamSpec,
+    ast.TypeVarTuple,
+    ast.ClassDef,
+    ast.ExceptHandler,
+)
+
 
 class PatternType(Enum):
     IMMEDIATE_SINGLE_USE = auto()
@@ -207,31 +219,19 @@ def _collect_module_binding_facts(tree: ast.Module) -> tuple[bool, dict[str, int
     function_name_counts: dict[str, int] = {}
     shadowing: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        if isinstance(node, _FUNCTION_NODES):
             function_name_counts[node.name] = function_name_counts.get(node.name, 0) + 1
         elif isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names):
             has_wildcard_import = True
         elif isinstance(node, ast.arg):
             shadowing.add(node.arg)
-        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, _STORE_OR_DELETE_CONTEXTS):
             shadowing.add(node.id)
         elif isinstance(node, ast.alias):
             shadowing.add((node.asname or node.name).split(".")[0])
         elif isinstance(node, ast.MatchMapping) and node.rest is not None:
             shadowing.add(node.rest)
-        elif (
-            isinstance(
-                node,
-                ast.MatchAs
-                | ast.MatchStar
-                | ast.TypeVar
-                | ast.ParamSpec
-                | ast.TypeVarTuple
-                | ast.ClassDef
-                | ast.ExceptHandler,
-            )
-            and node.name is not None
-        ):
+        elif isinstance(node, _NAMED_BINDING_NODES) and node.name is not None:
             shadowing.add(node.name)
     return has_wildcard_import, function_name_counts, shadowing
 
@@ -914,7 +914,7 @@ class VariableTracker(ast.NodeVisitor):
     def _enclosing_call_for_argument(self, node: ast.Name, immediate_parent: ast.AST | None) -> ast.Call | None:
         if isinstance(immediate_parent, ast.Call) and node is not immediate_parent.func:
             return immediate_parent
-        if isinstance(immediate_parent, ast.keyword | ast.Starred) and immediate_parent.value is node:
+        if isinstance(immediate_parent, (ast.keyword, ast.Starred)) and immediate_parent.value is node:
             grandparent = self.parent_stack[-2] if len(self.parent_stack) >= 2 else None
             if isinstance(grandparent, ast.Call):
                 return grandparent
