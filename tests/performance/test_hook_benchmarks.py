@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Literal
 
 import pytest
 
+from pre_commit_hooks.ast_checks.redundant_type_conversion import daemon
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -22,6 +24,7 @@ CacheState = Literal["cold", "warm"]
 
 
 def _clear_benchmark_cache() -> None:
+    daemon.shutdown_if_running(_PROJECT_ROOT)
     try:
         shutil.rmtree(_CACHE_DIRECTORY)
     except FileNotFoundError:

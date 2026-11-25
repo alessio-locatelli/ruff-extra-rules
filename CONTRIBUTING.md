@@ -30,6 +30,8 @@ uv run pytest tests/performance --benchmark-only --benchmark-json=benchmark-resu
 uv run python -m benchmarks.regression benchmark-results.json benchmarks/baseline.json
 ```
 
+The suite passes `--ignore=redundant-type-conversion`, and before clearing this repository's cache it shuts down the check's background `ty` process, which loses that process's cross-file state. Ignore the check in ad-hoc measurements too, unless you are measuring it. It keeps a background `ty` process per git repository for up to 15 idle minutes, so timing it in many throwaway repositories leaves one such process behind for each, and moving or deleting a repository's `.cache/pre_commit_hooks/` while its process runs leaves it unreachable until that timeout.
+
 CI uploads the JSON report and adds the comparison to its job summary. A candidate is a review signal, not an automatic failure: reproduce it locally with the same command before deciding whether it is a real regression.
 
 To change `baseline.json`, run the suite, update every affected value, and include a `Performance baseline rationale:` section in the pull request body that explains the intentional trade-off. CI requires that section whenever the baseline changes.

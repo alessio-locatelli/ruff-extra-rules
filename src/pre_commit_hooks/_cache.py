@@ -66,7 +66,8 @@ class CacheManager:
                 tag_file.write_text(
                     "Signature: 8a477f597d28d172789f06886806bc55\n"
                     "# This directory is a cache directory for pre_commit_hooks.\n"
-                    "# It is safe to delete this directory to clear the cache.\n"
+                    "# Deleting this directory clears the cache. Before deleting it, see\n"
+                    "# https://github.com/alessio-locatelli/ruff-extra-rules/blob/main/docs/faq.md#cache-location\n"
                 )
 
             if not os.access(self.cache_dir, os.W_OK):
