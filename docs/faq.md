@@ -30,7 +30,7 @@ Given that this project exists for rules that are missing in Ruff, the preferred
 
 ### Cache Location
 
-Check results are cached under `.cache/pre_commit_hooks/` in your project root — the directory holding the `pyproject.toml` whose `[tool.ruff-extra-rules]` table configured the run. Running the CLI from a subdirectory therefore reuses the same cache rather than starting a new one. With no configuration file (or under `--isolated`), it falls back to the working directory. The cache is safe to delete at any time (see the `CACHEDIR.TAG` file it writes).
+Check results are cached under `.cache/pre_commit_hooks/` in your project root — the directory holding the `pyproject.toml` whose `[tool.ruff-extra-rules]` table configured the run. Running the CLI from a subdirectory therefore reuses the same cache rather than starting a new one. With no configuration file (or under `--isolated`), it falls back to the working directory. Deleting it clears cached results (see the `CACHEDIR.TAG` file it writes). One copy of this directory is special: the one at the root of your git repository, which may be above your project root, also holds the socket of the background `ty` process that `redundant-type-conversion` keeps per repository. Deleting that copy while the process runs leaves the process unreachable but alive until it has been idle for 15 minutes. The next run starts a new one, which has not seen your other files yet, so until they are checked again it can miss conversions that depend on them (see [redundant-type-conversion](rules/redundant-type-conversion.md)).
 
 ### Why `# pytriage` instead of `# noqa` for inline ignore comments?
 
