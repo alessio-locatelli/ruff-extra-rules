@@ -6,17 +6,6 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
 
-SCOPE_NODES: tuple[type[ast.AST], ...] = (
-    ast.FunctionDef,
-    ast.AsyncFunctionDef,
-    ast.Lambda,
-    ast.ListComp,
-    ast.SetComp,
-    ast.DictComp,
-    ast.GeneratorExp,
-    ast.ClassDef,
-)
-
 _COMPREHENSION_NODES: tuple[type[ast.AST], ...] = (
     ast.ListComp,
     ast.SetComp,
@@ -24,27 +13,39 @@ _COMPREHENSION_NODES: tuple[type[ast.AST], ...] = (
     ast.GeneratorExp,
 )
 
-_WALRUS_BOUNDARY = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+_DEFINITION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
 
-def _walrus_targets(node: ast.AST) -> Iterator[ast.Name]:
-    for child in ast.iter_child_nodes(node):
-        if isinstance(child, ast.NamedExpr):
-            yield child.target
-        if not isinstance(child, _WALRUS_BOUNDARY):
-            yield from _walrus_targets(child)
+def _walrus_targets(nodes: Iterable[ast.AST]) -> Iterator[ast.Name]:
+    for node in nodes:
+        if isinstance(node, ast.NamedExpr):
+            yield node.target
+        if isinstance(node, _DEFINITION_NODES):
+            yield from _walrus_targets(definition_header(node))
+        else:
+            yield from _walrus_targets(ast.iter_child_nodes(node))
 
 
 def iter_within_scope(node: ast.AST) -> Iterator[ast.AST]:
     yield from iter_within_scope_from(ast.iter_child_nodes(node))
 
 
+def definition_header(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef) -> list[ast.expr]:
+    if isinstance(node, ast.ClassDef):
+        return [*node.decorator_list, *node.bases, *(keyword.value for keyword in node.keywords)]
+    decorators = [] if isinstance(node, ast.Lambda) else node.decorator_list
+    keyword_defaults = [default for default in node.args.kw_defaults if default is not None]
+    return [*decorators, *node.args.defaults, *keyword_defaults]
+
+
 def iter_within_scope_from(children: Iterable[ast.AST]) -> Iterator[ast.AST]:
     for child in children:
         yield child
         if isinstance(child, _COMPREHENSION_NODES):
-            yield from _walrus_targets(child)
-        elif not isinstance(child, SCOPE_NODES):
+            yield from _walrus_targets(ast.iter_child_nodes(child))
+        elif isinstance(child, _DEFINITION_NODES):
+            yield from iter_within_scope_from(definition_header(child))
+        else:
             yield from iter_within_scope(child)
 
 
@@ -85,21 +86,12 @@ def class_scope_binding_names(node: ast.ClassDef) -> set[str]:
 
         def visit_ClassDef(self, node: ast.ClassDef) -> None:
             names.add(node.name)
-            for decorator in node.decorator_list:
-                self.visit(decorator)
-            for base in node.bases:
-                self.visit(base)
-            for keyword in node.keywords:
-                self.visit(keyword.value)
-            for type_param in node.type_params:
-                self.visit(type_param)
+            for child in [*definition_header(node), *node.type_params]:
+                self.visit(child)
 
         def _visit_function_header(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-            for decorator in node.decorator_list:
-                self.visit(decorator)
-            for default in [*node.args.defaults, *node.args.kw_defaults]:
-                if default is not None:
-                    self.visit(default)
+            for child in definition_header(node):
+                self.visit(child)
             for argument in [
                 *node.args.posonlyargs,
                 *node.args.args,
@@ -115,9 +107,8 @@ def class_scope_binding_names(node: ast.ClassDef) -> set[str]:
                 self.visit(type_param)
 
         def visit_Lambda(self, node: ast.Lambda) -> None:
-            for default in [*node.args.defaults, *node.args.kw_defaults]:
-                if default is not None:
-                    self.visit(default)
+            for child in definition_header(node):
+                self.visit(child)
 
         def visit_ListComp(self, _node: ast.ListComp) -> None:
             return

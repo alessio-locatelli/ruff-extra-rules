@@ -18,8 +18,10 @@ from ._base import (
 from ._scope import (
     class_scope_binding_names,
     class_scope_global_or_nonlocal_names,
+    definition_header,
     iter_binding_names,
     iter_within_scope,
+    iter_within_scope_from,
 )
 
 if TYPE_CHECKING:
@@ -44,14 +46,10 @@ class _EnumClass:
 
 def _names_bound_by(statements: list[ast.stmt]) -> set[str]:
     names: set[str] = set()
-    for statement in statements:
-        names.update(iter_binding_names(statement))
-        if isinstance(statement, ast.ClassDef):
-            names.update(class_scope_global_or_nonlocal_names(statement))
-        if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            continue
-        for node in iter_within_scope(statement):
-            names.update(iter_binding_names(node))
+    for node in iter_within_scope_from(statements):
+        names.update(iter_binding_names(node))
+        if isinstance(node, ast.ClassDef):
+            names.update(class_scope_global_or_nonlocal_names(node))
     return names
 
 
@@ -373,9 +371,8 @@ class _ValueVisitor(ast.NodeVisitor):
         self._visit_scope(node, set(), node.body)
 
     def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
-        for child in [*node.decorator_list, *node.args.defaults, *node.args.kw_defaults]:
-            if child is not None:
-                self.visit(child)
+        for child in definition_header(node):
+            self.visit(child)
         self._visit_scope(node, _function_bindings(node), node.body)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
@@ -385,9 +382,8 @@ class _ValueVisitor(ast.NodeVisitor):
         self._visit_function(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
-        for child in [*node.args.defaults, *node.args.kw_defaults]:
-            if child is not None:
-                self.visit(child)
+        for child in definition_header(node):
+            self.visit(child)
         self._visit_scope(node, _function_bindings(node), [node.body])
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
@@ -398,7 +394,7 @@ class _ValueVisitor(ast.NodeVisitor):
         return
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        for child in [*node.decorator_list, *node.bases, *(keyword.value for keyword in node.keywords)]:
+        for child in definition_header(node):
             self.visit(child)
         self._visit_scope(node, class_scope_binding_names(node), node.body)
 

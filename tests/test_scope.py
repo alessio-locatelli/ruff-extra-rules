@@ -29,6 +29,13 @@ def test_iter_within_scope_yields_direct_children() -> None:
         ("class Foo:\n    attr = 1\n    def method(self):\n        pass\n", ast.ClassDef, []),
         ("callback = lambda item: item + 1\n", None, ["callback"]),
         ("squares = [value * value for value in range(10)]\n", None, ["squares"]),
+        (
+            "@deco\ndef outer(arg=default, *, flag=switch):\n    body = 1\n",
+            ast.FunctionDef,
+            ["deco", "default", "switch"],
+        ),
+        ("@deco\nclass Foo(Base, metaclass=Meta):\n    attr = 1\n", ast.ClassDef, ["deco", "Base", "Meta"]),
+        ("callback = lambda item=default: item\n", None, ["callback", "default"]),
     ],
     ids=[
         "descends-into-if",
@@ -36,6 +43,9 @@ def test_iter_within_scope_yields_direct_children() -> None:
         "yields-but-not-into-class",
         "not-into-lambda",
         "not-into-comprehension",
+        "function-header",
+        "class-header",
+        "lambda-defaults",
     ],
 )
 def test_iter_within_scope_descent_rules(source: str, node_type: type[ast.AST] | None, names: list[str]) -> None:
@@ -97,6 +107,11 @@ def test_iter_within_scope_starts_inside_a_function_scope() -> None:
             False,
             set(),
         ),
+        (
+            "def outer():\n    return [lambda arg=(bound := 1): arg for item in range(3)]\n",
+            False,
+            {"bound"},
+        ),
     ],
     ids=[
         "module-level-excludes-function-locals",
@@ -106,6 +121,7 @@ def test_iter_within_scope_starts_inside_a_function_scope() -> None:
         "walrus-in-comprehension-bubbles-up",
         "walrus-in-nested-comprehension-bubbles-up",
         "walrus-in-lambda-stays-in-lambda-scope",
+        "walrus-in-lambda-default-bubbles-up",
     ],
 )
 def test_collect_scope_names(source: str, names: set[str], *, use_module_root: bool) -> None:
