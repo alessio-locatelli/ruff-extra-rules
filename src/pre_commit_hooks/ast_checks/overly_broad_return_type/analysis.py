@@ -117,7 +117,7 @@ def _mentions_abstract_return(tree: ast.Module) -> bool:
         if alias.asname is not None and alias.name in _ABSTRACT_NAMES
     }
     return any(
-        isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef)
+        isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
         and statement.returns is not None
         and any(
             (isinstance(part, ast.Name) and part.id in names)
@@ -137,7 +137,7 @@ def _iter_statements(statements: list[ast.stmt]) -> Iterator[ast.stmt]:
             block = getattr(statement, field, None)
             if block:
                 pending.extend(block)
-        if isinstance(statement, ast.Try | ast.TryStar):
+        if isinstance(statement, (ast.Try, ast.TryStar)):
             pending.extend(child for handler in statement.handlers for child in handler.body)
         elif isinstance(statement, ast.Match):
             pending.extend(child for case in statement.cases for child in case.body)

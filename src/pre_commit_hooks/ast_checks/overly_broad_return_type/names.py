@@ -160,7 +160,7 @@ class NameResolver:
         return nested
 
     def _record_attribute_store(self, node: ast.AST, scope: Scope) -> None:
-        if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Store | ast.Del):
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
             self._attribute_stores.append((node, scope))
 
     def _lookup(self, name: str, scope: Scope) -> list[Binding] | None:

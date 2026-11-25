@@ -28,6 +28,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
     from pathlib import Path
 
+_STORE_OR_DELETE_CONTEXTS = (ast.Store, ast.Del)
+
 
 CHECK_ID = "redundant-enum-value"
 ERROR_CODE = "TR10"
@@ -58,7 +60,7 @@ def _enum_attribute_rebinding_names(statement: ast.stmt) -> set[str]:
         node.value.id
         for node in ast.walk(statement)
         if isinstance(node, ast.Attribute)
-        and isinstance(node.ctx, ast.Store | ast.Del)
+        and isinstance(node.ctx, _STORE_OR_DELETE_CONTEXTS)
         and isinstance(node.value, ast.Name)
         and node.attr in {"value", "__getattribute__"}
     }
@@ -69,7 +71,7 @@ def _member_value_rebindings(statement: ast.stmt, member_aliases: dict[str, tupl
         (node.value.value.id, node.value.attr)
         for node in ast.walk(statement)
         if isinstance(node, ast.Attribute)
-        and isinstance(node.ctx, ast.Store | ast.Del)
+        and isinstance(node.ctx, _STORE_OR_DELETE_CONTEXTS)
         and node.attr == "_value_"
         and isinstance(node.value, ast.Attribute)
         and isinstance(node.value.value, ast.Name)
@@ -78,7 +80,7 @@ def _member_value_rebindings(statement: ast.stmt, member_aliases: dict[str, tupl
         member_aliases[node.value.id]
         for node in ast.walk(statement)
         if isinstance(node, ast.Attribute)
-        and isinstance(node.ctx, ast.Store | ast.Del)
+        and isinstance(node.ctx, _STORE_OR_DELETE_CONTEXTS)
         and node.attr == "_value_"
         and isinstance(node.value, ast.Name)
         and node.value.id in member_aliases

@@ -134,7 +134,7 @@ def _function_facts(
     for node in chain.from_iterable(map(ast.walk, function.body)):
         if isinstance(node, ast.Name):
             occurrences[node.id] += 1
-        elif isinstance(node, ast.Global | ast.Nonlocal):
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
             redeclared.update(node.names)
     if any(
         isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _DYNAMIC_SCOPE_BUILTINS
@@ -199,7 +199,7 @@ def _iter_blocks(
 
 
 def _update_definitely_bound(bound: set[str], statement: ast.stmt) -> None:
-    if isinstance(statement, ast.Assign | ast.AnnAssign | ast.AugAssign):
+    if isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
         targets = statement.targets if isinstance(statement, ast.Assign) else [statement.target]
         if not isinstance(statement, ast.AnnAssign) or statement.value is not None:
             bound.update(
@@ -304,7 +304,7 @@ def _reads_before_rebinding(statement: ast.stmt, name: str) -> bool:
     reading_targets.update(
         id(target)
         for node in ast.walk(statement)
-        if isinstance(node, ast.Assign | ast.AnnAssign) and node.value is not None and _loads(node.value, name)
+        if isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None and _loads(node.value, name)
         for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
     )
     return not any(name in iter_binding_names(node) for node in ast.walk(statement) if id(node) not in reading_targets)
@@ -345,7 +345,7 @@ def _contains_exit(
         return True
     if isinstance(node, ast.Raise):
         return _escapes(node, guards, builtin_names)
-    if isinstance(node, ast.Continue | ast.Break):
+    if isinstance(node, (ast.Continue, ast.Break)):
         return not in_loop
     if isinstance(node, (*_NESTED_SCOPE_NODES, ast.expr)):
         return False
