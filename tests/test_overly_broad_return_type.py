@@ -551,8 +551,8 @@ def test_fix_declines_every_violation(tmp_path: Path) -> None:
     assert filepath.read_text() == source
 
 
-def test_cli_level_option_reaches_the_check(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    filepath = tmp_path / "module.py"
+def test_cli_level_option_reaches_the_check(git_worktree: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text(ABC_IMPORTS + "\nclass Plain:\n    def items(self) -> Sequence[int]:\n        return [1]\n")
 
     assert main(["--isolated", "--select=overly-broad-return-type", str(filepath)]) == 0

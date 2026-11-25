@@ -1146,8 +1146,8 @@ def test_identity_prefilter_and_fix_contract() -> None:
     ],
     ids=["default", "aggressive", "max-distance", "both"],
 )
-def test_cli_options_reach_the_check(tmp_path: Path, argv: list[str], expected_exit: int) -> None:
-    filepath = tmp_path / "module.py"
+def test_cli_options_reach_the_check(git_worktree: Path, argv: list[str], expected_exit: int) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text("def f():\n    result = get()\n    first()\n    second()\n    use(result)\n")
 
     assert main(["--isolated", "--select", "defined-far-from-use", *argv, filepath.as_posix()]) == expected_exit

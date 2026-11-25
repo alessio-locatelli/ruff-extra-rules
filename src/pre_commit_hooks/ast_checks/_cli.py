@@ -3,9 +3,11 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pre_commit_hooks._cache import CacheManager
+from pre_commit_hooks._git import GitError, run_git
 
 from . import ALL_CHECKS
 from ._config import resolve
@@ -27,7 +29,7 @@ def main(
 ) -> int:
     parser = argparse.ArgumentParser(
         prog="ruff-extra-rules",
-        description="Run multiple AST-based checks in a single pass",
+        description="Check Python files in the current Git working tree. Requires Git on PATH.",
     )
     parser.add_argument("filenames", nargs="*", help="Python files to check")
     parser.add_argument(
@@ -120,14 +122,6 @@ def main(
     if not args.filenames:
         return 0
 
-    filenames = expand_directories(args.filenames)
-    if not filenames:
-        return 0
-
-    filenames = filter_excluded_files(filenames, config.exclude)
-    if not filenames:
-        return 0
-
     checks = load_checks(
         select=config.select,
         extend_select=config.extend_select,
@@ -139,12 +133,66 @@ def main(
     if not checks:
         return 0
 
-    orchestrator = CheckOrchestrator(
-        checks=checks,
-        fix_mode=config.fix,
-        cache_dir=config.root / CacheManager.DEFAULT_CACHE_DIR,
-        per_file_ignores=config.per_file_ignores,
-    )
-    all_violations = orchestrator.process_files(filenames)
+    try:
+        root = _worktree_root()
+        worktree_roots = {root: root}
+        inputs = filter_excluded_files(args.filenames, config.exclude)
+        _validate_worktree_paths(inputs, root, worktree_roots)
+        filenames = filter_excluded_files(expand_directories(inputs), config.exclude)
+        _validate_worktree_paths(filenames, root, worktree_roots)
+        if not filenames:
+            return 0
+
+        orchestrator = CheckOrchestrator(
+            checks=checks,
+            fix_mode=config.fix,
+            cache_dir=config.root / CacheManager.DEFAULT_CACHE_DIR,
+            per_file_ignores=config.per_file_ignores,
+        )
+        all_violations = orchestrator.process_files(filenames)
+    except GitError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 2
 
     return report(orchestrator, all_violations)
+
+
+def _worktree_root(cwd: Path | None = None) -> Path:
+    return Path(run_git("rev-parse", ("--show-toplevel",), cwd=cwd).removesuffix("\n"))
+
+
+def _validate_worktree_paths(filenames: list[str], root: Path, worktree_roots: dict[Path, Path]) -> None:
+    for filename in filenames:
+        absolute = Path(filename).absolute()
+        if not absolute.is_relative_to(root):
+            msg = f"input path is outside the Git working tree: {filename}"
+            raise GitError(msg)
+
+        current = root
+        for part in absolute.relative_to(root).parts:
+            if part == "..":
+                if current == root:
+                    msg = f"input path is outside the Git working tree: {filename}"
+                    raise GitError(msg)
+                current = current.parent
+                continue
+
+            current /= part
+            if current in worktree_roots:
+                continue
+            if current.is_symlink():
+                msg = f"input path uses a symbolic link: {current}"
+                raise GitError(msg)
+            worktree_roots[current] = (
+                _worktree_root(current)
+                if (current / ".git").exists(follow_symlinks=False)
+                else worktree_roots[current.parent]
+            )
+
+        worktree = worktree_roots[current]
+        if worktree != root:
+            msg = (
+                f"input path belongs to a nested repository: {filename}. "
+                f"Run the linter from the Git working tree at {worktree}."
+            )
+            raise GitError(msg)

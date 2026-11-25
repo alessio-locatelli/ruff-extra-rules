@@ -42,7 +42,7 @@ Not reliably — treat that as out of scope. Run `check-ast` (from [`pre-commit/
 
 ### Running without prek/pre-commit
 
-Try the checks directly, with no persistent install:
+Run the checks from a Git working tree with Git on `PATH`. Pass files or directories from that working tree and use their real paths. For a nested repository or submodule, run the command from its own working tree. For example:
 
 ```bash
 uvx --from git+https://github.com/alessio-locatelli/ruff-extra-rules python -m pre_commit_hooks.ast_checks src/

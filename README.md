@@ -43,6 +43,8 @@ Individual checks are toggled with `--select`/`--ignore` (or the matching `pypro
 
 ## Installation
 
+Linting requires Git on `PATH` and runs within the current Git working tree.
+
 Add to your `.pre-commit-config.yaml` — the same file [prek](https://github.com/j178/prek) and pre-commit both read:
 
 ```yaml

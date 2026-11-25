@@ -533,9 +533,9 @@ def test_check_identity_prefilter_and_fix_contract() -> None:
 
 
 def test_cli_lists_selects_and_does_not_fix_redundant_enum_values(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    git_worktree: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     source = "from enum import StrEnum\n\nclass Status(StrEnum):\n    OK = 'ok'\n\nvalue = Status.OK.value\n"
     filepath.write_text(source)
 
@@ -545,12 +545,12 @@ def test_cli_lists_selects_and_does_not_fix_redundant_enum_values(
     assert filepath.read_text() == source
 
 
-def test_config_selects_redundant_enum_value(tmp_path: Path) -> None:
-    filepath = tmp_path / "module.py"
+def test_config_selects_redundant_enum_value(git_worktree: Path) -> None:
+    filepath = git_worktree / "module.py"
     filepath.write_text(
         "from enum import StrEnum\n\nclass Status(StrEnum):\n    OK = 'ok'\n\nvalue = Status.OK.value\n"
     )
-    config = tmp_path / "pyproject.toml"
+    config = git_worktree / "pyproject.toml"
     config.write_text('[tool.ruff-extra-rules]\nselect = ["redundant-enum-value"]\n')
 
     assert main(["--config", str(config), str(filepath)]) == 1

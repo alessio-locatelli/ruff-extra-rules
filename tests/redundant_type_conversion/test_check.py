@@ -319,10 +319,10 @@ def test_check_does_not_flag_a_line_with_an_unrelated_comment(monkeypatch: pytes
 
 
 def test_end_to_end_through_main_reports_a_violation(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    git_worktree: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     source = "y = str(x)\n"
-    filepath = tmp_path / "module.py"
+    filepath = git_worktree / "module.py"
     filepath.write_text(source)
 
     session = FakeSession(

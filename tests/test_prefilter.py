@@ -1,279 +1,111 @@
 from __future__ import annotations
 
-import contextlib
-import os
-import shutil
+import errno
 import subprocess
-import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest import mock
 
 import pytest
 
-from pre_commit_hooks._prefilter import (
-    batch_filter_files,
-    git_grep_filter,
-)
+from pre_commit_hooks._git import GitError
+from pre_commit_hooks._prefilter import batch_filter_files
 from tests._helpers import restricted_permissions
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 @pytest.fixture
-def sample_files(tmp_path: Path) -> list[str]:
-    files = []
-
-    file1 = tmp_path / "file1.py"
-    file1.write_text("def get_name():\n    return 'foo'\n")
-    files.append(str(file1))
-
-    file2 = tmp_path / "file2.py"
-    file2.write_text("data = {'key': 'value'}\n")
-    files.append(str(file2))
-
-    file3 = tmp_path / "file3.py"
-    file3.write_text("data = load()\nresult = process(data)\n")
-    files.append(str(file3))
-
-    file4 = tmp_path / "file4.py"
-    file4.write_text("def foo():\n    pass\n")
-    files.append(str(file4))
-
-    return files
-
-
-@pytest.mark.parametrize(
-    ("pattern", "expected_names"),
-    [
-        ("def get_", {"file1.py"}),
-        ("data", {"file2.py", "file3.py"}),
-        ("nonexistent", set()),
-    ],
-    ids=["single-match", "multiple-matches", "no-matches"],
-)
-def test_git_grep_filter_fixed_string(sample_files: list[str], pattern: str, expected_names: set[str]) -> None:
-    matches = git_grep_filter(sample_files, pattern, fixed_string=True)
-    assert {Path(m).name for m in matches} == expected_names
-
-
-def test_git_grep_filter_empty_input() -> None:
-    assert git_grep_filter([], "pattern") == []
-
-
-def test_git_grep_filter_regex_pattern(sample_files: list[str]) -> None:
-    matches = git_grep_filter(sample_files, "def get_", fixed_string=False)
-
-    assert len(matches) >= 1
-    assert any(m.endswith("file1.py") for m in matches)
-
-
-def test_git_grep_filter_real_success_and_no_match_paths(tmp_path: Path) -> None:
-    git = shutil.which("git")
-    assert git is not None
-
-    with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603 -- Trusted test command.
-
-        file1 = tmp_path / "file1.py"
-        file1.write_text("def get_name():\n    return 'foo'\n")
-        subprocess.run([git, "add", "file1.py"], check=True, cwd=tmp_path)  # noqa: S603 -- Trusted test command.
-
-        matches = git_grep_filter([str(file1)], "def get_", fixed_string=True)
-        assert matches == [str(file1)]
-
-        no_matches = git_grep_filter([str(file1)], "totally_absent_pattern", fixed_string=True)
-        assert no_matches == []
-
-
-def test_git_grep_filter_includes_permission_denied_tracked_file(tmp_path: Path) -> None:
-    git = shutil.which("git")
-    assert git is not None
-
-    with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603 -- Trusted test command.
-
-        unreadable = tmp_path / "unreadable.py"
-        unreadable.write_text("data = 1\n")
-        subprocess.run([git, "add", "unreadable.py"], check=True, cwd=tmp_path)  # noqa: S603 -- Trusted test command.
-
-        with restricted_permissions(unreadable, 0o000, restore=0o644):
-            matches = git_grep_filter([str(unreadable)], "data", fixed_string=True)
-
-        assert str(unreadable) in matches
-
-
-def test_git_grep_filter_includes_file_deleted_since_discovery(tmp_path: Path) -> None:
-    git = shutil.which("git")
-    assert git is not None
-
-    with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603 -- Trusted test command.
-
-        vanished = tmp_path / "vanished.py"
-
-        matches = git_grep_filter([str(vanished)], "data", fixed_string=True)
-
-        assert str(vanished) in matches
-
-
-def test_git_grep_filter_includes_untracked_file(tmp_path: Path) -> None:
-    git = shutil.which("git")
-    assert git is not None
-
-    with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603 -- Trusted test command.
-
-        untracked = tmp_path / "untracked.py"
-        untracked.write_text("data = 1\n")
-
-        matches = git_grep_filter([str(untracked)], "data", fixed_string=True)
-
-        assert matches == [str(untracked)]
-
-
-def test_git_grep_filter_includes_gitignored_file(tmp_path: Path) -> None:
-    git = shutil.which("git")
-    assert git is not None
-
-    with contextlib.chdir(tmp_path):
-        subprocess.run([git, "init", "-q"], check=True)  # noqa: S603 -- Trusted test command.
-        (tmp_path / ".gitignore").write_text("ignored.py\n")
-
-        ignored = tmp_path / "ignored.py"
-        ignored.write_text("data = 1\n")
-
-        matches = git_grep_filter([str(ignored)], "data", fixed_string=True)
-
-        assert matches == [str(ignored)]
-
-
-def test_git_grep_filter_match_order_is_independent_of_hash_seed(tmp_path: Path) -> None:
-    git = shutil.which("git")
-    assert git is not None
-    subprocess.run([git, "init", "-q"], check=True, cwd=tmp_path)  # noqa: S603 -- Trusted test command.
-
-    names = [f"file{i}.py" for i in range(10)]
-    for name in names:
-        (tmp_path / name).write_text("data = 1\n")
-
-    script = (
-        "from pre_commit_hooks._prefilter import git_grep_filter\n"
-        f"print(git_grep_filter({names!r}, 'data', fixed_string=True))\n"
-    )
-
-    outputs = set()
-    for seed in ("0", "1", "2"):
-        run_result = subprocess.run(  # noqa: S603 -- Trusted test command.
-            [sys.executable, "-c", script],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            env={**os.environ, "PYTHONHASHSEED": seed},
-            check=True,
-        )
-        outputs.add(run_result.stdout)
-
-    assert len(outputs) == 1
-
-
-def test_git_grep_filter_skips_unresolvable_git_paths(tmp_path: Path) -> None:
-    file1 = tmp_path / "file1.py"
-    file1.write_text("value = 1\n")
-
-    with mock.patch("subprocess.run") as mock_run:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args=[],
-            returncode=0,
-            stdout=f"{file1}\0/does/not/exist/in/input.py\0",
-            stderr="",
-        )
-        matches = git_grep_filter([str(file1)], "data", fixed_string=True)
-
-    assert matches == [str(file1)]
-
-
-def _fail_not_a_git_repo(mock_run: mock.MagicMock) -> None:
-    mock_run.return_value = subprocess.CompletedProcess(
-        args=[], returncode=2, stdout="", stderr="fatal: not a git repository"
-    )
-
-
-def _fail_timeout(mock_run: mock.MagicMock) -> None:
-    mock_run.side_effect = subprocess.TimeoutExpired(cmd="git grep", timeout=30)
-
-
-def _fail_git_not_found(mock_run: mock.MagicMock) -> None:
-    mock_run.side_effect = FileNotFoundError("git not found")
-
-
-@pytest.mark.parametrize(
-    "configure_mock",
-    [_fail_not_a_git_repo, _fail_timeout, _fail_git_not_found],
-    ids=["not-a-git-repo", "timeout", "git-not-found"],
-)
-def test_git_grep_filter_falls_back_to_python_search(
-    sample_files: list[str], configure_mock: Callable[[mock.MagicMock], None]
-) -> None:
-    with mock.patch("subprocess.run") as mock_run:
-        configure_mock(mock_run)
-        matches = git_grep_filter(sample_files, "data", fixed_string=True)
-
-    assert len(matches) >= 1
-    assert any(m.endswith("file2.py") for m in matches)
-
-
-def test_batch_filter_files_falls_back_to_python_search_for_any_pattern(sample_files: list[str]) -> None:
-    with mock.patch("subprocess.run") as mock_run:
-        _fail_git_not_found(mock_run)
-        matches = batch_filter_files(sample_files, ["data", "def get_"])
-
-    assert {Path(m).name for m in matches} == {"file1.py", "file2.py", "file3.py"}
-
-
-def test_python_fallback_includes_unreadable_files(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    file1 = tmp_path / "readable.py"
-    file1.write_text("data = 123")
-
-    file2 = tmp_path / "unreadable.py"
-    file2.write_text("content")
-
-    with (
-        restricted_permissions(file2, 0o000, restore=0o644),
-        mock.patch("subprocess.run") as mock_run,
-        caplog.at_level("DEBUG"),
-    ):
-        mock_run.side_effect = FileNotFoundError()
-
-        matches = git_grep_filter([str(file1), str(file2)], "data")
-
-        assert str(file2) in matches
-
-    assert all(record.levelname == "DEBUG" for record in caplog.records)
-
-
-def test_git_grep_handles_binary_files(tmp_path: Path) -> None:
-    binary_file = tmp_path / "binary.pyc"
-    binary_file.write_bytes(b"\x00\x01\x02\x03data\x04\x05")
-
-    text_file = tmp_path / "text.py"
-    text_file.write_text("data = 123")
-
-    matches = git_grep_filter([str(binary_file), str(text_file)], "data")
-
-    assert any(m.endswith("text.py") for m in matches)
+def sample_files(git_worktree: Path) -> list[str]:
+    sources = {
+        "tracked.py": "def get_name():\n    return 'foo'\n",
+        ":(glob)x.py": "data = {'key': 'value'}\n",
+        "ignored.py": "data = load()\n",
+        "other.py": "def foo():\n    pass\n",
+    }
+    (git_worktree / ".gitignore").write_text("ignored.py\n")
+    for name, source in sources.items():
+        (git_worktree / name).write_text(source)
+    subprocess.run(["git", "add", "tracked.py"], check=True)  # noqa: S607 -- Git is required on PATH.
+    return [str(git_worktree / name) for name in sources]
 
 
 @pytest.mark.parametrize(
     ("patterns", "expected_names"),
     [
-        (["data", "def get_"], {"file1.py", "file2.py", "file3.py"}),
-        ([], {"file1.py", "file2.py", "file3.py", "file4.py"}),
-        (["nonexistent1", "nonexistent2"], set()),
+        (["def get_"], ["tracked.py"]),
+        (["data"], [":(glob)x.py", "ignored.py"]),
+        (["data", "def get_"], [":(glob)x.py", "ignored.py", "tracked.py"]),
+        (["absent"], []),
+        (["d.ta"], []),
+        ([], ["tracked.py", ":(glob)x.py", "ignored.py", "other.py"]),
     ],
-    ids=["match-any-pattern", "empty-patterns-returns-all", "no-matches"],
+    ids=["tracked", "literal-path-and-ignored-file", "any-pattern", "no-match", "literal-pattern", "no-patterns"],
 )
-def test_batch_filter_files(sample_files: list[str], patterns: list[str], expected_names: set[str]) -> None:
-    matches = batch_filter_files(sample_files, patterns)
-    assert {Path(m).name for m in matches} == expected_names
+def test_batch_filter_files(sample_files: list[str], patterns: list[str], expected_names: list[str]) -> None:
+    assert [Path(name).name for name in batch_filter_files(sample_files, patterns)] == expected_names
+
+
+def test_batch_filter_files_deduplicates_path_aliases(sample_files: list[str]) -> None:
+    tracked = sample_files[0]
+    assert batch_filter_files([tracked, "tracked.py", tracked], ["def get_"]) == [tracked]
+
+
+def test_batch_filter_files_empty_input() -> None:
+    assert batch_filter_files([], ["data"]) == []
+
+
+def test_batch_filter_files_keeps_unreadable_inputs(git_worktree: Path) -> None:
+    unreadable = git_worktree / "unreadable.py"
+    unreadable.write_text("data = 1\n")
+    subprocess.run(["git", "add", "unreadable.py"], check=True)  # noqa: S607 -- Git is required on PATH.
+    readable = git_worktree / "readable.py"
+    readable.write_text("data = 2\n")
+    vanished = git_worktree / "vanished.py"
+
+    with restricted_permissions(unreadable, 0o000, restore=0o644):
+        assert batch_filter_files([str(vanished), str(unreadable), str(readable)], ["data"]) == [
+            str(readable),
+            str(unreadable),
+            str(vanished),
+        ]
+
+
+def test_git_grep_handles_binary_files(git_worktree: Path) -> None:
+    binary_file = git_worktree / "binary.pyc"
+    binary_file.write_bytes(b"\x00\x01\x02\x03data\x04\x05")
+    text_file = git_worktree / "text.py"
+    text_file.write_text("data = 123")
+
+    assert batch_filter_files([str(binary_file), str(text_file)], ["data"]) == [str(binary_file), str(text_file)]
+
+
+@pytest.mark.parametrize(
+    ("exit_status", "stderr", "diagnostic"),
+    [
+        (0, "cannot open source", "cannot open source"),
+        (1, "permission denied", "permission denied"),
+        (128, "", "exit status 128"),
+    ],
+    ids=["match-with-stderr", "no-match-with-stderr", "unexpected-status-without-stderr"],
+)
+def test_git_grep_rejects_failed_search(
+    sample_files: list[str], exit_status: int, stderr: str, diagnostic: str
+) -> None:
+    with (
+        mock.patch("subprocess.run", return_value=subprocess.CompletedProcess([], exit_status, b"", stderr.encode())),
+        pytest.raises(GitError, match=diagnostic),
+    ):
+        batch_filter_files(sample_files, ["data"])
+
+
+@pytest.mark.parametrize(
+    ("error", "diagnostic"),
+    [
+        (FileNotFoundError(), "Ensure Git is installed and available on PATH"),
+        (subprocess.TimeoutExpired("git grep", 30), "git grep timed out after 30 seconds"),
+        (OSError(errno.E2BIG, "Argument list too long"), "Split the file list into smaller runs"),
+        (PermissionError(errno.EACCES, "Permission denied"), "git grep could not start.*Permission denied"),
+    ],
+    ids=["missing-git", "timeout", "argument-list-too-long", "permission-denied"],
+)
+def test_git_grep_reports_subprocess_errors(sample_files: list[str], error: Exception, diagnostic: str) -> None:
+    with mock.patch("subprocess.run", side_effect=error), pytest.raises(GitError, match=diagnostic):
+        batch_filter_files(sample_files, ["data"])
