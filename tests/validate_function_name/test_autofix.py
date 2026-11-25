@@ -834,3 +834,153 @@ def test_apply_fix_reports_write_outcomes(
     monkeypatch.setattr(autofix_module, "atomic_write_text", fail_write)
 
     assert apply_fix(filepath, suggestion) is outcome
+
+
+@pytest.mark.parametrize(
+    ("future_import", "user"),
+    [
+        (
+            "from __future__ import annotations\n\n",
+            (
+                "from typing import Annotated\n\n"
+                "def outer(get_data):\n"
+                "    def inner(value: Annotated[str, get_data]):\n"
+                "        return value\n"
+                "    return inner\n"
+            ),
+        ),
+        ("from __future__ import annotations\n\n", "def outer() -> get_data:\n    pass\n"),
+        ("from __future__ import annotations\n\n", "class Box:\n    value: get_data\n"),
+        ("", 'def outer() -> list["get_data"]:\n    pass\n'),
+        ("", 'def outer[T: "get_data"]() -> None:\n    pass\n'),
+        ("", 'type Alias[T = "get_data"] = T\n'),
+        ("", 'type Alias = list["get_data"]\n'),
+        ("", 'from typing import TypeAlias\nAlias: TypeAlias = list["get_data"]\n'),
+        ("", 'from typing import TypeAlias\nAlias: "(TypeAlias)" = list["get_data"]\n'),
+        ("", 'import typing as t\nAlias: t.TypeAlias = list["get_data"]\n'),
+        (
+            "",
+            'from typing import *\nother: list[str] = []\nAlias: "TypeAlias" = list["get_data"]\n',
+        ),
+        (
+            "",
+            'def outer():\n    import typing as t\n    Alias: t.TypeAlias = list["get_data"]\n    return Alias\n',
+        ),
+        ("", 'def outer(value: "*get_data"):\n    pass\n'),
+        ("", f"def outer(value: {('+' * 20_000 + 'T')!r}):\n    pass\n"),
+        ("", f"def outer(value: {('(' * 250 + 'T' + ')' * 250)!r}):\n    pass\n"),
+        (
+            "",
+            r"""def outer(value: "list['get_\\u0064ata']"):
+    pass
+""",
+        ),
+    ],
+    ids=[
+        "shadowed-signature",
+        "return",
+        "variable",
+        "quoted-signature",
+        "quoted-bound",
+        "quoted-default",
+        "quoted-alias",
+        "legacy-alias",
+        "parenthesized-legacy-alias-marker",
+        "qualified-legacy-alias",
+        "star-imported-legacy-alias",
+        "locally-imported-legacy-alias",
+        "quoted-unpack",
+        "quoted-expression-parser-overflow",
+        "quoted-expression-nesting-limit",
+        "escaped-forward-reference",
+    ],
+)
+def test_apply_fix_declines_ambiguous_annotations(tmp_path: Path, future_import: str, user: str) -> None:
+    test_file = tmp_path / "module.py"
+    source = (
+        future_import + 'def get_data():\n    with open("f.txt") as stream:\n        return stream.read()\n\n' + user
+    )
+    test_file.write_text(source)
+
+    assert apply_fix(test_file, _suggestion_for(test_file, "get_data")) is FixOutcome.DECLINED
+    assert test_file.read_text() == source
+
+
+def test_apply_fix_declines_stringified_method_attribute(tmp_path: Path) -> None:
+    test_file = tmp_path / "module.py"
+    source = """from __future__ import annotations
+
+class Reader:
+    def get_data(self):
+        with open("f.txt") as stream:
+            return stream.read()
+
+    def reader(self):
+        def inner(value: self.get_data):
+            return value
+        return inner
+"""
+    test_file.write_text(source)
+
+    assert apply_fix(test_file, _suggestion_for(test_file, "get_data")) is FixOutcome.DECLINED
+    assert test_file.read_text() == source
+
+
+@pytest.mark.parametrize(
+    "future_import", ["", "from __future__ import annotations\n\n"], ids=["deferred", "stringified"]
+)
+def test_apply_fix_renames_lexical_type_parameter_bound(tmp_path: Path, future_import: str) -> None:
+    test_file = tmp_path / "module.py"
+    source = future_import + (
+        "def get_data():\n"
+        '    with open("f.txt") as stream:\n'
+        "        return stream.read()\n"
+        "\n"
+        "def outer[T: get_data = get_data]() -> T:\n"
+        "    pass\n"
+    )
+    test_file.write_text(source)
+
+    suggestion = _suggestion_for(test_file, "get_data")
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
+    assert test_file.read_text() == source.replace("get_data", suggestion.suggested_name)
+
+
+@pytest.mark.parametrize(
+    "user",
+    [
+        "def outer(load_data):\n    def inner(value: get_data):\n        return value\n    return inner\n",
+        "def outer(value: load_data):\n    return value\n",
+        ("from typing import TypeAlias\ndef outer(load_data):\n    Alias: TypeAlias = get_data\n    return Alias\n"),
+    ],
+    ids=["replacement-shadowed", "replacement-captures-global", "legacy-alias-capture"],
+)
+def test_apply_fix_declines_annotation_capture(tmp_path: Path, user: str) -> None:
+    test_file = tmp_path / "module.py"
+    source = 'def get_data():\n    with open("f.txt") as stream:\n        return stream.read()\n\n' + user
+    test_file.write_text(source)
+
+    suggestion = _suggestion_for(test_file, "get_data")
+    assert suggestion.suggested_name == "load_data"
+    assert apply_fix(test_file, suggestion) is FixOutcome.DECLINED
+    assert test_file.read_text() == source
+
+
+def test_apply_fix_preserves_generic_class_type_parameter_in_nested_annotation(tmp_path: Path) -> None:
+    test_file = tmp_path / "module.py"
+    source = (
+        "def get_data():\n"
+        '    with open("f.txt") as stream:\n'
+        "        return stream.read()\n"
+        "\n"
+        "class Box[get_data]:\n"
+        "    def method(self):\n"
+        "        def inner(value: get_data):\n"
+        "            return value\n"
+        "        return inner\n"
+    )
+    test_file.write_text(source)
+
+    suggestion = _suggestion_for(test_file, "get_data")
+    assert apply_fix(test_file, suggestion) is FixOutcome.APPLIED
+    assert test_file.read_text() == source.replace("def get_data():", f"def {suggestion.suggested_name}():", 1)

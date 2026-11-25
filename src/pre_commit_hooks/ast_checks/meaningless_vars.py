@@ -21,7 +21,13 @@ from ._base import (
     split_lines_like_ast,
 )
 from ._options import EnumOption
-from ._references import class_bound_and_read_names, collect_scope_replacements, has_future_annotations_import
+from ._references import (
+    AnnotationReferences,
+    QuotedAnnotationTooComplexError,
+    class_bound_and_read_names,
+    collect_scope_replacements,
+    has_future_annotations_import,
+)
 from .meaningless_vars_suggestions import Confidence, plan_suggestions
 
 if TYPE_CHECKING:
@@ -160,7 +166,6 @@ def _apply_fixes(
     encoding: str = "utf-8",
 ) -> FixOutcome:
     has_future_annotations = has_future_annotations_import(tree)
-
     violations_by_scope: dict[int | None, list[MeaninglessVarsFixData]] = {}
     scope_nodes: dict[int | None, ast.AST] = {}
     for v in violations:
@@ -286,12 +291,25 @@ class MeaninglessVarsCheck(BaseCheck):
             raw_violations = []
             suggestions = {}
 
+        try:
+            annotation_names = (
+                AnnotationReferences(tree, has_future_annotations=has_future_annotations_import(tree)).ambiguous_names()
+                if suggestions
+                else set()
+            )
+        except QuotedAnnotationTooComplexError:
+            annotation_names = None
         violations = []
         for v in raw_violations:
             proposal = suggestions.get((v["line"], v["byte_col"]))
             if proposal is not None:
                 v["suggestion"] = proposal.name
-                v["auto_fixable"] = proposal.confidence is Confidence.AUTO_FIX
+                v["auto_fixable"] = (
+                    proposal.confidence is Confidence.AUTO_FIX
+                    and annotation_names is not None
+                    and v["name"] not in annotation_names
+                    and proposal.name not in annotation_names
+                )
             if self._level is MeaninglessVarsLevel.CONSERVATIVE and not v["suggestion"]:
                 continue
             if v.get("suggestion"):

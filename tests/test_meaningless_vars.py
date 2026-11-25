@@ -1403,43 +1403,40 @@ def test_autofix_assigns_outer_name_first_when_nested_closure_precedes_assignmen
     assert "payload: Payload = response.json()" in fixed_content
 
 
-def test_autofix_does_not_rename_annotation_under_deferred_annotations() -> None:
-    source = """from __future__ import annotations
-
-data = int
-
-def outer(response):
+@pytest.mark.parametrize(
+    ("future_import", "annotation"),
+    [
+        ("from __future__ import annotations\n\n", "data"),
+        ("from __future__ import annotations\n\n", "payload"),
+        ("", 'list["data"]'),
+        ("", repr("+" * 20_000 + "T")),
+    ],
+    ids=["old-name", "new-name", "quoted-forward-reference", "quoted-expression-parser-overflow"],
+)
+def test_autofix_declines_ambiguous_annotations(tmp_path: Path, future_import: str, annotation: str) -> None:
+    source = (
+        future_import
+        + f"""def outer(response):
     data: Payload = response.json()
 
-    def inner(x: data):
-        return x
+    def wrapper(data):
+        def inner(x: {annotation}):
+            return x
+        return inner
 
-    return inner
+    return data, wrapper
 """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.py"
-        filepath.write_text(source)
-
-        tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
-        violations = check.check(filepath, tree, source)
-        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
-
-        fixed_content = filepath.read_text()
-
-    assert "def inner(x: data):" in fixed_content
-    module_namespace: dict[str, Any] = {}
-    exec(  # noqa: S102 -- Trusted test fixture.
-        compile(ast.parse(fixed_content), "<meaningless_vars_fixture>", "exec"), module_namespace
     )
+    filepath = tmp_path / "module.py"
+    filepath.write_text(source)
 
-    class FakeResponse:
-        def json(self) -> str:
-            return "runtime value"
-
-    inner = module_namespace["outer"](FakeResponse())
-    hints = typing.get_type_hints(inner)
-    assert hints == {"x": int}
+    tree = ast.parse(source)
+    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
+    violations = check.check(filepath, tree, source)
+    assert violations
+    assert not any(violation.fixable for violation in violations)
+    assert FixOutcome.DECLINED in check.fix(filepath, violations, source, tree).outcomes
+    assert filepath.read_text() == source
 
 
 def test_autofix_still_follows_annotation_closure_without_deferred_annotations() -> None:
@@ -1814,31 +1811,6 @@ def test_collect_replacements_preserves_peer_names_inside_nested_generic_scopes(
     assert [(old_name, new_name) for _, _, old_name, new_name in replacements] == [("result", "secondary_result")]
 
 
-def test_autofix_does_not_follow_generic_functions_own_annotation_under_deferred_annotations() -> None:
-    source = """from __future__ import annotations
-
-def outer(response):
-    data: Payload = response.json()
-
-    def inner[T](value: data):
-        return value
-
-    return inner
-"""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.py"
-        filepath.write_text(source)
-
-        tree = ast.parse(source)
-        check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
-        violations = check.check(filepath, tree, source)
-        assert FixOutcome.APPLIED in check.fix(filepath, violations, source, tree).outcomes
-
-        fixed_content = filepath.read_text()
-
-    assert "def inner[T](value: data):" in fixed_content
-
-
 def test_scope_names_ignore_unnamed_except_and_match_captures() -> None:
     source = """def outer(response):
     data: Payload = response.json()
@@ -2165,3 +2137,54 @@ def test_conservative_level_gates_on_suggestion_presence(source: str, conservati
 
     assert len(conservative) == conservative_count
     assert len(aggressive) == 1
+
+
+@pytest.mark.parametrize(
+    ("imports", "annotation", "should_fix"),
+    [
+        ("from typing import Literal", 'Literal["data"]', True),
+        ("from typing import Annotated as A", 'A[str, "data"]', True),
+        ("import typing as t", 't.Literal["data"]', True),
+        ("", 'Unknown[str, "label for data"]', True),
+        ("", 'provider()["data"]', False),
+        ("from typing import Annotated", 'Annotated["data", "metadata"]', False),
+        ("from typing import Literal\nLiteral = list", 'Literal["data"]', False),
+        ("import typing as t\nt.Literal = list", 't.Literal["data"]', False),
+        ("from __future__ import annotations\nfrom typing import Annotated", "Annotated[str, data]", False),
+    ],
+    ids=[
+        "literal",
+        "metadata",
+        "qualified-literal",
+        "metadata-is-not-an-expression",
+        "unknown-subscript",
+        "annotated-type",
+        "rebound-literal",
+        "rebound-qualified-literal",
+        "stringified-metadata-reference",
+    ],
+)
+def test_autofix_distinguishes_annotation_values(
+    imports: str, annotation: str, tmp_path: Path, *, should_fix: bool
+) -> None:
+    source = f"""{imports}
+
+def outer(response):
+    data: Payload = response.json()
+    return data
+
+def process(value: {annotation}):
+    return value
+"""
+
+    filepath = tmp_path / "module.py"
+    filepath.write_text(source)
+    tree = ast.parse(source)
+    check = MeaninglessVarsCheck(level=MeaninglessVarsLevel.AGGRESSIVE)
+    violations = check.check(filepath, tree, source)
+    assert len(violations) == 1
+    assert violations[0].fixable is should_fix
+    outcome = FixOutcome.APPLIED if should_fix else FixOutcome.DECLINED
+    assert check.fix(filepath, violations, source, tree).outcomes == (outcome,)
+    expected = source.replace("data: Payload", "payload: Payload").replace("return data", "return payload")
+    assert filepath.read_text() == (expected if should_fix else source)
