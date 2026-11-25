@@ -33,10 +33,10 @@ def _literal_matches_constructor(hover_text: str, constructor: str) -> bool:
     return False
 
 
-def _exact_match(hover_text: str, constructor: str) -> bool:
-    if hover_text == constructor or hover_text.startswith(f"{constructor}["):
+def _member_matches_constructor(member: str, constructor: str) -> bool:
+    if member == constructor or member.startswith(f"{constructor}["):
         return True
-    return _literal_matches_constructor(hover_text, constructor)
+    return _literal_matches_constructor(member, constructor)
 
 
 def _is_unreliable(hover_text: str) -> bool:
@@ -45,14 +45,26 @@ def _is_unreliable(hover_text: str) -> bool:
 
 
 def _split_top_level(text: str, separator: str) -> list[str]:
+    if separator not in text:
+        return [text]
+
     members: list[str] = []
     depth = 0
+    quote = ""
     start = 0
     index = 0
     length = len(text)
     while index < length:
         char = text[index]
-        if char in "([{":
+        if quote:
+            if char == "\\":
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+        elif char in {'"', "'"}:
+            quote = char
+        elif char in "([{":
             depth += 1
         elif char in ")]}":
             depth -= 1
@@ -90,10 +102,11 @@ def accepts_any_argument(parameter_labels: list[str | None]) -> bool:
 
 
 def is_exact_match(hover_text: str, constructor: str) -> bool:
-    if _exact_match(hover_text, constructor):
-        return True
-    members = _split_top_level_union(hover_text)
-    return len(members) > 1 and all(_exact_match(member, constructor) for member in members)
+    return _all_members_match(_split_top_level_union(hover_text), constructor)
+
+
+def _all_members_match(members: list[str], constructor: str) -> bool:
+    return all(_member_matches_constructor(member, constructor) for member in members)
 
 
 PUREPATH_HOVER_NAMES = frozenset({"Path", "PurePath", "PosixPath", "WindowsPath", "PurePosixPath", "PureWindowsPath"})
@@ -121,7 +134,7 @@ def is_comparison_safe_hover(hover_text: str, constructor: str) -> bool:
     )
 
 
-_ITERABLE_CONSTRUCTORS = frozenset({"list", "tuple", "set", "frozenset", "bytearray"})
+_ITERABLE_CONSTRUCTORS = frozenset({"list", "bytearray"})
 
 _ITERABLE_PROTOCOL_HEADS = frozenset(
     {
@@ -156,10 +169,19 @@ _ITERABLE_PROTOCOL_HEADS = frozenset(
 
 _MAPPING_PROTOCOL_HEADS = frozenset({"Mapping", "MutableMapping", "dict", "ChainMap"})
 
-_DEDUP_SAFE_HEADS: dict[str, frozenset[str]] = {
-    "set": _COMPARISON_SAFE_HEADS["set"] | {"KeysView"},
-    "frozenset": _COMPARISON_SAFE_HEADS["frozenset"] | {"KeysView"},
+_MUTABLE_OR_VIEW_HEADS = MUTABLE_CONSTRUCTORS | {
+    "ItemsView",
+    "KeysView",
+    "MutableMapping",
+    "MutableSequence",
+    "MutableSet",
+    "ValuesView",
+    "deque",
+    "memoryview",
 }
+_TUPLE_LOOSE_HEADS = _ITERABLE_PROTOCOL_HEADS - _MUTABLE_OR_VIEW_HEADS
+_SET_LOOSE_HEADS = _COMPARISON_SAFE_HEADS["set"] | {"KeysView"}
+_FROZENSET_LOOSE_HEADS = _SET_LOOSE_HEADS - _MUTABLE_OR_VIEW_HEADS
 
 _SCALAR_LOOSE_HEADS: dict[str, frozenset[str]] = {
     "str": frozenset({"str", "LiteralString"}) | PUREPATH_HOVER_NAMES,
@@ -172,8 +194,12 @@ _SCALAR_LOOSE_HEADS: dict[str, frozenset[str]] = {
 
 def _loose_match(hover_text: str, constructor: str) -> bool:
     head = hover_text.split(" & ", 1)[0].split("[", 1)[0]
-    if constructor in {"set", "frozenset"}:
-        return head in _DEDUP_SAFE_HEADS[constructor]
+    if constructor == "set":
+        return head in _SET_LOOSE_HEADS
+    if constructor == "frozenset":
+        return head in _FROZENSET_LOOSE_HEADS
+    if constructor == "tuple":
+        return head in _TUPLE_LOOSE_HEADS
     if constructor in _ITERABLE_CONSTRUCTORS:
         if constructor == "bytearray" and head == "str":
             return False
@@ -186,11 +212,7 @@ def _loose_match(hover_text: str, constructor: str) -> bool:
 def hover_passes_gate(hover_text: str | None, level: ConfidenceLevel, constructor: str) -> bool:
     if not hover_text or _is_unreliable(hover_text):
         return False
-    if _exact_match(hover_text, constructor):
-        return True
-    if level is not ConfidenceLevel.AGGRESSIVE:
-        return False
     members = _split_top_level_union(hover_text)
-    if len(members) > 1:
-        return all(_exact_match(member, constructor) for member in members)
-    return _loose_match(hover_text, constructor)
+    return _all_members_match(members, constructor) or (
+        level is ConfidenceLevel.AGGRESSIVE and len(members) == 1 and _loose_match(hover_text, constructor)
+    )

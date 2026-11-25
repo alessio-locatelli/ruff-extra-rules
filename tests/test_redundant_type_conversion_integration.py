@@ -56,7 +56,7 @@ def test_same_scope_scalar_conversion_is_flagged() -> None:
 def test_cross_file_call_site_conversion_is_flagged_at_aggressive() -> None:
     violations = _check(BAD_ROOT / "cross_file_call_site.py", level=ConfidenceLevel.AGGRESSIVE)
 
-    assert {v.line for v in violations} == {5, 6, 7}
+    assert {v.line for v in violations} == {5, 6}
     assert {v.error_code for v in violations} == {"TR6"}
 
 
@@ -77,6 +77,12 @@ def test_necessary_conversions_are_never_flagged() -> None:
     violations = _check(FIXTURES_ROOT / "good" / "necessary_conversions.py", level=ConfidenceLevel.AGGRESSIVE)
 
     assert violations == []
+
+
+def test_aggressive_flags_only_existing_immutable_collections() -> None:
+    violations = _check(BAD_ROOT / "immutable_collections.py", level=ConfidenceLevel.AGGRESSIVE)
+
+    assert [(violation.line, violation.error_code) for violation in violations] == [(16, "TR6"), (17, "TR6")]
 
 
 def test_a_conversion_in_a_file_tys_own_configuration_excludes_is_never_flagged(
