@@ -17,6 +17,11 @@ from pre_commit_hooks.ast_checks._base import (
     find_ignored_lines,
     read_source_with_encoding,
 )
+from pre_commit_hooks.ast_checks._references import (
+    class_bound_and_read_names,
+    collect_scope_replacements,
+    has_future_annotations_import,
+)
 from pre_commit_hooks.ast_checks._scope import iter_within_scope
 
 from .analysis import IGNORE_PATTERN, Suggestion, attach_parents, read_source
@@ -191,32 +196,6 @@ def _attr_name_position(node: ast.Attribute, lines: list[str]) -> SourcePosition
     return (node.end_lineno, char_end - len(node.attr))
 
 
-def _binds_name(node: ast.FunctionDef | ast.AsyncFunctionDef, name: str, target: ast.AST) -> bool:
-    args = node.args
-    all_args = [
-        *args.args,
-        *args.posonlyargs,
-        *args.kwonlyargs,
-        *([args.vararg] if args.vararg else []),
-        *([args.kwarg] if args.kwarg else []),
-    ]
-    if any(arg.arg == name for arg in all_args):
-        return True
-
-    for child in iter_within_scope(node):
-        if child is target:
-            continue
-        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and child.name == name:
-            return True
-        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store) and child.id == name:
-            return True
-        if isinstance(child, (ast.Import, ast.ImportFrom)) and any(
-            (alias.asname or alias.name) == name for alias in child.names
-        ):
-            return True
-    return False
-
-
 def _is_rebound_in_scope(scope_node: ast.AST, name: str, target: ast.AST) -> bool:
     for child in iter_within_scope(scope_node):
         if child is target:
@@ -230,52 +209,28 @@ def _is_rebound_in_scope(scope_node: ast.AST, name: str, target: ast.AST) -> boo
     return False
 
 
-class _ReferenceCollector(ast.NodeVisitor):
-    def __init__(self, old_name: str, target: ast.AST, lines: list[str], *, is_method: bool) -> None:
+class _SelfAttributeCollector(ast.NodeVisitor):
+    def __init__(self, old_name: str, lines: list[str]) -> None:
         self.old_name = old_name
-        self.is_method = is_method
-        self.target = target
         self.lines = lines
         self.positions: list[SourcePosition] = []
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        if not self.is_method and _binds_name(node, self.old_name, self.target):
-            return
-        self.generic_visit(node)
-
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        if not self.is_method and _binds_name(node, self.old_name, self.target):
-            return
-        self.generic_visit(node)
-
-    def visit_Lambda(self, node: ast.Lambda) -> None:
-        args = node.args
-        all_args = [
-            *args.args,
-            *args.posonlyargs,
-            *args.kwonlyargs,
-            *([args.vararg] if args.vararg else []),
-            *([args.kwarg] if args.kwarg else []),
-        ]
-        if not self.is_method and any(arg.arg == self.old_name for arg in all_args):
-            return
-        self.generic_visit(node)
-
     def visit_Attribute(self, node: ast.Attribute) -> None:
-        if (
-            self.is_method
-            and node.attr == self.old_name
-            and isinstance(node.ctx, ast.Load)
-            and _is_self_like_receiver(node.value)
-        ):
+        if node.attr == self.old_name and isinstance(node.ctx, ast.Load) and _is_self_like_receiver(node.value):
             self.positions.append(_attr_name_position(node, self.lines))
         self.generic_visit(node)
 
-    def visit_Name(self, node: ast.Name) -> None:
-        if not self.is_method and node.id == self.old_name and isinstance(node.ctx, ast.Load):
-            char_col = byte_col_to_char_col(self.lines[node.lineno - 1], node.col_offset)
-            self.positions.append((node.lineno, char_col))
-        self.generic_visit(node)
+
+def _name_reference_positions(
+    tree: ast.Module, scope_node: ast.AST, name: str, lines: list[str]
+) -> list[SourcePosition]:
+    has_future_annotations = scope_node is not tree and has_future_annotations_import(tree)
+    return [
+        (line, byte_col_to_char_col(lines[line - 1], byte_col))
+        for line, byte_col, _old, _new in collect_scope_replacements(
+            scope_node, {name: name}, has_future_annotations=has_future_annotations
+        )
+    ]
 
 
 def _is_self_like_receiver(value: ast.expr) -> bool:
@@ -316,12 +271,18 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
 
     scope_node, is_method = _resolve_rename_scope(tree, func_node)
 
-    if not is_method and _is_rebound_in_scope(scope_node, func_node.name, func_node):
+    if not is_method and (
+        _is_rebound_in_scope(scope_node, func_node.name, func_node)
+        or class_bound_and_read_names(scope_node, [func_node.name])
+    ):
         return FixOutcome.DECLINED
 
-    collector = _ReferenceCollector(func_node.name, func_node, lines, is_method=is_method)
-    collector.visit(scope_node)
-    positions.extend(collector.positions)
+    if is_method:
+        collector = _SelfAttributeCollector(func_node.name, lines)
+        collector.visit(scope_node)
+        positions.extend(collector.positions)
+    else:
+        positions.extend(_name_reference_positions(tree, scope_node, func_node.name, lines))
 
     ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
     if any(line_num in ignored_lines for line_num, _col in positions):
