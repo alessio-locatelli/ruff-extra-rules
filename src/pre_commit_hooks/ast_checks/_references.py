@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+from collections import Counter
 from typing import TYPE_CHECKING
 
 from ._scope import (
@@ -16,6 +17,9 @@ if TYPE_CHECKING:
 
 type _ComprehensionNode = ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp
 type Replacement = tuple[int, int, str, str]
+
+_TYPING_MODULES = {"typing", "typing_extensions"}
+_TYPING_SUBSCRIPTS = {"Annotated", "Literal"}
 
 
 _CROSSABLE_SCOPE_NODES = (
@@ -86,6 +90,173 @@ def _type_param_defaults_and_bounds(type_params: list[ast.type_param]) -> Iterat
                 yield type_param.default_value
         elif isinstance(type_param, ast.ParamSpec | ast.TypeVarTuple) and type_param.default_value is not None:
             yield type_param.default_value
+
+
+class QuotedAnnotationTooComplexError(Exception):
+    pass
+
+
+class AnnotationReferences:
+    __slots__ = ("_alias_markers", "_has_future_annotations", "_tree", "_typing_forms")
+
+    def __init__(self, tree: ast.Module, *, has_future_annotations: bool) -> None:
+        self._tree = tree
+        self._has_future_annotations = has_future_annotations
+        self._typing_forms, self._alias_markers = _typing_annotation_forms(tree)
+
+    def _expressions(self, scope: ast.AST) -> Iterator[tuple[ast.expr, bool]]:
+        for node in ast.walk(scope):
+            if isinstance(node, ast.arg | ast.AnnAssign) and node.annotation is not None:
+                yield node.annotation, self._has_future_annotations
+                if (
+                    isinstance(node, ast.AnnAssign)
+                    and node.value is not None
+                    and _annotation_path(node.annotation) in self._alias_markers
+                ):
+                    yield node.value, False
+            elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.returns is not None:
+                yield node.returns, self._has_future_annotations
+            elif isinstance(node, ast.TypeAlias):
+                yield node.value, False
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.TypeAlias):
+                for expression in _type_param_defaults_and_bounds(node.type_params):
+                    yield expression, False
+
+    def ambiguous_names(self) -> set[str]:
+        return {
+            name
+            for expression, stringified in self._expressions(self._tree)
+            for name in _annotation_names(expression, self._typing_forms, stringified=stringified)
+        }
+
+    def rename_may_capture(self, scope: ast.AST, old_name: str, new_name: str) -> bool:
+        names = {
+            child.id
+            for statement in own_scope_children(scope)
+            for expression, stringified in self._expressions(statement)
+            if not stringified
+            for child in ast.walk(expression)
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load)
+        }
+        return new_name in names or (
+            old_name in names
+            and any(
+                (isinstance(node, ast.arg) and node.arg == new_name)
+                or (isinstance(node, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple) and node.name == new_name)
+                or (isinstance(node, ast.Global | ast.Nonlocal) and new_name in node.names)
+                or new_name in iter_binding_names(node)
+                for node in ast.walk(scope)
+            )
+        )
+
+
+def _typing_annotation_forms(tree: ast.Module) -> tuple[dict[str, str], frozenset[str]]:
+    direct_statements = set(tree.body)
+    forms: dict[str, str] = {}
+    alias_markers: set[str] = set()
+    bindings: Counter[str] = Counter()
+    modified_modules: set[str] = set()
+    wildcard = False
+    for node in ast.walk(tree):
+        bindings.update(iter_binding_names(node))
+        if isinstance(node, ast.arg):
+            bindings[node.arg] += 1
+        elif isinstance(node, ast.TypeVar | ast.ParamSpec | ast.TypeVarTuple):
+            bindings[node.name] += 1
+        elif (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.ctx, ast.Store | ast.Del)
+            and isinstance(node.value, ast.Name)
+        ):
+            modified_modules.add(node.value.id)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in _TYPING_MODULES:
+                    spelling = alias.asname or alias.name
+                    alias_markers.add(f"{spelling}.TypeAlias")
+                    if node in direct_statements:
+                        forms[spelling] = "module"
+        elif isinstance(node, ast.ImportFrom):
+            wildcard |= any(alias.name == "*" for alias in node.names)
+            if node.level == 0 and node.module in _TYPING_MODULES:
+                for alias in node.names:
+                    spelling = alias.asname or alias.name
+                    if alias.name in {"TypeAlias", "*"}:
+                        alias_markers.add("TypeAlias" if alias.name == "*" else spelling)
+                    if alias.name in _TYPING_SUBSCRIPTS and node in direct_statements:
+                        forms[spelling] = alias.name
+    if wildcard:
+        return {}, frozenset(alias_markers)
+    return {
+        spelling: form
+        for spelling, form in forms.items()
+        if bindings[spelling] == 1 and spelling not in modified_modules
+    }, frozenset(alias_markers)
+
+
+def _parse_quoted_expression(text: str) -> ast.expr | None:
+    if text.lstrip().startswith("*"):
+        text = f"({text},)[0]"
+    try:
+        return ast.parse(text, mode="eval").body
+    except SyntaxError as error:
+        if error.msg == "too many nested parentheses":
+            raise QuotedAnnotationTooComplexError from error
+        return None
+    except (RecursionError, MemoryError) as error:
+        raise QuotedAnnotationTooComplexError from error
+
+
+def _annotation_path(node: ast.expr | None) -> str | None:
+    while isinstance(node, ast.Constant) and isinstance(node.value, str):
+        node = _parse_quoted_expression(node.value)
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return f"{node.value.id}.{node.attr}"
+    return None
+
+
+def _annotation_names(expression: ast.expr, typing_forms: dict[str, str], *, stringified: bool) -> Iterator[str]:
+    pending: list[tuple[ast.AST, bool]] = [(expression, stringified)]
+    while pending:
+        node, stringified = pending.pop()
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            quoted = _parse_quoted_expression(node.value)
+            if quoted is not None:
+                pending.append((quoted, True))
+        elif stringified and isinstance(node, ast.Name):
+            yield node.id
+        elif stringified and isinstance(node, ast.Attribute):
+            yield node.attr
+            pending.append((node.value, True))
+        elif isinstance(node, ast.Subscript):
+            form = _typing_subscript_form(node.value, typing_forms)
+            if form in _TYPING_SUBSCRIPTS:
+                items = node.slice.elts if isinstance(node.slice, ast.Tuple) else [node.slice]
+                pending.append((node.value, stringified))
+                pending.extend(
+                    (item, stringified)
+                    for index, item in enumerate(items)
+                    if (form == "Annotated" and index == 0)
+                    or not (isinstance(item, ast.Constant) and isinstance(item.value, str))
+                )
+            else:
+                pending.extend((child, stringified) for child in ast.iter_child_nodes(node))
+        else:
+            pending.extend((child, stringified) for child in ast.iter_child_nodes(node))
+
+
+def _typing_subscript_form(node: ast.expr, typing_forms: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Name):
+        return typing_forms.get(node.id)
+    if (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and typing_forms.get(node.value.id) == "module"
+    ):
+        return node.attr
+    return None
 
 
 def _peer_filtered_replace_names(type_params: list[ast.type_param], replace_names: dict[str, str]) -> dict[str, str]:
@@ -236,7 +407,8 @@ def collect_replacements(
             )
 
         class_names = class_scope_binding_names(node)
-        class_replace_names = {name: new for name, new in outer_replace_names.items() if name not in class_names}
+        class_outer_names = _peer_filtered_replace_names(node.type_params, outer_replace_names)
+        class_replace_names = {name: new for name, new in class_outer_names.items() if name not in class_names}
         if replace_names:
             for decorator in node.decorator_list:
                 collect(decorator, replace_names, outer_names=outer_replace_names)
@@ -249,7 +421,7 @@ def collect_replacements(
             for expression in _type_param_defaults_and_bounds(node.type_params):
                 collect(expression, header_names, outer_names=header_names)
         for child in node.body:
-            collect(child, class_replace_names, outer_names=outer_replace_names)
+            collect(child, class_replace_names, outer_names=class_outer_names)
         return class_replacements
 
     return [

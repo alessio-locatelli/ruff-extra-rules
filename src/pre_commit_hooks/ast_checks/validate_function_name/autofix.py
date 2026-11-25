@@ -18,6 +18,8 @@ from pre_commit_hooks.ast_checks._base import (
     read_source_with_encoding,
 )
 from pre_commit_hooks.ast_checks._references import (
+    AnnotationReferences,
+    QuotedAnnotationTooComplexError,
     class_bound_and_read_names,
     collect_scope_replacements,
     has_future_annotations_import,
@@ -222,9 +224,8 @@ class _SelfAttributeCollector(ast.NodeVisitor):
 
 
 def _name_reference_positions(
-    tree: ast.Module, scope_node: ast.AST, name: str, lines: list[str]
+    scope_node: ast.AST, name: str, lines: list[str], *, has_future_annotations: bool
 ) -> list[SourcePosition]:
-    has_future_annotations = scope_node is not tree and has_future_annotations_import(tree)
     return [
         (line, byte_col_to_char_col(lines[line - 1], byte_col))
         for line, byte_col, _old, _new in collect_scope_replacements(
@@ -270,6 +271,18 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
     positions: list[SourcePosition] = [_def_name_position(lines, func_node)]
 
     scope_node, is_method = _resolve_rename_scope(tree, func_node)
+    old_name = func_node.name
+    new_name = suggestion.suggested_name
+    has_future_annotations = has_future_annotations_import(tree)
+    annotations = AnnotationReferences(tree, has_future_annotations=has_future_annotations)
+    try:
+        annotation_names = annotations.ambiguous_names()
+        if old_name in annotation_names or new_name in annotation_names:
+            return FixOutcome.DECLINED
+        if not is_method and annotations.rename_may_capture(scope_node, old_name, new_name):
+            return FixOutcome.DECLINED
+    except QuotedAnnotationTooComplexError:
+        return FixOutcome.DECLINED
 
     if any(
         isinstance(node, ast.Global | ast.Nonlocal) and func_node.name in node.names
@@ -288,14 +301,14 @@ def apply_fix(filepath: Path, suggestion: Suggestion) -> FixOutcome:
         collector.visit(scope_node)
         positions.extend(collector.positions)
     else:
-        positions.extend(_name_reference_positions(tree, scope_node, func_node.name, lines))
+        positions.extend(
+            _name_reference_positions(scope_node, old_name, lines, has_future_annotations=has_future_annotations)
+        )
 
     ignored_lines = find_ignored_lines(source, IGNORE_PATTERN)
     if any(line_num in ignored_lines for line_num, _col in positions):
         return FixOutcome.DECLINED
 
-    old_name = func_node.name
-    new_name = suggestion.suggested_name
     old_len = len(old_name)
 
     for line_num, col in sorted(set(positions), reverse=True):
